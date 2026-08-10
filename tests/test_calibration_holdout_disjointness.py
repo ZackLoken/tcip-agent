@@ -212,6 +212,134 @@ def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, mon
     assert clean["leaked_groups"] == []
 
 
+def test_train_disjointness_rects_kwargs_default_none_is_byte_identical(tmp_path, monkeypatch):
+    """cal_rects/hold_rects default to None: passing them explicitly as None must produce
+    byte-identical output to every existing caller, which omits them entirely."""
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_noop"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(json.dumps({
+        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
+    }), encoding="utf-8")
+
+    omitted = _train_disjointness("exp_noop", {"mosaic"}, set())
+    explicit_none = _train_disjointness(
+        "exp_noop", {"mosaic"}, set(), cal_rects=None, hold_rects=None)
+    assert omitted == explicit_none == {
+        "checked": True, "unresolvable": False,
+        "leaked_groups": ["mosaic"], "leaked_stems": [], "group_check": "spatial_strip",
+    }
+
+
+def test_train_disjointness_spatial_strip_geometric_containment(tmp_path, monkeypatch):
+    """When a caller supplies cal_rects/hold_rects against a spatial_strip split, the check
+    becomes geometric containment (fully inside a persisted non-train region, disjoint from
+    every persisted train region) instead of the lexical same-source check, and catches a leak
+    the lexical check alone would miss: a rect that spills into train from a source stem that
+    isn't literally the training source's own name."""
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_geo"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(json.dumps({
+        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
+        "spatial": {
+            "train_region": [[0, 0, 500, 1000]],
+            "val_region": [[500, 0, 750, 1000]],
+            "test_region": [[750, 0, 1000, 1000]],
+        },
+    }), encoding="utf-8")
+
+    clean = _train_disjointness(
+        "exp_geo", {"mosaic"}, set(), cal_rects={"mosaic": (550, 100, 700, 300)})
+    assert clean["leaked_groups"] == []
+    assert clean["group_check"] == "spatial_strip_geometric"
+    assert clean["unresolvable"] is False
+
+    # A rect from a source whose name is not "mosaic" at all -- the lexical check has nothing
+    # to key off, but the region it actually covers spills into the persisted train area.
+    leaked = _train_disjointness(
+        "exp_geo", set(), {"other_mosaic"}, hold_rects={"other_mosaic": (10, 10, 100, 100)})
+    assert leaked["leaked_groups"] == ["other_mosaic"]
+
+    # Straddling the train/val boundary: not fully contained in any single non-train region.
+    straddling = _train_disjointness(
+        "exp_geo", {"mosaic"}, set(), cal_rects={"mosaic": (400, 100, 600, 300)})
+    assert straddling["leaked_groups"] == ["mosaic"]
+
+
+def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tmp_path, monkeypatch):
+    """A rect fully inside a persisted calibration_region (the four-way split's own reserved
+    calibration side, distinct from val/test) must clear the geometric check exactly like a
+    val/test rect does -- calibration_region was omitted from the non-train set once and every
+    block calibration failed as a result; this pins it against regression."""
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_geo4"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(json.dumps({
+        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
+        "spatial": {
+            "train_region": [[0, 0, 500, 1000]],
+            "val_region": [[500, 0, 650, 1000]],
+            "calibration_region": [[650, 0, 800, 1000]],
+            "test_region": [[800, 0, 1000, 1000]],
+        },
+    }), encoding="utf-8")
+
+    clean = _train_disjointness(
+        "exp_geo4", {"mosaic"}, {"mosaic"},
+        cal_rects={"mosaic": (680, 100, 780, 300)}, hold_rects={"mosaic": (850, 100, 950, 300)})
+    assert clean["leaked_groups"] == []
+    assert clean["group_check"] == "spatial_strip_geometric"
+
+    leaked = _train_disjointness(
+        "exp_geo4", {"mosaic"}, set(), cal_rects={"mosaic": (100, 100, 300, 300)})
+    assert leaked["leaked_groups"] == ["mosaic"]
+
+
+def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tmp_path):
+    """The real pipeline: _auto_train_val -> _persist_split_manifest persists train_region/
+    val_region (this phase's own addition), and _train_disjointness's geometric check reads
+    them back correctly -- a calibration rect drawn from inside the persisted val region reads
+    clean, and one drawn from inside the persisted train region is caught."""
+    from tcip_mcp.experiments import create_experiment, experiments_dir
+    from tcip_mcp.pipelines.operating_point import _train_disjointness
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+
+    create_experiment("exp_geo_e2e", {})
+    _persist_split_manifest("exp_geo_e2e", train_ds, val_ds, data_cfg)
+    split = json.loads((experiments_dir() / "exp_geo_e2e" / "split.json").read_text())
+    train_region = split["spatial"]["train_region"]
+    val_region = split["spatial"]["val_region"]
+    assert train_region and val_region
+
+    def _shrunk(rect):
+        x0, y0, x1, y1 = rect
+        return (x0 + 1, y0 + 1, x1 - 1, y1 - 1)
+
+    clean = _train_disjointness(
+        "exp_geo_e2e", {stem}, set(), cal_rects={stem: _shrunk(val_region[0])})
+    assert clean["leaked_groups"] == []
+
+    leaked = _train_disjointness(
+        "exp_geo_e2e", set(), {stem}, hold_rects={stem: _shrunk(train_region[0])})
+    assert leaked["leaked_groups"] == [stem]
+
+
 def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, Path, str]:
     from torchvision.utils import save_image
 
