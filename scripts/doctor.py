@@ -189,8 +189,9 @@ def check_region_completeness(root: Path, findings: list) -> None:
         stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
         if stale:
             findings.append(("error", f"region completeness for {subject!r} on "
-                            f"{record.get('stem')!r}: cell(s) {stale} were attested complete "
-                            "but their annotation content has changed since; re-attest"))
+                            f"{record.get('stem')!r}: cell(s) {stale} are attested complete but "
+                            "either carry no stamped digest or their annotation content has "
+                            "changed since attestation; re-attest"))
 
 
 def check_trait_specs(root: Path, findings: list) -> None:
