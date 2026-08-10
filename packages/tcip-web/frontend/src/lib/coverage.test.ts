@@ -9,6 +9,7 @@ import {
   planRegionFetches,
   servedCellAtNative,
   stepUnsweptCell,
+  subdivideCell,
   sweptFractionBlocks,
   type CompletenessRecord,
   type GridCell,
@@ -51,6 +52,35 @@ describe("cell rect predicates", () => {
         viewport,
       ),
     ).toBe(false);
+  });
+});
+
+describe("subdivideCell", () => {
+  it("tiles the cell exactly, gapless, at an evenly-divisible size", () => {
+    const cell: GridCell = { name: "A1", x0: 0, y0: 0, x1: 100, y1: 100 };
+    const subs = subdivideCell(cell, 4);
+    expect(subs).toHaveLength(16);
+    expect(subs[0]).toEqual({ x0: 0, y0: 0, x1: 25, y1: 25 });
+    expect(subs[5]).toEqual({ x0: 25, y0: 25, x1: 50, y1: 50 }); // row 1, col 1
+    expect(subs[15]).toEqual({ x0: 75, y0: 75, x1: 100, y1: 100 }); // last row/col reaches the edge
+    // Every row spans the cell's full width with no gap or overlap between columns.
+    for (let row = 0; row < 4; row++) {
+      const rowSubs = subs.slice(row * 4, row * 4 + 4).sort((a, b) => a.x0 - b.x0);
+      expect(rowSubs[0].x0).toBe(cell.x0);
+      expect(rowSubs[3].x1).toBe(cell.x1);
+      for (let i = 1; i < 4; i++) expect(rowSubs[i].x0).toBe(rowSubs[i - 1].x1);
+    }
+  });
+
+  it("absorbs the remainder into the last row/column on a non-divisible size", () => {
+    const cell: GridCell = { name: "A1", x0: 0, y0: 0, x1: 10, y1: 10 };
+    const subs = subdivideCell(cell, 3);
+    expect(subs).toHaveLength(9);
+    // Every sub-cell still lies fully inside the parent, and the last column/row reaches the edge.
+    for (const s of subs) {
+      expect(s.x0 >= cell.x0 && s.x1 <= cell.x1 && s.y0 >= cell.y0 && s.y1 <= cell.y1).toBe(true);
+    }
+    expect(subs[8]).toEqual({ x0: 6, y0: 6, x1: 10, y1: 10 });
   });
 });
 
