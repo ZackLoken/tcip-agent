@@ -955,7 +955,10 @@ class TiledDetectionDataset(BaseImageDataset):
 
     def _read_windowed_tile(self, stem: str, info: dict, tile_x: int, tile_y: int):
         """One tile through the pooled windowed source, clipped to bounds and zero-padded; PIL
-        where the dtype has a faithful mode (so augmentation applies), else ndarray.
+        where the dtype has a faithful mode (so augmentation applies), else ndarray. A 4-channel
+        tile only converts when the source's own ``band_interpretations`` names the 4th band
+        alpha (see :func:`to_pil_if_faithful`); an untagged or genuinely spectral 4th band stays
+        ndarray, same as any other mode PIL can't represent faithfully.
 
         The recorded frame is checked against the pooled source's own dims: the pool keys on the
         file's mtime and size, so a file replaced since the index was built opens fresh here, and
@@ -980,7 +983,9 @@ class TiledDetectionDataset(BaseImageDataset):
                 f"pixels for the {y1 - y0}x{x1 - x0} window at ({x0}, {y0}): the decoder "
                 f"disagrees with its own header, refusing to serve displaced pixels."
             )
-        return to_pil_if_faithful(pad_tile(region, self.tile_size))
+        return to_pil_if_faithful(
+            pad_tile(region, self.tile_size),
+            band_interpretations=getattr(src, "band_interpretations", None))
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         e = self._index[idx]
