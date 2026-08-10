@@ -22,7 +22,7 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
 | `visualize(source="comparison", path=<image>)` | Overlay GT (green) vs predictions (red) with match stats |
 | `render_failure_cases` | Grid of top-K failure cases |
-| `propose_annotations` | Engine-proposed candidate masks rendered with numbered overlay (`engine='sam'` default) |
+| `propose_annotations` | Engine-proposed candidate masks rendered with numbered overlay (`engine='sam'` default); `grid_cells=[...]` scopes the pass to a region instead of the whole frame |
 | `accept_proposals` | Stage classified candidates as predictions (created_by=<engine>) for human review |
 | `overlay_reference_grid` | Labeled reference-grid overlay (square native-pixel cells); echoes its grid geometry (`tile_size`, `overlap`, `cols`, `rows`, `width`, `height`) for `segment_prompt(grid_cells=...)` |
 | `capture_live_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
