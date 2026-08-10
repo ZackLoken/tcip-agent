@@ -277,6 +277,19 @@ state (`.tcip/audit.jsonl`, `.tcip/experiments/`) resolves via `$TCIP_PROJECT_RO
 server/backend pin it to the repo root at startup), so a process started from a subdir no
 longer fragments `.tcip/`.
 
+Reindexing `claude-context` (`mcp__claude-context__index_codebase`/`clear_index`) against this
+repo: `get_indexing_status`'s `Status: completed` is not a completion signal here, confirmed
+repeatedly, not a one-off. It reports "completed" almost immediately after a job starts and stays
+that way for 10+ minutes while file/chunk counts keep climbing underneath it. The healthy settled
+state is 453 files, ~7100-7200 chunks (~15.7 chunks/file, real AST-level splitting); a run still
+actually in flight shows chunks == files exactly (no real splitting yet) and the count keeps
+growing across checks even though the status string never changes. Trigger exactly one
+`index_codebase` call, then do not call `index_codebase`/`clear_index` again and do not report a
+result until at least two `get_indexing_status` checks, minutes apart (not tens of seconds), return
+identical file/chunk counts and the same `Last updated` timestamp. Firing a second mutating call
+before confirming settlement races it against the still-running first one and produces a corrupted
+index (counts exceeding the real on-disk file total), which is worse than just waiting.
+
 ## Conventions
 
 - **Lazy-import** torch/torchvision inside function bodies (fast MCP startup).
