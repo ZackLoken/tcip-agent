@@ -110,6 +110,25 @@ def derive_coverage_tile_size(width: int, height: int) -> int:
     return math.ceil(long_edge / n)
 
 
+def derive_large_raster_grid_tile_size(width: int, height: int, divisions: int = 16) -> int:
+    """Cell edge for the view-coverage lattice over a large-raster (windowed) source, a fixed
+    subdivision of the raster's own dimensions rather than :func:`derive_coverage_tile_size`'s
+    display-resolution-derived edge.
+
+    A large orthomosaic annotates canopy-scale objects (large and sparse), nothing like the dense
+    small-object case the display-derived lattice was built for; applied there it produces far more,
+    far smaller cells than the annotation task needs (an estimated ~2,500 cells inside a real
+    mosaic's reserved calibration/test regions alone). ``divisions=16`` is a plain, documented
+    default (source: docs/superpowers/specs/2026-08-10-region-completeness-batch-attestation-design.md,
+    a fixed subdivision, not derived from object size or GT) -- deliberately provisional, to revisit
+    once real large-orthomosaic annotation sessions exist to check the grain against. At real
+    ValleyFarm dimensions (239921x141130) this derives a 16x10 lattice (160 cells), not the ~8,260
+    the display-derived lattice would produce.
+    """
+    long_edge = max(width, height)
+    return math.ceil(long_edge / divisions)
+
+
 def derive_pointing_tile_size(width: int, height: int) -> int:
     """Cell edge for the agent pointing grid, sized so labels stay legible on the overlay
     artifact.
@@ -132,10 +151,11 @@ def grid_geometry(width: int, height: int, tile_size: int, overlap: float = 0.0)
     tile_size, overlap, cols, rows}``.
 
     Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the
-    caller's choice), never shipped between agent tool calls. ``tile_size`` is explicit:
-    two derivations exist (:func:`derive_coverage_tile_size` for the coverage lattice,
-    :func:`derive_pointing_tile_size` for the agent overlay), so a caller that has not
-    chosen one has not chosen a grid, and a cell name means nothing without its grid.
+    caller's choice), never shipped between agent tool calls. ``tile_size`` is explicit: three
+    derivations exist (:func:`derive_coverage_tile_size` for the ordinary coverage lattice,
+    :func:`derive_large_raster_grid_tile_size` for a large-raster source,
+    :func:`derive_pointing_tile_size` for the agent overlay), so a caller that has not chosen
+    one has not chosen a grid, and a cell name means nothing without its grid.
     """
     cells = reference_cells(width, height, tile_size, overlap)
     return {
