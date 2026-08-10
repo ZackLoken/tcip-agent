@@ -1,18 +1,30 @@
 /**
  * Session accumulator for the per-image view-coverage record. It records two facts per cell:
  * cells_served_at_native (a region serve's response covered the cell at native resolution) and
- * cells_swept (the cell sat fully inside the viewport at or above the working-scale bar). The
- * bar is the minimum view scale in force when annotations were committed on this image and
- * subject this session: the coarsest scale at which objects were demonstrably judged. No
- * authoring commits means no bar and no sweep accumulation.
+ * cells_swept (every one of the cell's sub-cells, see subdivideCell, has at some point sat fully
+ * inside the viewport at or above the working-scale bar -- a union-of-visibility fact, not "the
+ * whole cell was on screen at once," which a raster whose cells exceed any working viewport can
+ * never satisfy). The bar is the minimum view scale in force when annotations were committed on
+ * this image and subject this session: the coarsest scale at which objects were demonstrably
+ * judged. No authoring commits means no bar and no sweep accumulation.
  *
  * Facts are pushed with a trailing debounce; union-merging with the stored record is the
  * server's job. Tracking activates only for multi-cell grids (an image inside the display bound
  * derives a single trivially-covered cell and gets no tracking).
  */
 
-import { cellContainedIn, sameGrid, type GridCell, type GridGeometry } from "@/lib/coverage";
+import { rectFullyInside, rectsOverlap, sameGrid, subdivideCell, type GridCell, type GridGeometry } from "@/lib/coverage";
 import type { PixelRect } from "@/lib/viewGeometry";
+
+/**
+ * Sub-cell grain for the union-of-visibility sweep predicate (see `subdivideCell`): a cell
+ * sweeps once every one of its DIVISIONS x DIVISIONS sub-rects has, at some point, been fully on
+ * screen at or above the working-scale bar. Provisional: elicited directly from Zack (2026-08-10)
+ * as a starting guess, not yet checked against a real GUI annotation session at working zoom --
+ * the same "ship a plain, documented, revisit-later default" idiom as
+ * reference_grid.derive_large_raster_grid_tile_size's own divisions=16.
+ */
+const SUB_CELL_DIVISIONS = 32;
 
 export interface CoverageKeyParts {
   imagePath: string;
@@ -62,9 +74,11 @@ export class CoverageTracker {
   private cells: GridCell[] = [];
   private servedAtNativeSet = new Set<string>();
   private sweptSet = new Set<string>();
-  // Best containment scale seen per cell, recorded whether or not a bar exists yet, so a
-  // bar arriving late still credits every earlier viewport moment.
-  private containScale = new Map<string, number>();
+  // Each cell's fixed sub-cell partition (subdivideCell), computed once per grid.
+  private subCells = new Map<string, PixelRect[]>();
+  // Best containment scale seen per sub-cell (keyed "<cellName>#<index>"), recorded whether or
+  // not a bar exists yet, so a bar arriving late still credits every earlier viewport moment.
+  private subCellScale = new Map<string, number>();
   private barValue: number | null = null;
   private viewing: CoverageViewing = {};
   private dirty = false;
@@ -103,7 +117,8 @@ export class CoverageTracker {
     this.cells = cells;
     this.servedAtNativeSet = new Set();
     this.sweptSet = new Set();
-    this.containScale = new Map();
+    this.subCells = new Map(cells.map((c) => [c.name, subdivideCell(c, SUB_CELL_DIVISIONS)]));
+    this.subCellScale = new Map();
     this.barValue = null;
     this.dirty = false;
     this.opts.onChange?.();
@@ -127,19 +142,27 @@ export class CoverageTracker {
     this.opts.onChange?.();
   }
 
-  /** The viewport now shows `rect` (image coords, clipped) at `scale`. */
+  /**
+   * The viewport now shows `rect` (image coords, clipped) at `scale`. A cell sweeps once every
+   * one of its sub-cells has, across any number of viewport moments (not necessarily this one),
+   * been fully inside the viewport at or above the bar: the union-of-visibility generalization
+   * of "the whole cell was on screen at once," which a raster whose cells exceed any working
+   * viewport can never satisfy directly.
+   */
   noteViewport(rect: PixelRect, scale: number): void {
     if (!this.active) return;
     let changed = false;
     for (const cell of this.cells) {
-      if (!cellContainedIn(cell, rect)) continue;
-      const prev = this.containScale.get(cell.name) ?? 0;
-      if (scale > prev) this.containScale.set(cell.name, scale);
-      if (
-        this.barValue !== null &&
-        Math.max(prev, scale) >= this.barValue &&
-        !this.sweptSet.has(cell.name)
-      ) {
+      if (this.sweptSet.has(cell.name) || !rectsOverlap(cell, rect)) continue;
+      const subs = this.subCells.get(cell.name);
+      if (!subs) continue;
+      for (let i = 0; i < subs.length; i++) {
+        if (!rectFullyInside(subs[i], rect)) continue;
+        const key = `${cell.name}#${i}`;
+        const prev = this.subCellScale.get(key) ?? 0;
+        if (scale > prev) this.subCellScale.set(key, scale);
+      }
+      if (this.allSubCellsAtBar(cell.name, subs.length)) {
         this.sweptSet.add(cell.name);
         changed = true;
       }
@@ -148,6 +171,16 @@ export class CoverageTracker {
       this.markDirty();
       this.opts.onChange?.();
     }
+  }
+
+  /** Every sub-cell of `cellName` has a recorded max scale at or above the bar (false, always,
+   *  with no bar yet). */
+  private allSubCellsAtBar(cellName: string, subCellCount: number): boolean {
+    if (this.barValue === null) return false;
+    for (let i = 0; i < subCellCount; i++) {
+      if ((this.subCellScale.get(`${cellName}#${i}`) ?? 0) < this.barValue) return false;
+    }
+    return true;
   }
 
   /** A region serve's response covered this cell at its native dimensions. */
@@ -183,13 +216,17 @@ export class CoverageTracker {
     this.flush();
   }
 
-  /** Recompute swept membership from recorded containment scales against the current bar. */
+  /** Recompute swept membership from recorded sub-cell containment scales against the current
+   *  bar. */
   private resweep(): void {
     if (this.barValue === null) return;
     let changed = false;
-    for (const [name, scale] of this.containScale) {
-      if (scale >= this.barValue && !this.sweptSet.has(name)) {
-        this.sweptSet.add(name);
+    for (const cell of this.cells) {
+      if (this.sweptSet.has(cell.name)) continue;
+      const subs = this.subCells.get(cell.name);
+      if (!subs) continue;
+      if (this.allSubCellsAtBar(cell.name, subs.length)) {
+        this.sweptSet.add(cell.name);
         changed = true;
       }
     }
