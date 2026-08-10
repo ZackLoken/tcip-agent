@@ -74,9 +74,14 @@ export function useRegionCompleteness(args: {
           cell,
           user: useStore.getState().user,
         })
-        .then(reload, () => {
-          // The toggle failed server-side (refused cell, locate failure, ...); the store is
-          // untouched, so leaving the last-fetched state in place is already correct.
+        .then(reload, (err: unknown) => {
+          // A write can fail after partially committing, so reload() runs on error too, the
+          // same as success, rather than trusting a "the store is untouched" assumption.
+          const detail = err instanceof Error ? err.message : String(err);
+          useStore
+            .getState()
+            .pushToast(`Failed to update completeness for cell ${cell}: ${detail}`);
+          reload();
         });
     },
     [imagePath, datasetRoot, subject, reload],
