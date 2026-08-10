@@ -1328,10 +1328,9 @@ def run_full_frame_evaluation(
         dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
-        # max_dets is honored verbatim on this gating path (no rescuing
-        # sentinel), stamp per-image cap saturation so a caller-explicit low max_dets that
-        # truncates real detections is visible rather than silently assumed away.
-        rec["cap_hit"] = len(dt) >= max_dets
+        # predict_tiled stamps cap_hit itself now; read it rather than re-deriving, falling back
+        # to the equivalent direct computation for a predictor stub that predates that stamp.
+        rec["cap_hit"] = r.get("cap_hit", len(dt) >= max_dets)
         per_image.append(rec)
 
     m = coco_detection_metrics(per_image, iou_threshold=iou_threshold,
