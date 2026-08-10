@@ -79,6 +79,56 @@ describe("CoverageTracker sweep", () => {
   });
 });
 
+describe("CoverageTracker sub-cell union sweep", () => {
+  // The whole 320px cell never fits inside any 90px-wide viewport below: the drone-photo failure.
+  const BIG_CELL: GridCell = { name: "A1", x0: 0, y0: 0, x1: 320, y1: 320 };
+  const OTHER_CELL: GridCell = { name: "B1", x0: 320, y0: 0, x1: 640, y1: 320 };
+  const BIG_GRID: GridGeometry = {
+    width: 640,
+    height: 320,
+    tile_size: 320,
+    overlap: 0,
+    cols: 2,
+    rows: 1,
+  };
+
+  it("sweeps a cell that never once fits fully in the viewport, once its sub-cells' union does", () => {
+    tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
+    tracker.noteAuthoringScale(1);
+    // Each pass is 90px wide (< the cell's 320px) but full height, so it fully contains a
+    // vertical strip of sub-cells, never the whole cell.
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 90, y1: 320 }, 1);
+    expect(tracker.swept.has("A1")).toBe(false);
+    tracker.noteViewport({ x0: 90, y0: 0, x1: 180, y1: 320 }, 1);
+    tracker.noteViewport({ x0: 180, y0: 0, x1: 270, y1: 320 }, 1);
+    expect(tracker.swept.has("A1")).toBe(false); // union so far: x in [0, 270) only
+    tracker.noteViewport({ x0: 270, y0: 0, x1: 360, y1: 320 }, 1); // reaches the far edge
+    expect(tracker.swept.has("A1")).toBe(true);
+  });
+
+  it("does not sweep while the sub-cell union stays partial all session", () => {
+    tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
+    tracker.noteAuthoringScale(1);
+    // Always the same left-hand strip: the right portion's sub-cells are never seen.
+    for (let i = 0; i < 5; i++) {
+      tracker.noteViewport({ x0: 0, y0: 0, x1: 90, y1: 320 }, 1);
+    }
+    expect(tracker.swept.has("A1")).toBe(false);
+  });
+
+  it("a late-arriving bar credits sub-cell union progress recorded before it existed", () => {
+    tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
+    // Panned across the whole cell at scale 1 before ever committing an annotation.
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 90, y1: 320 }, 1);
+    tracker.noteViewport({ x0: 90, y0: 0, x1: 180, y1: 320 }, 1);
+    tracker.noteViewport({ x0: 180, y0: 0, x1: 270, y1: 320 }, 1);
+    tracker.noteViewport({ x0: 270, y0: 0, x1: 360, y1: 320 }, 1);
+    expect(tracker.swept.has("A1")).toBe(false); // no bar yet
+    tracker.noteAuthoringScale(0.5);
+    expect(tracker.swept.has("A1")).toBe(true); // the pre-commit union already clears the bar
+  });
+});
+
 describe("CoverageTracker served-at-native", () => {
   it("records only names that belong to the lattice", () => {
     tracker.reset(KEY, GRID, CELLS);
