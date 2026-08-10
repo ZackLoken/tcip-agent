@@ -87,17 +87,17 @@ export function cellsIntersecting(cells: GridCell[], rect: PixelRect): GridCell[
   return cells.filter((c) => rectsOverlap(c, rect));
 }
 
-export function cellContainedIn(cell: GridCell, rect: PixelRect): boolean {
-  return rectFullyInside(cell, rect);
-}
-
 /**
- * One cell divided into a `divisions` x `divisions` grid of equal (final row/column absorbing
- * any remainder from integer division) sub-rects, exact and gapless. The coverage tracker's
- * union-of-visibility sweep predicate needs this: "was the whole cell ever on screen at once" is
- * unsatisfiable on a raster whose cells are bigger than any working viewport, but "was every one
- * of its sub-cells, individually, fully on screen at some point this session" is the same fact
- * at a grain small enough to actually accumulate through ordinary panning.
+ * One cell divided into a `divisions` x `divisions` grid of near-equal, gapless sub-rects:
+ * floor-indexed boundaries (`floor(size*i/divisions)`) distribute any remainder across the whole
+ * row/column rather than concentrating it in one oversized final cell. The last row/column's far
+ * edge is pinned to the cell's own `x1`/`y1` rather than the general formula, a defensive exact-
+ * edge guarantee against float drift; for this platform's integer pixel cells the two already
+ * agree. The coverage tracker's union-of-visibility sweep predicate needs this: "was the whole
+ * cell ever on screen at once" is unsatisfiable on a raster whose cells are bigger than any
+ * working viewport, but "was every one of its sub-cells, individually, fully on screen at some
+ * point this session" is the same fact at a grain small enough to actually accumulate through
+ * ordinary panning.
  */
 export function subdivideCell(cell: GridCell, divisions: number): PixelRect[] {
   const w = cell.x1 - cell.x0;
@@ -290,7 +290,9 @@ export function sweptFractionBlocks(
 
 /**
  * The Complete warning's wording. States screen facts only, cells and scale, never a claim about
- * what the person looked at.
+ * what the person looked at. Says nothing about the swept cells: a swept cell can have been
+ * covered piecewise across several separate views (see subdivideCell), never claimed to have
+ * sat on screen whole at once, so the wording must not imply that either.
  */
 export function completeWarningMessage(w: {
   unsweptCount: number;
@@ -298,5 +300,5 @@ export function completeWarningMessage(w: {
   bar: number;
 }): string {
   const pct = Math.round(w.bar * 100);
-  return `Complete: ${w.unsweptCount} of ${w.total} grid cells were never fully on screen at ${pct}% zoom or closer this session.`;
+  return `Complete: ${w.unsweptCount} of ${w.total} grid cells were never fully seen, in any combination of views, at ${pct}% zoom or closer this session.`;
 }
