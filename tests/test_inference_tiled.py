@@ -47,6 +47,38 @@ def test_predict_tiled_shape_and_bounds(tmp_path):
         assert 0 <= b[1] <= r["height"] and 0 <= b[3] <= r["height"]
 
 
+def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path):
+    """``predict_tiled``'s post-merge full-frame cap already truncates a dense result
+    (``self.max_dets``), but the truncation itself was invisible in the returned result: this
+    stamps ``cap_hit`` (computed from the pre-truncation count) so a caller building its own
+    records (block calibration's ``_band_records``) can surface cap saturation as provenance."""
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    ckpt = _detection_checkpoint(tmp_path)
+    img = _image(tmp_path)
+    pred = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    uncapped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
+        "for this test to force a real truncation, not merely assert an untested edge"
+
+    pred.max_dets = uncapped["count"] - 1
+    capped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    assert capped["cap_hit"] is True
+    assert capped["count"] == uncapped["count"] - 1
+
+    # Exactly at the cap: no slicing occurs, but cap_hit still reads True (matching
+    # records_from_detector's own >= convention -- sitting at the ceiling is still uncertain).
+    pred.max_dets = uncapped["count"]
+    at_cap = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    assert at_cap["cap_hit"] is True
+    assert at_cap["count"] == uncapped["count"]
+
+    pred.max_dets = uncapped["count"] + 1
+    not_capped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
+    assert not_capped["cap_hit"] is False
+    assert not_capped["count"] == uncapped["count"]
+
+
 def test_run_inference_tile_flag(tmp_path):
     from tcip_mcp.tools.inference_tools import run_inference
 
