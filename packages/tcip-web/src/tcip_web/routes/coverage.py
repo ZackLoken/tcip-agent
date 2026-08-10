@@ -107,9 +107,8 @@ def get_grid(
     frontend consumes these cells verbatim and never re-derives them.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
-    from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
     from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-    from tcip_mcp.pipelines.raster_source import opens_windowed
+    from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
     from tcip_mcp.pipelines.reference_grid import (
         derive_coverage_tile_size,
         derive_large_raster_grid_tile_size,
@@ -128,11 +127,11 @@ def get_grid(
     except BandGroupIncomplete as exc:
         raise HTTPException(409, str(exc)) from exc
     width, height = image_dimensions(source)
-    # opens_windowed alone is a decode-cost predicate, not an orthomosaic-scale one; see
-    # docs/current-task.md for the open threshold question this size gate only partly closes.
+    # A stitched orthomosaic carries real per-pixel georeferencing; an ordinary drone/ground
+    # capture (any pixel size) carries at most a single EXIF GPS point, never that.
     if tile_size is not None:
         edge = tile_size
-    elif opens_windowed(source, 3) and max(width, height) > DISPLAY_MAX_EDGE:
+    elif opens_windowed(source, 3) and is_georeferenced(source):
         edge = derive_large_raster_grid_tile_size(width, height)
     else:
         edge = derive_coverage_tile_size(width, height)
