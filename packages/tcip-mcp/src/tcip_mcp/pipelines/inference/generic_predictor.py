@@ -366,8 +366,9 @@ class GenericPredictor:
             if collect_masks:
                 masks = [masks[i] for i in keep]
 
-        # Enforce the full-frame detection cap after the cross-tile merge (highest score first);
-        # the in-model detections_per_img only caps per tile, so a dense image can exceed it.
+        # Full-frame cap after the cross-tile merge (highest score first); the in-model
+        # detections_per_img only caps per tile. cap_hit uses >=, matching records_from_detector.
+        cap_hit = bool(self.max_dets is not None and len(scores) >= self.max_dets)
         if self.max_dets is not None and len(scores) > self.max_dets:
             top = np.argsort(scores)[::-1][: self.max_dets]
             boxes, scores, labels = boxes[top], scores[top], labels[top]
@@ -382,6 +383,7 @@ class GenericPredictor:
             "labels": labels.tolist(),
             "count": int(len(boxes)),
             "tiles": len(positions),
+            "cap_hit": cap_hit,
         }
         if collect_masks:
             result["masks"] = [
