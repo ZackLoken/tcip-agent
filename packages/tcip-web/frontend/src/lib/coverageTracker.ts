@@ -17,6 +17,7 @@ import {
   rectFullyInside,
   rectsOverlap,
   sameGrid,
+  subCellDivisionsFor,
   subdivideCell,
   type GridCell,
   type GridGeometry,
@@ -25,22 +26,21 @@ import type { PixelRect } from "@/lib/viewGeometry";
 
 /**
  * Sub-cell grain for the union-of-visibility sweep predicate (see `subdivideCell`): a cell
- * sweeps once every one of its DIVISIONS x DIVISIONS sub-rects has, at some point, been fully on
- * screen at or above the working-scale bar. Provisional, a starting guess pending a real GUI
- * annotation session to check the grain against -- the same "ship a plain, documented,
- * revisit-later default" idiom as reference_grid.derive_large_raster_grid_tile_size's own
- * divisions=16.
- *
- * A fixed fraction of the cell scales with the cell, not with the viewport, so this does not
- * uniformly fix the predicate it replaces. On the ordinary display-derived lattice (cells capped
- * at display_bounds.DISPLAY_MAX_EDGE=4096px) a sub-cell is at most 128px, comfortably containable
- * at real annotation zoom. On the large-raster lattice (derive_large_raster_grid_tile_size, cells
- * long_edge/16 -- roughly 15000px at real ValleyFarm scale) a sub-cell is still roughly 469px,
- * which only fits inside a working viewport below about 1.9x zoom; an annotator working closer
- * than that on a large-raster project would still hit the unsatisfiable-predicate failure this
- * change exists to close, just moved rather than removed. Known, unresolved as of this writing.
+ * sweeps once every one of its sub-rects has, at some point, been fully on screen at or above
+ * the working-scale bar. Divisions are derived per cell (`subCellDivisionsFor`) from this target
+ * pixel size, not a single fixed division count applied to every cell -- a fixed count scales
+ * sub-cell size with the cell, not the viewport, so it stops working the moment a lattice's
+ * cells get big (the large-raster lattice's cells run into the tens of thousands of pixels).
+ * 128px is not a fresh guess: it is display_bounds.DISPLAY_MAX_EDGE=4096 divided by the sub-cell
+ * count (32) the ordinary display-derived lattice already shipped with and nobody has flagged as
+ * too coarse, now applied as an absolute size to every lattice instead of a division count that
+ * only happened to produce it for one of them. Still provisional pending a real GUI annotation
+ * session to check the target against, the same "ship a plain, documented, revisit-later
+ * default" idiom as reference_grid.derive_large_raster_grid_tile_size's own divisions=16 -- but
+ * no longer structurally guaranteed to fail on a large-raster lattice at real zoom the way a
+ * fixed division count was.
  */
-const SUB_CELL_DIVISIONS = 32;
+const SUB_CELL_TARGET_PX = 128;
 
 export interface CoverageKeyParts {
   imagePath: string;
@@ -133,7 +133,9 @@ export class CoverageTracker {
     this.cells = cells;
     this.servedAtNativeSet = new Set();
     this.sweptSet = new Set();
-    this.subCells = new Map(cells.map((c) => [c.name, subdivideCell(c, SUB_CELL_DIVISIONS)]));
+    this.subCells = new Map(
+      cells.map((c) => [c.name, subdivideCell(c, subCellDivisionsFor(c, SUB_CELL_TARGET_PX))]),
+    );
     this.subCellScale = new Map();
     this.barValue = null;
     this.dirty = false;
