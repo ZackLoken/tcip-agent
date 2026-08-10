@@ -27,13 +27,36 @@ WIDTH, HEIGHT = 3200, 200
 BOX_STEP = 40
 
 
-def _write_mosaic(path: Path, *, seed: int = 0) -> None:
+def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False) -> None:
     import numpy as np
     import tifffile
 
     rng = np.random.default_rng(seed)
     arr = rng.integers(0, 255, size=(HEIGHT, WIDTH, 3), dtype=np.uint8)
-    tifffile.imwrite(str(path), arr)
+    if not georeferenced:
+        tifffile.imwrite(str(path), arr)
+        return
+    geokeys = (1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 32615)  # UTM zone 15N
+    tifffile.imwrite(
+        str(path), arr, photometric="rgb",
+        extratags=[
+            (33550, "d", 3, (1.0, 1.0, 0.0), False),
+            (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
+            (34735, "H", len(geokeys), geokeys, False),
+        ],
+    )
+
+
+def _write_plant_csv(path: Path) -> None:
+    import csv
+
+    # Two plants ~10m apart, independent of the mosaic's own pixel geometry: the plant path only
+    # needs the raster's real geotransform to convert this real-world spacing to pixels.
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
+        w.writerow(["P1", "acc-A", -93.0, 45.0])
+        w.writerow(["P2", "acc-B", -93.0001, 45.0])
 
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, tile_size: int = TILE) -> str:
@@ -50,9 +73,15 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, tile_size: int = TILE) -> s
 
 
 def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
-                      experiment_id: str = "exp_block") -> dict:
+                      experiment_id: str = "exp_block",
+                      plant_csv_paths: list[str] | None = None) -> dict:
     """A real 4-way spatial-strip split over a real raster, persisted as a real experiment
     (config.json + split.json), the checkpoint's own training provenance block calibration reads.
+
+    ``plant_csv_paths`` (when given) writes a georeferenced mosaic (the plant-pitch derivation
+    needs a real geotransform to convert real-world plant spacing to pixels) and threads the
+    paths into ``data.plant_csv_paths``, the config field ``resolve_block_calibration_records``
+    reads to prefer plant-pitch over GT-object-spacing.
 
     Returns a dict of everything a block-calibration test needs: ``root``/``images_dir``/
     ``labels_dir``/``stem``/``raster_path``/``checkpoint_path``/``experiment_id``/
@@ -67,7 +96,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     labels_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     raster_path = images_dir / f"{stem}.tif"
-    _write_mosaic(raster_path)
+    _write_mosaic(raster_path, georeferenced=bool(plant_csv_paths))
 
     boxes = [Annotation(subject="catkin", geometry=BBox(x, 80, x + 15, 110))
             for x in range(10, WIDTH - 20, BOX_STEP)]
@@ -79,6 +108,8 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": reserve_frac},
     }
+    if plant_csv_paths:
+        data_cfg["plant_csv_paths"] = plant_csv_paths
     train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     create_experiment(experiment_id, {"data": data_cfg})
@@ -199,6 +230,50 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
         "checked": True, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
         "group_check": "spatial_strip_geometric",
     }
+
+
+def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(tmp_path: Path):
+    """A training experiment whose config.json carries data.plant_csv_paths (report 9814, real
+    threading of plant-CSV data into block calibration) resolves the block scale from the real
+    planting-grid pitch, not the GT-object-spacing fallback -- report 9814's whole point: the
+    plant-pitch derivation path existed but had no production caller before this fix."""
+    plant_csv = tmp_path / "plants.csv"
+    _write_plant_csv(plant_csv)
+    exp = _build_experiment(tmp_path, plant_csv_paths=[str(plant_csv)])
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    _bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    assert prov["block_scale_source"].startswith("plant grid pitch"), prov["block_scale_source"]
+
+
+def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured(tmp_path: Path):
+    """No data.plant_csv_paths (the ordinary case, every other test in this file) still resolves
+    the GT-object-spacing fallback exactly as before this feature existed."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    _bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    assert prov["block_scale_source"].startswith("GT object-spacing"), prov["block_scale_source"]
 
 
 def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
