@@ -74,13 +74,72 @@ class TestGridRoute:
             for c in reference_cells(100, 80, 64, clamp=True)
         ]
 
-    def test_tile_size_omitted_derives_the_coverage_lattice(self, client, dated_dataset):
+    def test_tile_size_omitted_derives_the_coverage_lattice(self, client, tmp_path):
+        """An ordinary (non-large-raster) source still resolves ``derive_coverage_tile_size``
+        unchanged. A small single-page TIFF also opens windowed via GDAL
+        (``raster_source.opens_windowed`` is a backend-capability predicate, not a size one), so
+        the shared TIFF-based ``dated_dataset`` fixture is not the right fixture to prove this
+        contract; a genuinely non-windowed photographic source (PNG) is used instead."""
+        from tcip_mcp.pipelines.reference_grid import derive_coverage_tile_size
+
+        img_dir = tmp_path / "ds" / "images" / "2026-03-01"
+        img_dir.mkdir(parents=True)
+        path = img_dir / "plot.png"
+        Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
+
+        got = _grid(client, str(path))
+        assert got["tile_size"] == derive_coverage_tile_size(100, 80)
+        assert got["cols"] == 1 and got["rows"] == 1
+
+    def test_tile_size_omitted_for_a_small_windowed_source_still_derives_the_coverage_lattice(
+        self, client, dated_dataset,
+    ):
+        """A windowed source (``opens_windowed`` is a decode-cost predicate, true for any
+        GDAL-servable TIFF regardless of size) below the display-serve bound must still resolve
+        the ordinary lattice, not the large-raster one -- the exact regression an independent
+        review caught: an ordinary drone/ground TIFF capture is windowed too, and must not be
+        misrouted just because it's a TIFF."""
+        from tcip_mcp.pipelines.raster_source import opens_windowed
         from tcip_mcp.pipelines.reference_grid import derive_coverage_tile_size
 
         _root, path = dated_dataset
+        assert opens_windowed(path, 3) is True, \
+            "fixture must genuinely be windowed to prove the size gate, not the backend gate"
+
         got = _grid(client, path)
         assert got["tile_size"] == derive_coverage_tile_size(100, 80)
-        assert got["cols"] == 1 and got["rows"] == 1
+
+    def test_tile_size_omitted_for_a_large_raster_source_derives_the_large_raster_lattice(
+        self, client, tmp_path,
+    ):
+        """A large-raster (windowed, above the display-serve bound) source, a striped/tiled TIFF
+        GDAL serves without a whole decode, resolves ``derive_large_raster_grid_tile_size``
+        instead, the fixed-subdivision lattice, not the display-derived one."""
+        import tifffile
+
+        from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
+        from tcip_mcp.pipelines.reference_grid import (
+            derive_coverage_tile_size,
+            derive_large_raster_grid_tile_size,
+        )
+
+        width, height = DISPLAY_MAX_EDGE + 100, 2100
+        img_dir = tmp_path / "ds" / "images" / "2026-03-01"
+        img_dir.mkdir(parents=True)
+        path = img_dir / "mosaic.tif"
+        arr = np.random.default_rng(0).integers(
+            0, 255, size=(height, width, 3), dtype=np.uint8)
+        tifffile.imwrite(str(path), arr, photometric="rgb", rowsperstrip=8)
+
+        from tcip_mcp.pipelines.raster_source import opens_windowed
+
+        assert opens_windowed(path, 3) is True, \
+            "fixture must genuinely trigger the windowed branch, not merely assert an untested case"
+
+        got = _grid(client, str(path))
+        expected_tile = derive_large_raster_grid_tile_size(width, height)
+        assert got["tile_size"] == expected_tile
+        assert got["tile_size"] != derive_coverage_tile_size(width, height)
 
     def test_overlap_is_refused_naming_the_partition_contract(self, client, dated_dataset):
         _root, path = dated_dataset
