@@ -15,7 +15,11 @@ from tcip_mcp.dataset_layout import (
     normalize_region_completeness_store,
 )
 from tcip_mcp.pipelines.reference_grid import reference_cells
-from tcip_mcp.pipelines.region_completeness import cell_annotation_digest, stale_cells
+from tcip_mcp.pipelines.region_completeness import (
+    cell_annotation_digest,
+    cell_annotation_digests,
+    stale_cells,
+)
 
 
 def test_region_completeness_path_locator(tmp_path):
@@ -105,6 +109,46 @@ class TestCellAnnotationDigest:
         far = [Annotation(subject="catkin", geometry=BBox(90, 90, 100, 100))]
         assert cell_annotation_digest(far, "catkin", cell) == cell_annotation_digest(
             [], "catkin", cell)
+
+
+class TestCellAnnotationDigests:
+    """The binned, one-pass-over-annotations sibling of cell_annotation_digest: must agree with
+    it exactly, for every cell, in the same call -- the only property that matters here, since a
+    binning bug that silently assigns an annotation to the wrong cell is a real staleness-check
+    correctness bug, not just a performance regression."""
+
+    def _cells(self, width=128, height=128, tile_size=64, overlap=0.0):
+        return reference_cells(width, height, tile_size, overlap, clamp=True)
+
+    def test_agrees_with_the_per_cell_digest_across_a_populated_grid(self):
+        cells = self._cells()
+        anns = [
+            Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9)),      # A1
+            Annotation(subject="catkin", geometry=BBox(70, 1, 78, 9)),    # B1
+            Annotation(subject="catkin", geometry=BBox(1, 70, 9, 78)),    # A2
+            Annotation(subject="catkin", geometry=BBox(70, 70, 78, 78)),  # B2
+            Annotation(subject="bush", geometry=BBox(1, 1, 9, 9)),        # A1, wrong subject
+        ]
+        got = cell_annotation_digests(anns, "catkin", cells, tile_size=64)
+        expected = {c.name: cell_annotation_digest(anns, "catkin", c) for c in cells}
+        assert got == expected
+        assert len(got) == 4  # A1, A2, B1, B2 -- the grid this fixture actually derives
+
+    def test_empty_cell_list_returns_empty(self):
+        assert cell_annotation_digests([], "catkin", [], tile_size=64) == {}
+
+    def test_a_cell_with_no_annotations_still_gets_a_real_digest(self):
+        cells = self._cells()
+        got = cell_annotation_digests([], "catkin", cells, tile_size=64)
+        assert set(got) == {c.name for c in cells}
+        assert all(got.values())  # every value is a real, non-empty digest string
+
+    def test_nonzero_overlap_falls_back_to_the_per_cell_path_and_still_agrees(self):
+        cells = self._cells(overlap=0.2)
+        anns = [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))]
+        got = cell_annotation_digests(anns, "catkin", cells, tile_size=64, overlap=0.2)
+        expected = {c.name: cell_annotation_digest(anns, "catkin", c) for c in cells}
+        assert got == expected
 
 
 class TestStaleCells:
