@@ -116,6 +116,21 @@ export function subdivideCell(cell: GridCell, divisions: number): PixelRect[] {
   return subs;
 }
 
+/**
+ * How many divisions `subdivideCell` needs so `cell`'s sub-cells are no larger than `targetPx`
+ * on their long edge: `ceil(long_edge / targetPx)`, at least 1. A fixed division count scales
+ * sub-cell size with the cell itself, not with the viewport that has to contain one -- wrong on
+ * any lattice whose cells vary in size (the ordinary display-derived lattice caps cells at
+ * display_bounds.DISPLAY_MAX_EDGE=4096px; the large-raster lattice's cells run into the tens of
+ * thousands of pixels). Deriving divisions from an absolute pixel target instead keeps sub-cell
+ * size, and therefore whether a real viewport can ever fully contain one, consistent across
+ * every lattice this platform serves.
+ */
+export function subCellDivisionsFor(cell: GridCell, targetPx: number): number {
+  const longEdge = Math.max(cell.x1 - cell.x0, cell.y1 - cell.y0);
+  return Math.max(1, Math.ceil(longEdge / targetPx));
+}
+
 /** One planned cell-aligned region serve. */
 export interface RegionFetch {
   cell: GridCell;
