@@ -14,6 +14,7 @@ exactly as it sits on disk, and checking that is the caller's own job.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from collections import OrderedDict
@@ -44,6 +45,12 @@ _GDAL_CACHE_SHARE = 0.5
 # Used only when psutil cannot be imported: a deliberately low assumed host size, so a host whose
 # real memory can't be read is under-budgeted rather than over.
 _ASSUMED_TOTAL_RAM_BYTES = 8 * 1024 ** 3
+
+# raster_content_identity()'s default sampling budget, provisional and platform-chosen (not
+# measured against a real false-match rate).
+CONTENT_IDENTITY_SEED = 0
+CONTENT_IDENTITY_WINDOW_SIZE = 1024
+CONTENT_IDENTITY_MAX_WINDOWS = 8
 
 _total_ram_bytes: int | None = None
 
@@ -246,6 +253,50 @@ def _check_region(rect: Rect, height: int, width: int) -> None:
             f"region [{rect.y0}:{rect.y1}, {rect.x0}:{rect.x1}] is out of bounds for a "
             f"{height}x{width} raster"
         )
+
+
+class _RegionView:
+    """A read-only offset view over an already-open :class:`RasterSource`, restricted to one
+    sub-rectangle of its full extent.
+
+    Exposes exactly the minimal duck-typed surface a windowed tile source needs
+    (``read_window``/``height``/``width``/``num_channels``, the
+    ``inference.generic_predictor.WindowedRasterReader`` Protocol): a rectangular sub-region of a
+    mosaic then reads as an ordinary windowed raster source in its own local coordinate space, so
+    tiled inference over a haloed calibration/holdout block runs through the exact same
+    ``predict_tiled`` code path a whole-mosaic export does, never a second implementation of
+    tiled inference for one region.
+
+    Dims invariant, load-bearing for measurement integrity, not just an implementation detail:
+    ``height``/``width`` always report this view's own rect extent, never the parent source's,
+    and every read is translated into the parent's coordinate space by adding the rect's own
+    origin. A read past this view's declared bounds raises rather than falling through to the
+    parent's own out-of-bounds check, which validates against the *whole* mosaic and would
+    otherwise happily serve real training/buffer pixels through the offset -- exactly what
+    ``predict_tiled``'s own edge clip (``min(tile_y + edge, source.height)``, checked against
+    this class's own reported ``height``) relies on to keep a windowed pass over one region from
+    ever silently reading pixels outside it. This must hold for every future caller of this
+    class, not only ``predict_tiled``.
+    """
+
+    def __init__(self, parent: RasterSource, rect: Rect) -> None:
+        _check_region(rect, parent.height, parent.width)
+        self._parent = parent
+        self._rect = rect
+        self.height = rect.height
+        self.width = rect.width
+        self.num_channels = parent.num_channels
+
+    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
+        """The pixel window ``[y0:y1, x0:x1]`` in this view's own local coordinate space,
+        translated into the parent source's coordinates by this view's own rect origin.
+
+        Checked against this view's own declared ``height``/``width``, never the parent's: the
+        dims invariant this class exists to hold.
+        """
+        _check_region(Rect(x0, y0, x1, y1), self.height, self.width)
+        oy, ox = self._rect.y0, self._rect.x0
+        return self._parent.read_window(oy + y0, oy + y1, ox + x0, ox + x1)
 
 
 def _check_target_size(rect: Rect, target_size: tuple[int, int]) -> tuple[int, int]:
@@ -903,3 +954,139 @@ def close_source_pool() -> None:
         _key, source = _POOL.popitem()
         source.close()
     _POOL_BYTES = 0
+
+
+# ── Raster content identity ──────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RasterIdentity:
+    """One raster file's own content identity: header facts plus a deterministic, seeded pixel
+    checksum.
+
+    A sibling primitive to ``resolution.dataset_hash``/``resolution.dataset_fingerprint``, never
+    an extension of either: those identify a whole *dataset's* ground truth (or ground truth +
+    pixels + registry + confirmations) across many images, a coarser granularity that answers a
+    different question ("is this the same dataset") than the one this class answers ("is this the
+    same raster file"). ``pixel_checksum`` is the discriminating term (two different rasters of
+    identical dimensions checksum differently); ``width``/``height``/``num_channels``/``dtype``
+    travel alongside it for a human-readable identity, never in place of the checksum.
+
+    ``band_interpretations`` is present only when the backend that served this raster carries it
+    (GDAL-only today) and is ``None`` otherwise; absence is never a refusal condition, only a
+    narrower identity. ``geotransform`` is an optional strengthening term, present only when the
+    raster is a georeferenced GeoTIFF whose affine tags this module can read, and is never
+    load-bearing: an unprojected or non-GeoTIFF raster still gets a fully usable identity from the
+    checksum alone.
+
+    ``seed``/``window_size``/``max_windows``/``pixel_fraction`` are the sampling parameters that
+    produced ``pixel_checksum``, recorded by name (not just implied by the windows actually read)
+    so a later comparison can recompute the other side's identity under the exact same parameters
+    rather than each side's own independent default -- otherwise a genuinely identical raster can
+    checksum differently purely from parameter drift between the two calls, never from a real
+    content difference.
+    """
+
+    width: int
+    height: int
+    num_channels: int
+    dtype: str
+    pixel_checksum: str
+    seed: int
+    window_size: int
+    max_windows: int
+    pixel_fraction: float
+    band_interpretations: tuple[str, ...] | None
+    geotransform: dict | None
+
+
+def _optional_geotransform(source: "str | Path | BandGroupRef") -> dict | None:
+    """``source``'s own affine georeferencing tags as a plain dict, or ``None`` when it is not a
+    path (a :class:`BandGroupRef` has no single file to read tags from) or carries no
+    readable/projected geotransform. Never raises: this term strengthens a raster content
+    identity when present and is silently absent otherwise, never load-bearing for the identity
+    as a whole."""
+    if isinstance(source, BandGroupRef):
+        return None
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import read_geotransform
+
+    try:
+        gt = read_geotransform(source)
+    except Exception:  # noqa: BLE001, a missing/unresolvable/non-GeoTIFF geotransform is optional
+        return None
+    return {
+        "tiepoint_pixel_x": gt.tiepoint_pixel_x, "tiepoint_pixel_y": gt.tiepoint_pixel_y,
+        "tiepoint_native_x": gt.tiepoint_native_x, "tiepoint_native_y": gt.tiepoint_native_y,
+        "pixel_scale_x": gt.pixel_scale_x, "pixel_scale_y": gt.pixel_scale_y, "epsg": gt.epsg,
+    }
+
+
+def raster_content_identity(
+    source: "str | Path | BandGroupRef", num_channels: int, *, seed: int, window_size: int,
+    max_windows: int,
+) -> RasterIdentity:
+    """The content identity of one raster file, read through :func:`open_raster`.
+
+    Backend-agnostic by construction: the checksum walks the same :func:`sample_windows`
+    selection every backend serves through :meth:`RasterSource.read_region`, so a GDAL-served
+    GeoTIFF and a memory-mapped ``.npy`` of identical pixel content resolve the same identity,
+    and two different-content rasters of identical dimensions resolve different ones: the
+    checksum is the discriminating term, since a GDAL-only attribute cannot provide one for a
+    legitimate ``.npy``/``.npz``/whole-decode-TIFF training raster. ``band_interpretations`` is
+    read with ``getattr(src, "band_interpretations", None)``, this module's own convention for
+    the one GDAL-only attribute (see :class:`GdalSource`), never a refusal condition on its own.
+
+    Raises ``ValueError`` naming the source when the raster genuinely cannot be opened at all
+    (whatever the backend's own open failure was, wrapped uniformly here rather than leaking a
+    backend-specific exception type); never refuses merely for lacking a GDAL-only attribute or a
+    resolvable geotransform, both optional terms here.
+    """
+    try:
+        src_cm = open_raster(source, num_channels)
+    except ValueError:
+        raise
+    except Exception as exc:  # noqa: BLE001, uniformly named as this function's own refusal
+        raise ValueError(f"cannot open raster {source!r} for a content identity: {exc}") from exc
+    with src_cm as src:
+        windows = sample_windows(
+            src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
+        digest = hashlib.sha256()
+        covered = 0
+        for rect in windows:
+            region = np.ascontiguousarray(src.read_region(rect)[0])
+            digest.update(f"{rect.x0},{rect.y0},{rect.x1},{rect.y1}|".encode("ascii"))
+            digest.update(region.tobytes())
+            covered += rect.width * rect.height
+        fraction = covered / float(src.width * src.height)
+        identity = RasterIdentity(
+            width=int(src.width), height=int(src.height), num_channels=int(src.num_channels),
+            dtype=str(src.dtype), pixel_checksum=digest.hexdigest(), seed=int(seed),
+            window_size=int(window_size), max_windows=int(max_windows),
+            pixel_fraction=float(fraction),
+            band_interpretations=getattr(src, "band_interpretations", None),
+            geotransform=_optional_geotransform(source),
+        )
+    return identity
+
+
+def raster_identity_matches(recorded: dict, source: "str | Path | BandGroupRef") -> bool:
+    """Whether ``source`` is content-identical to a previously recorded
+    :func:`raster_content_identity` result (as its ``dataclasses.asdict`` form).
+
+    Recomputes ``source``'s identity under the *exact* sampling parameters (``seed``/
+    ``window_size``/``max_windows``) the recorded identity carries, never this call's own
+    default: a genuinely identical raster must not read as different purely from parameter drift
+    between a training-time and an export-time call. Raises ``ValueError`` (from
+    :func:`raster_content_identity`) naming ``source`` when it cannot be opened/sampled at all,
+    never silently reporting a false non-match for an unresolvable identity.
+    """
+    fresh = raster_content_identity(
+        source, int(recorded["num_channels"]), seed=int(recorded["seed"]),
+        window_size=int(recorded["window_size"]), max_windows=int(recorded["max_windows"]),
+    )
+    return (
+        fresh.width == int(recorded["width"]) and fresh.height == int(recorded["height"])
+        and fresh.num_channels == int(recorded["num_channels"])
+        and fresh.dtype == recorded["dtype"]
+        and fresh.pixel_checksum == recorded["pixel_checksum"]
+    )
