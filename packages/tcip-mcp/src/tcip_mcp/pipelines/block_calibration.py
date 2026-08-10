@@ -356,7 +356,16 @@ def resolve_block_calibration_records(
     from tcip_mcp.pipelines.raster_source import open_raster
 
     training_source = resolve_image_source(images_dir, stem)
+
     with open_raster(training_source, predictor.in_chans) as reader:
+        if (reader.width, reader.height) != (mosaic_w, mosaic_h):
+            raise BlockCalibrationRefused(
+                f"block calibration refused: the split manifest's recorded mosaic dimensions "
+                f"({mosaic_w}x{mosaic_h}) do not match the actual raster {training_source}'s "
+                f"current dimensions ({reader.width}x{reader.height}); the raster was likely "
+                f"replaced or truncated since training. Retrain or re-split against the current "
+                f"file before block calibration can trust the reserved regions' geometry."
+            )
         cal_records, cal_rects = _band_records(
             reader, cal_bands, mosaic_w, mosaic_h, tile_size, overlap, predictor,
             tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
@@ -373,15 +382,20 @@ def resolve_block_calibration_records(
     from tcip_mcp.pipelines.operating_point import (
         attach_spatial_split_kind_provenance, resolve_operating_point,
     )
-    from tcip_mcp.pipelines.resolution import dataset_hash
+    from tcip_mcp.pipelines.resolution import dataset_hash, derived
 
     dh = dataset_hash(labels_dir)
     bundle = resolve_operating_point(
         trait_name, dataset_hash=dh, calibration_records=cal_records, holdout_records=test_records,
-        tiled=True, tiled_source="default", cross_tile_nms=None, max_dets=None,
+        tiled=True, tiled_source="default", cross_tile_nms=None, max_dets=density_cap,
         experiment_id=experiment_id, staged_conf_floor=applied.get("score_thresh"),
         cal_rects=cal_rects, hold_rects=test_rects,
     )
+    # resolve_operating_point's own generic label doesn't say the count was pooled across both
+    # reserved regions' bands; restamp with the real provenance so a reviewer can reconstruct it.
+    bundle.params["max_dets"] = derived(
+        "max_dets", density_cap,
+        derived_from="~1.5x p99 GT objects/image, pooled across all calibration+test bands")
     attach_spatial_split_kind_provenance(bundle, spatial)
 
     provenance = {
@@ -427,6 +441,7 @@ def _band_records(
             global_nms_iou=global_nms_iou, postprocess=postprocess, require_masks=False,
             source_label=image_id,
         )
+        cap_hit = result.get("cap_hit", False)
         dt: list[dict] = []
         for (bx1, by1, bx2, by2), score, label in zip(
             result["boxes"], result["scores"], result["labels"],
@@ -442,6 +457,8 @@ def _band_records(
             {"category_id": int(lab), "bbox": [x1, y1, x2 - x1, y2 - y1], "iscrowd": 0}
             for (x1, y1, x2, y2), lab in zip(selected_boxes.tolist(), selected_labels.tolist())
         ]
-        records.append(build_coco_image_record(ix1 - ix0, iy1 - iy0, gt, dt, image_id=image_id))
+        rec = build_coco_image_record(ix1 - ix0, iy1 - iy0, gt, dt, image_id=image_id)
+        rec["cap_hit"] = cap_hit
+        records.append(rec)
         rects_by_id[image_id] = inner
     return records, rects_by_id
