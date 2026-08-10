@@ -364,7 +364,40 @@ _UNRESOLVABLE_TRAIN_DISJOINTNESS = {
 }
 
 
-def _train_disjointness(experiment_id: str | None, cal_ids: set, hold_ids: set) -> dict:
+def _spatial_strip_geometric_disjointness(spatial: dict, cal_rects: dict, hold_rects: dict) -> dict:
+    """The geometric form of the spatial_strip check: a cal/holdout rect must be fully contained
+    in a persisted non-train region (``val_region``/``test_region``/``calibration_region``, the
+    last only present on a four-way split) and disjoint from every persisted train region, read
+    from ``spatial`` (the ``split.json`` ``"spatial"`` block ``_persist_split_manifest`` writes).
+    Compares real geometry, so it catches a leak the lexical stem-identity check can't: a rect
+    that spills into the reserved train area from a source stem whose name never matches the
+    training stem's own.
+    """
+    from tcip_mcp.pipelines.data.tiling import rect_contains_rect, rects_overlap
+
+    train_regions = [tuple(r) for r in spatial.get("train_region", [])]
+    non_train_regions = ([tuple(r) for r in spatial.get("val_region", [])]
+                         + [tuple(r) for r in spatial.get("test_region", [])]
+                         + [tuple(r) for r in spatial.get("calibration_region", [])])
+    leaked_groups: list[str] = []
+    for rects in (cal_rects or {}, hold_rects or {}):
+        for stem, rect in rects.items():
+            rect = tuple(rect)
+            contained = any(rect_contains_rect(nt, rect) for nt in non_train_regions)
+            overlaps_train = any(rects_overlap(tr, rect) for tr in train_regions)
+            if not contained or overlaps_train:
+                leaked_groups.append(stem)
+    return {
+        "checked": True, "unresolvable": False, "leaked_groups": sorted(set(leaked_groups)),
+        "leaked_stems": [], "group_check": "spatial_strip_geometric",
+    }
+
+
+def _train_disjointness(
+    experiment_id: str | None, cal_ids: set, hold_ids: set, *,
+    cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
+    hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
+) -> dict:
     """Whether the cal/holdout images were also in the checkpoint's own training split.
 
     ``experiment_id is None`` -> a foreign/unregistered checkpoint with no known training
@@ -394,9 +427,17 @@ def _train_disjointness(experiment_id: str | None, cal_ids: set, hold_ids: set) 
     run's own stems and the calibration/holdout stem set (``leaked_stems``). ``group_check``
     records how much of the check was group-level: ``"performed"`` (every stem grouped),
     ``"partial"`` (some stems fell back to exact-stem), ``"not_performed"`` (no group policy
-    resolved at all, wholly exact-stem), or ``"spatial_strip"`` (a within-image split, checked
-    by source stem underneath each region identity). A leak found by either mechanism blocks
-    ``passed``.
+    resolved at all, wholly exact-stem), ``"spatial_strip"`` (a within-image split, checked
+    by source stem underneath each region identity), or ``"spatial_strip_geometric"`` (see below).
+    A leak found by either mechanism blocks ``passed``.
+
+    ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
+    stem) are optional and additive: every existing caller omits them and gets exactly the
+    behavior above, unchanged. When either is given and the persisted split is
+    ``group_by == "spatial_strip"``, the check becomes geometric containment against the
+    persisted ``train_region``/``val_region``/``test_region`` rects
+    (:func:`_spatial_strip_geometric_disjointness`) instead of the lexical same-source check
+    above, which this path drops entirely rather than running both.
     """
     if experiment_id is None:
         return {"checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
@@ -425,8 +466,11 @@ def _train_disjointness(experiment_id: str | None, cal_ids: set, hold_ids: set) 
     group_by = split.get("group_by")
 
     if group_by == "spatial_strip":
+        if cal_rects or hold_rects:
+            return _spatial_strip_geometric_disjointness(
+                split.get("spatial") or {}, cal_rects, hold_rects)
         # train_stems are per-region identities, not bare stems; only a same-source reference is
-        # caught here (region-level overlap against the reserved test area is not checked yet).
+        # caught here (a caller with real rects gets the geometric check above instead).
         train_source_stems = {stem_of_spatial_identity(s) for s in train_stems}
         spatial_leaked_groups = sorted(train_source_stems & set(cal_hold_stems))
         return {
@@ -504,6 +548,24 @@ def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None
         conf.sweep["split_unlocked_stems"] = locked["unlocked_stems"]
 
 
+def attach_spatial_split_kind_provenance(bundle: ResolvedBundle, spatial: dict) -> None:
+    """Same target and shape as :func:`attach_split_policy_provenance`, for a block-calibrated
+    bundle whose reference came from a mosaic's own persisted spatial-strip split (``spatial``,
+    ``split.json``'s ``spatial`` manifest) rather than a locked cal/holdout draw over a labeled
+    image set: there is no ``locked`` dict here to read a group policy off, only the split's own
+    recorded geometry, so this writes the split-kind fact directly instead of reusing
+    ``attach_split_policy_provenance``'s ``locked``-shaped signature. A no-op when the bundle has
+    no calibrated ``conf`` sweep to attach to, same as its sibling.
+    """
+    conf = bundle.params.get("conf")
+    if conf is None or conf.sweep is None:
+        return
+    conf.sweep["split_policy"] = {
+        "group_by": "spatial_strip", "seed": spatial.get("seed"),
+        "tile_size": spatial.get("tile_size"), "overlap": spatial.get("overlap"),
+    }
+
+
 def resolve_operating_point(
     trait_name: str,
     *,
@@ -520,9 +582,18 @@ def resolve_operating_point(
     experiment_id: str | None = None,
     staged_conf_floor: float | None = None,
     adjudication_covered: Callable[[dict], bool] | None = None,
+    cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
+    hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
 ) -> ResolvedBundle:
     """Resolve the operating point for (trait, dataset). Pure over records, callers pass the model
     pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
+
+    ``cal_rects``/``hold_rects`` are optional and additive, forwarded verbatim to
+    :func:`_train_disjointness` (see its own docstring): every existing caller omits them and gets
+    exactly today's lexical/stem-based disjointness check, unchanged. A block-calibration caller
+    (a mosaic's own reserved calibration/test regions) supplies them to get the geometric
+    containment check instead, the only shape that can prove disjointness for a within-mosaic
+    reference with no separate image identity of its own.
 
     ``tile_size_source``/``tiled_source`` are the caller's own resolution of whether each value was
     an explicit override, derived from the checkpoint's persisted training geometry, or a documented
@@ -662,7 +733,8 @@ def resolve_operating_point(
             # train-disjointness gate: the cal/holdout images must not also be in the producing
             # checkpoint's own training split, or the "held-out" bias check is measured partly on
             # data the model already trained on.
-            td = _train_disjointness(experiment_id, cal_ids, hold_ids)
+            td = _train_disjointness(
+                experiment_id, cal_ids, hold_ids, cal_rects=cal_rects, hold_rects=hold_rects)
 
             # Positive-evidence, unconditional, stated per-side (not a union), an all-negative
             # reference on either side can't validate a count operating point.
