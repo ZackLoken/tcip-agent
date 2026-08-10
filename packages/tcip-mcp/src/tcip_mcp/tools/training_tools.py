@@ -151,6 +151,13 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 except ValueError as exc:
                     issues.append(f"data.split: {exc}")
 
+    # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
+    # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
+    reserve_cal_frac = split_cfg.get("reserve_calibration_fraction") if isinstance(split_cfg, dict) else None
+    if reserve_cal_frac:
+        issues.extend(_reserve_calibration_feasibility_issues(
+            model_source, data_cfg, split_cfg, reserve_cal_frac, smoke=smoke))
+
     # Trainable-sample coverage: trainable_stems' own partition was computed
     # by DetectionDataset/InstanceSegDataset and then thrown away, a run whose label store admits
     # only a fraction of its annotated images (an unconfirmed-empty backlog, a stale-schema
@@ -1198,6 +1205,69 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
         return None, f"{type(exc).__name__}: {exc}"
 
 
+def _reserve_calibration_feasibility_issues(
+    model_source: dict | None, data_cfg: dict, split_cfg: dict, reserve_cal_frac: float, *,
+    smoke: bool,
+) -> list[str]:
+    """Named ``preflight_config`` issues for an explicitly-requested
+    ``reserve_calibration_fraction`` that cannot be honored, so the launch refuses here rather
+    than silently training without a calibration region or failing deep inside the training
+    subprocess. Routed through ``preflight_config``/``launch_training``'s own validation surface
+    (not ``pipelines.feedback.review_calibration``'s ``_FAILURE_MESSAGES``: that registry's only
+    consumer is the Review tab reading a ``ResolvedBundle``'s sweep failures, and this refusal
+    fires at training-launch time, with neither in scope).
+
+    Structurally inapplicable configs (not detection, tiling disabled, a multi-stem dataset that
+    would use the group-balanced split instead) are always flagged, cheaply, no dataset build
+    needed. The single-source geometry :func:`_spatial_single_source_split` itself would derive
+    (extent, strip-layout feasibility, an empty side after real filtering) is checked by actually
+    calling it, real dataset construction, so gated on ``smoke=True`` like this function's other
+    dataset/model-touching checks (a plain, non-smoke ``preflight_config`` call still catches the
+    structurally-inapplicable cases above, just not this geometry).
+    """
+    task = (model_source.get("task") if isinstance(model_source, dict) else None) \
+        or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
+    tiling_cfg = data_cfg.get("tiling") if isinstance(data_cfg, dict) else None
+    if task != "detection" or not tiling_cfg or not tiling_cfg.get("enabled", True):
+        return [
+            f"data.split.reserve_calibration_fraction={reserve_cal_frac} has no effect: it only "
+            "applies to a detection task with tiling enabled (the single-source spatial-strip "
+            f"split), this config's task is {task!r} with tiling={tiling_cfg!r}."
+        ]
+
+    images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
+    if not images_dir or not labels_dir or not Path(images_dir).is_dir() or not Path(labels_dir).is_dir():
+        return []  # the existing images_dir/labels_dir structural checks already cover this
+
+    from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
+
+    stems = sorted(f.stem for f in Path(images_dir).iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    if len(stems) >= 2:
+        return [
+            f"data.split.reserve_calibration_fraction={reserve_cal_frac} has no effect: "
+            f"{len(stems)} source images resolve to the group-balanced multi-stem split, not the "
+            "single-source spatial-strip split a calibration region reserves from."
+        ]
+    if len(stems) != 1 or not smoke:
+        return []
+
+    try:
+        from tcip_mcp.pipelines.data.datasets import build_dataset
+
+        base = build_dataset(
+            "detection", images_dir=images_dir, labels_dir=labels_dir,
+            subject=data_cfg.get("subject"), attribute=data_cfg.get("attribute"))
+        _spatial_single_source_split(
+            stems[0], dict(data_cfg), tiling_cfg, base, dict(split_cfg), None)
+    except ValueError as exc:
+        return [f"data.split.reserve_calibration_fraction: {exc}"]
+    except Exception as exc:  # noqa: BLE001, an unrelated build failure isn't this check's own
+        logger.info(
+            "reserve_calibration_fraction feasibility probe could not build a dataset to check "
+            "(%s); not reported as this check's own refusal.", exc)
+    return []
+
+
 def _spatial_single_source_split(
     stem: str, data_cfg: dict, tiling: dict, base, split_cfg: dict, transforms,
 ) -> tuple:
@@ -1211,20 +1281,38 @@ def _spatial_single_source_split(
     share). A test region is derived and reserved alongside train/val (excluded from both, so it
     is genuinely held out) but no dataset is built for it: nothing downstream consumes a third
     dataset from this function today, so only its geometry and kept-tile count are recorded,
-    material a later block-aware calibration mechanism can consume without recomputing the split.
-    Returns ``(train_ds, val_ds)``, or ``None`` when the extent is unknown or no strip layout can
-    populate both train and val, in which case the caller falls back to training without
-    validation.
+    material the block-aware calibration mechanism (``pipelines.block_calibration``) consumes
+    without recomputing the split.
+
+    ``split_cfg["reserve_calibration_fraction"]`` (opt-in, default unset/0) reserves a fourth
+    region, ``calibration``, alongside train/val/test, at that fraction of the axis: material for
+    the same block-calibration mechanism's calibration-side bands. Unset, this function's
+    behavior (fractions, split_names, every returned value) is byte-identical to the 3-way split
+    it has always run. When explicitly set, all three of :func:`spatial_strip_split`'s distinct
+    silent-``None``-return reasons (no extent from the label file; the strip layout itself
+    infeasible; an empty train/val/test/calibration side surviving tile filtering) instead raise
+    ``ValueError`` naming which one fired: an opt-in reserved region silently degrading to no
+    validation at all would be exactly the kind of measurement-integrity gap this mechanism exists
+    to close, unlike the unrequested 3-way case, where that same silent degradation is correct.
+
+    Returns ``(train_ds, val_ds)``, or ``None`` when ``reserve_calibration_fraction`` was not
+    requested and the extent is unknown or no strip layout can populate both train and val, in
+    which case the caller falls back to training without validation.
     """
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, tile_kwargs_from_tiling
     from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
 
+    reserve_cal = float(split_cfg.get("reserve_calibration_fraction") or 0.0)
+
     extent = image_extent_from_labels(data_cfg.get("labels_dir", ""), stem)
     if extent is None:
-        logger.warning(
-            "Spatial train/val split for %r skipped: its label file carries no width/height; "
-            "training without validation.", stem,
-        )
+        msg = f"its label file carries no width/height for {stem!r}"
+        if reserve_cal:
+            raise ValueError(
+                f"reserve_calibration_fraction={reserve_cal} requires a resolvable extent: {msg}; "
+                "a calibration region cannot be reserved without one.")
+        logger.warning("Spatial train/val split for %r skipped: %s; training without "
+                       "validation.", stem, msg)
         return None
     width, height = extent
 
@@ -1238,15 +1326,28 @@ def _spatial_single_source_split(
     overlap = tile_kwargs.get("overlap", 0.2)
     val_ratio = float(split_cfg.get("val_ratio", 0.2))
     test_ratio = float(split_cfg.get("test_ratio", 0.1))
-    train_ratio = 1.0 - val_ratio - test_ratio
     seed = int(split_cfg.get("seed", 42))
+    if reserve_cal:
+        train_ratio = 1.0 - val_ratio - test_ratio - reserve_cal
+        split_names = ("train", "val", "test", "calibration")
+        fractions = (train_ratio, val_ratio, test_ratio, reserve_cal)
+    else:
+        train_ratio = 1.0 - val_ratio - test_ratio
+        split_names = ("train", "val", "test")
+        fractions = (train_ratio, val_ratio, test_ratio)
 
     try:
         spatial = spatial_strip_split(
-            width, height, tile_size, overlap,
-            fractions=(train_ratio, val_ratio, test_ratio), seed=seed, buffer=tiling.get("buffer"),
+            width, height, tile_size, overlap, fractions=fractions, split_names=split_names,
+            seed=seed, buffer=tiling.get("buffer"),
         )
     except ValueError as exc:
+        if reserve_cal:
+            raise ValueError(
+                f"reserve_calibration_fraction={reserve_cal}: 4-way spatial split infeasible for "
+                f"{stem!r} at this mosaic size/tile size ({exc}); reduce the fraction or drop "
+                "reserve_calibration_fraction."
+            ) from exc
         logger.warning(
             "Spatial train/val split for %r could not be derived (%s); training without "
             "validation.", stem, exc,
@@ -1257,7 +1358,23 @@ def _spatial_single_source_split(
         base, transforms=transforms, keep_regions=spatial.regions["train"], **tile_kwargs)
     val_ds = TiledDetectionDataset(
         base, transforms=None, keep_regions=spatial.regions["val"], **tile_kwargs)
-    if train_ds.num_samples == 0 or val_ds.num_samples == 0:
+    empty_reserved_side = False
+    if reserve_cal:
+        # A tile lattice occupying the region (spatial_strip_split's own check) is not proof it
+        # carries GT: an all-background region still passes that but skip_empty filters it to 0.
+        test_ds = TiledDetectionDataset(
+            base, transforms=None, keep_regions=spatial.regions["test"], **tile_kwargs)
+        cal_ds = TiledDetectionDataset(
+            base, transforms=None, keep_regions=spatial.regions["calibration"], **tile_kwargs)
+        empty_reserved_side = test_ds.num_samples == 0 or cal_ds.num_samples == 0
+    if train_ds.num_samples == 0 or val_ds.num_samples == 0 or empty_reserved_side:
+        if reserve_cal:
+            raise ValueError(
+                f"reserve_calibration_fraction={reserve_cal}: the derived 4-way strip layout for "
+                f"{stem!r} left a side with zero kept (or zero GT-bearing) tiles after filtering "
+                f"(kept_tiles={spatial.kept_tiles}); reduce the fraction or drop "
+                "reserve_calibration_fraction."
+            )
         logger.warning(
             "Spatial train/val split for %r yielded an empty side after tile filtering; "
             "training without validation.", stem,
@@ -1269,9 +1386,14 @@ def _spatial_single_source_split(
 
     split_cfg["resolved_group_by"] = "spatial_strip"
     split_cfg["spatial_manifest"] = {
+        "stem": stem,
         "train_identities": _identities(train_ds), "val_identities": _identities(val_ds),
+        "train_region": spatial.regions.get("train", []),
+        "val_region": spatial.regions.get("val", []),
         "test_region": spatial.regions.get("test", []),
+        "calibration_region": spatial.regions.get("calibration", []),
         "kept_test_tiles": spatial.kept_tiles.get("test", 0),
+        "kept_calibration_tiles": spatial.kept_tiles.get("calibration", 0),
         "width": spatial.width, "height": spatial.height, "tile_size": spatial.tile_size,
         "overlap": spatial.overlap, "axis": spatial.axis, "buffer": spatial.buffer,
         "seed": spatial.seed, "requested_fractions": dict(zip(spatial.split_names,
@@ -1282,6 +1404,7 @@ def _spatial_single_source_split(
         "kept_val_tiles": spatial.kept_tiles.get("val", 0),
         "tiles_dropped_past_extent": spatial.tiles_dropped_past_extent,
         "tiles_dropped_outside_regions": spatial.tiles_dropped_outside_regions,
+        "raster_content_identity": _spatial_split_raster_identity(data_cfg, stem),
     }
     logger.info(
         "Spatial train/val split for %r: %d train / %d val tiles (axis=%s, "
@@ -1290,6 +1413,35 @@ def _spatial_single_source_split(
         spatial.realized_fractions, spatial.realized_discard_fraction,
     )
     return train_ds, val_ds
+
+
+def _spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
+    """This mosaic's own :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`, best
+    effort: recorded into ``spatial_manifest`` at spatial-split time (the training source is first
+    known to be a raster here), read back at export time (``inference_tools.
+    _export_predictions_raster``) to gate a block-calibrated bundle's claim scope to this exact
+    mosaic. A provenance write must never sink a launch: an unreadable/unsupported source (a
+    bespoke ``dataset_source``, a corrupt file) logs and returns ``None`` rather than raising, the
+    same posture ``_persist_split_manifest`` already takes for its own best-effort writes.
+    """
+    try:
+        from tcip_mcp.pipelines.derivations import probe_channels
+        from tcip_mcp.pipelines.image_utils import resolve_image_source
+        from tcip_mcp.pipelines.raster_source import (
+            CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
+            raster_content_identity,
+        )
+
+        source = resolve_image_source(data_cfg.get("images_dir", ""), stem)
+        nc = probe_channels(source)
+        identity = raster_content_identity(
+            source, nc, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
+            max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+        import dataclasses
+        return dataclasses.asdict(identity)
+    except Exception as exc:  # noqa: BLE001, best-effort provenance, never sinks the split/launch
+        logger.warning("raster content identity for %r could not be recorded: %s", stem, exc)
+        return None
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
