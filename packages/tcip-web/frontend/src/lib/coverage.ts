@@ -28,6 +28,38 @@ export interface CoverageGridResponse extends GridGeometry {
   cells: GridCell[];
 }
 
+/** One subject's region-completeness record, as GET /api/coverage/completeness returns it
+ *  (per subject, in `by_subject`). `stale_cells` is recomputed server-side on every read: an
+ *  attested cell whose annotation content has since been edited or deleted. */
+export interface CompletenessRecord {
+  grid: GridGeometry;
+  cells_complete: string[];
+  attested_by: string | null;
+  attested_at: string | null;
+  stem: string;
+  date: string | null;
+  subject: string;
+  stale_cells: string[];
+}
+
+/** Cells genuinely complete right now: attested, minus any that have since gone stale. A stale
+ *  attestation must never render as if it still held. */
+export function effectiveComplete(record: CompletenessRecord | undefined): Set<string> {
+  if (!record) return new Set();
+  const stale = new Set(record.stale_cells);
+  return new Set(record.cells_complete.filter((c) => !stale.has(c)));
+}
+
+/** One double-click: toggle one cell's completeness for a subject. POST /api/coverage/completeness. */
+export interface CompletenessTogglePostBody {
+  image_path: string;
+  dataset_root: string | null;
+  subject: string;
+  grid: GridGeometry;
+  cell: string;
+  user?: string | null;
+}
+
 export function sameGrid(a: GridGeometry, b: GridGeometry): boolean {
   return (
     a.width === b.width &&
