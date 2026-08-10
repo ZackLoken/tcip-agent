@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.pipelines.derivations import (
+    derive_block_scale_px,
     derive_cross_tile_nms,
     derive_iou_match_threshold,
     derive_localization_kind,
@@ -194,6 +195,80 @@ def test_derive_sliver_frac_raises_valueerror_on_malformed_char_sizes():
         derive_sliver_frac(None)
     with pytest.raises(ValueError, match="not numeric"):
         derive_sliver_frac(["abc", 1.0, 2.0, 3.0, 4.0])
+
+
+def test_derive_block_scale_px_gt_object_spacing_floored_at_tile_size():
+    # Objects 200px apart, tile_size 50: the derived scale (median NN spacing) is 200, well above
+    # the floor, so the floor never engages.
+    boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
+    px, source = derive_block_scale_px(tile_size=50, gt_boxes_per_image=[boxes])
+    assert px == 200
+    assert "GT object-spacing" in source
+
+
+def test_derive_block_scale_px_floors_at_tile_size_when_spacing_is_smaller():
+    boxes = [(x, 0, 5, 5) for x in range(0, 100, 10)]  # 10px spacing
+    px, source = derive_block_scale_px(tile_size=64, gt_boxes_per_image=[boxes])
+    assert px == 64  # the tile_size floor wins over the smaller measured spacing
+    assert "floored at tile_size" in source
+
+
+def test_derive_block_scale_px_no_data_refuses_named():
+    with pytest.raises(ValueError, match="no block scale is derivable"):
+        derive_block_scale_px(tile_size=64, gt_boxes_per_image=[[]])
+
+
+def test_derive_block_scale_px_insufficient_plant_registry_refuses_named():
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    one_plant = [PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0)]
+    boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
+    with pytest.raises(ValueError, match="plant grid pitch is underivable"):
+        derive_block_scale_px(
+            tile_size=50, gt_boxes_per_image=[boxes], plants=one_plant, raster_path=None)
+
+
+def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(monkeypatch, tmp_path):
+    from tcip_mcp.pipelines.postprocessing import orthomosaic_mapping
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    # Two plants 100m apart (haversine-ish at this latitude close enough for a unit test); a fake
+    # geotransform of 0.5 native units (m) per pixel converts that to a real pixel scale.
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),  # ~100m north
+    ]
+    fake_gt = orthomosaic_mapping.GeoTransform(
+        tiepoint_pixel_x=0, tiepoint_pixel_y=0, tiepoint_native_x=0, tiepoint_native_y=0,
+        pixel_scale_x=0.5, pixel_scale_y=0.5, epsg=32615)
+    monkeypatch.setattr(orthomosaic_mapping, "read_geotransform", lambda path: fake_gt)
+    boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
+    px, source = derive_block_scale_px(
+        tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
+        raster_path=str(tmp_path / "mosaic.tif"))
+    assert "plant grid pitch" in source
+    assert px == pytest.approx(200, rel=0.05)  # ~100m / 0.5 m-per-px = ~200px
+
+
+def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monkeypatch, tmp_path):
+    from tcip_mcp.pipelines.postprocessing import orthomosaic_mapping
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
+
+    plants = [
+        PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
+        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),
+    ]
+
+    def _boom(path):
+        raise orthomosaic_mapping.GeoreferencingError("no geokeys")
+
+    monkeypatch.setattr(orthomosaic_mapping, "read_geotransform", _boom)
+    boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
+    px, source = derive_block_scale_px(
+        tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+        raster_path=str(tmp_path / "mosaic.tif"))
+    assert "GT object-spacing" in source  # fell back, not a refusal
+    assert px == 200
 
 
 def test_write_class_map(tmp_path):
