@@ -205,7 +205,8 @@ class GenericPredictor:
                 results.append(self._format_detection(out, disp, w, h))
         return results
 
-    def _tile_model_input(self, crop, tile_resize: tuple[int, int] | None):
+    def _tile_model_input(self, crop, tile_resize: tuple[int, int] | None, *,
+                          band_interpretations: "tuple[str, ...] | None" = None):
         """One tile as the model should receive it, plus the ``(scale_x, scale_y)`` its coordinates
         were multiplied by getting there.
 
@@ -214,18 +215,21 @@ class GenericPredictor:
         implementation), which is a per-axis stretch: the two factors differ whenever the target's
         aspect differs from the tile's, so they travel separately and are never collapsed to one.
 
-        A tile no PIL mode represents faithfully (uint16, 5-band) is returned untouched at
-        ``(1.0, 1.0)``: the training loader's own transform chain is PIL-only and skipped such a
-        sample too (``BaseImageDataset._finalize``), so resizing here would introduce a geometry
-        training never applied. ``to_pil_if_faithful`` is that same shared decision, not a second
-        one.
+        A tile no PIL mode represents faithfully (uint16, 5-band, or a 4-channel tile whose
+        alpha-vs-spectral-band status is unresolved) is returned untouched at ``(1.0, 1.0)``: the
+        training loader's own transform chain is PIL-only and skipped such a sample too
+        (``BaseImageDataset._finalize``), so resizing here would introduce a geometry training
+        never applied. ``to_pil_if_faithful`` is that same shared decision, not a second one;
+        ``band_interpretations`` (the windowed source's own GDAL color interpretations, absent
+        for the whole-decode path since ``load_image`` already resolved it there) is the same
+        real signal that decision reads elsewhere, never guessed here either.
         """
         if tile_resize is None:
             return crop, 1.0, 1.0
         from tcip_mcp.pipelines.data.augmentations import Resize
         from tcip_mcp.pipelines.image_utils import to_pil_if_faithful
 
-        pil = to_pil_if_faithful(crop)
+        pil = to_pil_if_faithful(crop, band_interpretations=band_interpretations)
         if not isinstance(pil, Image.Image):
             return crop, 1.0, 1.0
         target = (int(tile_resize[0]), int(tile_resize[1]))
@@ -237,6 +241,7 @@ class GenericPredictor:
         tile_size: int, overlap: float, tile_batch_size: int, global_nms_iou: float,
         postprocess: str, *, require_masks: bool = True,
         tile_resize: tuple[int, int] | None = None,
+        band_interpretations: "tuple[str, ...] | None" = None,
     ) -> dict:
         """Shared tiling/batching/reconstruction loop behind :meth:`predict_tiled`'s two source
         kinds (a fully decoded in-memory image, or a windowed raster reader): build tile positions
@@ -269,7 +274,9 @@ class GenericPredictor:
         wrong scale and change which detections survive. What the model itself does internally to the
         tensor it is handed (a detector's own ``GeneralizedRCNNTransform`` resizes it, then maps its
         boxes back to that tensor's coordinate space) is already undone before this loop sees a box,
-        so only the resize applied here is corrected here.
+        so only the resize applied here is corrected here. ``band_interpretations`` passes through
+        to :meth:`_tile_model_input` for the windowed-reader caller only (the whole-decode caller's
+        tiles are already the type ``load_image`` resolved them to, with its own real signal).
 
         Returns ``width``/``height``/``boxes``/``scores``/``labels``/``count``/``tiles`` (``masks``
         when applicable); the caller stamps its own ``image`` field (a display path or a windowed
@@ -329,7 +336,8 @@ class GenericPredictor:
         resize_applied = True
         for tile_x, tile_y in positions:
             raw = get_tile(tile_x, tile_y)
-            crop, scale_x, scale_y = self._tile_model_input(raw, tile_resize)
+            crop, scale_x, scale_y = self._tile_model_input(
+                raw, tile_resize, band_interpretations=band_interpretations)
             resize_applied = crop is not raw
             batch_tiles.append(pil_to_tensor(crop).to(self.device))
             batch_scales.append((scale_x, scale_y))
@@ -482,7 +490,8 @@ class GenericPredictor:
 
             result = self._tiled_infer_core(
                 source.height, source.width, _windowed_tile, edge, overlap, tile_batch_size,
-                global_nms_iou, postprocess, require_masks=require_masks, tile_resize=tile_resize)
+                global_nms_iou, postprocess, require_masks=require_masks, tile_resize=tile_resize,
+                band_interpretations=getattr(source, "band_interpretations", None))
             result["image"] = source_label
             return result
 
