@@ -581,7 +581,9 @@ class BaseImageDataset(BaseDataset):
         return resolve_image_source(self.images_dir, stem)
 
     def _open_image(self, stem: str):
-        """Open an image honoring ``expected_channels`` (PIL for 1/3/4 ch, else ndarray)."""
+        """Open an image honoring ``expected_channels``: PIL where the pixels have a faithful
+        PIL mode (1/3 channels always; 4 only when the source declares its 4th band alpha), else
+        an ``[H, W, C]`` ndarray. See :func:`image_utils.to_pil_if_faithful`."""
         return load_image(self._resolve_path(stem), self.expected_channels)
 
     @staticmethod
@@ -602,7 +604,8 @@ class BaseImageDataset(BaseDataset):
             BaseImageDataset._warned_ndarray_transforms = True
             logger.warning(
                 "augmentation is configured but skipped for images whose dtype or band count "
-                "PIL cannot represent faithfully (e.g. uint16 or 5-band pixels): the transform "
+                "PIL cannot represent faithfully (e.g. uint16 or 5-band pixels, or a 4-band "
+                "uint8 raster whose 4th band the source doesn't declare alpha): the transform "
                 "pipeline is PIL-only. This run trains those images unaugmented."
             )
         return pil_to_tensor(img), target
