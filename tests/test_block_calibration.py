@@ -201,6 +201,148 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
     }
 
 
+def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
+    tmp_path: Path, monkeypatch,
+):
+    """A band whose raw detection count exceeds the applied per-image cap is invisible in block
+    calibration's own provenance today: ``_band_records`` builds every record via
+    ``build_coco_image_record``, which never stamps ``cap_hit``, so
+    ``operating_point._cap_saturated_frac`` (already wired into
+    ``calibration_cap_saturated_frac``/``holdout_cap_saturated_frac``) always reads ``None`` for a
+    block-calibrated bundle regardless of real saturation. Forces the density-derived cap down to
+    1 (monkeypatching ``derive_max_dets_from_counts``, since the real cap is derived from GT counts
+    this test does not otherwise control) so every band with more than one raw detection is
+    genuinely truncated."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    import tcip_mcp.pipelines.operating_point as operating_point_module
+
+    monkeypatch.setattr(operating_point_module, "derive_max_dets_from_counts", lambda *a, **k: 1)
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    conf = bundle.get("conf")
+    assert conf.sweep is not None
+    cal_frac = conf.sweep.get("calibration_cap_saturated_frac")
+    hold_frac = conf.sweep.get("holdout_cap_saturated_frac")
+    assert cal_frac is not None and cal_frac > 0.0
+    assert hold_frac is not None and hold_frac > 0.0
+
+
+def _rewrite_split_manifest_dims(root: Path, experiment_id: str, *, width: int, height: int) -> None:
+    """Hand-edits a persisted experiment's ``split.json`` ``spatial.width``/``spatial.height``,
+    simulating a manifest recorded against a raster that was later replaced or truncated."""
+    from tcip_mcp.experiments import experiments_dir
+
+    split_path = experiments_dir() / experiment_id / "split.json"
+    split = json.loads(split_path.read_text(encoding="utf-8"))
+    split["spatial"]["width"] = width
+    split["spatial"]["height"] = height
+    split_path.write_text(json.dumps(split), encoding="utf-8")
+
+
+def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_raster(tmp_path: Path):
+    """The split manifest's recorded mosaic dimensions must be cross-checked against the real
+    raster's own current dimensions before block calibration trusts the reserved regions'
+    geometry: a manifest recording larger-than-real dims must refuse by name
+    (``BlockCalibrationRefused``), not let a too-large haloed rect reach ``_RegionView.__init__``'s
+    bare ``ValueError``."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+    _rewrite_split_manifest_dims(
+        tmp_path, exp["experiment_id"], width=WIDTH + 500, height=HEIGHT)
+
+    from tcip_mcp.pipelines.block_calibration import (
+        BlockCalibrationRefused, resolve_block_calibration_records,
+    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    with pytest.raises(BlockCalibrationRefused, match="do not match"):
+        resolve_block_calibration_records(
+            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+
+def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_the_real_raster(
+    tmp_path: Path,
+):
+    """The inverse mismatch, a manifest recording smaller-than-real dims, must also refuse by
+    name, closing the silent-partial-scoring behavior (band rects resolved against a smaller
+    mosaic than the one actually being read would silently score only a sub-area of the real
+    raster) rather than proceeding as if the reserved regions still described the whole image."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+    _rewrite_split_manifest_dims(
+        tmp_path, exp["experiment_id"], width=WIDTH - 500, height=HEIGHT)
+
+    from tcip_mcp.pipelines.block_calibration import (
+        BlockCalibrationRefused, resolve_block_calibration_records,
+    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    with pytest.raises(BlockCalibrationRefused, match="do not match"):
+        resolve_block_calibration_records(
+            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+
+def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: Path):
+    """The calibration bundle's own persisted max_dets must equal the real cap applied to the
+    model during the band passes (density_cap, pooled across cal+test bands), not
+    resolve_operating_point's internal cal-only fallback. The uniform BOX_STEP layout alone makes
+    cal-only and pooled cal+test density agree by symmetry, so this inflates GT density inside the
+    reserved test region only, to force a genuine divergence between the two derivations."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+
+    label_path = exp["labels_dir"] / f"{exp['stem']}.json"
+    existing = json_io.read_annotations(str(label_path))
+    tx0, _ty0, tx1, _ty1 = manifest["test_region"][0]
+    dense = [Annotation(subject="catkin", geometry=BBox(x, 80, x + 15, 110))
+            for x in range(int(tx0) + 5, int(tx1) - 20, 2)]
+    json_io.write_annotations(str(label_path), existing + dense, WIDTH, HEIGHT, keep_empty=True)
+
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.operating_point import derive_max_dets_from_counts
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    density_cap = derive_max_dets_from_counts(
+        list(prov["cal_gt_counts"].values()) + list(prov["test_gt_counts"].values()))
+    cal_only_cap = derive_max_dets_from_counts(list(prov["cal_gt_counts"].values()))
+    # The dense test-side injection must actually produce a real divergence from the cal-only
+    # fallback (otherwise this proves nothing).
+    assert density_cap != cal_only_cap
+    assert bundle.get("max_dets")._raw == density_cap
+    assert bundle.get("max_dets")._raw != cal_only_cap
+
+
 def test_export_predictions_raster_block_calibration_admits_and_uncaps_max_dets(tmp_path: Path):
     """The real entry point: export_predictions(raster_path=..., trait=...) runs block
     calibration, ships a validated-or-honestly-stamped conf, and the persisted operating point's
@@ -226,6 +368,62 @@ def test_export_predictions_raster_block_calibration_admits_and_uncaps_max_dets(
     assert sidecar["claim_scope_validated"] == "same_mosaic_content_identity"
     assert sidecar["block_calibration"]["experiment_id"] == exp["experiment_id"]
     assert "spatial_manifest" not in sidecar["block_calibration"]
+
+
+def test_export_predictions_raster_applies_a_legitimate_zero_cross_tile_nms(
+    tmp_path: Path, monkeypatch,
+):
+    """A block-calibrated cross_tile_nms of exactly 0.0 is a real, legitimate value (never None by
+    construction, see resolve_operating_point), so the raster export pass must use it verbatim, not
+    silently fall back to global_nms_iou because 0.0 reads as falsy. Deriving a genuine 0.0 through
+    the real GT neighbor-IoU pipeline is not possible (derive_cross_tile_nms clamps to [0.2, 0.8]),
+    so this forces the block bundle's own cross_tile_nms param to 0.0 directly, the same shape
+    resolve_operating_point actually constructs it in (requires_validation=False)."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    import tcip_mcp.pipelines.block_calibration as block_calibration_module
+    from tcip_mcp.pipelines.resolution import ResolvedParam
+
+    real_resolve = block_calibration_module.resolve_block_calibration_records
+
+    def _zeroed_cross_tile_nms(*args, **kwargs):
+        bundle, prov = real_resolve(*args, **kwargs)
+        bundle.params["cross_tile_nms"] = ResolvedParam(
+            "cross_tile_nms", 0.0, source="derived", derived_from="test override: forced zero",
+            requires_validation=False)
+        return bundle, prov
+
+    monkeypatch.setattr(
+        block_calibration_module, "resolve_block_calibration_records", _zeroed_cross_tile_nms)
+
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    real_predict_tiled = GenericPredictor.predict_tiled
+    captured: dict = {}
+
+    def _capture_predict_tiled(self, source, **kwargs):
+        captured["global_nms_iou"] = kwargs.get("global_nms_iou")
+        return real_predict_tiled(self, source, **kwargs)
+
+    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_predict_tiled)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = tmp_path / "preds"
+    result = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    assert "error" not in result, result
+    # The last predict_tiled call is the raster export's own final full-mosaic pass (the band
+    # passes inside resolve_block_calibration_records all run first).
+    assert captured["global_nms_iou"] == 0.0
+    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    assert sidecar["operating_point"]["cross_tile_nms"]["value"] == 0.0
 
 
 def test_export_predictions_raster_claim_scope_refuses_cross_mosaic(tmp_path: Path):
