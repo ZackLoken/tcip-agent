@@ -78,7 +78,9 @@ export function rectsOverlap(a: PixelRect, b: PixelRect): boolean {
 
 /** Whether `inner` sits entirely inside `outer` (both half-open pixel rects). */
 export function rectFullyInside(inner: PixelRect, outer: PixelRect): boolean {
-  return inner.x0 >= outer.x0 && inner.y0 >= outer.y0 && inner.x1 <= outer.x1 && inner.y1 <= outer.y1;
+  return (
+    inner.x0 >= outer.x0 && inner.y0 >= outer.y0 && inner.x1 <= outer.x1 && inner.y1 <= outer.y1
+  );
 }
 
 export function cellsIntersecting(cells: GridCell[], rect: PixelRect): GridCell[] {
@@ -106,7 +108,8 @@ export function subdivideCell(cell: GridCell, divisions: number): PixelRect[] {
     const y1 = row === divisions - 1 ? cell.y1 : cell.y0 + Math.floor((h * (row + 1)) / divisions);
     for (let col = 0; col < divisions; col++) {
       const x0 = cell.x0 + Math.floor((w * col) / divisions);
-      const x1 = col === divisions - 1 ? cell.x1 : cell.x0 + Math.floor((w * (col + 1)) / divisions);
+      const x1 =
+        col === divisions - 1 ? cell.x1 : cell.x0 + Math.floor((w * (col + 1)) / divisions);
       subs.push({ x0, y0, x1, y1 });
     }
   }
