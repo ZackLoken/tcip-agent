@@ -195,6 +195,61 @@ def image_status_digest_path(dataset_root: str | Path) -> Path:
     return Path(dataset_root, ".tcip", "state", "image_status_digest.json")
 
 
+def region_completeness_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/.tcip/state/region_completeness.json``: per-subject attestations that
+    every instance of a subject has been found within a reference-grid region's cells.
+
+    Sibling of :func:`image_status_path`: an attestation is a fact about the dataset's content
+    (what a block-calibration split may treat as fully labeled), so it travels with the dataset
+    rather than living in whichever project's private ``.tcip/`` happens to be an ancestor.
+    Keyed by :func:`status_bucket` with the raster's own stem standing in for ``date`` (see
+    :func:`normalize_region_completeness_store`): unlike ``image_status.json``, a raster's
+    completeness is one record per bucket, not one per image name, since the stem already
+    identifies exactly one raster and a date directory can hold many.
+    """
+    return Path(dataset_root, ".tcip", "state", "region_completeness.json")
+
+
+def region_completeness_digest_path(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/.tcip/state/region_completeness_digest.json``: ``{bucket: {cell_name:
+    digest}}``.
+
+    Sibling of :func:`region_completeness_path`, stamped at attestation time with a content
+    digest of the subject's annotations found inside that cell (see
+    :mod:`tcip_mcp.pipelines.region_completeness`). Stamped per cell, not per bucket: a bucket
+    accumulates every cell a human has ever attested complete under one subject/raster, so a
+    bucket-wide stamp would be silently overwritten by the next cell's attestation, un-quarantining
+    an earlier cell's stale attestation nobody re-reviewed (the same reasoning
+    :func:`image_status_digest_path` states for its own per-image stamping). Lets a reader tell an
+    attestation whose cell content has since been edited or deleted from one still valid.
+    """
+    return Path(dataset_root, ".tcip", "state", "region_completeness_digest.json")
+
+
+def normalize_region_completeness_store(raw: object) -> dict[str, dict]:
+    """``{bucket: {grid, cells_complete, attested_by, attested_at, stem, date, subject}}``: a
+    shape guard, shared by every reader.
+
+    A bucket is ``status_bucket(subject, stem)``: the raster's own stem stands in for
+    ``image_status.json``'s ``date`` slot, since one raster's completeness is one record, not one
+    per image name (contrast :func:`normalize_status_store`, which nests by image name because a
+    date bucket can hold many images). An entry missing a dict ``grid`` or a ``cells_complete``
+    list of strings is not a completeness record and is dropped, so a malformed store yields no
+    attestations rather than a wrong one.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for key, value in raw.items():
+        if not isinstance(value, dict) or not isinstance(value.get("grid"), dict):
+            continue
+        cells = value.get("cells_complete")
+        if not isinstance(cells, list) or not all(isinstance(c, str) for c in cells):
+            continue
+        out[key] = value
+    return out
+
+
 def status_bucket(subject: str, date: Optional[str]) -> str:
     """The ``image_status.json`` key a confirmation belongs under.
 
