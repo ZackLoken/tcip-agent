@@ -1,22 +1,37 @@
 /**
  * Coverage minimap for a multi-cell raster: a small thumbnail of the whole image with per-cell
- * swept shading and the current viewport rectangle; clicking or dragging jumps the canvas to
- * the cell under the pointer. Collapsed to a pill by default so it never covers canvas content
- * unless opened; the pill sits bottom-right, completing the canvas' floating-chrome grammar
- * (legend bottom-left, attributes top-right).
+ * swept shading, region-completeness markers, in-view cell borders, and the current viewport
+ * rectangle; clicking or dragging jumps the canvas to the cell under the pointer, double-clicking
+ * toggles that cell's completeness for the active subject. Collapsed to a pill by default so it
+ * never covers canvas content unless opened; the pill sits bottom-right, completing the canvas'
+ * floating-chrome grammar (legend bottom-left, attributes top-right).
+ *
+ * Three simultaneously-visible, non-conflated per-cell facts, layered over each other: swept
+ * (viewed this session), in-view (on screen right now, live/transient), and complete (attested
+ * fully annotated for a subject, persisted).
  */
 
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import { useDisclosure } from "@/hooks/useDisclosure";
-import { indexCells, sweptFractionBlocks, type GridCell, type GridGeometry } from "@/lib/coverage";
+import {
+  cellsIntersecting,
+  indexCells,
+  sweptFractionBlocks,
+  type GridCell,
+  type GridGeometry,
+} from "@/lib/coverage";
 import type { PixelRect } from "@/lib/viewGeometry";
 
 // Swept shading uses the app accent (tcip-accent #507754) so covered work reads as the brand
 // green; the viewport rectangle uses the foreground paper tone (tcip-fg #E7E5DC).
 const SWEPT_RGB = "80, 119, 84";
 const VIEWPORT_STROKE = "#E7E5DC";
+// Complete markers use tcip-warn (#E6976B): distinct from the swept green and viewport tone.
+const COMPLETE_RGB = "230, 151, 107";
+// In-view borders use tcip-focus (#FFD700): "what's in frame right now" is a focus concept.
+const IN_VIEW_STROKE = "#FFD700";
 
 export function CoverageMinimap(props: {
   imagePath: string;
@@ -29,6 +44,11 @@ export function CoverageMinimap(props: {
   /** The visible image region in image coords, or null when unknown. */
   viewport: PixelRect | null;
   onJump: (cell: GridCell) => void;
+  /** Cells attested complete for the active subject (stale attestations already excluded). */
+  activeComplete: ReadonlySet<string>;
+  /** Cells attested complete for some other subject (stale attestations already excluded). */
+  otherComplete: ReadonlySet<string>;
+  onToggleComplete: (cell: GridCell) => void;
 }) {
   // Closed by default: the map must not cover canvas content unless asked for.
   const { open, toggle } = useDisclosure("tcip.annotate.minimapOpen");
@@ -98,6 +118,46 @@ export function CoverageMinimap(props: {
       }
     }
 
+    // Complete markers and in-view borders are per-cell facts; below the visibility floor
+    // (k > 1) there is no single cell rect left to draw either onto, so both are skipped there.
+    if (k === 1) {
+      for (const cell of props.cells) {
+        const isActive = props.activeComplete.has(cell.name);
+        const isOther = !isActive && props.otherComplete.has(cell.name);
+        if (!isActive && !isOther) continue;
+        const cx0 = cell.x0 * sx;
+        const cy0 = cell.y0 * sy;
+        const cw = (cell.x1 - cell.x0) * sx;
+        const ch = (cell.y1 - cell.y0) * sy;
+        ctx.strokeStyle = `rgba(${COMPLETE_RGB}, ${isActive ? 0.95 : 0.35})`;
+        ctx.lineWidth = Math.max(1, dpr * (isActive ? 1.5 : 1));
+        ctx.strokeRect(cx0 + 1, cy0 + 1, Math.max(0, cw - 2), Math.max(0, ch - 2));
+        if (isActive) {
+          const ccx = cx0 + cw / 2;
+          const ccy = cy0 + ch / 2;
+          const r = Math.min(cw, ch) * 0.28;
+          ctx.beginPath();
+          ctx.moveTo(ccx - r * 0.5, ccy);
+          ctx.lineTo(ccx - r * 0.15, ccy + r * 0.4);
+          ctx.lineTo(ccx + r * 0.5, ccy - r * 0.45);
+          ctx.stroke();
+        }
+      }
+
+      if (props.viewport) {
+        ctx.strokeStyle = IN_VIEW_STROKE;
+        ctx.lineWidth = Math.max(1, dpr);
+        for (const cell of cellsIntersecting(props.cells, props.viewport)) {
+          ctx.strokeRect(
+            cell.x0 * sx,
+            cell.y0 * sy,
+            (cell.x1 - cell.x0) * sx,
+            (cell.y1 - cell.y0) * sy,
+          );
+        }
+      }
+    }
+
     if (props.viewport) {
       ctx.strokeStyle = VIEWPORT_STROKE;
       ctx.lineWidth = dpr;
@@ -119,17 +179,28 @@ export function CoverageMinimap(props: {
     props.sweptVersion,
     props.viewport,
     props.grid,
+    props.activeComplete,
+    props.otherComplete,
   ]);
 
-  const jumpAt = (e: React.PointerEvent) => {
+  const cellAtClient = (clientX: number, clientY: number): GridCell | null => {
     const el = boxRef.current;
-    if (!el) return;
+    if (!el) return null;
     const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return;
-    const x = ((e.clientX - r.left) / r.width) * props.grid.width;
-    const y = ((e.clientY - r.top) / r.height) * props.grid.height;
-    const cell = props.cells.find((c) => x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1);
+    if (r.width <= 0 || r.height <= 0) return null;
+    const x = ((clientX - r.left) / r.width) * props.grid.width;
+    const y = ((clientY - r.top) / r.height) * props.grid.height;
+    return props.cells.find((c) => x >= c.x0 && x < c.x1 && y >= c.y0 && y < c.y1) ?? null;
+  };
+
+  const jumpAt = (e: React.PointerEvent) => {
+    const cell = cellAtClient(e.clientX, e.clientY);
     if (cell) props.onJump(cell);
+  };
+
+  const toggleCompleteAt = (e: React.MouseEvent) => {
+    const cell = cellAtClient(e.clientX, e.clientY);
+    if (cell) props.onToggleComplete(cell);
   };
 
   return (
@@ -153,6 +224,7 @@ export function CoverageMinimap(props: {
           <div
             ref={boxRef}
             className="relative cursor-pointer select-none"
+            title="Click or drag to jump; double-click to toggle a cell complete"
             onPointerDown={(e) => {
               draggingRef.current = true;
               e.currentTarget.setPointerCapture(e.pointerId);
@@ -164,6 +236,7 @@ export function CoverageMinimap(props: {
             onPointerUp={() => {
               draggingRef.current = false;
             }}
+            onDoubleClick={toggleCompleteAt}
           >
             {cssWidth > 0 && (
               <img
