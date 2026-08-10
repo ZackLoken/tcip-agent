@@ -77,6 +77,48 @@ def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     assert "unicorn_horn_length" in res.stdout
 
 
+def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
+    """An attested cell whose annotation content has since changed is exactly the data-state
+    inconsistency doctor.py exists to catch (region_completeness.json vs the label file it
+    describes); confirm the ritual surfaces it, not just the route's own read path."""
+    from tcip_mcp.dataset_layout import status_bucket
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
+
+    root = tmp_path / "stale_proj"
+    (root / "images" / "2026-02-11").mkdir(parents=True)
+    ann_dir = root / "annotations" / "2026-02-11"
+    ann_dir.mkdir(parents=True)
+    state_dir = root / ".tcip" / "state"
+    state_dir.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    Image.new("RGB", (32, 32)).save(root / "images" / "2026-02-11" / "IMG_A.JPG")
+    ann_path = ann_dir / "IMG_A.json"
+    json_io.write_annotations(
+        ann_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+
+    grid = {"width": 32, "height": 32, "tile_size": 16, "overlap": 0.0, "cols": 2, "rows": 2}
+    cell = next(c for c in reference_cells(32, 32, 16, clamp=True) if c.name == "A1")
+    stamped = cell_annotation_digest(json_io.read_annotations(str(ann_path)), "catkin", cell)
+
+    bucket = status_bucket("catkin", "IMG_A")
+    (state_dir / "region_completeness.json").write_text(json.dumps({
+        bucket: {"grid": grid, "cells_complete": ["A1"], "attested_by": "user:zack",
+                "attested_at": "t", "stem": "IMG_A", "date": "2026-02-11", "subject": "catkin"},
+    }))
+    (state_dir / "region_completeness_digest.json").write_text(
+        json.dumps({bucket: {"A1": stamped}}))
+
+    # The label is edited after attestation: a real staleness scenario, not a fabricated one.
+    json_io.write_annotations(
+        ann_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 20, 20))], 32, 32)
+
+    res = _run(root)
+    assert res.returncode == 2
+    assert "region completeness" in res.stdout
+    assert "catkin" in res.stdout and "A1" in res.stdout
+
+
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     """A bespoke run's source snapshot that failed to capture a declared file is
     self-describing (``missing``/``snapshot_errors``); doctor.py surfaces it rather than the
