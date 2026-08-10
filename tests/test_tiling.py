@@ -6,6 +6,7 @@ absent (they go through ``build_dataset``).
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -28,17 +29,17 @@ def test_tile_positions_pad_and_stride():
 def test_clip_boxes_to_tile_sliver_drop_and_remap():
     # min_box_size=12: a clipped box counts unless its visible part is a sliver (< 12px char-size).
     # Fully-inside box -> always kept, remapped to tile-local (minus origin 200,200).
-    tb, tl = tiling.clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 12.0)
+    tb, tl = tiling.clip_boxes_to_tile(np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert tb.shape == (1, 4)
     assert np.allclose(tb[0], [10, 10, 30, 30])
     # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> kept.
-    tb2, _ = tiling.clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 12.0)
+    tb2, _ = tiling.clip_boxes_to_tile(np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb2) == 1
     # Straddling box whose visible part is a sliver (clipped to 9x9, char 9 < 12) -> dropped.
-    tb3, _ = tiling.clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 12.0)
+    tb3, _ = tiling.clip_boxes_to_tile(np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb3) == 0
     # Non-overlapping box -> no output.
-    tb4, _ = tiling.clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 12.0)
+    tb4, _ = tiling.clip_boxes_to_tile(np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 64, 12.0)
     assert len(tb4) == 0
 
 
@@ -69,6 +70,33 @@ def test_reconstruct_core_dedup_seam():
     assert len(b) == 1
     assert np.allclose(b[0], [50, 20, 60, 40])
     assert s[0] == pytest.approx(0.9) and ll[0] == 1
+
+
+def test_region_halo_expands_by_ceil_margin_and_clips_to_mosaic():
+    haloed, inner = tiling.region_halo((100, 100, 300, 300), 1000, 800, 224, 0.2)
+    assert inner == (100, 100, 300, 300)
+    assert haloed == (77, 77, 323, 323)  # halo=ceil((224-179)/2)=23 on every side
+
+
+def test_region_halo_clips_to_mosaic_bounds_at_an_edge():
+    haloed, inner = tiling.region_halo((0, 0, 200, 50), 1000, 60, 224, 0.2)
+    assert inner == (0, 0, 200, 50)
+    assert haloed == (0, 0, 223, 60)  # y1 clips at the mosaic's own height (60), not 50+23=73
+
+
+def test_region_halo_is_bounded_by_half_the_tile_for_every_overlap():
+    """halo <= tile_size/2 for every overlap in [0, 1) (equality only at stride=1, even
+    tile_size): well inside a spatial_strip_split buffer (>= tile_size), the invariant that
+    guarantees a haloed region never reaches into a genuinely different split's tiles."""
+    for tile_size in (64, 100, 224, 512):
+        for overlap in (0.0, 0.1, 0.2, 0.5, 0.75, 0.99):
+            stride = tiling.compute_stride(tile_size, overlap)
+            halo = math.ceil((tile_size - stride) / 2.0)
+            assert halo <= tile_size / 2.0
+            haloed, inner = tiling.region_halo(
+                (0, 0, tile_size, tile_size), tile_size * 4, tile_size * 4, tile_size, overlap)
+            assert inner == (0, 0, tile_size, tile_size)
+            assert haloed == (0, 0, tile_size + halo, tile_size + halo)
 
 
 def test_global_nms_collapses_duplicates():
