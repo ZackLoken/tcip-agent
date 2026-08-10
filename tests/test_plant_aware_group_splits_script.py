@@ -147,6 +147,24 @@ def test_refuses_naming_the_stem_when_the_raster_has_no_georeferencing(
         derive_plant_group_key_map({"plain": plain}, _plants(two_plant_csv))
 
 
+def test_a_malformed_tiff_is_named_and_does_not_kill_the_whole_batch(
+    tmp_path: Path, two_plant_csv: Path,
+) -> None:
+    """``_raster_pixel_extent`` reads through ``tifffile.TiffFile``, which raises
+    ``tifffile.TiffFileError`` (not an ``OSError`` subclass) on a non-TIFF/malformed file. Mixing
+    one good stem with one malformed one proves the malformed stem is named specifically in the
+    refusal, matching the function's own "name every failing stem" promise, rather than an
+    uncaught TiffFileError killing the whole batch (including the good stem)."""
+    good = tmp_path / "good.tif"
+    _write_geotiff(good, *P1_TIEPOINT)
+    malformed = tmp_path / "malformed.tif"
+    malformed.write_bytes(b"not a real tiff")
+
+    with pytest.raises(ValueError, match="malformed"):
+        derive_plant_group_key_map(
+            {"good": good, "malformed": malformed}, _plants(two_plant_csv))
+
+
 def test_refuses_on_empty_plant_list(tmp_path: Path) -> None:
     r1 = tmp_path / "r1.tif"
     _write_geotiff(r1, *P1_TIEPOINT)
