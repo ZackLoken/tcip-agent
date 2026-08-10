@@ -13,7 +13,14 @@
  * derives a single trivially-covered cell and gets no tracking).
  */
 
-import { rectFullyInside, rectsOverlap, sameGrid, subdivideCell, type GridCell, type GridGeometry } from "@/lib/coverage";
+import {
+  rectFullyInside,
+  rectsOverlap,
+  sameGrid,
+  subdivideCell,
+  type GridCell,
+  type GridGeometry,
+} from "@/lib/coverage";
 import type { PixelRect } from "@/lib/viewGeometry";
 
 /**
