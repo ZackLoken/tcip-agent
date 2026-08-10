@@ -258,6 +258,24 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     assert manifest["kept_test_tiles"] > 0
 
 
+def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
+    """train_region/val_region are persisted the same way test_region already is: real rects, not
+    just per-region tile identities, so a later geometric disjointness check has real geometry
+    for every side, not only the reserved test area."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    _auto_train_val("detection", data_cfg, None)
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["train_region"] and manifest["val_region"] and manifest["test_region"]
+    for region in (manifest["train_region"], manifest["val_region"], manifest["test_region"]):
+        for rect in region:
+            assert len(rect) == 4
+
+
 def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions_in_tiling(
     tmp_path: Path,
 ):
@@ -321,6 +339,136 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
     train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # the explicit map still collapses everything into one group
     assert data_cfg["split"]["resolved_group_by"] == "explicit_map"
+
+
+# reserve_calibration_fraction: the four-way split (train/val/test/calibration).
+
+def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
+    """Fail-before/no-op: with reserve_calibration_fraction absent, the spatial_manifest carries
+    no calibration_region and the rest of the manifest is exactly what the 3-way split has always
+    produced (same keys, same train/val/test regions for the same seed/layout)."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["calibration_region"] == []
+    assert manifest["kept_calibration_tiles"] == 0
+    assert manifest["train_region"] and manifest["val_region"] and manifest["test_region"]
+
+
+def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_path: Path):
+    """Admits valid work: an explicitly reserved calibration region is real, non-empty geometry,
+    disjoint from train/val/test."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
+                  "reserve_calibration_fraction": 0.15},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    manifest = data_cfg["split"]["spatial_manifest"]
+    assert manifest["calibration_region"]
+    assert manifest["kept_calibration_tiles"] > 0
+
+    def _rects(region):
+        return [tuple(r) for r in region]
+
+    from tcip_mcp.pipelines.data.tiling import rects_overlap
+
+    cal_rects = _rects(manifest["calibration_region"])
+    for other_key in ("train_region", "val_region", "test_region"):
+        for other in _rects(manifest[other_key]):
+            for cr in cal_rects:
+                assert not rects_overlap(cr, other)
+
+
+def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Path):
+    """Reason 1: no width/height in the label file. Explicitly requested -> raises by name,
+    rather than the unrequested case's silent (train_ds, None) degradation."""
+    from tcip_mcp.tools.training_tools import _spatial_single_source_split
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    _save_png(images_dir / "mosaic.png")
+    (labels_dir / "mosaic.json").write_text("[]", encoding="utf-8")  # no width/height recorded
+
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin"}
+    tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
+    split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1, "reserve_calibration_fraction": 0.15}
+    with pytest.raises(ValueError, match="reserve_calibration_fraction"):
+        _spatial_single_source_split("mosaic", data_cfg, tiling, object(), split_cfg, None)
+
+
+def test_reserve_calibration_fraction_raises_on_infeasible_layout(tmp_path: Path):
+    """Reason 2: spatial_strip_split itself cannot lay out 4 non-empty regions at this mosaic
+    size/tile size. Explicitly requested -> raises by name."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        # A calibration fraction that leaves nothing after val+test on a mosaic this size.
+        "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
+                  "reserve_calibration_fraction": 0.3},
+    }
+    with pytest.raises(ValueError, match="reserve_calibration_fraction"):
+        _auto_train_val("detection", data_cfg, None)
+
+
+def test_reserve_calibration_fraction_raises_on_empty_gt_bearing_side(tmp_path: Path):
+    """Reason 3: the strip layout itself is feasible (every side gets kept tiles), but with
+    tiling.skip_empty set, a reserved side's tiles carrying no GT filter down to zero real
+    samples. At this exact width/tile_size/fractions/seed, spatial_strip_split places train at x
+    in [1275, 3175] and val at [3264, 3991] (verified directly against spatial_strip_split for
+    this test's own params); GT is placed only inside those two ranges, leaving test ([0, 421])
+    and calibration ([510, 1186]) both real, tiled, and entirely GT-free."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stem = "mosaic"
+    width, height = 4000, 300
+    from torchvision.utils import save_image
+    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
+    boxes = [Annotation(subject="catkin", geometry=BBox(x, 20, x + 20, 40))
+            for x in range(1300, 3960, 40)]
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
+
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2, "skip_empty": True},
+        "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
+                  "reserve_calibration_fraction": 0.2},
+    }
+    with pytest.raises(ValueError, match="reserve_calibration_fraction"):
+        _auto_train_val("detection", data_cfg, None)
+
+
+def test_reserve_calibration_fraction_records_raster_content_identity(tmp_path: Path):
+    """Mechanism 2's training-time recording: a real, decodable single-source raster gets a
+    raster_content_identity in the same spatial_manifest a claim-scope check later reads back."""
+    images_dir, labels_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
+    }
+    _auto_train_val("detection", data_cfg, None)
+    manifest = data_cfg["split"]["spatial_manifest"]
+    identity = manifest["raster_content_identity"]
+    assert identity is not None
+    assert identity["width"] == 4000 and identity["height"] == 3000
+    assert identity["pixel_checksum"]
 
 
 def test_train_emits_val_loss_with_autoval(tmp_path: Path):
