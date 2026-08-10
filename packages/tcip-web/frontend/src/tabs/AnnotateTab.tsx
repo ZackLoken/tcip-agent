@@ -15,6 +15,7 @@ import { useImageBands } from "@/hooks/useImageBands";
 import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
+import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import { useRegionServes } from "@/hooks/useRegionServes";
 import {
   compositeParams,
@@ -417,6 +418,11 @@ export function AnnotateTab() {
     baseFacts,
     composite,
     onCellServedAtNative: coverage.noteServedAtNative,
+  });
+  const completeness = useRegionCompleteness({
+    imagePath: imgPath,
+    datasetRoot: dataset.dataset_root,
+    subject: dataset.subject,
   });
   const coverageMultiCell = coverageGrid.cells.length > 1;
 
@@ -1652,6 +1658,11 @@ export function AnnotateTab() {
               return vp ? { x0: vp.x, y0: vp.y, x1: vp.x + vp.w, y1: vp.y + vp.h } : null;
             })()}
             onJump={jumpToCell}
+            activeComplete={completeness.activeComplete}
+            otherComplete={completeness.otherComplete}
+            onToggleComplete={(cell) => {
+              if (coverageGrid.grid) completeness.toggle(cell.name, coverageGrid.grid);
+            }}
           />
         )}
       </div>
