@@ -26,10 +26,19 @@ import type { PixelRect } from "@/lib/viewGeometry";
 /**
  * Sub-cell grain for the union-of-visibility sweep predicate (see `subdivideCell`): a cell
  * sweeps once every one of its DIVISIONS x DIVISIONS sub-rects has, at some point, been fully on
- * screen at or above the working-scale bar. Provisional: elicited directly from Zack (2026-08-10)
- * as a starting guess, not yet checked against a real GUI annotation session at working zoom --
- * the same "ship a plain, documented, revisit-later default" idiom as
- * reference_grid.derive_large_raster_grid_tile_size's own divisions=16.
+ * screen at or above the working-scale bar. Provisional, a starting guess pending a real GUI
+ * annotation session to check the grain against -- the same "ship a plain, documented,
+ * revisit-later default" idiom as reference_grid.derive_large_raster_grid_tile_size's own
+ * divisions=16.
+ *
+ * A fixed fraction of the cell scales with the cell, not with the viewport, so this does not
+ * uniformly fix the predicate it replaces. On the ordinary display-derived lattice (cells capped
+ * at display_bounds.DISPLAY_MAX_EDGE=4096px) a sub-cell is at most 128px, comfortably containable
+ * at real annotation zoom. On the large-raster lattice (derive_large_raster_grid_tile_size, cells
+ * long_edge/16 -- roughly 15000px at real ValleyFarm scale) a sub-cell is still roughly 469px,
+ * which only fits inside a working viewport below about 1.9x zoom; an annotator working closer
+ * than that on a large-raster project would still hit the unsatisfiable-predicate failure this
+ * change exists to close, just moved rather than removed. Known, unresolved as of this writing.
  */
 const SUB_CELL_DIVISIONS = 32;
 
