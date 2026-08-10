@@ -57,12 +57,23 @@ def _annotation_record(a: Annotation) -> dict:
     return {"subject": a.subject, "geometry": geom, "attributes": dict(sorted(a.attributes.items()))}
 
 
+def _digest_of_records(records: list[dict]) -> str:
+    """Canonical-json + sha256[:16] recipe ``class_registry.attribute_schema_digest`` also uses,
+    shared by :func:`cell_annotation_digest` and :func:`cell_annotation_digests` so the two never
+    drift into computing "the same" digest two different ways."""
+    ordered = sorted(records, key=lambda r: json.dumps(r, sort_keys=True))
+    canonical = json.dumps(ordered, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
 def cell_annotation_digest(annotations: list[Annotation], subject: str, cell: Cell) -> str:
     """Content digest of ``subject``'s annotations centered inside ``cell``.
 
-    Deterministic in the annotation content alone (subject, geometry, attribute values): the same
-    canonical-json + sha256[:16] recipe ``class_registry.attribute_schema_digest`` uses. An empty
-    cell still gets a real, stable digest, of an empty list.
+    Deterministic in the annotation content alone (subject, geometry, attribute values). An empty
+    cell still gets a real, stable digest, of an empty list. Rescans ``annotations`` in full;
+    a caller checking many cells at once (:func:`stale_cells`) should use
+    :func:`cell_annotation_digests` instead, one pass over ``annotations`` for every cell rather
+    than one pass per cell.
     """
     records = []
     for a in annotations:
@@ -72,9 +83,40 @@ def cell_annotation_digest(annotations: list[Annotation], subject: str, cell: Ce
         if center is None or not _in_cell(center, cell):
             continue
         records.append(_annotation_record(a))
-    records.sort(key=lambda r: json.dumps(r, sort_keys=True))
-    canonical = json.dumps(records, separators=(",", ":"), sort_keys=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return _digest_of_records(records)
+
+
+def cell_annotation_digests(
+    annotations: list[Annotation], subject: str, cells: list[Cell], tile_size: int,
+    overlap: float = 0.0,
+) -> dict[str, str]:
+    """:func:`cell_annotation_digest` for every cell in ``cells`` at once, one pass over
+    ``annotations`` rather than one pass per cell -- O(annotations + cells) instead of
+    O(annotations x cells), the real cost at real orthomosaic scale (thousands of annotations,
+    up to hundreds of reserved-region cells).
+
+    Requires ``overlap == 0.0`` (every real region-completeness/coverage grid caller constructs
+    one) to bin by direct ``tile_size`` floor-division of each annotation's center, the same
+    origin math :func:`~tcip_mcp.pipelines.reference_grid.reference_cells` itself uses -- a
+    non-zero overlap would put some points in more than one cell, which floor-division alone
+    cannot resolve, so that case falls back to :func:`cell_annotation_digest` per cell instead of
+    silently computing a wrong digest.
+    """
+    if overlap != 0.0:
+        return {c.name: cell_annotation_digest(annotations, subject, c) for c in cells}
+    by_colrow = {(c.col, c.row): c.name for c in cells}
+    buckets: dict[str, list[dict]] = {c.name: [] for c in cells}
+    for a in annotations:
+        if a.subject != subject:
+            continue
+        center = _annotation_center(a)
+        if center is None:
+            continue
+        x, y = center
+        name = by_colrow.get((int(x // tile_size), int(y // tile_size)))
+        if name is not None:
+            buckets[name].append(_annotation_record(a))
+    return {name: _digest_of_records(records) for name, records in buckets.items()}
 
 
 def stale_cells(
@@ -87,8 +129,9 @@ def stale_cells(
     the digest stamped at attestation time: a cell edited or deleted since it was attested.
 
     Reads the label file the record's own ``stem``/``date`` resolve to
-    (``dataset_layout.annotation_path``) fresh, recomputes each attested cell's digest via
-    :func:`cell_annotation_digest`, and compares. A cell with no stamp at all (an attestation made
+    (``dataset_layout.annotation_path``) fresh, recomputes every attested cell's digest in one
+    pass via :func:`cell_annotation_digests`, and compares. A cell with no stamp at all (an
+    attestation made
     before the digest sidecar existed, or the sidecar itself lost) is reported stale: this gate has
     no escape hatch by design, and there is no legitimate no-digest case to preserve (no real
     attestation predates the digest sidecar, since the platform carries no user data yet). A cell
@@ -118,13 +161,17 @@ def stale_cells(
     label_path = annotation_path(dataset_root, record.get("date"), stem)
     annotations = read_annotations(str(label_path)) if label_path.is_file() else []
 
+    complete_cells = [cells_by_name[name] for name in cells_complete if name in cells_by_name]
+    digests = cell_annotation_digests(
+        annotations, subject, complete_cells, int(grid["tile_size"]),
+        float(grid.get("overlap", 0.0)))
+
     stale: list[str] = []
     for name in cells_complete:
-        cell = cells_by_name.get(name)
-        if cell is None:
+        if name not in cells_by_name:
             continue
         stamped = stamped_digests.get(name)
-        if stamped is None or cell_annotation_digest(annotations, subject, cell) != stamped:
+        if stamped is None or digests.get(name) != stamped:
             stale.append(name)
     return stale
 
