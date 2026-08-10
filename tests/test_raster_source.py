@@ -670,6 +670,37 @@ def test_region_view_construction_refuses_a_rect_outside_the_parents_own_bounds(
             _RegionView(parent, Rect(0, 0, 31, 20))  # x1=31 > parent.width=30
 
 
+def test_region_view_forwards_the_parents_band_interpretations(tmp_path: Path) -> None:
+    """A haloed calibration/holdout block reads through this view, never the parent directly;
+    the alpha-vs-spectral-band decision (image_utils.to_pil_if_faithful) must resolve the same
+    way there as it does for a whole-mosaic export of the same file, so the fact has to survive
+    the wrap."""
+    from tcip_mcp.pipelines.raster_source import _RegionView
+
+    rgba_path = tmp_path / "rgba.tif"
+    _write_striped_tiff(rgba_path, _distinctive_array(40, 30, channels=4), rowsperstrip=4)
+    with open_raster(rgba_path, 4) as parent:
+        view = _RegionView(parent, Rect(5, 5, 25, 20))
+        assert view.band_interpretations == parent.band_interpretations == (
+            "red", "green", "blue", "alpha",
+        )
+
+
+def test_region_view_reports_no_band_interpretations_for_a_parent_that_carries_none(
+    tmp_path: Path,
+) -> None:
+    """A .npy-backed parent carries no color-interpretation metadata at all; the view must not
+    fabricate one, same as raster_content_identity's own getattr convention."""
+    from tcip_mcp.pipelines.raster_source import _RegionView
+
+    path = tmp_path / "bands.npy"
+    np.save(str(path), _distinctive_array(40, 30, channels=3))
+    with open_raster(path, 3) as parent:
+        assert not hasattr(parent, "band_interpretations")
+        view = _RegionView(parent, Rect(5, 5, 25, 20))
+        assert view.band_interpretations is None
+
+
 # ── raster_content_identity: one raster file's own content identity ─────────────────────────
 
 
