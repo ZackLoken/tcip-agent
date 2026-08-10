@@ -185,6 +185,12 @@ def resolve_block_calibration_records(
     whole premise is one specific checkpoint validated against one specific mosaic's own reserved
     regions, so an unresolvable experiment_id means there is no mosaic to validate against at all,
     not a foreign-but-harmless case to skip past.
+
+    The block scale (:func:`~tcip_mcp.pipelines.derivations.derive_block_scale_px`) prefers a
+    real planting-grid pitch over the GT-object-spacing fallback when the training experiment's
+    own ``config.json`` (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves
+    at least two georeferenced plants and the training raster carries a real geotransform; a
+    ``BandGroupRef`` source (no single file to read tags from) always falls back to GT-spacing.
     """
     from tcip_mcp.experiments import experiments_dir
     from tcip_mcp.utils.atomic_io import read_json
@@ -304,9 +310,24 @@ def resolve_block_calibration_records(
         [x1, y1, x2 - x1, y2 - y1]
         for (x1, y1, x2, y2) in gt_boxes_arr[reserved_mask].tolist()
     ]
+    training_source = resolve_image_source(images_dir, stem)
+
+    plants = None
+    plant_csv_paths = data_cfg.get("plant_csv_paths")
+    if plant_csv_paths:
+        from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
+
+        plants = read_plant_csvs([Path(p) for p in plant_csv_paths]) or None
+
+    from tcip_mcp.pipelines.raster_source import BandGroupRef
+
+    raster_path_for_scale = (
+        training_source if not isinstance(training_source, BandGroupRef) else None)
+
     try:
         buffer_px, scale_source = derive_block_scale_px(
-            tile_size=tile_size, gt_boxes_per_image=[reserved_boxes_xywh])
+            tile_size=tile_size, gt_boxes_per_image=[reserved_boxes_xywh],
+            plants=plants, raster_path=raster_path_for_scale)
     except ValueError as exc:
         raise BlockCalibrationRefused(
             f"block calibration refused: no block scale is derivable for the reserved "
@@ -354,8 +375,6 @@ def resolve_block_calibration_records(
     predictor.max_dets = density_cap
 
     from tcip_mcp.pipelines.raster_source import open_raster
-
-    training_source = resolve_image_source(images_dir, stem)
 
     with open_raster(training_source, predictor.in_chans) as reader:
         if (reader.width, reader.height) != (mosaic_w, mosaic_h):
