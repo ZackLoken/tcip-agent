@@ -11,6 +11,7 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
     dataset_hash,
+    default,
     derived,
     validate_resolved_bundle,
 )
@@ -257,6 +258,17 @@ def test_raw_operating_point_untiled_never_gates_tile_size():
     assert untiled.get("tile_size").requires_validation is False
 
 
+def test_raw_operating_point_max_dets_none_is_a_real_uncapped_value():
+    # A deliberate value (uncapped), not an unset caller: the block-calibration export path
+    # commits to it on purpose, never coerced into DEFAULT_MAX_DETS or refused for being falsy.
+    from tcip_mcp.pipelines.resolution import raw_operating_point
+
+    b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=64, max_dets=None)
+    md = b.get("max_dets")
+    assert md._raw is None
+    assert md.requires_validation is False  # never gates a delivery on its own
+
+
 # --- bundle shippability + provenance ---
 
 def test_bundle_shippable_only_when_all_calibration_validated():
@@ -330,6 +342,17 @@ def test_validate_eval_vs_inference_operating_point_mismatch():
     issues = validate_resolved_bundle(ev, inference_bundle=inf)
     assert any("operating point" in s for s in issues)
     assert validate_resolved_bundle(bundle(0.4), inference_bundle=bundle(0.4)) == []
+
+
+def test_validate_max_dets_divergence_is_a_named_exemption_not_a_silent_gap():
+    # A block bundle's max_dets and its export bundle's max_dets diverge by design (see this
+    # function's own docstring); a caller comparing exactly those two must exclude "max_dets".
+    block = ResolvedBundle("catkin", "h1", {"max_dets": derived("max_dets", 42, derived_from="p99")})
+    export = ResolvedBundle("catkin", "h1", {
+        "max_dets": default("max_dets", None, derived_from="block calibration: uncapped"),
+    })
+    issues = validate_resolved_bundle(block, inference_bundle=export)
+    assert any(i.startswith("max_dets:") for i in issues)
 
 
 def test_validate_export_refuses_unvalidated():
