@@ -205,13 +205,23 @@ def crop_pad_tile(img, x: int, y: int, tile_size: int, w: int, h: int):
     return pad_tile(crop, tile_size)
 
 
-def to_pil_if_faithful(arr):
-    """An ``[H, W, C]`` uint8 ndarray with 1, 3, or 4 channels as a PIL image (mode L, RGB,
-    RGBA; a single channel is squeezed); anything else is returned unchanged.
+def to_pil_if_faithful(arr, *, band_interpretations: "tuple[str, ...] | None" = None):
+    """An ``[H, W, C]`` uint8 ndarray with 1 or 3 channels as a PIL image (mode L or RGB, a
+    single channel squeezed); a 4-channel array only when ``band_interpretations`` names its
+    4th band ``"alpha"``; anything else is returned unchanged.
 
     The one conversion the loaders share, so uint8 pixels reach the PIL-only augmentation chain
     whatever container they decoded from, while dtypes and band counts PIL has no faithful mode
-    for stay ndarray.
+    for stay ndarray. RGBA is a faithful *pixel* round-trip for any 4-channel uint8 array, but
+    PIL's augmentation chain (brightness/contrast/saturation) treats an alpha channel differently
+    than a color one, silently leaving it unperturbed -- correct when the 4th channel really is
+    transparency, wrong when it is a genuine spectral band (RGB+NIR) that should be treated like
+    any other channel. ``band_interpretations`` is the caller's own source's GDAL color
+    interpretations (``getattr(src, "band_interpretations", None)``, the convention
+    ``raster_source`` already uses elsewhere), the only backend-carried fact that distinguishes
+    the two; with no such signal (an ``.npy``/``.npz`` stack, a band group, or a GDAL file whose
+    4th band is untagged) a 4-channel array is never guessed into RGBA, and stays ndarray on the
+    unaugmented path uint16/5-band inputs already take.
     """
     if not isinstance(arr, np.ndarray):
         return arr
@@ -219,7 +229,12 @@ def to_pil_if_faithful(arr):
         return arr
     if arr.shape[2] == 1:
         return Image.fromarray(arr[:, :, 0], mode="L")
-    return Image.fromarray(arr, mode="RGB" if arr.shape[2] == 3 else "RGBA")
+    if arr.shape[2] == 3:
+        return Image.fromarray(arr, mode="RGB")
+    if band_interpretations is not None and len(band_interpretations) == 4 \
+            and band_interpretations[3] == "alpha":
+        return Image.fromarray(arr, mode="RGBA")
+    return arr
 
 
 def pil_to_tensor(img) -> torch.Tensor:
@@ -244,9 +259,10 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int = 3):
 
     Returns a ``PIL.Image`` wherever PIL has a faithful mode for the decoded pixels: photographic
     formats at 1/3/4 channels, and any array container (``.npy`` / ``.npz`` / GeoTIFF / a
-    :class:`BandGroupRef`) whose pixels come back uint8 with 1, 3, or 4 channels
-    (:func:`to_pil_if_faithful`), so the PIL-only augmentation chain applies to those regardless
-    of container. Everything else (uint16/float rasters, other band counts) stays an
+    :class:`BandGroupRef`) whose pixels come back uint8 with 1 or 3 channels, or 4 channels whose
+    4th band the source itself declares alpha (:func:`to_pil_if_faithful`), so the PIL-only
+    augmentation chain applies to those regardless of container. Everything else (uint16/float
+    rasters, other band counts, an undeclared or genuinely spectral 4th band) stays an
     ``[H, W, C]`` ndarray. An RGB file requested as 1 channel is converted to grayscale; as 3,
     kept RGB.
 
@@ -257,7 +273,8 @@ def load_image(path: "str | Path | BandGroupRef", num_channels: int = 3):
     with raster_source.open_raster(path, num_channels) as src:
         if isinstance(src, raster_source.PhotographicSource):
             return src.image
-        return to_pil_if_faithful(src.read_region(Rect(0, 0, src.width, src.height))[0])
+        pixels = src.read_region(Rect(0, 0, src.width, src.height))[0]
+        return to_pil_if_faithful(pixels, band_interpretations=getattr(src, "band_interpretations", None))
 
 
 def load_multiband(path: "str | Path | BandGroupRef", num_channels: int) -> np.ndarray:
