@@ -89,9 +89,11 @@ def stale_cells(
     Reads the label file the record's own ``stem``/``date`` resolve to
     (``dataset_layout.annotation_path``) fresh, recomputes each attested cell's digest via
     :func:`cell_annotation_digest`, and compares. A cell with no stamp at all (an attestation made
-    before the digest sidecar existed, or the sidecar itself lost) is not reported stale: a rail
-    must admit valid work, not only reject it, and treating "never stamped" as "provably wrong"
-    would quarantine every pre-existing attestation on sight rather than the ones actually edited.
+    before the digest sidecar existed, or the sidecar itself lost) is reported stale: this gate has
+    no escape hatch by design, and there is no legitimate no-digest case to preserve (no real
+    attestation predates the digest sidecar, since the platform carries no user data yet). A cell
+    absent from the record's own recomputed grid (``cell is None``, a different, structurally-
+    impossible-in-normal-operation condition) is still skipped, unchanged.
     """
     from tcip_annotation.json_io import read_annotations
 
@@ -119,10 +121,10 @@ def stale_cells(
     stale: list[str] = []
     for name in cells_complete:
         cell = cells_by_name.get(name)
-        stamped = stamped_digests.get(name)
-        if cell is None or stamped is None:
+        if cell is None:
             continue
-        if cell_annotation_digest(annotations, subject, cell) != stamped:
+        stamped = stamped_digests.get(name)
+        if stamped is None or cell_annotation_digest(annotations, subject, cell) != stamped:
             stale.append(name)
     return stale
 
