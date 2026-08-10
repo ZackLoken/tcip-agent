@@ -203,10 +203,12 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
 
         def predict_tiled(self, path, **kw):
             # 5 detections returned; max_dets below will cap the caller intentionally at 2.
+            # cap_hit=True: what the real predict_tiled would stamp here, now read directly.
             boxes = [[10, 10, 30, 30], [50, 50, 70, 70], [90, 90, 110, 110],
                      [130, 130, 150, 150], [170, 170, 190, 190]]
             return {"image": path, "width": 200, "height": 200, "boxes": boxes,
-                    "scores": [0.9, 0.8, 0.7, 0.6, 0.5], "labels": [1] * 5, "count": 5}
+                    "scores": [0.9, 0.8, 0.7, 0.6, 0.5], "labels": [1] * 5, "count": 5,
+                    "cap_hit": True}
 
     build_predictor_orig = predictor_mod.build_predictor
     try:
