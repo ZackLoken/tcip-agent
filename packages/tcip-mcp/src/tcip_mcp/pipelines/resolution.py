@@ -39,6 +39,9 @@ VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a kno
 # caller's deliberate stated override (the same two bases run_full_frame_evaluation already accepts).
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
+# A raster export target's content identity matched the mosaic a block-calibrated bundle was
+# validated against; check_delivery_gate's own "claim_scope" dimension, never a ResolvedParam.
+VALIDATED_SAME_MOSAIC_IDENTITY = "same_mosaic_content_identity"
 VALIDATED_FALSE = "false"
 
 # Which validated_against values legitimately clear validation for which kind of thing being
@@ -65,7 +68,7 @@ def accepted_references(validation_kind: str) -> tuple[str, ...]:
 # accepted_references(validation_kind), always.
 VALIDATED_SHIPPABLE = (
     VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT,
-    VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY,
+    VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY, VALIDATED_SAME_MOSAIC_IDENTITY,
 )
 
 # Shared inference operating-point defaults, referenced by both run_inference and the web route so the
@@ -331,7 +334,7 @@ def resolve_tile_size_param(
 
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
-    max_dets: int, tile_size_source: str = "default", tiled_source: str = "default",
+    max_dets: int | None, tile_size_source: str = "default", tiled_source: str = "default",
 ) -> ResolvedBundle:
     """The operating point for raw (uncalibrated) inference, the one both doors resolve through.
 
@@ -339,6 +342,11 @@ def raw_operating_point(
     is stamped ``validated_against=false``: reading it requires ``unvalidated_value(...)`` and the
     caller must stamp its output ``validated=false``. This is what stops the MCP tool and the web job
     giving a different count (the phenotype) for the same model + images by entry point.
+
+    ``max_dets=None`` is a real, deliberate value (uncapped), not an unset caller: the block
+    calibration export path (``inference_tools._export_predictions_raster``) commits to it on
+    purpose, since a block-calibrated bundle's own density-derived cap is scoped to one reserved
+    band and would truncate a whole-mosaic count if adopted wholesale.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
     geometry, ``explicit`` (caller override), or has no real basis at all (``"unavailable"``), so a
@@ -1051,6 +1059,15 @@ def validate_resolved_bundle(
     - the eval operating point must equal the inference operating point on the same dataset
       (select@0.25 / ship@0.5 divergence).
     - a dataset-scoped calibration must not be inherited across a different dataset hash.
+
+    ``max_dets`` is an intentional, standing exemption from the ``inference_bundle`` equality
+    check for one specific comparison: a block-calibrated bundle against its own whole-raster
+    export bundle (``inference_tools._export_predictions_raster``). Those two bundles' ``max_dets``
+    are deliberately different by design (the export pass commits to ``None``, uncapped, never the
+    block bundle's own band-scoped density-derived value), so a caller comparing exactly that pair
+    must exclude ``"max_dets"`` before calling this, not treat a mismatch there as the select/ship
+    divergence this check exists to catch. No caller does that comparison today, so this check's
+    own general logic stays untouched here rather than special-cased for a pairing nothing calls.
     """
     issues: list[str] = []
 
