@@ -15,6 +15,7 @@ without torch. Ported from the chestnut-burr ``CanopyTiler`` /
 
 from __future__ import annotations
 
+import math
 from typing import NamedTuple
 
 import numpy as np
@@ -77,28 +78,80 @@ def tile_within_extent(tile_x: int, tile_y: int, tile_size: int, width: int, hei
     return tile_x + tile_size <= width and tile_y + tile_size <= height
 
 
+def rect_contains_rect(
+    outer: tuple[int, int, int, int], inner: tuple[int, int, int, int],
+) -> bool:
+    """Whether half-open pixel rect ``inner`` lies fully inside half-open pixel rect ``outer``."""
+    ox0, oy0, ox1, oy1 = outer
+    ix0, iy0, ix1, iy1 = inner
+    return ox0 <= ix0 and oy0 <= iy0 and ix1 <= ox1 and iy1 <= oy1
+
+
+def rects_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+    """Whether two half-open pixel rects share any pixel; sharing only an edge does not count."""
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
+
+
 def rect_contains_tile(rect: tuple[int, int, int, int], tile_x: int, tile_y: int, tile_size: int) -> bool:
     """Whether a tile's rect lies fully inside a half-open pixel rect ``(x0, y0, x1, y1)``."""
+    return rect_contains_rect(rect, (tile_x, tile_y, tile_x + tile_size, tile_y + tile_size))
+
+
+def region_halo(
+    rect: tuple[int, int, int, int], mosaic_width: int, mosaic_height: int,
+    tile_size: int, overlap: float,
+) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
+    """The ``(haloed_rect, inner_rect)`` pair for tiled inference over one sub-region of a
+    larger mosaic (a block-aware calibration/holdout region), each a half-open pixel rect.
+
+    ``halo = ceil((tile_size - stride) / 2)`` is :func:`reconstruct_core`'s own ``margin``,
+    rounded up to a whole pixel: the minimum context production tiling already guarantees at
+    every tile's edge from its neighbor, never a separately chosen, larger buffer. Expanding
+    ``rect`` by ``halo`` on every side (clipped to the mosaic's own ``(0, 0, mosaic_width,
+    mosaic_height)`` bounds) restores exactly that minimum around the sub-region's own boundary.
+    A caller runs tiled inference (``predict_tiled``) over a ``_RegionView`` on the returned
+    haloed rect, then keeps only detections whose box center lands in the returned inner rect
+    (``rect`` unchanged) and clips GT the same way, discarding the halo band from the scored
+    result, never from the pixels the model actually saw.
+
+    This bounds, but does not eliminate, a small perimeter bias at the inner rect's own edge (see
+    :func:`reconstruct_core`'s own docstring): a detection near that edge still sees only
+    production's minimum guaranteed context, not the fuller context an interior detection sees
+    from tiles further beyond it. Kept as designed; shrinking it further is not this function's
+    job.
+    """
     x0, y0, x1, y1 = rect
-    return tile_x >= x0 and tile_y >= y0 and tile_x + tile_size <= x1 and tile_y + tile_size <= y1
+    halo = math.ceil((tile_size - compute_stride(tile_size, overlap)) / 2.0)
+    haloed = (
+        max(0, x0 - halo), max(0, y0 - halo),
+        min(mosaic_width, x1 + halo), min(mosaic_height, y1 + halo),
+    )
+    return haloed, (x0, y0, x1, y1)
 
 
 def clip_boxes_to_tile(
     boxes: np.ndarray, labels: np.ndarray, tile_x: int, tile_y: int,
-    tile_size: int, min_box_size: float,
+    tile_w: int, tile_h: int, min_box_size: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Intersect full-image-px boxes with a tile; drop seam slivers; emit tile-local xyxy.
+    """Intersect full-image-px boxes with a ``tile_w`` x ``tile_h`` tile; drop seam slivers; emit
+    tile-local xyxy.
 
     A box clipped by the tile edge is dropped only when the *visible* (clipped) part is a sliver:
     its characteristic size ``sqrt(iw*ih) < min_box_size``. ``min_box_size`` is derived per dataset
     from the class's average box size (a partial object counts unless it's a tiny sliver; see
     ``TiledDetectionDataset``), not a fixed fraction. Boxes fully inside the tile are always kept.
+
+    ``tile_w``/``tile_h`` need not be equal: every square caller (a sliding-window training/
+    inference tile) passes ``tile_w == tile_h == tile_size``, and the rectangular case exists for
+    a haloed calibration/holdout block, whose own extent need not be square.
     """
     boxes = np.asarray(boxes)
     labels = np.asarray(labels)
     if len(boxes) == 0:
         return EMPTY_BOXES.copy(), EMPTY_LABELS.copy()
-    tx2, ty2 = tile_x + tile_size, tile_y + tile_size
+    tx2, ty2 = tile_x + tile_w, tile_y + tile_h
     ix1 = np.maximum(boxes[:, 0], tile_x)
     iy1 = np.maximum(boxes[:, 1], tile_y)
     ix2 = np.minimum(boxes[:, 2], tx2)
@@ -162,7 +215,7 @@ def clipped_boxes_per_tile(
         if m is None:
             continue  # a grid cell tile_positions never emitted (dropped as pure padding)
         results[m] = clip_boxes_to_tile(
-            boxes[idxs], labels[idxs], key[0], key[1], tile_size, min_box_size)
+            boxes[idxs], labels[idxs], key[0], key[1], tile_size, tile_size, min_box_size)
     return [(EMPTY_BOXES.copy(), EMPTY_LABELS.copy()) if r is None else r for r in results]
 
 
