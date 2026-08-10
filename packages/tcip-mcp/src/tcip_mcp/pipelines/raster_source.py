@@ -1021,6 +1021,16 @@ def _optional_geotransform(source: "str | Path | BandGroupRef") -> dict | None:
     }
 
 
+def is_georeferenced(source: "str | Path | BandGroupRef") -> bool:
+    """Whether ``source`` carries a real per-pixel affine geotransform (a stitched, georectified
+    orthomosaic), never a size proxy for one: an ordinary drone/ground capture typically carries
+    only a single EXIF GPS point for the camera's own position at capture time, not the
+    ModelPixelScaleTag/ModelTiepointTag/GeoKeyDirectoryTag trio this checks for (:func:`
+    ~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.read_geotransform`), regardless of how
+    large that capture's own pixel dimensions are."""
+    return _optional_geotransform(source) is not None
+
+
 def raster_content_identity(
     source: "str | Path | BandGroupRef", num_channels: int, *, seed: int, window_size: int,
     max_windows: int,
