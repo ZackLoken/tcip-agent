@@ -4,6 +4,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { api } from "@/api/client";
 import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import type { CompletenessRecord } from "@/lib/coverage";
+import { useStore } from "@/store";
 
 const GRID = { width: 300, height: 200, tile_size: 100, overlap: 0, cols: 3, rows: 2 };
 
@@ -116,5 +117,29 @@ describe("useRegionCompleteness", () => {
       }),
     );
     await waitFor(() => expect(result.current.activeComplete).toEqual(new Set(["A1"])));
+  });
+
+  it("a failed toggle surfaces an error toast, not a silent no-op", async () => {
+    const get = vi.spyOn(api.coverage, "completeness").mockResolvedValue({ by_subject: {} });
+    vi.spyOn(api.coverage, "toggleCompleteness").mockRejectedValue(new Error("refused"));
+    const { result } = renderHook(() =>
+      useRegionCompleteness({
+        imagePath: "C:/data/images/2026-01-01/mosaic.tif",
+        datasetRoot: "C:/data",
+        subject: "bush",
+      }),
+    );
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+
+    result.current.toggle("A1", GRID);
+    await waitFor(() =>
+      expect(
+        useStore
+          .getState()
+          .toasts.some((t) => t.message.includes("A1") && t.message.includes("refused")),
+      ).toBe(true),
+    );
+    // A failure reloads too, the same as a success, rather than trusting a stale local guess.
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
 });
