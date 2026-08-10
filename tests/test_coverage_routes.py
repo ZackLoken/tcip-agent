@@ -261,3 +261,108 @@ def test_view_coverage_path_locator(tmp_path):
     from tcip_mcp.dataset_layout import view_coverage_path
 
     assert view_coverage_path(tmp_path) == tmp_path / ".tcip" / "state" / "view_coverage.json"
+
+
+class TestCompletenessRoute:
+    def _toggle(self, client, path, grid, cell, subject="catkin", **overrides):
+        body = {"image_path": path, "subject": subject, "grid": grid, "cell": cell,
+               "user": "zack"}
+        body.update(overrides)
+        return client.post("/api/coverage/completeness", json=body)
+
+    def test_toggle_on_then_off(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "ok", "complete": True, "cells_complete": ["A1"]}
+
+        resp = self._toggle(client, path, grid, "A1")
+        assert resp.json() == {"status": "ok", "complete": False, "cells_complete": []}
+
+    def test_subject_is_required(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1", subject="")
+        assert resp.status_code == 400
+        assert "subject" in resp.json()["detail"]
+
+    def test_unknown_cell_is_refused(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "Z9")
+        assert resp.status_code == 400
+        assert "Z9" in resp.json()["detail"]
+
+    def test_by_stem_reads_back_the_attested_cell(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1")
+        self._toggle(client, path, grid, "B2")
+
+        got = client.get("/api/coverage/completeness", params={"path": path})
+        assert got.status_code == 200, got.text
+        record = got.json()["by_subject"]["catkin"]
+        assert record["cells_complete"] == ["A1", "B2"]
+        assert record["attested_by"] == "user:zack"
+        assert record["stale_cells"] == []
+        assert record["subject"] == "catkin"
+        assert record["stem"] == Path(path).stem
+
+    def test_different_subjects_do_not_collide(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1", subject="catkin")
+        self._toggle(client, path, grid, "B2", subject="bush")
+
+        by_subject = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]
+        assert by_subject["catkin"]["cells_complete"] == ["A1"]
+        assert by_subject["bush"]["cells_complete"] == ["B2"]
+
+    def test_mismatched_grid_replaces_wholesale(self, client, dated_dataset):
+        _root, path = dated_dataset
+        self._toggle(client, path, _grid(client, path, tile_size=64), "A1")
+        resp = self._toggle(client, path, _grid(client, path, tile_size=100), "A1")
+        assert resp.json()["cells_complete"] == ["A1"]
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["grid"]["tile_size"] == 100
+
+    def test_a_stale_attestation_is_detected_on_read(self, client, dated_dataset):
+        """A cell is attested complete, then an annotation is added inside it: the stamped
+        digest no longer matches, so the attestation reads back as stale (see
+        tcip_mcp.pipelines.region_completeness.stale_cells) rather than silently trusted."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1")
+
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        json_io.write_annotations(
+            label_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 80)
+
+        record = client.get(
+            "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
+        assert record["cells_complete"] == ["A1"]
+        assert record["stale_cells"] == ["A1"]
+
+    def test_audit_records_the_write(self, client, dated_dataset):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1")
+        audit = root / ".tcip" / "audit.jsonl"
+        entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()
+                   if json.loads(line)["tool"] == "gui_set_region_completeness"]
+        assert len(entries) == 1
+        assert entries[0]["arguments"] == {
+            "image_name": "plot.tif", "subject": "catkin", "cell": "A1",
+            "complete": True, "stem": "plot", "date": "2026-03-01"}
+
+    def test_region_completeness_path_locator(self, tmp_path):
+        from tcip_mcp.dataset_layout import region_completeness_path
+
+        assert region_completeness_path(tmp_path) == (
+            tmp_path / ".tcip" / "state" / "region_completeness.json")
