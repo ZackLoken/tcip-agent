@@ -4,11 +4,13 @@ import {
   cellContainedIn,
   cellsIntersecting,
   completeWarningMessage,
+  effectiveComplete,
   indexCells,
   planRegionFetches,
   servedCellAtNative,
   stepUnsweptCell,
   sweptFractionBlocks,
+  type CompletenessRecord,
   type GridCell,
 } from "@/lib/coverage";
 
@@ -187,6 +189,40 @@ describe("indexCells", () => {
     expect(index.at(2, 1)?.name).toBe("C2");
     expect(index.colX[1]).toEqual([100, 200]);
     expect(index.rowY[1]).toEqual([100, 200]);
+  });
+});
+
+describe("effectiveComplete", () => {
+  const GRID = { width: 300, height: 200, tile_size: 100, overlap: 0, cols: 3, rows: 2 };
+
+  function record(overrides: Partial<CompletenessRecord> = {}): CompletenessRecord {
+    return {
+      grid: GRID,
+      cells_complete: ["A1", "B2"],
+      attested_by: "user:z",
+      attested_at: "t",
+      stem: "mosaic",
+      date: null,
+      subject: "bush",
+      stale_cells: [],
+      ...overrides,
+    };
+  }
+
+  it("undefined record yields no complete cells", () => {
+    expect(effectiveComplete(undefined)).toEqual(new Set());
+  });
+
+  it("with no stale cells, every attested cell is effectively complete", () => {
+    expect(effectiveComplete(record())).toEqual(new Set(["A1", "B2"]));
+  });
+
+  it("a stale cell is excluded even though it is still in cells_complete", () => {
+    expect(effectiveComplete(record({ stale_cells: ["A1"] }))).toEqual(new Set(["B2"]));
+  });
+
+  it("every cell stale yields an empty set", () => {
+    expect(effectiveComplete(record({ stale_cells: ["A1", "B2"] }))).toEqual(new Set());
   });
 });
 
