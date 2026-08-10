@@ -9,6 +9,13 @@ re-deriving them. The record store is ``view_coverage.json``
 (``dataset_layout.view_coverage_path``), bucketed like ``image_status.json``
 (``status_bucket(subject, date)``, then image name). The store is advisory: training
 never reads it, and unviewed cells warn rather than block a Complete.
+
+Also here: region-completeness routes, a different store on the same grid. An attestation ("I
+found every instance of this subject in these cells") gates a scientific claim (block
+calibration's completeness check), so unlike view coverage it is written with the same discipline
+as ``routes/classes.py``'s image-status store, and a stale attestation (a cell's annotation
+content edited or deleted since it was attested) is detected on every read, not trusted forever.
+See ``dataset_layout.region_completeness_path`` and ``tcip_mcp.pipelines.region_completeness``.
 """
 
 from __future__ import annotations
@@ -73,6 +80,15 @@ def _require_subject(subject: Optional[str]) -> str:
     if not subject:
         raise HTTPException(400, "view coverage is scoped to a subject and date, the same "
                                  "bucket image status uses; pass a subject")
+    return subject
+
+
+def _require_completeness_subject(subject: Optional[str]) -> str:
+    if not subject:
+        raise HTTPException(400, "region completeness is scoped to a subject, the same way "
+                                 "every other confirmation in this platform is; a bare 'mark "
+                                 "region done' with no subject would silently clear a different "
+                                 "subject's calibration; pass a subject")
     return subject
 
 
@@ -230,3 +246,151 @@ def post_coverage(payload: CoveragePayload) -> dict:
         "cells_swept": len(swept),
         "total_cells": grid["cols"] * grid["rows"],
     }
+
+
+# Region completeness gates a scientific claim rather than warning advisory, so (unlike view
+# coverage above) it is written with classes.py's image-status discipline (file_transaction + atomic_write_json + _audit_dataset_write).
+
+
+class CompletenessTogglePayload(BaseModel):
+    """One double-click on the minimap: toggle one cell's completeness for a subject."""
+
+    image_path: str
+    subject: str
+    dataset_root: Optional[str] = None
+    grid: dict
+    cell: str
+    # GUI-set identity; stamped as attested_by ("user:<name>"), mirroring annotate.py/review.py.
+    user: Optional[str] = None
+
+
+@router.get("/completeness")
+def get_completeness(
+    path: str = Query(..., description="Absolute path to the image file"),
+    dataset_root: Optional[str] = Query(None),
+) -> dict:
+    """Every subject's region-completeness record for the raster at ``path`` (its own stem), not
+    just one subject's: lets the minimap render a cell attested complete for a subject other than
+    the one currently active, distinguishably from the active subject's own attestations.
+
+    Each record carries ``stale_cells``: attested cells whose annotation content has changed since
+    attestation (:mod:`tcip_mcp.pipelines.region_completeness`), recomputed fresh on every read so
+    a stale attestation is never served as if it still held.
+    """
+    from tcip_mcp.dataset_layout import (
+        normalize_region_completeness_store,
+        region_completeness_digest_path,
+        region_completeness_path,
+    )
+    from tcip_mcp.pipelines.region_completeness import stale_cells
+
+    root = _resolve_root(path, dataset_root)
+    stem = Path(path).stem
+    store = normalize_region_completeness_store(
+        read_json(region_completeness_path(root), default={}))
+    digests = read_json(region_completeness_digest_path(root), default={})
+    if not isinstance(digests, dict):
+        digests = {}
+
+    by_subject: dict[str, dict] = {}
+    for bucket, record in store.items():
+        if record.get("stem") != stem:
+            continue
+        subject = record.get("subject")
+        if not isinstance(subject, str) or not subject:
+            continue
+        stamped = digests.get(bucket)
+        stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+        by_subject[subject] = {**record, "stale_cells": stale}
+    return {"by_subject": by_subject}
+
+
+@router.post("/completeness")
+def post_completeness(payload: CompletenessTogglePayload) -> dict:
+    """Toggle one cell's completeness for a subject: not-complete -> complete (stamping the
+    cell's current annotation-content digest) or complete -> not-complete (clearing its stamp).
+
+    Cell names are validated against the posted grid's own cells, same as ``post_coverage``. A
+    stored record whose grid disagrees with the posted one replaces wholesale (cells and digest
+    stamps alike), rather than trusting a same-named cell across two different lattices.
+    """
+    from tcip_annotation.json_io import read_annotations
+
+    from tcip_mcp.dataset_layout import (
+        annotation_path,
+        normalize_region_completeness_store,
+        parse_image_path,
+        region_completeness_digest_path,
+        region_completeness_path,
+        status_bucket,
+    )
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+    from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
+    from tcip_web.identity import resolve_user, user_id
+
+    subject = _require_completeness_subject(payload.subject)
+    root = _resolve_root(payload.image_path, payload.dataset_root)
+    try:
+        _root_from_image, date, stem = parse_image_path(payload.image_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    grid = _normalized_grid(payload.grid)
+    cells_by_name = {c.name: c for c in reference_cells(
+        grid["width"], grid["height"], grid["tile_size"], grid["overlap"], clamp=True)}
+    if payload.cell not in cells_by_name:
+        raise HTTPException(
+            400, f"cell not in this grid: {payload.cell!r}; the grid has {len(cells_by_name)} "
+                 f"cells")
+
+    bucket = status_bucket(subject, stem)
+    completeness_path = region_completeness_path(root)
+    digest_path = region_completeness_digest_path(root)
+    author = user_id(resolve_user(payload.user))
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with file_transaction(completeness_path):
+        store = normalize_region_completeness_store(read_json(completeness_path, default={}))
+        existing = store.get(bucket)
+        grid_matches = existing is not None and existing.get("grid") == grid
+        cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()
+        replaced = existing is not None and not grid_matches
+        complete = payload.cell not in cells_complete
+        if complete:
+            cells_complete.add(payload.cell)
+        else:
+            cells_complete.discard(payload.cell)
+        store[bucket] = {
+            "grid": grid,
+            "cells_complete": sorted(cells_complete),
+            "attested_by": author,
+            "attested_at": now_iso,
+            "stem": stem,
+            "date": date,
+            "subject": subject,
+        }
+        atomic_write_json(completeness_path, store)
+
+    with file_transaction(digest_path):
+        digests = read_json(digest_path, default={})
+        if not isinstance(digests, dict):
+            digests = {}
+        bucket_digests = digests.get(bucket)
+        bucket_digests = dict(bucket_digests) if isinstance(bucket_digests, dict) else {}
+        if replaced:
+            bucket_digests = {}
+        if complete:
+            label_path = annotation_path(root, date, stem)
+            annotations = read_annotations(str(label_path)) if label_path.is_file() else []
+            bucket_digests[payload.cell] = cell_annotation_digest(
+                annotations, subject, cells_by_name[payload.cell])
+        else:
+            bucket_digests.pop(payload.cell, None)
+        digests[bucket] = bucket_digests
+        atomic_write_json(digest_path, digests)
+
+    _audit_dataset_write(
+        root, "gui_set_region_completeness",
+        {"image_name": Path(payload.image_path).name, "subject": subject, "cell": payload.cell,
+         "complete": complete, "stem": stem, "date": date},
+    )
+    return {"status": "ok", "complete": complete, "cells_complete": sorted(cells_complete)}
