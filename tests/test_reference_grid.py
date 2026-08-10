@@ -8,6 +8,7 @@ import pytest
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.reference_grid import (
     derive_coverage_tile_size,
+    derive_large_raster_grid_tile_size,
     derive_pointing_tile_size,
     grid_geometry,
     reference_cells,
@@ -109,6 +110,39 @@ class TestDerivations:
         """An image inside the artifact bound renders at native scale, so the grain is
         chosen against its own long edge: 640 splits into 14 cells of edge 46."""
         assert derive_pointing_tile_size(640, 480) == 46
+
+    def test_large_raster_grid_does_not_touch_the_display_derived_one(self):
+        """Adding the large-raster derivation must not change a single value
+        derive_coverage_tile_size (the display-derived lattice) returns for any caller: this is a
+        new, additive branch, not a replacement, and shares no code path with it. Hardcoded
+        expected values, not a self-comparison, so a shared-code-path regression would actually
+        be caught."""
+        assert derive_coverage_tile_size(141130, 239921) == 4067
+        assert derive_coverage_tile_size(4000, 3000) == 4000
+        assert derive_coverage_tile_size(5000, 64) == 2500
+        assert derive_coverage_tile_size(640, 480) == 640
+        assert derive_coverage_tile_size(4096, 3000) == 4096
+
+    def test_large_raster_grid_real_mosaic_scale_is_tens_to_low_hundreds_of_cells(self):
+        """The real ValleyFarm numeric case: at 239921x141130 the display-derived lattice is
+        roughly 118x70 (~8,260 cells); the large-raster derivation must instead produce a lattice
+        in the tens-to-low-hundreds, not thousands."""
+        tile = derive_large_raster_grid_tile_size(239921, 141130)
+        geometry = grid_geometry(239921, 141130, tile)
+        total_cells = geometry["cols"] * geometry["rows"]
+        assert 100 <= total_cells <= 300
+        assert geometry["cols"] == 16
+
+    def test_large_raster_grid_tile_size_formula(self):
+        import math
+
+        assert derive_large_raster_grid_tile_size(3200, 1600) == math.ceil(3200 / 16)
+        assert derive_large_raster_grid_tile_size(1600, 3200) == math.ceil(3200 / 16)
+
+    def test_large_raster_grid_divisions_is_overridable(self):
+        import math
+
+        assert derive_large_raster_grid_tile_size(3200, 1600, divisions=8) == math.ceil(3200 / 8)
 
 
 class TestGridGeometry:
