@@ -620,8 +620,8 @@ def run_inference(
         conf_param = bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
                 else conf_param.unvalidated_value(acknowledge_unvalidated=True))
-        max_dets = int(bundle.get("max_dets")._raw)
-        global_nms_iou = float(bundle.get("cross_tile_nms")._raw or global_nms_iou)
+        max_dets = int(bundle.get("max_dets").value)
+        global_nms_iou = float(bundle.get("cross_tile_nms").value or global_nms_iou)
         # Apply the resolved operating point to the model so it governs which boxes exist.
         predictor.score_threshold = conf
         set_detector_operating_point(predictor.model, score_thresh=conf, detections_per_img=max_dets)
