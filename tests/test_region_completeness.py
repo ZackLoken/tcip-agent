@@ -124,12 +124,12 @@ class TestStaleCells:
         anns = json_io.read_annotations(str(ann_dir / f"{stem}.json"))
         return cell_annotation_digest(anns, subject, cell)
 
-    def test_no_stamp_at_all_is_not_reported_stale(self, tmp_path):
+    def test_no_stamp_at_all_is_reported_stale(self, tmp_path):
         grid, _cells = self._grid_and_cells()
         self._write_label(tmp_path / "annotations", "mosaic",
                           [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))])
         record = {"grid": grid, "cells_complete": ["A1"], "stem": "mosaic", "date": None}
-        assert stale_cells(tmp_path, record, {}, "catkin") == []
+        assert stale_cells(tmp_path, record, {}, "catkin") == ["A1"]
 
     def test_matching_stamp_is_not_stale(self, tmp_path):
         grid, cells = self._grid_and_cells()
