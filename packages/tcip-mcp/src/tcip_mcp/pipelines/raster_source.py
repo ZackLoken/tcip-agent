@@ -277,6 +277,13 @@ class _RegionView:
     this class's own reported ``height``) relies on to keep a windowed pass over one region from
     ever silently reading pixels outside it. This must hold for every future caller of this
     class, not only ``predict_tiled``.
+
+    ``band_interpretations`` forwards the parent's own attribute verbatim when it has one (a
+    ``GdalSource`` parent), absent otherwise, the same ``getattr(src, "band_interpretations",
+    None)`` convention every other consumer of this fact uses: a haloed calibration/holdout block
+    read through this view is still the same file the whole-mosaic export path reads, so the two
+    must resolve the same alpha-vs-spectral-band decision (:func:`image_utils.to_pil_if_faithful`)
+    rather than one seeing the real signal and the other silently seeing none.
     """
 
     def __init__(self, parent: RasterSource, rect: Rect) -> None:
@@ -286,6 +293,7 @@ class _RegionView:
         self.height = rect.height
         self.width = rect.width
         self.num_channels = parent.num_channels
+        self.band_interpretations = getattr(parent, "band_interpretations", None)
 
     def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
         """The pixel window ``[y0:y1, x0:x1]`` in this view's own local coordinate space,
