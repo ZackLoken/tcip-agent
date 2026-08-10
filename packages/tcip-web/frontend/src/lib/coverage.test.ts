@@ -9,6 +9,7 @@ import {
   rectFullyInside,
   servedCellAtNative,
   stepUnsweptCell,
+  subCellDivisionsFor,
   subdivideCell,
   sweptFractionBlocks,
   type CompletenessRecord,
@@ -92,6 +93,28 @@ describe("subdivideCell", () => {
     expect(oversized).toBeGreaterThan(1); // more than just the last slot
     expect(rowWidths[31]).toBe(4); // the last slot is still one of them, snapped to the exact edge
     expect(rowWidths.reduce((a, b) => a + b, 0)).toBe(100);
+  });
+});
+
+describe("subCellDivisionsFor", () => {
+  it("keeps sub-cell size roughly constant across very different cell sizes", () => {
+    const small: GridCell = { name: "A1", x0: 0, y0: 0, x1: 4096, y1: 4096 }; // ordinary lattice
+    const large: GridCell = { name: "A1", x0: 0, y0: 0, x1: 14996, y1: 8000 }; // large-raster lattice
+
+    const smallDivisions = subCellDivisionsFor(small, 128);
+    const largeDivisions = subCellDivisionsFor(large, 128);
+    expect(smallDivisions).toBe(32); // 4096 / 128 exactly: the value this platform already shipped
+    expect(largeDivisions).toBe(118); // ceil(14996 / 128), the long edge, not the short one
+
+    const smallSubEdge = (small.x1 - small.x0) / smallDivisions;
+    const largeSubEdge = (large.x1 - large.x0) / largeDivisions;
+    expect(smallSubEdge).toBeLessThanOrEqual(128);
+    expect(largeSubEdge).toBeLessThanOrEqual(128); // no longer ~469px: the bug this fixes
+  });
+
+  it("never returns fewer than 1 division, even for a cell smaller than the target", () => {
+    const tiny: GridCell = { name: "A1", x0: 0, y0: 0, x1: 40, y1: 40 };
+    expect(subCellDivisionsFor(tiny, 128)).toBe(1);
   });
 });
 
