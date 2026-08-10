@@ -574,12 +574,76 @@ def _viz_dataset_sample(
     }
 
 
+def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
+    """The bounding rect, in the grid's native-pixel frame, of the named reference-grid cells.
+
+    A region-scoped proposal pass needs one rectangle to crop, not the point prompts
+    ``segment_prompt`` turns grid cells into: multiple names union to their cells' combined
+    bounding box, matched case-insensitively the same way ``sam_wrapper.grid_to_pixel`` matches a
+    single cell name.
+    """
+    from tcip_mcp.pipelines.raster_source import Rect
+
+    by_name = {c.name.upper(): c for c in cells}
+    matched = []
+    for name in names:
+        cell = by_name.get(name.strip().upper())
+        if cell is None:
+            raise ValueError(f"Cell {name!r} is not in this grid. Valid cells: "
+                             f"{', '.join(sorted(by_name))}.")
+        matched.append(cell)
+    return Rect(min(c.x0 for c in matched), min(c.y0 for c in matched),
+               max(c.x1 for c in matched), max(c.y1 for c in matched))
+
+
+def _write_region_crop(pixels: "np.ndarray") -> Path:
+    """Save an RGB region crop to a fresh temp PNG file; the caller deletes it once the engine has
+    read it.
+
+    The crop is taken from ``PhotographicSource``'s already-``auto_orient_image``'d frame, so it
+    carries no EXIF orientation tag once saved (a PIL ``.save()`` never re-emits an orientation tag
+    it didn't read from a source file): ``auto_mask``'s own internal re-orientation call is a no-op
+    against this file, not a second, wrong rotation of pixels that are already upright.
+    """
+    import os
+    import tempfile
+
+    from PIL import Image
+
+    fd, tmp = tempfile.mkstemp(suffix=".png", prefix="tcip_propose_crop_")
+    os.close(fd)
+    Image.fromarray(pixels, mode="RGB").save(tmp)
+    return Path(tmp)
+
+
+def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> list[dict]:
+    """Candidates proposed against a region crop's own pixels, translated into the source image's
+    full-frame native coordinates by the crop's own origin.
+
+    Both consumers downstream (``render_candidates``, and ``accept_proposals`` reading the cached
+    envelope back later) expect ``bbox``/``rings`` in the source image's native frame, never
+    crop-local pixels, so this runs before either sees the candidates.
+    """
+    ox, oy = origin
+    shifted = []
+    for c in candidates:
+        c = dict(c)
+        x1, y1, x2, y2 = c["bbox"]
+        c["bbox"] = [x1 + ox, y1 + oy, x2 + ox, y2 + oy]
+        c["rings"] = [[(x + ox, y + oy) for x, y in ring] for ring in c["rings"]]
+        shifted.append(c)
+    return shifted
+
+
 @mcp.tool()
 @audited
 def propose_annotations(
     image_path: str,
     engine: str = "sam",
     engine_params: dict | None = None,
+    grid_cells: list[str] | None = None,
+    tile_size: int | None = None,
+    overlap: float = 0.0,
 ) -> dict:
     """Propose candidate annotations on an image for review, using a chosen auto-labeling engine.
 
@@ -592,12 +656,31 @@ def propose_annotations(
     wrote, then trial and compare engines by how well each one's high-conf proposals survive breeder
     review, and pick the most useful for the task.
 
+    ``grid_cells`` restricts the pass to a region instead of the whole frame: name the reference-
+    grid cells the region spans (e.g. ``['B3', 'C3', 'B4', 'C4']``, the same grid
+    ``overlay_reference_grid``/``segment_prompt`` use), and the engine proposes only over their
+    bounding rect. Useful on a large or crowded frame where a whole-image pass returns too many or
+    too coarse candidates to review, or where only part of the frame matters right now. The crop is
+    taken and the results offset back to full-frame coordinates entirely on this side of the engine
+    seam: the engine is handed an ordinary (if smaller) image and never told a region was involved,
+    so a bespoke engine gets region support with no code of its own. The one real caveat: an engine
+    that keys behavior off the image path itself (a cache, a sidecar lookup keyed by the original
+    file) receives the temp crop's path, which it cannot resolve back to the source image. Omitting
+    ``grid_cells`` runs the whole frame, unchanged.
+
     Args:
         image_path: Absolute path to the image file.
         engine: Proposal engine: 'sam' (built-in) or a dotted 'module:factory' the agent brings.
         engine_params: Engine-specific knobs forwarded to the engine (e.g. SAM's model_type,
             points_per_side, pred_iou_thresh, stability_score_thresh, min_mask_region_area). Omit for
             the engine's own defaults.
+        grid_cells: Reference-grid cell names bounding the region to propose over (e.g.
+            ['B3', 'D5']); the engine sees the bounding rect of the named cells, not the whole
+            frame. Requires ``tile_size``. Omit for the whole frame.
+        tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required with
+            ``grid_cells``.
+        overlap: Overlap fraction of the grid the cells were read off, ``segment_prompt``'s same
+            semantics.
     """
     from tcip_mcp.pipelines.proposal import resolve_proposer
 
@@ -610,12 +693,51 @@ def propose_annotations(
     except (ValueError, ImportError) as e:
         return {"error": str(e)}
 
+    # A region is cropped and offset entirely here, before the engine ever sees an image path.
+    # grid_cells=None skips this branch, taking the exact whole-frame path below, unchanged.
+    propose_path = image_path
+    crop_tmp: Path | None = None
+    origin = (0.0, 0.0)
+    region_info: dict | None = None
+    if grid_cells is not None:
+        if not grid_cells:
+            return {"error": "grid_cells is empty; name at least one cell to scope the region."}
+        if tile_size is None:
+            return {"error": "grid_cells requires tile_size, the cell edge of the grid the "
+                             "cells were read off (overlay_reference_grid echoes it back, with "
+                             "overlap). Without it a cell name resolves against a grid nobody "
+                             "rendered."}
+        from tcip_mcp.pipelines.raster_source import PhotographicSource
+        from tcip_mcp.pipelines.reference_grid import reference_cells
+
+        # PhotographicSource directly (not segment_prompt's dataset-layout _dims_for): this tool
+        # takes a bare path, oriented the same way auto_mask's own re-orientation will then no-op against.
+        try:
+            with PhotographicSource(image_path, 3) as src:
+                cells = reference_cells(src.width, src.height, tile_size, overlap, clamp=True)
+                rect = _region_rect_from_cells(cells, grid_cells)
+                pixels, _spec = src.read_region(rect)
+        except ValueError as e:
+            return {"error": str(e)}
+        crop_tmp = _write_region_crop(pixels)
+        propose_path = str(crop_tmp)
+        origin = (float(rect.x0), float(rect.y0))
+        region_info = {"grid_cells": list(grid_cells), "tile_size": tile_size, "overlap": overlap,
+                       "rect": [rect.x0, rect.y0, rect.x1, rect.y1]}
+
     try:
-        candidates = proposer.propose(image_path, **(engine_params or {}))
-    except ImportError as e:
-        return {"error": str(e)}
-    except FileNotFoundError as e:
-        return {"error": str(e)}
+        try:
+            candidates = proposer.propose(propose_path, **(engine_params or {}))
+        except ImportError as e:
+            return {"error": str(e)}
+        except FileNotFoundError as e:
+            return {"error": str(e)}
+    finally:
+        if crop_tmp is not None:
+            crop_tmp.unlink(missing_ok=True)
+
+    if region_info is not None:
+        candidates = _offset_candidates(candidates, origin)
 
     if not candidates:
         return {
@@ -628,22 +750,23 @@ def propose_annotations(
     read = _display_for_path(image_path)
     out = render_candidates(read.pixels, candidates, native_size=read.native_size)
 
-    # Resolve state via the platform root, not a CWD-relative path, so the
-    # handoff to accept_proposals survives CWD != project root. The envelope records the engine so
-    # accept_proposals stamps the right producer and stages into the matching bucket.
+    # Resolve state via the platform root so the handoff to accept_proposals survives CWD !=
+    # project root; the envelope records the engine so accept_proposals stamps the right producer.
     from tcip_mcp.project_paths import resolve_state
 
     import json
     state_file = resolve_state(Path(".tcip") / "state" / f"proposals_{img.stem}.json")
     state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(
-        json.dumps({"engine": engine, "candidates": candidates}, default=str), encoding="utf-8"
-    )
+    envelope: dict = {"engine": engine, "candidates": candidates}
+    if region_info is not None:
+        envelope["region"] = region_info
+    state_file.write_text(json.dumps(envelope, default=str), encoding="utf-8")
 
+    region_note = f" (region {grid_cells})" if region_info is not None else ""
     return {
         "image_path": out,
         "engine": engine,
-        "summary": f"Engine {engine!r} proposed {len(candidates)} candidates. "
+        "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}. "
                    f"Review the numbered overlay, then call accept_proposals "
                    f"with class assignments.",
         "candidate_count": len(candidates),
