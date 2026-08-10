@@ -64,6 +64,8 @@ def derive_plant_group_key_map(
     ``ValueError`` naming every such stem and its specific cause once all stems have been checked,
     rather than stopping at the first.
     """
+    import tifffile
+
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         GeoreferencingError,
         OrthomosaicGeoreference,
@@ -88,9 +90,9 @@ def derive_plant_group_key_map(
         path = stem_to_raster[stem]
         try:
             georef = OrthomosaicGeoreference.from_file(path)
-            cx, cy = _raster_pixel_extent(path)
-            lat, lon = georef.pixel_to_wgs84(cx / 2.0, cy / 2.0)
-        except (RotatedRasterError, GeoreferencingError, OSError) as exc:
+            width, height = _raster_pixel_extent(path)
+            lat, lon = georef.pixel_to_wgs84(width / 2.0, height / 2.0)
+        except (RotatedRasterError, GeoreferencingError, OSError, tifffile.TiffFileError) as exc:
             failures.append(f"{stem} ({path}): could not georeference - {exc}")
             continue
 
