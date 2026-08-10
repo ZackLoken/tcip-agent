@@ -772,7 +772,7 @@ def _export_predictions_raster(
     *, checkpoint_path: str, raster_path: str, out: Path, resolution, device: str | None,
     conf_threshold: float, tile_size: int | None, overlap: float | None, tile_batch_size: int,
     global_nms_iou: float, max_dets: int, postprocess: str, require_masks: bool,
-    experiment_id: str | None, acknowledge_unvalidated: bool,
+    experiment_id: str | None, acknowledge_unvalidated: bool, trait: str | None = None,
 ) -> dict:
     """The windowed-raster regime of :func:`export_predictions`: tiled detection/instance_seg
     inference over a whole georeferenced (or merely huge) raster too large to decode whole, sourced
@@ -787,16 +787,26 @@ def _export_predictions_raster(
     ``<raster stem>.json`` prediction file (in full-raster pixel space) plus the same
     ``operating_point.json`` sidecar convention every other bucket carries.
 
-    This is the raw, detect-and-persist step: the persisted operating point is never stamped
-    validated here (conf has no per-dataset calibration for a raster source), a validated per-plant
-    count is earned later, at delivery (``deliver_orthomosaic_plant_counts``). The tile_size gate
-    runs pre-pass (before the always-expensive tiled pass) and is the one dimension this step
-    refuses to write unacknowledged. Unlike the ordinary regime (which can
-    fall back to running untiled), this regime always tiles, so a checkpoint with no persisted
-    geometry and no explicit override has no real basis to tile at *at all*: that refusal is
-    unconditional, never overridable via ``acknowledge_unvalidated`` (there is no value to
-    provisionally proceed with), distinct from a real-but-unvalidated tile scale, which the gate
-    below does admit when acknowledged.
+    ``trait`` is ``None`` for every raster export with no reserved calibration region (the
+    original, byte-identical raw path: the persisted operating point is never stamped validated
+    here, conf has no per-dataset calibration for a raster source, a validated per-plant count is
+    earned later at delivery). ``export_predictions`` only ever passes a real ``trait`` here once
+    it has already confirmed the checkpoint's training experiment reserved a calibration region
+    (:func:`~tcip_mcp.pipelines.block_calibration.reserved_calibration_region_available`); in that
+    case this runs block calibration first (small reserved bands, not the whole mosaic), gates on
+    the mosaic's own claim scope (:func:`~tcip_mcp.pipelines.raster_source.raster_identity_matches`
+    -- the block-validated reference must be *this* raster, not a different one reusing the same
+    checkpoint), then applies the calibrated conf/cross_tile_nms to the real whole-mosaic pass with
+    ``max_dets`` deliberately uncapped (never the block bundle's own band-scoped density-derived
+    value, which would truncate a whole-mosaic count to roughly one band's worth of objects).
+
+    The tile_size gate (and, for the ``trait`` path, the claim-scope gate) runs pre-pass, before
+    the always-expensive tiled pass. Unlike the ordinary regime (which can fall back to running
+    untiled), this regime always tiles, so a checkpoint with no persisted geometry and no explicit
+    override has no real basis to tile at *at all*: that refusal is unconditional, never
+    overridable via ``acknowledge_unvalidated`` (there is no value to provisionally proceed with),
+    distinct from a real-but-unvalidated tile scale, which the gate below does admit when
+    acknowledged.
     """
     from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.inference.predictor import (
@@ -823,23 +833,96 @@ def _export_predictions_raster(
     tile_resize = native_ratio_tile_resize(predictor, tile_size_source)
 
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, check_delivery_gate, raw_operating_point, tile_size_gate_flag,
+        VALIDATED_FALSE, check_delivery_gate, raw_operating_point, resolve_tile_size_param,
+        tile_size_gate_flag,
     )
 
-    # Always tiled (a raster too large to load whole has no untiled alternative); every input the
-    # gate needs is already resolved, so it runs here, before the expensive raster pass.
-    op_bundle = raw_operating_point(
-        conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=True, tile_size=resolved_tile,
-        max_dets=max_dets, tile_size_source=tile_size_source, tiled_source="default",
-    )
-    op_provenance = op_bundle.to_provenance()["operating_point"]
+    conf_source = "default"
+    block_prov: dict | None = None
+    claim_scope_validated: str | None = None
+    applied_nms_iou = global_nms_iou
 
-    tile_ref = tile_size_gate_flag(op_provenance)
-    tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
-    gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
-    if not gate.ok:
-        return {"error": gate.reason, "tile_size_validated": tile_ref}
-    tile_size_validated = gate.stamp.get("tile_size")
+    if trait is not None:
+        from tcip_mcp.pipelines.block_calibration import (
+            BlockCalibrationRefused, resolve_block_calibration_records,
+        )
+        from tcip_mcp.pipelines.raster_source import raster_identity_matches
+        from tcip_mcp.pipelines.resolution import VALIDATED_SAME_MOSAIC_IDENTITY, default
+
+        try:
+            block_bundle, block_prov = resolve_block_calibration_records(
+                predictor, checkpoint_path=checkpoint_path, trait_name=trait,
+                experiment_id=identity["experiment_id"], global_nms_iou=global_nms_iou,
+                tile_batch_size=tile_batch_size, postprocess=postprocess,
+            )
+        except BlockCalibrationRefused as exc:
+            return {"error": str(exc)}
+
+        training_identity = (block_prov["spatial_manifest"] or {}).get("raster_content_identity")
+        if training_identity is None:
+            return {"error": (
+                "block calibration refused: no raster content identity was recorded for "
+                f"experiment {block_prov['experiment_id']!r} at spatial-split time (an unreadable "
+                "or unsupported training source); the claim-scope gate has nothing to compare "
+                "this export target against."
+            )}
+        try:
+            same_mosaic = raster_identity_matches(training_identity, raster_path)
+        except ValueError as exc:
+            return {"error": f"claim-scope check refused: {exc}"}
+        claim_scope_flag = VALIDATED_SAME_MOSAIC_IDENTITY if same_mosaic else VALIDATED_FALSE
+
+        conf_param = block_bundle.get("conf")
+        conf = (conf_param.value if conf_param.is_shippable
+                else conf_param.unvalidated_value(acknowledge_unvalidated=True))
+        applied_nms_iou = float(block_bundle.get("cross_tile_nms")._raw or global_nms_iou)
+
+        # Reset from the calibration-time floor to the real, calibrated point (full-frame cap
+        # committed to None below, never the block bundle's own band-scoped density-derived one).
+        from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+
+        predictor.score_threshold = conf
+        set_detector_operating_point(predictor.model, score_thresh=conf, detections_per_img=max_dets)
+        predictor.max_dets = None
+
+        op_bundle = type(block_bundle)(trait=trait, dataset_hash=block_bundle.dataset_hash, params={
+            "conf": block_bundle.get("conf"),
+            "cross_tile_nms": block_bundle.get("cross_tile_nms"),
+            "tiled": default("tiled", True),
+            "tile_size": resolve_tile_size_param(
+                resolved_tile, tiled=True, tile_size_source=tile_size_source),
+            "max_dets": default(
+                "max_dets", None,
+                derived_from="block calibration: not transferred, uncapped for the whole-mosaic pass"),
+        })
+        op_provenance = op_bundle.to_provenance()["operating_point"]
+
+        tile_ref = tile_size_gate_flag(op_provenance)
+        gate_flags = {"claim_scope": claim_scope_flag}
+        if tile_ref is not None:
+            gate_flags["tile_size"] = tile_ref
+        gate = check_delivery_gate(gate_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+        if not gate.ok:
+            return {"error": gate.reason, "tile_size_validated": tile_ref,
+                    "claim_scope_validated": claim_scope_flag}
+        tile_size_validated = gate.stamp.get("tile_size")
+        claim_scope_validated = gate.stamp.get("claim_scope")
+        conf_source = "block_calibration"
+    else:
+        # Always tiled (a raster too large to load whole has no untiled alternative); every input
+        # the gate needs is already resolved, so it runs here, before the expensive raster pass.
+        op_bundle = raw_operating_point(
+            conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=True, tile_size=resolved_tile,
+            max_dets=max_dets, tile_size_source=tile_size_source, tiled_source="default",
+        )
+        op_provenance = op_bundle.to_provenance()["operating_point"]
+
+        tile_ref = tile_size_gate_flag(op_provenance)
+        tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
+        gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+        if not gate.ok:
+            return {"error": gate.reason, "tile_size_validated": tile_ref}
+        tile_size_validated = gate.stamp.get("tile_size")
 
     from tcip_mcp.pipelines.raster_source import open_raster
 
@@ -848,7 +931,7 @@ def _export_predictions_raster(
     with open_raster(raster_path, predictor.in_chans) as reader:
         result = predictor.predict_tiled(
             reader, tile_size=resolved_tile, overlap=resolved_overlap,
-            tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+            tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou,
             postprocess=postprocess, require_masks=require_masks, source_label=str(raster_path),
             tile_resize=tile_resize,
         )
@@ -867,10 +950,13 @@ def _export_predictions_raster(
     has_masks = bool(result.get("masks"))
 
     produced_at = datetime.now(timezone.utc).isoformat()
+    validated = bool(op_bundle.is_shippable) and tile_size_validated != VALIDATED_FALSE
+    if trait is not None:
+        validated = validated and claim_scope_validated != VALIDATED_FALSE
     op_stamp = {
         "operating_point": op_provenance,
         "id_map": id_map,
-        "validated": bool(op_bundle.is_shippable) and tile_size_validated != VALIDATED_FALSE,
+        "validated": validated,
         "tile_size_validated": tile_size_validated,
         "shippable_issues": op_bundle.shippable_issues(),
         "checkpoint": Path(checkpoint_path).stem,
@@ -882,6 +968,26 @@ def _export_predictions_raster(
     }
     if has_masks:
         op_stamp["mask_binarize"] = mask_binarize_provenance()
+    if block_prov is not None:
+        op_stamp["claim_scope_validated"] = claim_scope_validated
+        # spatial_manifest is already carried on the training experiment's own split.json.
+        op_stamp["block_calibration"] = {
+            k: v for k, v in block_prov.items() if k != "spatial_manifest"
+        }
+        try:
+            import dataclasses
+
+            from tcip_mcp.pipelines.raster_source import (
+                CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
+                raster_content_identity,
+            )
+
+            export_identity = raster_content_identity(
+                raster_path, predictor.in_chans, seed=CONTENT_IDENTITY_SEED,
+                window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+            op_stamp["raster_content_identity"] = dataclasses.asdict(export_identity)
+        except Exception:
+            logger.warning("export-time raster content identity could not be recorded", exc_info=True)
     from tcip_mcp.utils.atomic_io import atomic_write_json
 
     atomic_write_json(out / "operating_point.json", op_stamp)
@@ -902,11 +1008,13 @@ def _export_predictions_raster(
         "operating_point": op_provenance,
         "validated": op_stamp["validated"],
         "tile_size_validated": tile_size_validated,
-        "conf_source": "default",
+        "conf_source": conf_source,
         "checkpoint_sha256": sha,
         "experiment_id": exp_id,
         "tiles": result.get("tiles"),
     }
+    if block_prov is not None:
+        response["claim_scope_validated"] = claim_scope_validated
     return response
 
 
@@ -948,9 +1056,14 @@ def export_predictions(
       (:func:`~tcip_mcp.pipelines.raster_source.open_raster`), always tiled (there is no untiled
       option for a raster too large to decode whole), and writes exactly one ``<raster stem>.json``
       prediction file (in full-raster pixel space), since there is no natural
-      directory-of-per-plant-images shape for a whole-raster capture. Conf has no per-dataset
-      calibration for this regime (``trait``/``calibration_labels_dir`` are not accepted with it); a
-      validated per-plant count is earned later, at delivery (``deliver_orthomosaic_plant_counts``).
+      directory-of-per-plant-images shape for a whole-raster capture. ``calibration_labels_dir`` is
+      not accepted with it (there is no separate labeled directory shape for one raster); ``trait``
+      alone calibrates against the mosaic's own reserved regions instead
+      (:func:`~tcip_mcp.pipelines.block_calibration.resolve_block_calibration_records`), when the
+      checkpoint's own training experiment reserved one (``data.split.reserve_calibration_fraction``
+      at training time). Without a reserved region, conf has no per-dataset calibration for this
+      regime; a validated per-plant count is earned later, at delivery
+      (``deliver_orthomosaic_plant_counts``).
 
     Provide exactly one of ``images_dir``/``raster_path``. Both regimes write the same
     ``operating_point.json`` stamp convention beside the prediction file(s), so downstream code that
@@ -996,10 +1109,13 @@ def export_predictions(
         global_nms_iou: Cross-tile NMS IoU.
         max_dets: Full-frame detection cap.
         postprocess: Cross-tile merge, "nms" or "nmm".
-        trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``,
-            ``images_dir`` regime only).
+        trait: Trait to calibrate the operating point per dataset. ``images_dir`` regime: with
+            ``calibration_labels_dir``. ``raster_path`` regime: alone, against the checkpoint's own
+            training mosaic's reserved calibration/test regions (requires
+            ``data.split.reserve_calibration_fraction`` at training time; refuses by name
+            otherwise).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating
-            point (``images_dir`` regime only).
+            point (``images_dir`` regime only; not accepted with ``raster_path``, see ``trait``).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
@@ -1019,10 +1135,10 @@ def export_predictions(
         return {"error": "Provide either images_dir or raster_path"}
     if images_dir is not None and raster_path is not None:
         return {"error": "Provide only one of images_dir or raster_path, not both"}
-    if raster_path is not None and (trait or calibration_labels_dir):
-        return {"error": "trait/calibration_labels_dir calibration is not supported for a "
-                         "raster_path export; deliver a calibrated per-plant count via "
-                         "deliver_orthomosaic_plant_counts instead."}
+    if raster_path is not None and calibration_labels_dir:
+        return {"error": "calibration_labels_dir is not supported for a raster_path export: "
+                         "block calibration (trait alone, see below) validates against the "
+                         "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
     if raster_path is not None:
         # The images_dir regime gets this for free from run_inference's own check; this regime
         # builds its predictor directly, so a missing file would otherwise raise uncaught.
@@ -1030,6 +1146,25 @@ def export_predictions(
             return {"error": f"Checkpoint not found: {checkpoint_path}"}
         if not Path(raster_path).is_file():
             return {"error": f"raster_path not found: {raster_path}"}
+
+    block_calibration_experiment_id = None
+    if raster_path is not None and trait:
+        from tcip_mcp.model_registry import resolve_model_identity
+        from tcip_mcp.pipelines.block_calibration import reserved_calibration_region_available
+
+        block_identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+        block_calibration_experiment_id = block_identity["experiment_id"]
+        if block_calibration_experiment_id is None or not reserved_calibration_region_available(
+            block_calibration_experiment_id
+        ):
+            return {"error": (
+                "trait calibration for a raster_path export requires the checkpoint's own "
+                "training experiment to have a spatial-strip split with a reserved calibration "
+                "region (train it with data.split.reserve_calibration_fraction set); this "
+                f"checkpoint's experiment_id ({block_calibration_experiment_id!r}) has none. "
+                "Deliver a calibrated per-plant count via deliver_orthomosaic_plant_counts "
+                "instead, or retrain with reserve_calibration_fraction set."
+            )}
 
     from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.prediction_buckets import (
@@ -1076,8 +1211,9 @@ def export_predictions(
             resolution=resolution, device=device, conf_threshold=conf_threshold,
             tile_size=tile_size, overlap=overlap, tile_batch_size=tile_batch_size,
             global_nms_iou=global_nms_iou, max_dets=max_dets, postprocess=postprocess,
-            require_masks=require_masks, experiment_id=experiment_id,
-            acknowledge_unvalidated=acknowledge_unvalidated,
+            require_masks=require_masks,
+            experiment_id=block_calibration_experiment_id or experiment_id,
+            acknowledge_unvalidated=acknowledge_unvalidated, trait=trait,
         )
 
     from tcip_mcp.pipelines.resolution import (
