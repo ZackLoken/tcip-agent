@@ -521,6 +521,32 @@ def test_opens_windowed_answers_false_for_an_unopenable_tiff(tmp_path: Path) -> 
     assert raster_source.opens_windowed(path, 3) is False
 
 
+def test_is_georeferenced_true_only_for_a_real_geotransform(tmp_path: Path) -> None:
+    """A raster with real ModelPixelScale/ModelTiepoint/GeoKeyDirectory tags (a stitched,
+    georectified orthomosaic) answers True; an ordinary capture with none of those tags (this
+    module's own fixtures, and an .npy, which has no tag mechanism at all) answers False,
+    regardless of pixel dimensions -- the decider is georeferencing, never size."""
+    plain_path = tmp_path / "plain.tif"
+    _write_striped_tiff(plain_path, _distinctive_array(24, 20), rowsperstrip=4)
+    assert raster_source.is_georeferenced(plain_path) is False
+
+    npy_path = tmp_path / "content.npy"
+    np.save(str(npy_path), _distinctive_array(24, 20))
+    assert raster_source.is_georeferenced(npy_path) is False
+
+    geo_path = tmp_path / "geo.tif"
+    geokeys = (1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 32615)  # UTM zone 15N
+    tifffile.imwrite(
+        str(geo_path), _distinctive_array(24, 20), photometric="rgb", rowsperstrip=4,
+        extratags=[
+            (33550, "d", 3, (1.0, 1.0, 0.0), False),
+            (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
+            (34735, "H", len(geokeys), geokeys, False),
+        ],
+    )
+    assert raster_source.is_georeferenced(geo_path) is True
+
+
 # ── Reads that were always valid and must stay so ────────────────────────
 
 
