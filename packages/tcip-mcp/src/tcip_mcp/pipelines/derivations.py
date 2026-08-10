@@ -377,6 +377,76 @@ def derive_sliver_frac(
     return float(min(max(raw, lo), hi))
 
 
+def derive_block_scale_px(
+    *, tile_size: int, gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
+    plants: "list | None" = None, raster_path: "str | Path | None" = None,
+) -> tuple[int, str]:
+    """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored
+    at ``tile_size`` (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`'s own hard floor
+    for a boundary buffer: a smaller gap cannot guarantee two bands never share pixels/context).
+
+    Two derivation paths:
+
+    - Plant-spacing-derived, only attempted when ``plants`` is supplied: this dataset's own
+      planting-grid pitch (``plant_mapping.grid_pitch_m``) converted to pixels via ``raster_path``'s
+      own Projected-CRS geotransform. A raster with no resolvable Projected geotransform (a
+      non-georeferenced source, or one whose CRS this module can't read) is not a refusal for this
+      path, it falls back to the GT-object-spacing path below instead. A ``plants`` list with
+      fewer than two georeferenced plants (``grid_pitch_m`` returns ``0.0``) *is* refused by name:
+      the caller explicitly asked for this derivation and it produced nothing usable, not a case
+      to quietly downgrade to a different mechanism it didn't ask for.
+    - GT-object-spacing-derived (``plants`` omitted, or the raster's geotransform unresolvable):
+      the median nearest-neighbor spacing of ``gt_boxes_per_image``'s own box centers, the same
+      per-image neighbor-distance primitive :func:`derive_localization_tolerance_frac` pools.
+
+    Raises ``ValueError`` naming exactly why when neither path can derive a scale (no ``plants``
+    and no image with two or more GT boxes to measure a spacing from).
+    """
+    import statistics
+
+    if plants:
+        from tcip_mcp.pipelines.postprocessing.plant_mapping import grid_pitch_m
+
+        pitch_m = grid_pitch_m(plants)
+        if pitch_m <= 0.0:
+            raise ValueError(
+                "derive_block_scale_px: plant grid pitch is underivable (fewer than two plants "
+                "in the supplied registry carry resolvable coordinates); pass plants=None to use "
+                "the GT-object-spacing-derived block scale instead of an insufficient registry"
+            )
+        if raster_path is not None:
+            from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+                GeoreferencingError, RotatedRasterError, read_geotransform,
+            )
+
+            try:
+                gt = read_geotransform(raster_path)
+            except (GeoreferencingError, RotatedRasterError):
+                gt = None
+            if gt is not None:
+                px_per_m = 2.0 / (abs(gt.pixel_scale_x) + abs(gt.pixel_scale_y))
+                pitch_px = pitch_m * px_per_m
+                return (
+                    max(tile_size, round(pitch_px)),
+                    f"plant grid pitch ({pitch_m:.2f}m) via projected geotransform, floored at "
+                    "tile_size",
+                )
+
+    gt_boxes_per_image = _validate_gt_boxes_per_image(
+        gt_boxes_per_image, fn_name="derive_block_scale_px")
+    dists: list[float] = []
+    for boxes in gt_boxes_per_image:
+        dists.extend(_neighbor_min_center_distances(boxes))
+    if not dists:
+        raise ValueError(
+            "derive_block_scale_px: no block scale is derivable (no plant registry supplied, or "
+            "its raster has no resolvable Projected geotransform, and the reserved region's own "
+            "GT has no image with two or more objects to measure a spacing from)"
+        )
+    spacing_px = statistics.median(dists)
+    return max(tile_size, round(spacing_px)), "GT object-spacing (median nearest-neighbor), floored at tile_size"
+
+
 def band_normalization_stats(
     image_paths: Sequence[str | Path], num_channels: int, *, max_images: int = 50,
 ) -> tuple[list[float], list[float]] | None:
