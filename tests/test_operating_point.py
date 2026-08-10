@@ -326,6 +326,63 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
                                                  "group_check": "performed"}
 
 
+def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monkeypatch):
+    """cal_rects/hold_rects default to None: an existing caller who never passes them (every
+    caller before this phase) gets exactly today's lexical spatial_strip check, unchanged."""
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_rects_noop"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(json.dumps({
+        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
+    }), encoding="utf-8")
+    cal, hold = _good_cal_holdout()
+
+    omitted = resolve_operating_point("catkin", tiled=False, dataset_hash="h1",
+                                      calibration_records=cal, holdout_records=hold,
+                                      staged_conf_floor=0.01, experiment_id="exp_rects_noop")
+    explicit_none = resolve_operating_point("catkin", tiled=False, dataset_hash="h1",
+                                            calibration_records=cal, holdout_records=hold,
+                                            staged_conf_floor=0.01, experiment_id="exp_rects_noop",
+                                            cal_rects=None, hold_rects=None)
+    assert (omitted.get("conf").sweep["train_disjointness"]
+           == explicit_none.get("conf").sweep["train_disjointness"]
+           == {"checked": True, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
+               "group_check": "spatial_strip"})
+
+
+def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path, monkeypatch):
+    """Given cal_rects/hold_rects against a spatial_strip split, resolve_operating_point threads
+    them into the geometric containment check instead of the lexical same-source one, catching a
+    leak the lexical check alone would miss (a rect whose own source name isn't a training stem
+    at all, but whose geometry spills into the persisted train region)."""
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_rects_geo"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "split.json").write_text(json.dumps({
+        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
+        "spatial": {
+            "train_region": [[0, 0, 500, 1000]],
+            "val_region": [[500, 0, 750, 1000]],
+            "test_region": [[750, 0, 1000, 1000]],
+        },
+    }), encoding="utf-8")
+    cal, hold = _good_cal_holdout()
+    cal_id = cal[0]["image_id"]
+
+    leaked = resolve_operating_point(
+        "catkin", tiled=False, dataset_hash="h1", calibration_records=cal, holdout_records=hold,
+        staged_conf_floor=0.01, experiment_id="exp_rects_geo",
+        cal_rects={cal_id: (400, 100, 600, 300)},  # straddles train/val: not fully contained
+    )
+    td = leaked.get("conf").sweep["train_disjointness"]
+    assert td["group_check"] == "spatial_strip_geometric"
+    assert td["leaked_groups"] == [cal_id]
+
+
 # --- tile_size gates the calibrated path too, not just raw_operating_point -----------------
 
 def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_with_valid_conf():
