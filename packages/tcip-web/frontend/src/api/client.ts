@@ -5,7 +5,11 @@
 
 import { asJson } from "@/api/http";
 import type { CanvasStateBody } from "@/lib/canvasSync";
-import type { CoverageGridResponse } from "@/lib/coverage";
+import type {
+  CompletenessRecord,
+  CompletenessTogglePostBody,
+  CoverageGridResponse,
+} from "@/lib/coverage";
 import type { CoveragePostBody, CoverageRecord } from "@/lib/coverageTracker";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
@@ -249,6 +253,21 @@ export const api = {
     // Union-merged server-side on a matching grid; a mismatched grid replaces the record.
     push: (body: CoveragePostBody) =>
       call<{ status: string }>("/api/coverage", { method: "POST", body: JSON.stringify(body) }),
+
+    // Every subject's region-completeness record for the raster at `path`, so the minimap can
+    // tell the active subject's attestations apart from another subject's.
+    completeness: (path: string, dataset_root: string | null) =>
+      call<{ by_subject: Record<string, CompletenessRecord> }>(
+        `/api/coverage/completeness?${q({ path, dataset_root })}`,
+      ),
+
+    // Toggles one cell's completeness for a subject; the server stamps or clears its content
+    // digest so a later edit inside the cell is told apart from an unedited attestation.
+    toggleCompleteness: (body: CompletenessTogglePostBody) =>
+      call<{ status: string; complete: boolean; cells_complete: string[] }>(
+        "/api/coverage/completeness",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   },
 
   state: {
