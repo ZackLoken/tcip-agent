@@ -165,6 +165,34 @@ def check_state(root: Path, findings: list) -> None:
                 findings.append(("warn", f"review shard {shard.name} references unknown image {img!r}"))
 
 
+def check_region_completeness(root: Path, findings: list) -> None:
+    """A region-completeness attestation whose cell content has since been edited or deleted is a
+    stale claim block calibration could otherwise trust silently; flag every disagreement between
+    an attested cell's stamped digest and its current annotation content."""
+    from tcip_mcp.dataset_layout import (
+        normalize_region_completeness_store, region_completeness_digest_path,
+        region_completeness_path,
+    )
+    from tcip_mcp.pipelines.region_completeness import stale_cells
+
+    store = normalize_region_completeness_store(_load(region_completeness_path(root)))
+    if not store:
+        return
+    digests = _load(region_completeness_digest_path(root))
+    if not isinstance(digests, dict):
+        digests = {}
+    for bucket, record in store.items():
+        subject = record.get("subject")
+        if not isinstance(subject, str) or not subject:
+            subject, _ = _bucket_subject_date(bucket)
+        stamped = digests.get(bucket)
+        stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+        if stale:
+            findings.append(("error", f"region completeness for {subject!r} on "
+                            f"{record.get('stem')!r}: cell(s) {stale} were attested complete "
+                            "but their annotation content has changed since; re-attest"))
+
+
 def check_trait_specs(root: Path, findings: list) -> None:
     from tcip_mcp.traits import load_trait_specs_with_errors
 
@@ -183,7 +211,8 @@ def main() -> int:
         return 2
 
     findings: list[tuple[str, str]] = []
-    for check in (check_negatives, check_registry, check_provenance, check_state, check_trait_specs):
+    for check in (check_negatives, check_registry, check_provenance, check_state,
+                 check_region_completeness, check_trait_specs):
         check(root, findings)
 
     rank = {"error": 0, "warn": 1, "info": 2}
