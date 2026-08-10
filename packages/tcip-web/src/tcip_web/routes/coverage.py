@@ -107,9 +107,12 @@ def get_grid(
     frontend consumes these cells verbatim and never re-derives them.
     """
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete
+    from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
     from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+    from tcip_mcp.pipelines.raster_source import opens_windowed
     from tcip_mcp.pipelines.reference_grid import (
         derive_coverage_tile_size,
+        derive_large_raster_grid_tile_size,
         grid_geometry,
         reference_cells,
     )
@@ -125,7 +128,14 @@ def get_grid(
     except BandGroupIncomplete as exc:
         raise HTTPException(409, str(exc)) from exc
     width, height = image_dimensions(source)
-    edge = tile_size if tile_size is not None else derive_coverage_tile_size(width, height)
+    # opens_windowed alone is a decode-cost predicate, not an orthomosaic-scale one; see
+    # docs/current-task.md for the open threshold question this size gate only partly closes.
+    if tile_size is not None:
+        edge = tile_size
+    elif opens_windowed(source, 3) and max(width, height) > DISPLAY_MAX_EDGE:
+        edge = derive_large_raster_grid_tile_size(width, height)
+    else:
+        edge = derive_coverage_tile_size(width, height)
     cells = reference_cells(width, height, edge, 0.0, clamp=True)
     return {
         **grid_geometry(width, height, edge, 0.0),
@@ -348,6 +358,8 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    # The digest write nests inside the completeness-store transaction, before the store's own
+    # write: stale_cells fails closed on a missing digest, so it must exist before an attestation.
     with file_transaction(completeness_path):
         store = normalize_region_completeness_store(read_json(completeness_path, default={}))
         existing = store.get(bucket)
@@ -359,6 +371,24 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
             cells_complete.add(payload.cell)
         else:
             cells_complete.discard(payload.cell)
+        with file_transaction(digest_path):
+            digests = read_json(digest_path, default={})
+            if not isinstance(digests, dict):
+                digests = {}
+            bucket_digests = digests.get(bucket)
+            bucket_digests = dict(bucket_digests) if isinstance(bucket_digests, dict) else {}
+            if replaced:
+                bucket_digests = {}
+            if complete:
+                label_path = annotation_path(root, date, stem)
+                annotations = read_annotations(str(label_path)) if label_path.is_file() else []
+                bucket_digests[payload.cell] = cell_annotation_digest(
+                    annotations, subject, cells_by_name[payload.cell])
+            else:
+                bucket_digests.pop(payload.cell, None)
+            digests[bucket] = bucket_digests
+            atomic_write_json(digest_path, digests)
+
         store[bucket] = {
             "grid": grid,
             "cells_complete": sorted(cells_complete),
@@ -369,24 +399,6 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
             "subject": subject,
         }
         atomic_write_json(completeness_path, store)
-
-    with file_transaction(digest_path):
-        digests = read_json(digest_path, default={})
-        if not isinstance(digests, dict):
-            digests = {}
-        bucket_digests = digests.get(bucket)
-        bucket_digests = dict(bucket_digests) if isinstance(bucket_digests, dict) else {}
-        if replaced:
-            bucket_digests = {}
-        if complete:
-            label_path = annotation_path(root, date, stem)
-            annotations = read_annotations(str(label_path)) if label_path.is_file() else []
-            bucket_digests[payload.cell] = cell_annotation_digest(
-                annotations, subject, cells_by_name[payload.cell])
-        else:
-            bucket_digests.pop(payload.cell, None)
-        digests[bucket] = bucket_digests
-        atomic_write_json(digest_path, digests)
 
     _audit_dataset_write(
         root, "gui_set_region_completeness",
