@@ -71,12 +71,46 @@ export function sameGrid(a: GridGeometry, b: GridGeometry): boolean {
   );
 }
 
+/** Whether two half-open pixel rects share any area (touching edges don't count). */
+export function rectsOverlap(a: PixelRect, b: PixelRect): boolean {
+  return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+}
+
+/** Whether `inner` sits entirely inside `outer` (both half-open pixel rects). */
+export function rectFullyInside(inner: PixelRect, outer: PixelRect): boolean {
+  return inner.x0 >= outer.x0 && inner.y0 >= outer.y0 && inner.x1 <= outer.x1 && inner.y1 <= outer.y1;
+}
+
 export function cellsIntersecting(cells: GridCell[], rect: PixelRect): GridCell[] {
-  return cells.filter((c) => c.x0 < rect.x1 && c.x1 > rect.x0 && c.y0 < rect.y1 && c.y1 > rect.y0);
+  return cells.filter((c) => rectsOverlap(c, rect));
 }
 
 export function cellContainedIn(cell: GridCell, rect: PixelRect): boolean {
-  return cell.x0 >= rect.x0 && cell.y0 >= rect.y0 && cell.x1 <= rect.x1 && cell.y1 <= rect.y1;
+  return rectFullyInside(cell, rect);
+}
+
+/**
+ * One cell divided into a `divisions` x `divisions` grid of equal (final row/column absorbing
+ * any remainder from integer division) sub-rects, exact and gapless. The coverage tracker's
+ * union-of-visibility sweep predicate needs this: "was the whole cell ever on screen at once" is
+ * unsatisfiable on a raster whose cells are bigger than any working viewport, but "was every one
+ * of its sub-cells, individually, fully on screen at some point this session" is the same fact
+ * at a grain small enough to actually accumulate through ordinary panning.
+ */
+export function subdivideCell(cell: GridCell, divisions: number): PixelRect[] {
+  const w = cell.x1 - cell.x0;
+  const h = cell.y1 - cell.y0;
+  const subs: PixelRect[] = [];
+  for (let row = 0; row < divisions; row++) {
+    const y0 = cell.y0 + Math.floor((h * row) / divisions);
+    const y1 = row === divisions - 1 ? cell.y1 : cell.y0 + Math.floor((h * (row + 1)) / divisions);
+    for (let col = 0; col < divisions; col++) {
+      const x0 = cell.x0 + Math.floor((w * col) / divisions);
+      const x1 = col === divisions - 1 ? cell.x1 : cell.x0 + Math.floor((w * (col + 1)) / divisions);
+      subs.push({ x0, y0, x1, y1 });
+    }
+  }
+  return subs;
 }
 
 /** One planned cell-aligned region serve. */
