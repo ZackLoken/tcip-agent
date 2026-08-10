@@ -200,6 +200,110 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     assert preflight_config(cfg)["valid"] is True
 
 
+# preflight_config's reserve_calibration_fraction feasibility check (N7): a training-launch-time
+# refusal through this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
+
+def _reserve_cal_big_single_source(root, width=4000, height=3000, tile_size=128):
+    """One large single-image detection source with real width/height, real GT scattered evenly
+    across it: enough for a feasible 4-way spatial-strip split."""
+    import torch
+    from torchvision.utils import save_image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir, labels_dir = root / "images", root / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stem = "mosaic"
+    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
+    boxes = [Annotation(subject="catkin", geometry=BBox(x, y, x + 20, y + 20))
+            for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, width, height, keep_empty=True)
+    return images_dir, labels_dir
+
+
+def test_preflight_reserve_calibration_fraction_wrong_task_flags_issue(tmp_path):
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "classification"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "split": {"reserve_calibration_fraction": 0.15}},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert any("reserve_calibration_fraction" in i and "has no effect" in i for i in r["issues"])
+
+
+def test_preflight_reserve_calibration_fraction_multi_stem_flags_issue(tmp_path):
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    from PIL import Image
+    Image.new("RGB", (32, 32)).save(images_dir / "a.png")
+    Image.new("RGB", (32, 32)).save(images_dir / "b.png")
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "tiling": {"enabled": True, "tile_size": 32},
+                 "split": {"reserve_calibration_fraction": 0.15}},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert any("reserve_calibration_fraction" in i and "multi-stem" in i for i in r["issues"])
+
+
+def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_smoke(tmp_path):
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+                 "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+                 # Nothing left for a real train fraction at this mosaic size.
+                 "split": {"val_ratio": 0.45, "test_ratio": 0.45, "seed": 1,
+                          "reserve_calibration_fraction": 0.3}},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg, smoke=True)
+    assert any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
+
+    # Without smoke, this specific geometry check doesn't run (needs a real dataset build).
+    r_no_smoke = preflight_config(cfg, smoke=False)
+    assert not any("reserve_calibration_fraction" in i for i in r_no_smoke["issues"])
+
+
+def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_path):
+    """The rail-admits-valid-work paired test: a real, feasible reserve_calibration_fraction
+    config produces no reserve_calibration_fraction issue under smoke=True."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "min_size": 128, "max_size": 256},
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+                 "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+                 "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
+                          "reserve_calibration_fraction": 0.15}},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg, smoke=True)
+    assert not any("reserve_calibration_fraction" in i for i in r["issues"]), r["issues"]
+
+
 # --------------------------------------------------------------------------
 # _apply_hpo_params: lr/weight_decay reach what the trainer actually reads
 # --------------------------------------------------------------------------
