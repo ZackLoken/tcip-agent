@@ -577,3 +577,232 @@ def test_a_channel_first_shaped_npy_is_left_alone_at_a_mismatched_count(tmp_path
     got = load_multiband(path, 3)
     assert got.shape == (5, 40, 24)
     assert np.array_equal(got, arr)
+
+
+# ── _RegionView: an offset read window over an already-open parent source ───────────────────
+
+
+def test_region_view_reports_the_rects_own_extent_not_the_parents(tmp_path: Path) -> None:
+    """The dims invariant this class exists to hold: height/width always report the rect it was
+    constructed over, never the full parent source's own dims."""
+    from tcip_mcp.pipelines.raster_source import _RegionView
+
+    arr = _distinctive_array(40, 30)
+    path = tmp_path / "region.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=4)
+    with open_raster(path, 3) as parent:
+        view = _RegionView(parent, Rect(5, 5, 25, 20))
+        assert (view.height, view.width) == (15, 20)
+        assert (view.height, view.width) != (parent.height, parent.width)
+        assert view.num_channels == parent.num_channels == 3
+
+
+def test_region_view_read_window_translates_into_the_parents_coordinate_space(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.raster_source import _RegionView
+
+    arr = _distinctive_array(40, 30)
+    path = tmp_path / "region.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=4)
+    with open_raster(path, 3) as parent:
+        view = _RegionView(parent, Rect(5, 5, 25, 20))
+        full = view.read_window(0, view.height, 0, view.width)
+        partial = view.read_window(2, 10, 3, 12)
+    assert np.array_equal(full, arr[5:20, 5:25])
+    assert np.array_equal(partial, arr[7:15, 8:17])
+
+
+def test_region_view_refuses_a_read_past_its_own_declared_bounds(tmp_path: Path) -> None:
+    """The one place this design could silently read real pixels beyond the region a caller
+    asked for: the parent source has plenty of real pixels past this rect (unlike a true
+    raster edge, which zero-pads), so the view's own bounds must be enforced explicitly, not
+    left as an emergent property of what happens to call it today."""
+    from tcip_mcp.pipelines.raster_source import _RegionView
+
+    arr = _distinctive_array(40, 30)
+    path = tmp_path / "region.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=4)
+    with open_raster(path, 3) as parent:
+        view = _RegionView(parent, Rect(5, 5, 25, 20))  # height=15, width=20
+        with pytest.raises(ValueError):
+            view.read_window(0, view.height + 1, 0, view.width)
+        with pytest.raises(ValueError):
+            view.read_window(0, view.height, 0, view.width + 1)
+
+
+def test_region_view_construction_refuses_a_rect_outside_the_parents_own_bounds(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.raster_source import _RegionView
+
+    arr = _distinctive_array(40, 30)
+    path = tmp_path / "region.tif"
+    _write_striped_tiff(path, arr, rowsperstrip=4)
+    with open_raster(path, 3) as parent:
+        with pytest.raises(ValueError):
+            _RegionView(parent, Rect(0, 0, 31, 20))  # x1=31 > parent.width=30
+
+
+# ── raster_content_identity: one raster file's own content identity ─────────────────────────
+
+
+_IDENTITY_KW = dict(seed=7, window_size=8, max_windows=50)
+
+
+def test_raster_content_identity_agrees_across_gdal_and_npy_backends_for_same_content(
+    tmp_path: Path,
+) -> None:
+    """Two entirely different backends (a GDAL-served GeoTIFF, a memory-mapped .npy) reading the
+    same pixel content resolve the same identity: the checksum is the discriminating term, never
+    a GDAL-only attribute."""
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    arr = _distinctive_array(24, 20)
+    tif_path = tmp_path / "content.tif"
+    npy_path = tmp_path / "content.npy"
+    _write_striped_tiff(tif_path, arr, rowsperstrip=4)
+    np.save(str(npy_path), arr)
+
+    tif_identity = raster_content_identity(tif_path, 3, **_IDENTITY_KW)
+    npy_identity = raster_content_identity(npy_path, 3, **_IDENTITY_KW)
+
+    assert tif_identity.pixel_checksum == npy_identity.pixel_checksum
+    assert (tif_identity.width, tif_identity.height, tif_identity.num_channels) == (
+        npy_identity.width, npy_identity.height, npy_identity.num_channels)
+    assert tif_identity.dtype == npy_identity.dtype
+
+
+def test_raster_content_identity_differs_for_different_content_same_dimensions(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    a_path, b_path = tmp_path / "a.npy", tmp_path / "b.npy"
+    np.save(str(a_path), _distinctive_array(24, 20))
+    np.save(str(b_path), np.zeros((24, 20, 3), dtype=np.uint8))
+
+    a_identity = raster_content_identity(a_path, 3, **_IDENTITY_KW)
+    b_identity = raster_content_identity(b_path, 3, **_IDENTITY_KW)
+
+    assert (a_identity.width, a_identity.height) == (b_identity.width, b_identity.height)
+    assert a_identity.pixel_checksum != b_identity.pixel_checksum
+
+
+def test_raster_content_identity_deterministic_under_matching_recorded_parameters(
+    tmp_path: Path,
+) -> None:
+    """A training-time and an export-time call agree when both recompute under the identity's own
+    recorded seed/window_size/max_windows -- the parameters that must travel with the identity."""
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    path = tmp_path / "content.npy"
+    np.save(str(path), _distinctive_array(30, 22))
+
+    first = raster_content_identity(path, 3, **_IDENTITY_KW)
+    second = raster_content_identity(
+        path, 3, seed=first.seed, window_size=first.window_size, max_windows=first.max_windows)
+
+    assert first.pixel_checksum == second.pixel_checksum
+    assert (first.seed, first.window_size, first.max_windows) == (7, 8, 50)
+
+
+def test_raster_content_identity_band_interpretations_present_only_on_gdal(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    tif_path = tmp_path / "content.tif"
+    npy_path = tmp_path / "content.npy"
+    arr = _distinctive_array(24, 20)
+    _write_striped_tiff(tif_path, arr, rowsperstrip=4)
+    np.save(str(npy_path), arr)
+
+    tif_identity = raster_content_identity(tif_path, 3, **_IDENTITY_KW)
+    npy_identity = raster_content_identity(npy_path, 3, **_IDENTITY_KW)
+
+    assert tif_identity.band_interpretations == ("red", "green", "blue")
+    assert npy_identity.band_interpretations is None
+
+
+def test_raster_content_identity_geotransform_optional_never_load_bearing(tmp_path: Path) -> None:
+    """A raster with no georeferencing tags (every fixture this module writes) still resolves a
+    fully usable identity: the geotransform term is absent, the checksum is not."""
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    tif_path = tmp_path / "content.tif"
+    _write_striped_tiff(tif_path, _distinctive_array(24, 20), rowsperstrip=4)
+
+    identity = raster_content_identity(tif_path, 3, **_IDENTITY_KW)
+    assert identity.geotransform is None
+    assert identity.pixel_checksum  # a real, usable identity despite no geotransform
+
+    npy_path = tmp_path / "content.npy"
+    np.save(str(npy_path), _distinctive_array(24, 20))
+    npy_identity = raster_content_identity(npy_path, 3, **_IDENTITY_KW)
+    assert npy_identity.geotransform is None  # not a GeoTIFF; still a fully usable identity
+
+
+def test_raster_content_identity_refuses_only_when_unopenable(tmp_path: Path) -> None:
+    from tcip_mcp.pipelines.raster_source import raster_content_identity
+
+    with pytest.raises(ValueError):
+        raster_content_identity(tmp_path / "nonexistent.npy", 3, **_IDENTITY_KW)
+
+
+# ── raster_identity_matches: the claim-scope comparison ──────────────────────────────────────
+
+
+def test_raster_identity_matches_same_file(tmp_path: Path) -> None:
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
+
+    path = tmp_path / "content.npy"
+    np.save(str(path), _distinctive_array(24, 20))
+    recorded = asdict(raster_content_identity(path, 3, **_IDENTITY_KW))
+    assert raster_identity_matches(recorded, path) is True
+
+
+def test_raster_identity_matches_false_for_different_content(tmp_path: Path) -> None:
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
+
+    a_path, b_path = tmp_path / "a.npy", tmp_path / "b.npy"
+    np.save(str(a_path), _distinctive_array(24, 20))
+    np.save(str(b_path), np.zeros((24, 20, 3), dtype=np.uint8))
+    recorded = asdict(raster_content_identity(a_path, 3, **_IDENTITY_KW))
+    assert raster_identity_matches(recorded, b_path) is False
+
+
+def test_raster_identity_matches_recomputes_under_the_recorded_parameters_not_a_new_default(
+    tmp_path: Path,
+) -> None:
+    """The exact regression the design calls out: comparing under each call's own default sampling
+    parameters (rather than the recorded ones) could false-refuse a genuinely identical raster.
+    Here a deliberately different ad-hoc seed/window_size would produce a different checksum
+    (since the sampled windows differ), so the match only holds because the recorded parameters,
+    not this call's own default, actually drove the comparison."""
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
+
+    path = tmp_path / "content.npy"
+    np.save(str(path), _distinctive_array(30, 22))
+    recorded = asdict(raster_content_identity(path, 3, seed=1, window_size=4, max_windows=3))
+    # A differently-parameterized fresh call would disagree on the checksum; matches() must not
+    # take that path, it must recompute under recorded's own seed/window_size/max_windows.
+    off_default = raster_content_identity(path, 3, seed=99, window_size=6, max_windows=2)
+    assert off_default.pixel_checksum != recorded["pixel_checksum"]
+    assert raster_identity_matches(recorded, path) is True
+
+
+def test_raster_identity_matches_raises_when_source_unopenable(tmp_path: Path) -> None:
+    from dataclasses import asdict
+
+    from tcip_mcp.pipelines.raster_source import raster_content_identity, raster_identity_matches
+
+    path = tmp_path / "content.npy"
+    np.save(str(path), _distinctive_array(24, 20))
+    recorded = asdict(raster_content_identity(path, 3, **_IDENTITY_KW))
+    with pytest.raises(ValueError):
+        raster_identity_matches(recorded, tmp_path / "nonexistent.npy")
