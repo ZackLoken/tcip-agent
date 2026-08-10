@@ -75,7 +75,7 @@ def test_clip_matches_the_per_box_reference_on_adversarial_geometries():
         for dtype in (np.float32, np.float64):
             b = boxes.astype(dtype)
             labels = np.arange(1, len(b) + 1, dtype=np.int64)
-            got = tiling.clip_boxes_to_tile(b, labels, 200, 200, 64, 3.0)
+            got = tiling.clip_boxes_to_tile(b, labels, 200, 200, 64, 64, 3.0)
             want = _clip_reference(b, labels, 200, 200, 64, 3.0)
             _assert_identical(got, want)
 
@@ -91,7 +91,7 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
         tile_x, tile_y = int(rng.integers(0, 300)), int(rng.integers(0, 300))
         min_box_size = float(rng.uniform(0, 20))
         for dtype in (np.float32, np.float64):
-            got = tiling.clip_boxes_to_tile(boxes.astype(dtype), labels, tile_x, tile_y, 128,
+            got = tiling.clip_boxes_to_tile(boxes.astype(dtype), labels, tile_x, tile_y, 128, 128,
                                             min_box_size)
             want = _clip_reference(boxes.astype(dtype), labels, tile_x, tile_y, 128,
                                    min_box_size)
@@ -114,7 +114,7 @@ def test_clip_semantics_stated_as_properties():
         tx, ty = int(rng.integers(0, 250)), int(rng.integers(0, 250))
         cutoff = float(rng.uniform(0, 25))
         out_boxes, out_labels = tiling.clip_boxes_to_tile(boxes, labels, tx, ty, tile_size,
-                                                          cutoff)
+                                                          tile_size, cutoff)
         expected = []
         for i, (bx1, by1, bx2, by2) in enumerate(boxes.tolist()):
             iw = min(bx2, tx + tile_size) - max(bx1, tx)
@@ -131,6 +131,32 @@ def test_clip_semantics_stated_as_properties():
                            atol=1e-4)
         if len(out_boxes):
             assert out_boxes.min() >= 0 and out_boxes.max() <= tile_size
+
+
+def test_clip_boxes_to_tile_square_call_is_byte_identical_to_the_square_only_reference():
+    """clip_boxes_to_tile(..., tile_w, tile_h, ...) at tile_w == tile_h == tile_size must match
+    the square-only reference this function generalized from exactly: the byte-identical
+    guarantee every existing square call site (clipped_boxes_per_tile included) depends on."""
+    tile_size = 64
+    boxes = np.concatenate([b for b in _ADVERSARIAL if b.size], axis=0)
+    labels = np.arange(1, len(boxes) + 1, dtype=np.int64)
+    got = tiling.clip_boxes_to_tile(boxes, labels, 200, 200, tile_size, tile_size, 3.0)
+    want = _clip_reference(boxes, labels, 200, 200, tile_size, 3.0)
+    _assert_identical(got, want)
+
+
+def test_clip_boxes_to_tile_rectangular_is_a_genuine_generalization():
+    """tile_w != tile_h clips against a real rectangle, not a silent square-only pass-through: a
+    box's visible slice is a 54x40 sliver clipped against a 64-wide square tile (dropped at
+    min_box_size=100), but the same box sits entirely inside a 300-wide rectangle at the same
+    tile_x/tile_y, unclipped and always kept regardless of size."""
+    boxes = np.array([[210.0, 210.0, 350.0, 250.0]])
+    labels = np.array([1])
+    square = tiling.clip_boxes_to_tile(boxes, labels, 200, 200, 64, 64, 100.0)
+    rect = tiling.clip_boxes_to_tile(boxes, labels, 200, 200, 300, 64, 100.0)
+    assert len(square[0]) == 0
+    assert len(rect[0]) == 1
+    assert np.allclose(rect[0][0], [10.0, 10.0, 150.0, 50.0])
 
 
 def test_bulk_clip_equals_the_per_tile_calls_over_a_grid():
