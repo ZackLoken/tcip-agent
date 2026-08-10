@@ -80,13 +80,14 @@ describe("CoverageTracker sweep", () => {
 });
 
 describe("CoverageTracker sub-cell union sweep", () => {
-  // The whole 320px cell never fits inside any 90px-wide viewport below: the drone-photo failure.
-  const BIG_CELL: GridCell = { name: "A1", x0: 0, y0: 0, x1: 320, y1: 320 };
-  const OTHER_CELL: GridCell = { name: "B1", x0: 320, y0: 0, x1: 640, y1: 320 };
+  // 512px, divisions derived from SUB_CELL_TARGET_PX=128 -> exactly 4 sub-cells per side (128px
+  // each): the whole cell never fits inside any of the 128px-wide viewports below.
+  const BIG_CELL: GridCell = { name: "A1", x0: 0, y0: 0, x1: 512, y1: 512 };
+  const OTHER_CELL: GridCell = { name: "B1", x0: 512, y0: 0, x1: 1024, y1: 512 };
   const BIG_GRID: GridGeometry = {
-    width: 640,
-    height: 320,
-    tile_size: 320,
+    width: 1024,
+    height: 512,
+    tile_size: 512,
     overlap: 0,
     cols: 2,
     rows: 1,
@@ -95,23 +96,23 @@ describe("CoverageTracker sub-cell union sweep", () => {
   it("sweeps a cell that never once fits fully in the viewport, once its sub-cells' union does", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
     tracker.noteAuthoringScale(1);
-    // Each pass is 90px wide (< the cell's 320px) but full height, so it fully contains a
-    // vertical strip of sub-cells, never the whole cell.
-    tracker.noteViewport({ x0: 0, y0: 0, x1: 90, y1: 320 }, 1);
+    // Each pass is one 128px sub-cell wide (< the cell's 512px) but full height, so it fully
+    // contains one column of sub-cells at a time, never the whole cell.
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 1);
     expect(tracker.swept.has("A1")).toBe(false);
-    tracker.noteViewport({ x0: 90, y0: 0, x1: 180, y1: 320 }, 1);
-    tracker.noteViewport({ x0: 180, y0: 0, x1: 270, y1: 320 }, 1);
-    expect(tracker.swept.has("A1")).toBe(false); // union so far: x in [0, 270) only
-    tracker.noteViewport({ x0: 270, y0: 0, x1: 360, y1: 320 }, 1); // reaches the far edge
+    tracker.noteViewport({ x0: 128, y0: 0, x1: 256, y1: 512 }, 1);
+    tracker.noteViewport({ x0: 256, y0: 0, x1: 384, y1: 512 }, 1);
+    expect(tracker.swept.has("A1")).toBe(false); // union so far: x in [0, 384) only
+    tracker.noteViewport({ x0: 384, y0: 0, x1: 512, y1: 512 }, 1); // reaches the far edge
     expect(tracker.swept.has("A1")).toBe(true);
   });
 
   it("does not sweep while the sub-cell union stays partial all session", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
     tracker.noteAuthoringScale(1);
-    // Always the same left-hand strip: the right portion's sub-cells are never seen.
+    // Always the same left-hand column: the rest of the cell's sub-cells are never seen.
     for (let i = 0; i < 5; i++) {
-      tracker.noteViewport({ x0: 0, y0: 0, x1: 90, y1: 320 }, 1);
+      tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 1);
     }
     expect(tracker.swept.has("A1")).toBe(false);
   });
@@ -119,13 +120,37 @@ describe("CoverageTracker sub-cell union sweep", () => {
   it("a late-arriving bar credits sub-cell union progress recorded before it existed", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
     // Panned across the whole cell at scale 1 before ever committing an annotation.
-    tracker.noteViewport({ x0: 0, y0: 0, x1: 90, y1: 320 }, 1);
-    tracker.noteViewport({ x0: 90, y0: 0, x1: 180, y1: 320 }, 1);
-    tracker.noteViewport({ x0: 180, y0: 0, x1: 270, y1: 320 }, 1);
-    tracker.noteViewport({ x0: 270, y0: 0, x1: 360, y1: 320 }, 1);
+    tracker.noteViewport({ x0: 0, y0: 0, x1: 128, y1: 512 }, 1);
+    tracker.noteViewport({ x0: 128, y0: 0, x1: 256, y1: 512 }, 1);
+    tracker.noteViewport({ x0: 256, y0: 0, x1: 384, y1: 512 }, 1);
+    tracker.noteViewport({ x0: 384, y0: 0, x1: 512, y1: 512 }, 1);
     expect(tracker.swept.has("A1")).toBe(false); // no bar yet
     tracker.noteAuthoringScale(0.5);
     expect(tracker.swept.has("A1")).toBe(true); // the pre-commit union already clears the bar
+  });
+
+  it("closes the large-raster-lattice gap: a viewport too narrow for the old fixed-32-division grain can now sweep", () => {
+    // Real ValleyFarm large-raster cell edge: the old fixed 32-division grain gave ~469px
+    // sub-cells (too big for this 300px viewport); the new ~127px per-cell derivation fits.
+    const edge = 14996;
+    const cell: GridCell = { name: "A1", x0: 0, y0: 0, x1: edge, y1: edge };
+    const other: GridCell = { name: "B1", x0: edge, y0: 0, x1: edge * 2, y1: edge };
+    const grid: GridGeometry = {
+      width: edge * 2,
+      height: edge,
+      tile_size: edge,
+      overlap: 0,
+      cols: 2,
+      rows: 1,
+    };
+    tracker.reset(KEY, grid, [cell, other]);
+    tracker.noteAuthoringScale(1);
+    const viewportWidth = 300; // comfortably below the old grain, above the new one
+    const stride = 100; // dense overlap, so no sub-cell can straddle a gap between passes
+    for (let x0 = 0; x0 < edge; x0 += stride) {
+      tracker.noteViewport({ x0, y0: 0, x1: Math.min(x0 + viewportWidth, edge), y1: edge }, 1);
+    }
+    expect(tracker.swept.has("A1")).toBe(true);
   });
 });
 
