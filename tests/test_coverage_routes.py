@@ -95,51 +95,109 @@ class TestGridRoute:
         self, client, dated_dataset,
     ):
         """A windowed source (``opens_windowed`` is a decode-cost predicate, true for any
-        GDAL-servable TIFF regardless of size) below the display-serve bound must still resolve
-        the ordinary lattice, not the large-raster one -- the exact regression an independent
-        review caught: an ordinary drone/ground TIFF capture is windowed too, and must not be
-        misrouted just because it's a TIFF."""
-        from tcip_mcp.pipelines.raster_source import opens_windowed
+        GDAL-servable TIFF regardless of size) with no georeferencing must still resolve the
+        ordinary lattice, not the large-raster one -- the exact regression an independent review
+        caught: an ordinary drone/ground TIFF capture is windowed too, and must not be misrouted
+        just because it's a TIFF."""
+        from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
         from tcip_mcp.pipelines.reference_grid import derive_coverage_tile_size
 
         _root, path = dated_dataset
         assert opens_windowed(path, 3) is True, \
-            "fixture must genuinely be windowed to prove the size gate, not the backend gate"
+            "fixture must genuinely be windowed to prove the georeferencing gate, not the backend gate"
+        assert is_georeferenced(path) is False
 
         got = _grid(client, path)
         assert got["tile_size"] == derive_coverage_tile_size(100, 80)
 
+    def test_tile_size_omitted_for_a_large_ungeoreferenced_source_still_derives_the_coverage_lattice(
+        self, client, tmp_path,
+    ):
+        """A large, windowed, but ungeoreferenced TIFF (an ordinary high-resolution drone/ground
+        photo saved as TIFF, no stitching) must resolve the ordinary lattice too: the decider is
+        real per-pixel georeferencing, never image size, per Zack's explicit direction."""
+        import tifffile
+
+        from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
+        from tcip_mcp.pipelines.reference_grid import derive_coverage_tile_size
+
+        width, height = 8000, 4500
+        img_dir = tmp_path / "ds" / "images" / "2026-03-01"
+        img_dir.mkdir(parents=True)
+        path = img_dir / "big_photo.tif"
+        arr = np.random.default_rng(0).integers(
+            0, 255, size=(height, width, 3), dtype=np.uint8)
+        tifffile.imwrite(str(path), arr, photometric="rgb", rowsperstrip=8)
+
+        assert opens_windowed(path, 3) is True
+        assert is_georeferenced(path) is False, \
+            "fixture must genuinely lack georeferencing to prove size alone doesn't route here"
+
+        got = _grid(client, str(path))
+        assert got["tile_size"] == derive_coverage_tile_size(width, height)
+
     def test_tile_size_omitted_for_a_large_raster_source_derives_the_large_raster_lattice(
         self, client, tmp_path,
     ):
-        """A large-raster (windowed, above the display-serve bound) source, a striped/tiled TIFF
-        GDAL serves without a whole decode, resolves ``derive_large_raster_grid_tile_size``
-        instead, the fixed-subdivision lattice, not the display-derived one."""
-        import tifffile
+        """A large, windowed, genuinely georeferenced source (a stitched, georectified
+        orthomosaic) resolves ``derive_large_raster_grid_tile_size`` instead, the fixed-
+        subdivision lattice, not the display-derived one."""
+        width, height = 4200, 2100
+        path = self._write_georeferenced_tiff(tmp_path, width, height)
 
-        from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
+        from tcip_mcp.pipelines.raster_source import is_georeferenced, opens_windowed
         from tcip_mcp.pipelines.reference_grid import (
             derive_coverage_tile_size,
             derive_large_raster_grid_tile_size,
         )
 
-        width, height = DISPLAY_MAX_EDGE + 100, 2100
-        img_dir = tmp_path / "ds" / "images" / "2026-03-01"
-        img_dir.mkdir(parents=True)
-        path = img_dir / "mosaic.tif"
-        arr = np.random.default_rng(0).integers(
-            0, 255, size=(height, width, 3), dtype=np.uint8)
-        tifffile.imwrite(str(path), arr, photometric="rgb", rowsperstrip=8)
-
-        from tcip_mcp.pipelines.raster_source import opens_windowed
-
         assert opens_windowed(path, 3) is True, \
             "fixture must genuinely trigger the windowed branch, not merely assert an untested case"
+        assert is_georeferenced(path) is True, \
+            "fixture must genuinely carry a real geotransform, not merely assert an untested case"
 
         got = _grid(client, str(path))
         expected_tile = derive_large_raster_grid_tile_size(width, height)
         assert got["tile_size"] == expected_tile
         assert got["tile_size"] != derive_coverage_tile_size(width, height)
+
+    def test_tile_size_omitted_for_a_small_georeferenced_source_derives_the_large_raster_lattice(
+        self, client, tmp_path,
+    ):
+        """A small georeferenced source still resolves the large-raster lattice: this platform's
+        own decision is that image size never drives this choice, only whether the raster is a
+        real georectified mosaic."""
+        width, height = 400, 300
+        path = self._write_georeferenced_tiff(tmp_path, width, height)
+
+        from tcip_mcp.pipelines.reference_grid import (
+            derive_coverage_tile_size,
+            derive_large_raster_grid_tile_size,
+        )
+
+        got = _grid(client, str(path))
+        assert got["tile_size"] == derive_large_raster_grid_tile_size(width, height)
+        assert got["tile_size"] != derive_coverage_tile_size(width, height)
+
+    @staticmethod
+    def _write_georeferenced_tiff(tmp_path: Path, width: int, height: int) -> str:
+        """A striped GeoTIFF GDAL serves windowed, carrying a real UTM affine geotransform."""
+        import tifffile
+
+        img_dir = tmp_path / "ds" / "images" / "2026-03-01"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        path = img_dir / "mosaic.tif"
+        arr = np.random.default_rng(0).integers(0, 255, size=(height, width, 3), dtype=np.uint8)
+        geokeys = (1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 32615)  # UTM zone 15N
+        tifffile.imwrite(
+            str(path), arr, photometric="rgb", rowsperstrip=8,
+            extratags=[
+                (33550, "d", 3, (1.0, 1.0, 0.0), False),
+                (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
+                (34735, "H", len(geokeys), geokeys, False),
+            ],
+        )
+        return str(path)
 
     def test_overlap_is_refused_naming_the_partition_contract(self, client, dated_dataset):
         _root, path = dated_dataset
