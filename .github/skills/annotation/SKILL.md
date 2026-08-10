@@ -94,7 +94,11 @@ The agent labels images by using a proposal engine for geometry and its multimod
 classification and QA.
 
 Full workflow:
-1. `propose_annotations(image_path, engine='sam')` → the engine proposes candidates, renders a numbered overlay
+1. `propose_annotations(image_path, engine='sam')` → the engine proposes candidates, renders a
+   numbered overlay. `grid_cells=[...]` (with `tile_size`, `overlap` echoed by
+   `overlay_reference_grid`) restricts the pass to the named cells' bounding rect instead of the
+   whole frame, useful on a large or crowded image; the engine itself never sees a region, only a
+   crop, and the returned candidates are already in full-frame coordinates
 2. Agent `view_image` on overlay → identifies and classifies each candidate
 3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → stages
    accepted candidates as predictions (`created_by=<engine>`) in the predictions tree for human
@@ -122,7 +126,7 @@ Grid cell system:
 
 | Tool | Role | Phase |
 |------|------|-------|
-| `propose_annotations` | Propose candidate masks with a chosen engine | Discovery |
+| `propose_annotations` | Propose candidate masks with a chosen engine, whole-frame or `grid_cells`-scoped | Discovery |
 | `accept_proposals` | Stage classified candidates as predictions | Classification |
 | `overlay_reference_grid` | Spatial reference for corrections | Correction |
 | `segment_prompt(grid_cells=...)` | Targeted segmentation | Correction |
