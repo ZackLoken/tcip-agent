@@ -875,7 +875,7 @@ def _export_predictions_raster(
         conf_param = block_bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
                 else conf_param.unvalidated_value(acknowledge_unvalidated=True))
-        applied_nms_iou = float(block_bundle.get("cross_tile_nms")._raw or global_nms_iou)
+        applied_nms_iou = float(block_bundle.get("cross_tile_nms").value)
 
         # Reset from the calibration-time floor to the real, calibrated point (full-frame cap
         # committed to None below, never the block bundle's own band-scoped density-derived one).
