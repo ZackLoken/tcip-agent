@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  cellContainedIn,
   cellsIntersecting,
   completeWarningMessage,
   effectiveComplete,
   indexCells,
   planRegionFetches,
+  rectFullyInside,
   servedCellAtNative,
   stepUnsweptCell,
   subdivideCell,
@@ -35,19 +35,19 @@ describe("cell rect predicates", () => {
         .sort(),
     ).toEqual(["A1", "A2", "B1", "B2", "C1", "C2"]);
     expect(
-      cellContainedIn(
+      rectFullyInside(
         CELLS.find((c) => c.name === "B1")!,
         viewport,
       ),
     ).toBe(true);
     expect(
-      cellContainedIn(
+      rectFullyInside(
         CELLS.find((c) => c.name === "A1")!,
         viewport,
       ),
     ).toBe(false);
     expect(
-      cellContainedIn(
+      rectFullyInside(
         CELLS.find((c) => c.name === "B2")!,
         viewport,
       ),
@@ -72,15 +72,26 @@ describe("subdivideCell", () => {
     }
   });
 
-  it("absorbs the remainder into the last row/column on a non-divisible size", () => {
+  it("tiles a non-divisible size gaplessly, every sub-cell fully inside the parent", () => {
     const cell: GridCell = { name: "A1", x0: 0, y0: 0, x1: 10, y1: 10 };
     const subs = subdivideCell(cell, 3);
     expect(subs).toHaveLength(9);
-    // Every sub-cell still lies fully inside the parent, and the last column/row reaches the edge.
     for (const s of subs) {
       expect(s.x0 >= cell.x0 && s.x1 <= cell.x1 && s.y0 >= cell.y0 && s.y1 <= cell.y1).toBe(true);
     }
-    expect(subs[8]).toEqual({ x0: 6, y0: 6, x1: 10, y1: 10 });
+    expect(subs[8]).toEqual({ x0: 6, y0: 6, x1: 10, y1: 10 }); // last sub-cell reaches the exact edge
+  });
+
+  it("distributes any remainder across the grid rather than concentrating it in one final cell", () => {
+    // 100 / 32 = 3.125: floor-indexed boundaries put the extra pixel in several scattered
+    // sub-cells (widths 3 or 4), not piled entirely into the last row/column.
+    const cell: GridCell = { name: "A1", x0: 0, y0: 0, x1: 100, y1: 100 };
+    const subs = subdivideCell(cell, 32);
+    const rowWidths = subs.slice(0, 32).map((s) => s.x1 - s.x0);
+    const oversized = rowWidths.filter((w) => w === 4).length;
+    expect(oversized).toBeGreaterThan(1); // more than just the last slot
+    expect(rowWidths[31]).toBe(4); // the last slot is still one of them, snapped to the exact edge
+    expect(rowWidths.reduce((a, b) => a + b, 0)).toBe(100);
   });
 });
 
@@ -260,7 +271,8 @@ describe("completeWarningMessage", () => {
   it("states cells and scale, no attention claim", () => {
     const msg = completeWarningMessage({ unsweptCount: 14, total: 35, bar: 0.35 });
     expect(msg).toBe(
-      "Complete: 14 of 35 grid cells were never fully on screen at 35% zoom or closer this session.",
+      "Complete: 14 of 35 grid cells were never fully seen, in any combination of views, " +
+        "at 35% zoom or closer this session.",
     );
   });
 });
