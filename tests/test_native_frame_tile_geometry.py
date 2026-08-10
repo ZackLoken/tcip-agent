@@ -42,12 +42,12 @@ class _MiddleHalfDetector(torch.nn.Module):
     tensor, whatever ``min_size`` is, which is what makes a doubled correction visible.
     """
 
-    def __init__(self, min_size: int, max_size: int) -> None:
+    def __init__(self, min_size: int, max_size: int, channels: int = 3) -> None:
         super().__init__()
         from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
         self.transform = GeneralizedRCNNTransform(
-            min_size, max_size, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+            min_size, max_size, [0.0] * channels, [1.0] * channels)
 
     def forward(self, images):
         original_sizes = [(int(im.shape[-2]), int(im.shape[-1])) for im in images]
@@ -257,6 +257,67 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
                            source_label="raster")
 
     assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
+
+
+def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(caplog):
+    """A windowed 4-band reader whose own band_interpretations declares the 4th band alpha (the
+    real signal a GDAL-served orthomosaic carries, e.g. raster_source.GdalSource) gets the
+    recorded resize applied and undone exactly like the 3-band case: the alpha-vs-spectral
+    ambiguity to_pil_if_faithful exists for must not silently disable this tier for a genuinely
+    alpha-bearing 4-band source. The fake detector is scale-invariant (always the middle 50% of
+    whatever tensor it is handed), so box equality alone can't tell "resized" from "skipped" --
+    the absence of the skip warning is the signal that actually distinguishes them, the same
+    signal test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels checks for its
+    presence."""
+    import logging
+
+    import numpy as np
+
+    class _Reader:
+        height = IMAGE
+        width = IMAGE
+        num_channels = 4
+        band_interpretations = ("red", "green", "blue", "alpha")
+
+        def read_window(self, y0, y1, x0, x1):
+            return np.full((y1 - y0, x1 - x0, 4), 120, dtype=np.uint8)
+
+    pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333, channels=4))
+    pred.in_chans = 4
+
+    with caplog.at_level(logging.WARNING):
+        r = pred.predict_tiled(_Reader(), tile_size=TILE, overlap=0.0, tile_resize=(128, 96),
+                               source_label="raster")
+
+    assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
+    assert not any("recorded train-time resize" in m for m in caplog.messages)
+
+
+def test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels(caplog):
+    """A windowed 4-band reader with no band_interpretations fact (an .npy-backed reader, or a
+    GDAL file whose 4th band carries no alpha tag) must not be guessed into RGBA: the recorded
+    resize is skipped, reported the same way the uint16/5-band case already is, not silently."""
+    import logging
+
+    import numpy as np
+
+    class _Reader:
+        height = IMAGE
+        width = IMAGE
+        num_channels = 4
+
+        def read_window(self, y0, y1, x0, x1):
+            return np.full((y1 - y0, x1 - x0, 4), 120, dtype=np.uint8)
+
+    pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333, channels=4))
+    pred.in_chans = 4
+
+    with caplog.at_level(logging.WARNING):
+        r = pred.predict_tiled(_Reader(), tile_size=TILE, overlap=0.0, tile_resize=(128, 96),
+                               source_label="raster")
+
+    assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
+    assert any("recorded train-time resize" in m for m in caplog.messages)
 
 
 def test_mask_patches_come_back_at_the_native_tile_size(tmp_path):
