@@ -89,3 +89,7 @@ Thumbs.db
 tensorboard_runs/
 *.zip
 /.review-corpus
+
+# Papers cited in references/: not tracked (redistribution of paywalled PDFs, and size).
+# The metadata, quotes, and anchors beside them are tracked and CI-checkable.
+references/pdf/
