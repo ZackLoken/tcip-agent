@@ -127,7 +127,7 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
             "stronger platform-change signal than one project's own recurrence."
         )
         for word, n_projects in cross_themes:
-            lines.append(f"- **{word}**: {n_projects} projects")
+            lines.append(f"- {word}: {n_projects} projects")
     else:
         lines.append(
             "\n## Cross-project recurring themes\nNone found (or only one project has data)."
@@ -178,7 +178,7 @@ def build_worksheet(project_root: Path) -> str:
     if themes:
         lines.append("\n## Recurring themes (candidates for a skill line or a CLAUDE.md rule)")
         for word, n in themes:
-            lines.append(f"- **{word}** ×{n}")
+            lines.append(f"- {word} ×{n}")
 
     disagreements = [r for r in reports if r.get("user_disagreement")]
     if disagreements:

@@ -92,18 +92,18 @@ Port discovery inside MCP tools: `TCIP_WEB_PORT` env > `.tcip/state/web_port.txt
 Conscious calls for this single-operator desktop GUI (recorded so they're not
 re-litigated):
 
-- **Dark-only theme.** No light mode or theme toggle: the palette is the SI dark
+- Dark-only theme. No light mode or theme toggle: the palette is the SI dark
   tokens + `color-scheme: dark`. (The old inert `class="dark"` was removed; no
   Tailwind `dark:` variants are used.)
-- **Accessibility bar.** The core flows are keyboard-navigable (shortcut map above;
-  focusable native controls). Full ARIA/screen-reader support is **not** targeted for
+- Accessibility bar. The core flows are keyboard-navigable (shortcut map above;
+  focusable native controls). Full ARIA/screen-reader support is not targeted for
   this local single-user tool; revisit if it's ever shipped to broader users.
-- **Touch / pen: not supported.** The annotation canvas is mouse-only (wheel-zoom,
+- Touch / pen: not supported. The annotation canvas is mouse-only (wheel-zoom,
   middle-drag pan, click-to-draw). Field-tablet (touch/pen) annotation is a known
   limitation and future work, not a regression.
-- **Sourcemaps.** The shipped `static/` bundle is built **without** sourcemaps (leaner
+- Sourcemaps. The shipped `static/` bundle is built without sourcemaps (leaner
   wheel). Use `npm run dev` (HMR + sourcemaps) to debug.
-- **Trust boundary.** Loopback bind (default `127.0.0.1`) is frictionless with no auth;
+- Trust boundary. Loopback bind (default `127.0.0.1`) is frictionless with no auth;
   cross-site WS reads are blocked (Origin check) and DNS-rebinding is blocked
   (TrustedHost). Binding a non-loopback host is refused unless `TCIP_WEB_ALLOW_INSECURE=1`
   (it would expose filesystem browsing + writes with no login). Token auth for an
@@ -114,7 +114,7 @@ re-litigated):
 `STATIC_DIR` resolves the built frontend from either the installed package
 (`tcip_web/static/`) or the src-layout checkout (`packages/tcip-web/static/`). Running
 from a checkout (`python -m tcip_web`) needs only `npm run build` (writes
-`packages/tcip-web/static/`). To ship the GUI **inside** a wheel, build the frontend
+`packages/tcip-web/static/`). To ship the GUI inside a wheel, build the frontend
 first, then include the built `static/` at `tcip_web/static/` in the wheel (e.g. a
 hatch `force-include`). Build the frontend before building the wheel, or the wheel will
 ship API-only and `/` returns a 503 with build instructions.

@@ -51,8 +51,8 @@ requires per-band `image_mean`/`image_std` (ImageNet's 3-element defaults silent
 `derivations.band_normalization_stats` and pass them through `builder_kwargs` to `build_detector`,
 which refuses to build without them rather than normalizing against numbers it picked. Detectors are built by the plain `build_detector` (+
 `_build_faster_rcnn`/`_build_fcos`/`_build_retinanet`/`_build_mask_rcnn`) that bespoke
-model code imports directly, and `instance_seg` is real (Mask R-CNN). **3D point clouds
-(LiDAR / SfM) are not built** and carry no scaffolding: there is no point-cloud
+model code imports directly, and `instance_seg` is real (Mask R-CNN). 3D point clouds
+(LiDAR / SfM) are not built and carry no scaffolding: there is no point-cloud
 dataset/loader or task type; that's new work, not a config flag. See Roadmap in README.
 
 Three processes, one shared `.tcip/` state dir (diagram: `README.md` § Architecture).
@@ -77,7 +77,7 @@ Your default failure mode is pushing through friction by guessing: filling
 blanks silently, treating an uncertain read as settled. In a scientific pipeline
 that silently corrupts results and compounds across sessions. So:
 
-- **Scope the project-data ritual before running it.** A session about platform/codebase work
+- Scope the project-data ritual before running it. A session about platform/codebase work
   (no project data in play) skips `load_project_memory`/`inspect_project`/`doctor.py` entirely;
   running it anyway just doctors an unrelated project's data. When the session is project-scoped,
   don't trust the active-project marker (`workspace.py`'s `.active` file) as proof it names the
@@ -93,15 +93,15 @@ that silently corrupts results and compounds across sessions. So:
   prior context, then `inspect_project`, then run `python scripts/doctor.py <project_root>`, which
   flags data-state inconsistencies (unconfirmed negatives, registry pollution, provenance smells)
   that code reads miss. Report anything it finds via `claude_reports` before acting on the data.
-- **Surface friction with `claude_reports` the moment you hit it**: missing tool,
+- Surface friction with `claude_reports` the moment you hit it: missing tool,
   ambiguous data, missing path, unclear domain concept, an op that failed 2–3×, a
   decision needing human judgment, or behavior that surprised you. The free-text
   `detail` matters more than the category. Over-report; a report is cheap, a silent
   guess is not. A mandated action that is blocked or fails (`doctor.py` won't run, a
   ritual MCP call errors, a guard denies a read-only command) is itself always a
   `claude_reports`, not a silent skip.
-- **End substantial work** (even if incomplete) with `project_retrospective`.
-- **Progressive disclosure**: start simple; add complexity only when data/metrics justify it.
+- End substantial work (even if incomplete) with `project_retrospective`.
+- Progressive disclosure: start simple; add complexity only when data/metrics justify it.
 
 Never state a fact about this codebase you have not just executed or read. Not "this is covered",
 not "this would fail before the fix", not "nothing calls this". Run it, grep it, or say you did not.
@@ -143,13 +143,13 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
 
 ## Invariants that protect the science (hard rules)
 
-- **Measurement integrity: the highest rule.** This is a computer-vision *and* a
+- Measurement integrity: the highest rule. This is a computer-vision *and* a
   breeding platform: a confident, precise, wrong phenotype is the worst thing it can
   produce. So:
-  - **The domain expert defines each trait's measurement**, grounded in the imagery. You
+  - The domain expert defines each trait's measurement, grounded in the imagery. You
     (Claude) are the CV engineer who operationalizes *their* definition; never substitute
     your own. If the definition is unclear, stop and ask; do not infer it.
-  - **Geometry measures dimensions; it can't replace the CV step or proxy a state.** Area /
+  - Geometry measures dimensions; it can't replace the CV step or proxy a state. Area /
     length / width computed on a *validated mask* (with scale calibration) is a valid
     measurement: that is how a dimensional trait (leaf area, organ length, canopy width) is
     measured. What's invalid: using crude geometry (a bounding box's height or aspect ratio)
@@ -157,25 +157,25 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
     biological *state/stage* (elongated vs dormant, diseased vs healthy) that needs a real
     visual call. If a trait can't yet be measured validly from pixels, say so; don't
     manufacture a number.
-  - **Validate the measurement before producing any downstream result** (curve, milestone,
+  - Validate the measurement before producing any downstream result (curve, milestone,
     CSV, delivery): the expert confirms the model has the trait's measurement straight on a
     *reference sized to the trait*: GT annotations, or a breeder-confirmed sample of the
     model's own outputs (the review-confirmation loop, a valid lighter path), not dense GT
     for every trait. Either reference passes the *identical* disjoint-split + count-bias
     gate, and the provenance records which one validated. No validated measurement → no
     result.
-  - **Never commit unvalidated domain logic as if it were a definition.** Provisional logic
+  - Never commit unvalidated domain logic as if it were a definition. Provisional logic
     is flagged provisional and validated or removed; it must not silently become
     institutional truth that the next session reuses.
-- **Scientific defensibility.** Every phenotype is reproducible and auditable end to end: a
+- Scientific defensibility. Every phenotype is reproducible and auditable end to end: a
   reviewer can reconstruct exactly how a number was produced (data → model+env → predictions →
   operating point → measurement). Parameters are derived from the data at runtime, never frozen
   constants wrong on the next dataset.
-- **Agent-legible and breeder-coherent.** The system must be usable by the agent (discoverable
+- Agent-legible and breeder-coherent. The system must be usable by the agent (discoverable
   toolkit, docs that match the code) and must guide the breeder without stranding them. The
   breeder's only surface is the browser GUI, and their clarity and flow through it are the product
   from their side, same weight as the agent's own reasoning surface.
-- **A subject is not a trait.** `subject` names an object class that must be isolated: old code
+- A subject is not a trait. `subject` names an object class that must be isolated: old code
   or docs may still say `campaign` or `annotation_type` — pre-rename terms for `subject`, backend
   and web layer alike. On disk, labels are one file per image
   (`annotations/<date>/<stem>.json`, see `dataset_layout.py`) holding every subject's annotation
@@ -184,26 +184,31 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   (catkins, for `catkin_50per_date`); often it is an enabling object no trait names: a *bush*
   isolated so anything can be aggregated per plant, a *leaf* isolated before leaf area is measured.
   So subject names are not governed by `crops.yml` and must not be validated against it.
-- **No pilot vocabulary as framing: no trait, crop, or measurement-shape is the exemplar.** A
+- No pilot vocabulary as framing: no trait, crop, or measurement-shape is the exemplar. A
   trait's own vocabulary (a name, a positive/negative state, a column prefix) must never become
   the name of a general mechanism, in comments or in identifiers alike: a type/function/variable/
   file name that encodes one trait's vocabulary for a concept every registered trait must use is
   the same failure as a comment that frames it that way. Name the general concept; thread the real
   trait through as data, resolved from the project's own registry, never hardcoded or assumed. A
   concrete trait is fine as one clearly-marked `e.g.` example; it is not fine as the thing itself.
-- **A negative is empty labels + an explicit human Complete** (the `image_status.json` store).
-  An empty label file alone is never a negative (it may be emptied mid-work) and never trains
-  as one. Don't delete empty label files without asking.
-- **Never train or evaluate on an unconfirmed format.** If `read_annotations`
+- A negative is an empty label file plus a human marking that image done with nothing on it.
+  The status token recorded for it is `"negative"`; the token for a finished image that does have
+  content is `"complete"`. Two distinct values: `"complete"` is not a weaker negative, it is the
+  opposite, so anything reading it as a confirmed negative trains populated images as empty. The
+  store is `<dataset_root>/.tcip/state/image_status.json`, resolved through `image_status_path` and
+  never reconstructed locally, and a confirmation is scoped to one subject on one image. An empty
+  label file alone is never a negative (it may be emptied mid-work) and never trains as one. Don't
+  delete empty label files without asking.
+- Never train or evaluate on an unconfirmed format. If `read_annotations`
   cannot determine the format it refuses rather than guessing: an undetected
   mismatch makes real annotations read as empty negatives.
-- **State changes go through `@audited` MCP tools.** `.tcip/audit.jsonl` is the
+- State changes go through `@audited` MCP tools. `.tcip/audit.jsonl` is the
   append-only record; don't route mutations around it.
-- **Experiments are immutable.** Each run is `.tcip/experiments/<id>/`
+- Experiments are immutable. Each run is `.tcip/experiments/<id>/`
   (config/metrics/artifacts/lineage). New run; don't overwrite history.
-- **Confirm before destructive/outward actions** (deleting labels, overwriting
+- Confirm before destructive/outward actions (deleting labels, overwriting
   weights, exporting deliverables). Approval for one doesn't extend to the next.
-- **No backward compatibility. The platform is pre-release and has no users.** Every migration path,
+- No backward compatibility. The platform is pre-release and has no users. Every migration path,
   fallback, quarantine, or "legacy" shim protects data that cannot exist yet; delete such code on
   sight rather than preserving it. Two different things wear the word "legacy": TCIP's own history
   (delete it) and other tools' formats or browser APIs (interop, keep it, but do not call it legacy).
@@ -213,17 +218,17 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   From that point, a schema/format change needs an actual migration path (this file's job then is to
   say how to write one safely, not to forbid it) and "no users yet" is no longer a fact you can cite.
   Whoever notices real user data exists updates this bullet, not just their own PR.
-- **Enumerate the consumers before deleting anything.** Grep the symbol, the filename, the config
+- Enumerate the consumers before deleting anything. Grep the symbol, the filename, the config
   key. A deletion whose assertion has no new home was a fact, not clutter.
-- **When two code paths must agree, call one from the other.** Never write a second implementation
+- When two code paths must agree, call one from the other. Never write a second implementation
   of the agreement: a smoke batch mirroring the training batch, a statistic re-deriving a scale the
   loader already applies, a reader re-parsing a store another reader normalizes. The copy drifts
   silently and is the most repeated defect class in this repo. A consistency check whose two sides
   share an implementation proves nothing.
-- **A rail must admit valid work, not only reject invalid work.** Every refusal ships with a test
+- A rail must admit valid work, not only reject invalid work. Every refusal ships with a test
   proving a legitimate call still succeeds. When a change's theme is "stop being permissive", the
   predictable failure is refusing things that were always fine.
-- **No silent fallback when required information is missing: require it explicitly, or refuse.** A
+- No silent fallback when required information is missing: require it explicitly, or refuse. A
   guessed/best-effort value that can reach a delivered result (a filename-parsed plant ID standing in
   for real identity resolution, or anything shaped like it) is a fabrication with a warning log
   attached, not a mitigation. When a required identity or measurement input isn't supplied, raise and
@@ -232,8 +237,8 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
 
 ## Pipelines & models
 
-- **No universal pipeline**: derive the decomposition from the data in hand (see `pipeline-design` skill).
-- **One build path.** You write an `nn.Module` (from scratch or by importing the plain
+- No universal pipeline: derive the decomposition from the data in hand (see `pipeline-design` skill).
+- One build path. You write an `nn.Module` (from scratch or by importing the plain
   building blocks: FPN/PAN necks, the heads, losses, backbone wrappers, `build_detector`)
   plus a `train(ctx)` loop, built via `model_source` → `build_model`, proven by
   `model_contract` (`check_model_contract`/`overfit_check`), run through the audited
@@ -241,7 +246,7 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   `toolkit-inventory` skill maps the pieces to compose: the `build_detector`/`build_loss`/task
   string names, the heads/necks/backbones, the derivations, the `ctx` craft library, and the
   `model_source`/`training_source`/`dataset_source` seams.
-- **Parameters: derive, don't pin.** When a threshold or operating point varies by
+- Parameters: derive, don't pin. When a threshold or operating point varies by
   dataset / model / trait (conf, IoU-for-a-hit, NMS, tile, anchors, `max_dets`), the deliverable
   is never the *value*: not one you pick, not one you derive from the current dataset and freeze
   "for future data" (a constant with extra steps, wrong on the next). Build the agent's capability
@@ -297,16 +302,16 @@ index (counts exceeding the real on-disk file total), which is worse than just w
 
 ## Conventions
 
-- **Lazy-import** torch/torchvision inside function bodies (fast MCP startup).
+- Lazy-import torch/torchvision inside function bodies (fast MCP startup).
 - MCP tools live in `packages/tcip-mcp/src/tcip_mcp/tools/`, decorated `@mcp.tool()` + `@audited`.
-- **Prefer a logged script in `scripts/` over a new MCP tool**: this repo has tool
+- Prefer a logged script in `scripts/` over a new MCP tool: this repo has tool
   bloat, not tool shortage. Add a tool only for an audit seam, long-running
   infrastructure, or domain knowledge the agent lacks.
 - Crop traits are controlled vocabulary in `.github/skills/crops/`; verify there before asserting.
 - Match surrounding code style. (Comment/emphasis style is a global rule, see global `CLAUDE.md`;
   this bullet is this repo's own elaboration of it, not a duplicate; read both.)
-- **Every piece of prose this repo ships is for whoever reads it next, never a changelog of the work
-  session that wrote it.** Covers comments, docstrings, every string literal meant to be read as
+- Every piece of prose this repo ships is for whoever reads it next, never a changelog of the work
+  session that wrote it. Covers comments, docstrings, every string literal meant to be read as
   prose (log/error messages, toast/UI text, test names and descriptions), and file/module names,
   everywhere in the repo, not just `packages/*/src`/`tests/`: `scripts/*.py`, `README.md`,
   `.github/skills/`, and package `CLAUDE.md` files are in scope too. Exempt: data values (a test
@@ -317,7 +322,7 @@ index (counts exceeding the real on-disk file total), which is worse than just w
     tracking), including in file and module names, which a content-only grep will never find.
   - An inline date a decision was made.
   - All-caps or markdown-bold used for emphasis (write "not"/"never", not "NOT"/"NEVER" or
-    "**not**"), the global rule restated here because it kept recurring.
+    "not"), the global rule restated here because it kept recurring.
   - Em dashes, anywhere in that prose.
 
   If a real, non-obvious technical fact survives once that framing is stripped, state it plainly
