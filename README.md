@@ -206,6 +206,6 @@ Not built yet (contributions/experiments welcome):
 
 ## License
 
-TCIP Agent is released under the [PolyForm Noncommercial License 1.0.0](LICENSE)
-(© Zack Loken). Bundled third-party components (e.g. timm, SAM2 under Apache-2.0)
-are attributed in [NOTICE](NOTICE).
+TCIP Agent is released under the [Apache License 2.0](LICENSE) (© 2026 Zack Loken).
+Commercial use is permitted. Bundled third-party components (e.g. timm, SAM2, also
+under Apache-2.0) are attributed in [NOTICE](NOTICE).
