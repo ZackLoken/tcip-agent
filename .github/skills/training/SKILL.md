@@ -139,12 +139,11 @@ task/data; match them to the space and budget; the defaults are a starting point
 run_hpo(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
         output_dir="runs/hpo_1")
 ```
-- `search_alg`: `random`/`grid` (native) or a backend when installed: `optuna`, `bayesopt`,
-  `hyperopt`, `nevergrad`, `ax`, `hebo`, `zoopt`, `bohb`. An uninstalled pick errors clearly
-  (never silently swapped). Call `hpo.available_search_algs()` for the live list on this box.
-- `scheduler`: `asha`, `hyperband`, `bohb` (pair with the `bohb` searcher), `pbt`, `median`,
-  or `none` to run every trial to completion. `grace_period`/`reduction_factor` tune the
-  halving schedulers.
+- `search_alg`: `random`/`grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, `nevergrad`,
+  `ax`, all installed by default. An uninstalled pick errors clearly (never silently swapped).
+  Call `hpo.available_search_algs()` for the live list on this box.
+- `scheduler`: `asha`, `hyperband`, `pbt`, `median`, or `none` to run every trial to
+  completion. `grace_period`/`reduction_factor` tune the halving schedulers.
 - `warm_start=True` seeds the search with a known-good baseline; `max_concurrent` bounds
   parallel trials (default 1, safe for single-GPU training).
 - Ray persists trials under `output_dir` (also the TensorBoard logdir); auto-launches

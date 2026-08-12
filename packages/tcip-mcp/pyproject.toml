@@ -29,7 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # [default] adds the dashboard's own deps (aiohttp, grpcio); hpo._ray_session only requests it when importable.
-hpo = ["ray[default,tune]>=2.9", "optuna>=3.0"]
+hpo = ["ray[default,tune]>=2.9", "optuna>=3.0", "hyperopt", "bayesian-optimization",
+       "nevergrad", "ax-platform"]
 # fiona is the vector reader scripts/shp_to_plant_csv.py and its tests use; no shipped module
 # imports it, so it belongs here rather than in the runtime dependencies.
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "pytest-timeout>=2.0", "pytest-xdist>=3.0",

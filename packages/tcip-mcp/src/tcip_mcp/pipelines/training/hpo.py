@@ -6,9 +6,9 @@ what imports on this machine) and overrides the derivable defaults when the data
 
 Facts (not a recipe, the agent chooses):
   - search algorithms: ``random``/``grid`` are native; ``optuna``, ``bayesopt``, ``hyperopt``,
-    ``nevergrad``, ``ax``, ``hebo``, ``zoopt``, ``bohb`` need their pip backend.
-  - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``bohb`` (pair with the bohb
-    searcher), ``pbt``, ``median``; ``none`` runs every trial to completion.
+    ``nevergrad``, ``ax`` need their pip backend and are installed by default.
+  - trial schedulers: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``; ``none``
+    runs every trial to completion.
 """
 
 from __future__ import annotations
@@ -39,24 +39,26 @@ _ENV_VARS_RAY_TUNE_REFUSES = ("TUNE_RESULT_DIR", "RAY_AIR_LOCAL_CACHE_DIR")
 # Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
 # over the discrete axes of the space; ``random`` samples them.
 _NATIVE_SEARCH = {"random", "grid", "variant_generator", "", None}
-# The backend module each searcher imports at instantiation (probe with find_spec so
-# discovery has no side effects). ``bohb`` also needs ConfigSpace.
+# The backend module each searcher imports at instantiation (probe with find_spec so discovery
+# has no side effects). All of these install by default; the probe covers an install that skipped
+# the hpo extra. Backends resting on abandoned upstreams are not offered: zoopt and hpbandster
+# (which bohb needs, for both its searcher and its scheduler) have no maintained release, and hebo
+# cannot build on Windows/Py3.12.
 _SEARCH_BACKEND_MODULE = {
     "optuna": "optuna", "hyperopt": "hyperopt", "bayesopt": "bayes_opt",
-    "nevergrad": "nevergrad", "ax": "ax", "hebo": "hebo", "zoopt": "zoopt",
-    "bohb": "hpbandster",
+    "nevergrad": "nevergrad", "ax": "ax",
 }
 # Seed kwarg differs per searcher; pass it only where the constructor accepts one.
 _SEARCHER_SEED_KWARG = {"optuna": "seed", "hyperopt": "random_state_seed", "bayesopt": "random_state"}
 # Scheduler aliases -> Ray's create_scheduler name.
 _SCHEDULER_ALIASES = {
     "asha": "async_hyperband", "async_hyperband": "async_hyperband",
-    "hyperband": "hyperband", "pbt": "pbt", "bohb": "hb_bohb", "hb_bohb": "hb_bohb",
+    "hyperband": "hyperband", "pbt": "pbt",
     "median": "median_stopping_rule", "median_stopping_rule": "median_stopping_rule",
 }
 _NO_SCHEDULER = {"none", "fifo", "", None}
 # Schedulers that consume the grace-period / reduction-factor early-stopping knobs.
-_HALVING_SCHEDULERS = {"async_hyperband", "hyperband", "hb_bohb"}
+_HALVING_SCHEDULERS = {"async_hyperband", "hyperband"}
 
 
 def get_default_space() -> dict:
@@ -90,7 +92,7 @@ def available_search_algs() -> list[str]:
 
 def available_schedulers() -> list[str]:
     """Trial schedulers Ray Tune offers (all native, none need an extra backend)."""
-    return ["asha", "hyperband", "bohb", "pbt", "median", "none"]
+    return ["asha", "hyperband", "pbt", "median", "none"]
 
 
 def _to_tune_space(param_space: dict, grid: bool = False) -> dict:
