@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -333,8 +335,13 @@ def test_build_search_alg_native_and_backend():
     assert build_search_alg("random") is None
     assert build_search_alg("grid") is None
     # A backend the agent picks that isn't installed raises clearly (never silently swapped).
-    with pytest.raises(ValueError, match="not installed"):
-        build_search_alg("hebo")
+    # Absence is simulated rather than relying on a package that happens to be missing: every
+    # offered backend now installs by default, so nothing real is left to stand in for one.
+    import tcip_mcp.pipelines.training.hpo as hpo_mod
+
+    with mock.patch.object(hpo_mod, "find_spec", return_value=None):
+        with pytest.raises(ValueError, match="not installed"):
+            build_search_alg("optuna")
 
 
 def test_available_search_algs_lists_natives_and_installed_backends():

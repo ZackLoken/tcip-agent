@@ -58,11 +58,6 @@ dependencies:
       - bayesian-optimization
       - nevergrad
       - ax-platform
-      - zoopt
-      - ConfigSpace
-      - hpbandster
-      # hebo (HEBOSearch) is intentionally omitted: it fails to build on Windows/Py3.12
-      # (its pinned numpy needs the removed pkgutil.ImpImporter). Ray runs fine without it.
       # --- dev / test ---
       - pytest>=7.0
       - pytest-asyncio>=0.21

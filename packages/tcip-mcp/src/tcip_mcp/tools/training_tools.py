@@ -821,9 +821,9 @@ def run_hpo(
     / ``available_schedulers`` for the live list); the defaults below are a sane starting
     point, not a recipe:
       - ``search_alg``: ``random``/``grid`` (native), or a backend, ``optuna``, ``bayesopt``,
-        ``hyperopt``, ``nevergrad``, ``ax``, ``hebo``, ``zoopt``, ``bohb``.
-      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``bohb`` (pair with the bohb
-        searcher), ``pbt``, ``median``, or ``none`` to run every trial to completion.
+        ``hyperopt``, ``nevergrad``, ``ax``.
+      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or
+        ``none`` to run every trial to completion.
 
     Trials minimize the composite selection objective (lower=better); each trains under the
     base config's regime so the chosen hyperparameters transfer to ``launch_training``.
