@@ -7,6 +7,34 @@ on:
     branches: [main]
 
 jobs:
+  # The only job that reads environment.yml. The pip jobs below install their own set, so without
+  # this a break in the documented install reaches an adopter before it reaches CI.
+  environment:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: tcip-agent
+          auto-activate-base: false
+
+      - name: Report what resolved
+        run: |
+          python --version
+          python -c "import rasterio, fiona, pyproj; print('rasterio', rasterio.__version__, 'gdal', rasterio.__gdal_version__); print('fiona', fiona.__version__)"
+
+      - name: The raster stack works in the documented environment
+        run: pytest tests/test_raster_source.py tests/test_overviews.py tests/test_band_stats.py -q
+
   # mypy runs as its own job so its ~2-3 min stays off the pytest critical path.
   mypy:
     runs-on: ubuntu-latest
@@ -15,18 +43,16 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
-      # pip's cache keys wheels by exact version, so a runner-image libgdal bump (a new
-      # gdal==X pin) misses the cache and rebuilds; nothing stale can be served.
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
           restore-keys: pip-${{ runner.os }}-
 
-      # mypy's own incremental cache; mypy invalidates individual file entries itself, so
-      # restoring the closest prior run's cache is always safe, never stale.
+      # mypy invalidates individual file entries itself, so restoring the closest prior run's
+      # cache is always safe, never stale.
       - uses: actions/cache@v4
         with:
           path: .mypy_cache
@@ -35,14 +61,6 @@ jobs:
 
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install GDAL (system libgdal + version-matched bindings; PyPI gdal has no wheels)
-        # Preinstalled numpy + --no-build-isolation: an isolated build omits the gdal_array
-        # numpy bridge, which fails only at runtime (_gdal_array ImportError).
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgdal-dev
-          pip install numpy setuptools wheel
-          pip install "gdal==$(gdal-config --version)" --no-build-isolation
 
       - name: Install packages
         run: |
@@ -61,10 +79,8 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
-      # pip's cache keys wheels by exact version, so a runner-image libgdal bump (a new
-      # gdal==X pin) misses the cache and rebuilds; nothing stale can be served.
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -73,14 +89,6 @@ jobs:
 
       - name: Install CPU-only torch
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install GDAL (system libgdal + version-matched bindings; PyPI gdal has no wheels)
-        # Preinstalled numpy + --no-build-isolation: an isolated build omits the gdal_array
-        # numpy bridge, which fails only at runtime (_gdal_array ImportError).
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgdal-dev
-          pip install numpy setuptools wheel
-          pip install "gdal==$(gdal-config --version)" --no-build-isolation
 
       - name: Install packages
         run: |
