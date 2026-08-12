@@ -19,11 +19,11 @@ src/tcip_annotation/
 
 ## Conventions specific to this package
 
-- **No dependency on `tcip-mcp` or `tcip-web`.** Keep it that way: this is the one package usable
+- No dependency on `tcip-mcp` or `tcip-web`. Keep it that way: this is the one package usable
   standalone. If a change here starts requiring an import from either, that's a design smell, not a
   detail to route around.
-- **Label formats: `{json, coco}` only.** VOC, LabelMe, and YOLO annotation label formats are not
+- Label formats: `{json, coco}` only. VOC, LabelMe, and YOLO annotation label formats are not
   supported; don't reintroduce a format branch without checking `format_io.py` first.
-- A negative is empty labels **plus** an explicit human Complete (see root `CLAUDE.md`'s
+- A negative is empty labels plus an explicit human Complete (see root `CLAUDE.md`'s
   measurement-integrity invariants); this package's read/write paths must not treat an empty label
   file alone as a negative.

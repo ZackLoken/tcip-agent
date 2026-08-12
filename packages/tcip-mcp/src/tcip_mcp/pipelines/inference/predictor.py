@@ -53,7 +53,7 @@ class Predictor(Protocol):
     resizes each tile to ``(w, h)`` before the forward pass and maps every returned box (and mask)
     back into the tile's own native pixel space, so a run can reproduce the input geometry a
     checkpoint trained at; every coordinate in a result is in the source's real pixel space either
-    way. Labels are **1-indexed foreground** (background = 0), the
+    way. Labels are 1-indexed foreground (background = 0), the
     torchvision convention the rest of the pipeline (JSON prediction export, Review, CSV) already
     assumes; a future kind that is natively 0-indexed would shift to it at its own boundary,
     so downstream code never has to know which kind produced a result.

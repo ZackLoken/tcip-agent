@@ -14,7 +14,7 @@ others with no underscore, invisible to both checks it fed):
   an unknown/fabricated name has nothing to search for: it can only look for "something shaped
   like a trait reference." Requires an underscore (multi-segment) deliberately: widening it to
   match bare single-word tokens floods on ordinary code identifiers (`ctx`, `boxes`, ...) that
-  aren't traits. **Residual gap, stated honestly, not fixed by this file**: a single-word
+  aren't traits. Residual gap, stated honestly, not fixed by this file: a single-word
   fabricated trait name is lexically undetectable by this check, since it looks identical to a
   legitimate non-trait single-word identifier. Only a real trait-name membership check (below)
   or human review catches that.

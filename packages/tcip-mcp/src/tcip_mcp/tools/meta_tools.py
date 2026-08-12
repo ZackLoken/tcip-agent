@@ -258,31 +258,31 @@ def project_retrospective(
     section_header = f"## Retrospective: {now.isoformat()}"
     body = f"""{section_header}
 
-**Task**
+### Task
 
 {task.strip()}
 
-**What worked**
+### What worked
 
 {worked.strip()}
 
-**What did not work**
+### What did not work
 
 {did_not_work.strip()}
 
-**Assumptions that turned out to be wrong**
+### Assumptions that turned out to be wrong
 
 {assumptions_wrong.strip() or "_(none noted)_"}
 
-**Knowledge for future sessions**
+### Knowledge for future sessions
 
 {knowledge_for_future.strip() or "_(none noted)_"}
 
-**Missing or hard-to-use tools**
+### Missing or hard-to-use tools
 
 {missing_or_hard_tools.strip() or "_(none noted)_"}
 
-**What I would do differently**
+### What I would do differently
 
 {would_do_differently.strip() or "_(none noted)_"}
 

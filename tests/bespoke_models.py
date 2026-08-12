@@ -4,13 +4,13 @@ platform's audited envelope.
 This is *agent-authored* model code the platform runs through its audited envelope. It exercises
 two things the CV-scientist boundary must support:
 
-  (a) **modified architecture internals**: a from-scratch backbone + tiny FPN that use ``GroupNorm``
+  (a) modified architecture internals: a from-scratch backbone + tiny FPN that use ``GroupNorm``
       (detector batches are tiny, so BatchNorm statistics are unreliable), fed into a torchvision
       Faster R-CNN whose ``AnchorGenerator`` is built from *this dataset's* GT box shapes
       (aspect ratios via ``pipelines.derivations.gt_aspect_ratios``, sizes from the GT size
       distribution) rather than torchvision's fixed defaults; and
 
-  (b) a **custom ``train(ctx)`` loop** (``train_bespoke``), not ``ctx.default_train()``, that drives
+  (b) a custom ``train(ctx)`` loop (``train_bespoke``), not ``ctx.default_train()``, that drives
       training through the envelope's ``ctx`` sinks so it stays audited, immutable, and provenanced.
 
 Importable-builder only (the envelope re-imports it, never ``exec``). Not a ``test_*`` module: it is
