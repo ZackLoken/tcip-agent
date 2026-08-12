@@ -246,7 +246,7 @@ class TileLocalitySampler(Sampler):
 
         from tcip_mcp.pipelines import raster_source
 
-        cache_bytes = int(raster_source._gdal().GetCacheMax())
+        cache_bytes = raster_source.gdal_cache_bytes()
         cache_share = cache_bytes // self._lane_count
         max_row_bytes = max(row_costs.values())
 

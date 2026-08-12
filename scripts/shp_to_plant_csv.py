@@ -37,21 +37,10 @@ _DEFAULT_FIELD_MAP = {
 }
 
 
-def _wgs84_srs():
-    from osgeo import osr
-
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(4326)
-    # GDAL 3's authority-compliant axis order for EPSG:4326 is (lat, lon); without this, every
-    # coordinate this module writes is silently swapped into the wrong CSV column.
-    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-    return srs
-
-
-def _field_value(feature, field_name: str | None) -> str:
+def _field_value(properties: dict, field_name: str | None) -> str:
     if field_name is None:
         return ""
-    value = feature.GetField(field_name)
+    value = properties.get(field_name)
     return "" if value is None else str(value)
 
 
@@ -89,10 +78,9 @@ def convert_shp_to_plant_csv(
     ``ValueError`` if the source has no resolvable CRS, has zero features with readable geometry,
     or if the written CSV fails to round-trip through ``read_plant_csvs``.
     """
-    from osgeo import ogr, osr
-
-    ogr.UseExceptions()
-    osr.UseExceptions()
+    import fiona
+    from pyproj import Transformer
+    from shapely.geometry import shape
 
     shp_path = Path(shp_path)
     csv_path = Path(csv_path)
@@ -100,60 +88,55 @@ def convert_shp_to_plant_csv(
     if field_map:
         fields.update(field_map)
 
-    ds = ogr.Open(str(shp_path), 0)
-    if ds is None:
-        raise ValueError(f"OGR could not open shapefile: {shp_path}")
-    layer = ds.GetLayer(0)
-    if layer is None:
-        raise ValueError(f"{shp_path}: no readable layer.")
-
-    src_srs = layer.GetSpatialRef()
-    if src_srs is None:
-        raise ValueError(
-            f"{shp_path}: no resolvable coordinate reference system (missing or unreadable "
-            ".prj). Refusing to guess a CRS; supply a .prj alongside the .shp."
-        )
-    src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-    transform = osr.CoordinateTransformation(src_srs, _wgs84_srs())
-
-    layer_defn = layer.GetLayerDefn()
-    available = {layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())}
-    resolved_fields: dict[str, str | None] = {}
-    for csv_col, shp_field in fields.items():
-        if shp_field in available:
-            resolved_fields[csv_col] = shp_field
-        elif shp_field[:10] in available:
-            # The ESRI Shapefile DBF driver truncates a field name over 10 chars (e.g.
-            # "accession_name" -> "accession_"); try that truncated form before giving up.
-            resolved_fields[csv_col] = shp_field[:10]
-        else:
-            resolved_fields[csv_col] = None
-    missing = sorted(csv_col for csv_col, f in resolved_fields.items() if f is None)
-
     geom_kinds: set[str] = set()
     rows: list[dict] = []
-    for feature in layer:
-        geom = feature.GetGeometryRef()
-        if geom is None:
-            continue
-        flat_type = ogr.GT_Flatten(geom.GetGeometryType())
-        if flat_type == ogr.wkbPoint:
-            geom_kinds.add("point")
-            x, y = geom.GetX(), geom.GetY()
-        else:
-            geom_kinds.add("polygon")
-            centroid = geom.Centroid()
-            x, y = centroid.GetX(), centroid.GetY()
-        lon, lat, _z = transform.TransformPoint(x, y)
-        rows.append({
-            "plot_name": _field_value(feature, resolved_fields["plot_name"]),
-            "accession_name": _field_value(feature, resolved_fields["accession_name"]),
-            "plot_number": _field_value(feature, resolved_fields["plot_number"]),
-            "row_number": _field_value(feature, resolved_fields["row_number"]),
-            "col_number": _field_value(feature, resolved_fields["col_number"]),
-            "WGS84_centroid_x": lon,
-            "WGS84_centroid_y": lat,
-        })
+    with fiona.open(str(shp_path)) as layer:
+        # fiona reports a missing .prj as an empty CRS rather than None, so this tests for
+        # emptiness; a bare `is None` would let an unprojected source through to pyproj.
+        if not layer.crs:
+            raise ValueError(
+                f"{shp_path}: no resolvable coordinate reference system (missing or unreadable "
+                ".prj). Refusing to guess a CRS; supply a .prj alongside the .shp."
+            )
+        # always_xy keeps both sides in (lon, lat) order; EPSG:4326's authority-declared order is
+        # (lat, lon), and without this every coordinate lands in the wrong CSV column.
+        transform = Transformer.from_crs(layer.crs, "EPSG:4326", always_xy=True)
+
+        available = set(layer.schema["properties"])
+        resolved_fields: dict[str, str | None] = {}
+        for csv_col, shp_field in fields.items():
+            if shp_field in available:
+                resolved_fields[csv_col] = shp_field
+            elif shp_field[:10] in available:
+                # The ESRI Shapefile DBF driver truncates a field name over 10 chars (e.g.
+                # "accession_name" -> "accession_"); try that truncated form before giving up.
+                resolved_fields[csv_col] = shp_field[:10]
+            else:
+                resolved_fields[csv_col] = None
+        missing = sorted(csv_col for csv_col, f in resolved_fields.items() if f is None)
+
+        for feature in layer:
+            if feature.geometry is None:
+                continue
+            geom = shape(feature.geometry)
+            if geom.geom_type == "Point":
+                geom_kinds.add("point")
+                x, y = geom.x, geom.y
+            else:
+                geom_kinds.add("polygon")
+                centroid = geom.centroid
+                x, y = centroid.x, centroid.y
+            lon, lat = transform.transform(x, y)
+            properties = dict(feature.properties)
+            rows.append({
+                "plot_name": _field_value(properties, resolved_fields["plot_name"]),
+                "accession_name": _field_value(properties, resolved_fields["accession_name"]),
+                "plot_number": _field_value(properties, resolved_fields["plot_number"]),
+                "row_number": _field_value(properties, resolved_fields["row_number"]),
+                "col_number": _field_value(properties, resolved_fields["col_number"]),
+                "WGS84_centroid_x": lon,
+                "WGS84_centroid_y": lat,
+            })
 
     if not rows:
         raise ValueError(f"{shp_path}: zero features with readable geometry; nothing to convert.")

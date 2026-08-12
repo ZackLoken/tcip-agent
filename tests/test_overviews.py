@@ -76,17 +76,21 @@ def test_a_partial_sidecar_is_invalid_and_is_rebuilt(tmp_path: Path) -> None:
     """A build interrupted outside this module's own cleanup (a crash, a kill) leaves a
     structurally complete sidecar whose unwritten tiles have zero-length byte counts; it must
     read as invalid, and a new build must replace it rather than trust or refuse it."""
-    from osgeo import gdal
-
-    gdal.UseExceptions()
     path, _ = _wide_raster(tmp_path)
-    ds = gdal.OpenEx(str(path), gdal.OF_RASTER | gdal.OF_READONLY)
-    with pytest.raises(RuntimeError):
-        ds.BuildOverviews("AVERAGE", [2], callback=lambda *_args: 0)
-    del ds
-
+    build_overviews(path)
     partial = overview_sidecar(path)
     assert partial.is_file()
+    assert sidecar_valid(path)
+
+    # Zero the sidecar's own tile byte counts in place: the structurally complete but
+    # never-written state a killed build leaves, which reads back as silent zeros.
+    with tifffile.TiffFile(str(partial)) as tif:
+        tag = tif.pages[0].tags.get("TileByteCounts") or tif.pages[0].tags["StripByteCounts"]
+        offset, nbytes = tag.valueoffset, tag.valuebytecount
+    with open(partial, "r+b") as fh:
+        fh.seek(offset)
+        fh.write(b"\x00" * nbytes)
+
     assert not sidecar_valid(path)
 
     sidecar = build_overviews(path)

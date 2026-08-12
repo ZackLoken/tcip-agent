@@ -40,14 +40,12 @@ def _make_image(path: Path, exif_date: str | None = None) -> None:
 def _make_raster(path: Path, **metadata: str) -> None:
     """Write a tiny GeoTIFF carrying ``metadata`` in GDAL's default metadata domain, where a
     stitching engine writes an orthomosaic's own capture date."""
-    from osgeo import gdal
+    import rasterio
 
-    gdal.UseExceptions()
     path.parent.mkdir(parents=True, exist_ok=True)
-    ds = gdal.GetDriverByName("GTiff").Create(str(path), 8, 8, 3, gdal.GDT_Byte)
-    for key, value in metadata.items():
-        ds.SetMetadataItem(key, value)
-    ds = None
+    with rasterio.open(str(path), "w", driver="GTiff", width=8, height=8,
+                       count=3, dtype="uint8") as ds:
+        ds.update_tags(**metadata)
 
 
 def _make_tagged_tiff(path: Path, datetime_tag: str) -> None:
@@ -230,11 +228,11 @@ def test_a_date_mode_that_names_its_own_bucket_opens_no_file(tmp_path, monkeypat
     (src / "broken.tif").write_bytes(b"this is not an image at all")
 
     import PIL.Image
-    from osgeo import gdal
+    import rasterio
 
     opened: list[str] = []
     monkeypatch.setattr(PIL.Image, "open", lambda *a, **k: opened.append("pil"))
-    monkeypatch.setattr(gdal, "OpenEx", lambda *a, **k: opened.append("gdal"))
+    monkeypatch.setattr(rasterio, "open", lambda *a, **k: opened.append("gdal"))
 
     manifest = ingest_images(source=str(src), name="proj_no_open", date_from=date_from)
 

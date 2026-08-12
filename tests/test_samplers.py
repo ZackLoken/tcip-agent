@@ -28,18 +28,10 @@ class _StubTiledDataset:
         return i, os.getpid()
 
 
-class _FakeGdal:
-    def __init__(self, cache_bytes: int):
-        self._cache_bytes = cache_bytes
-
-    def GetCacheMax(self):
-        return self._cache_bytes
-
-
 def _patch_gdal_cache(monkeypatch, cache_bytes: int) -> None:
     from tcip_mcp.pipelines import raster_source
 
-    monkeypatch.setattr(raster_source, "_gdal", lambda: _FakeGdal(cache_bytes))
+    monkeypatch.setattr(raster_source, "gdal_cache_bytes", lambda: cache_bytes)
 
 
 def _frame(width=10000, channels=3, itemsize=1, windowed=True):
