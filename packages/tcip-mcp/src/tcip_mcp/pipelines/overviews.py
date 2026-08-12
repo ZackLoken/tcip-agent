@@ -9,11 +9,30 @@ native ones. :func:`build_overviews` writes the GDAL-standard external ``.ovr`` 
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE
-from tcip_mcp.pipelines.raster_source import _gdal, open_gdal_dataset
+from tcip_mcp.pipelines.raster_source import open_gdal_dataset
+
+# How often the parent samples the growing sidecar to report progress and honor a cancel.
+_BUILD_POLL_SECONDS = 0.2
+
+_BUILD_CHILD = """
+import sys
+import rasterio
+from rasterio.enums import Resampling
+
+path, levels = sys.argv[1], [int(v) for v in sys.argv[2].split(",")]
+with rasterio.Env(TIFF_USE_OVR=True):
+    with rasterio.open(path, "r+") as ds:
+        ds.build_overviews(levels, Resampling.average)
+"""
 
 
 def overview_sidecar(path: str | Path) -> Path:
@@ -25,9 +44,21 @@ def has_overviews(path: str | Path) -> bool:
     """Whether GDAL can serve any reduced-resolution level for ``path``: internal overviews or a
     readable external sidecar, both visible as band overview levels on open."""
     ds = open_gdal_dataset(path)
-    count = int(ds.GetRasterBand(1).GetOverviewCount())
-    del ds
-    return count > 0
+    try:
+        return bool(ds.overviews(1))
+    finally:
+        ds.close()
+
+
+def _predicted_sidecar_bytes(width: int, height: int, count: int,
+                             itemsize: int, levels: list[int]) -> int:
+    """Uncompressed size of the pyramid's pixels, the denominator progress is reported against.
+
+    A compressed sidecar lands under this, so the reported fraction is a floor on real progress
+    rather than a measurement of it; the caller is told 1.0 only once the build actually returns.
+    """
+    per_level = sum((width // lvl) * (height // lvl) for lvl in levels)
+    return max(int(per_level * count * itemsize), 1)
 
 
 def sidecar_valid(path: str | Path) -> bool:
@@ -83,6 +114,12 @@ def build_overviews(path: str | Path,
 
     ``progress_cb``, when given, receives the build's completion fraction in ``[0, 1]``; returning
     ``False`` cancels the build.
+
+    The build runs in a child process. rasterio's ``build_overviews`` takes no progress or cancel
+    callback, and a pyramid over a multi-gigabyte raster runs far too long to be uninterruptible,
+    so the parent reports progress from the sidecar's growth and cancels by terminating the child.
+    ``progress_cb`` is consulted once before the child starts, so a caller that cancels immediately
+    is honored whatever the raster's size.
     """
     path = Path(path)
     sidecar = overview_sidecar(path)
@@ -94,24 +131,42 @@ def build_overviews(path: str | Path,
     if has_overviews(path):
         raise ValueError(f"{path} already carries internal overviews; nothing to build")
     ds = open_gdal_dataset(path)
-    levels = overview_levels(int(ds.RasterXSize), int(ds.RasterYSize))
+    try:
+        levels = overview_levels(int(ds.width), int(ds.height))
+        predicted = _predicted_sidecar_bytes(
+            int(ds.width), int(ds.height), int(ds.count),
+            np.dtype(ds.dtypes[0]).itemsize, levels)
+    finally:
+        ds.close()
     if not levels:
-        del ds
         raise ValueError(
             f"{path} already fits the display bound ({DISPLAY_MAX_EDGE}px longest edge); there "
             "is no overview level to build")
-    callback = None
-    if progress_cb is not None:
-        def callback(complete, _message, _data):
-            return 0 if progress_cb(float(complete)) is False else 1
-    _gdal()  # exceptions must be enabled before BuildOverviews so a failure raises, not returns
-    try:
-        ds.BuildOverviews("AVERAGE", levels, callback=callback)
-    except Exception:
-        # Release the dataset's own handle on the sidecar before deleting it.
-        del ds
+
+    def cancelled(fraction: float) -> bool:
+        return progress_cb is not None and progress_cb(fraction) is False
+
+    def abandon(reason: str) -> None:
         if sidecar.exists():
             sidecar.unlink()
-        raise
-    del ds
+        raise RuntimeError(reason)
+
+    if cancelled(0.0):
+        abandon(f"overview build for {path} cancelled before it started")
+
+    child = subprocess.Popen(
+        [sys.executable, "-c", _BUILD_CHILD, str(path), ",".join(str(v) for v in levels)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    while child.poll() is None:
+        time.sleep(_BUILD_POLL_SECONDS)
+        grown = sidecar.stat().st_size if sidecar.exists() else 0
+        if cancelled(min(grown / predicted, 0.99)):
+            child.terminate()
+            child.wait(timeout=30)
+            abandon(f"overview build for {path} cancelled")
+    if child.returncode != 0:
+        abandon(f"overview build for {path} failed: {(child.stderr.read() or '').strip()}")
+    if progress_cb is not None:
+        progress_cb(1.0)
     return sidecar

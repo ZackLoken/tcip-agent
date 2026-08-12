@@ -88,22 +88,21 @@ def _gdal_capture_date(path: Path) -> tuple[str | None, str | None]:
 
     Asks the TIFF ``DateTime`` tag first, then an EXIF IFD if the container exposes one, then the
     stitching-engine items of :data:`_GDAL_DATE_ITEMS` in the default metadata domain, which is
-    where an orthomosaic states the day it was flown. Metadata only: no pixels are read. GDAL is
-    lazy-imported so tool startup stays fast.
+    where an orthomosaic states the day it was flown. Metadata only: no pixels are read. rasterio
+    is lazy-imported so tool startup stays fast.
     """
-    from osgeo import gdal
+    import rasterio
 
-    gdal.UseExceptions()
     try:
-        ds = gdal.OpenEx(str(path), gdal.OF_RASTER | gdal.OF_READONLY)
-        raw = ds.GetMetadataItem("TIFFTAG_DATETIME")
-        if not raw:
-            raw = ds.GetMetadata("EXIF").get("EXIF_DateTimeOriginal")
-        if not raw:
-            items = {k.lower(): v for k, v in ds.GetMetadata().items()}
-            raw = next((items[name] for name in _GDAL_DATE_ITEMS if items.get(name)), None)
-        ds = None  # GDAL closes the dataset when the last reference to it drops
-    except RuntimeError as exc:
+        with rasterio.open(str(path)) as ds:
+            tags = ds.tags()
+            raw = tags.get("TIFFTAG_DATETIME")
+            if not raw:
+                raw = ds.tags(ns="EXIF").get("EXIF_DateTimeOriginal")
+            if not raw:
+                items = {k.lower(): v for k, v in tags.items()}
+                raw = next((items[name] for name in _GDAL_DATE_ITEMS if items.get(name)), None)
+    except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
         return None, f"raster metadata could not be read: {exc}"
     if not raw:
         return None, None

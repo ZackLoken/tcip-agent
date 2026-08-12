@@ -54,20 +54,9 @@ CONTENT_IDENTITY_MAX_WINDOWS = 8
 
 _total_ram_bytes: int | None = None
 
-_gdal_module = None
-
-
-def _gdal():
-    """``osgeo.gdal``, imported and configured exactly once: exceptions enabled, since without
-    them ``gdal.OpenEx`` returns ``None`` instead of saying what failed. Lazy so importing this
-    module never pays the GDAL import."""
-    global _gdal_module
-    if _gdal_module is None:
-        from osgeo import gdal
-
-        gdal.UseExceptions()
-        _gdal_module = gdal
-    return _gdal_module
+# GDAL reads GDAL_CACHEMAX as megabytes below this value and as bytes at or above it, so the
+# budget handed to it is floored here to stay unambiguously in bytes.
+_GDAL_CACHEMAX_BYTES_FLOOR = 100_000
 
 
 def configure_gdal_cache(share: float = 1.0) -> None:
@@ -81,16 +70,40 @@ def configure_gdal_cache(share: float = 1.0) -> None:
     ``1 / num_workers`` so ``num_workers`` peers together still commit the platform's intended
     budget rather than that amount each).
     """
-    _gdal().SetCacheMax(int(_memory_budget_bytes() * _GDAL_CACHE_SHARE * share))
+    from rasterio.env import set_gdal_config
+
+    budget = int(_memory_budget_bytes() * _GDAL_CACHE_SHARE * share)
+    set_gdal_config("GDAL_CACHEMAX", max(budget, _GDAL_CACHEMAX_BYTES_FLOOR))
+
+
+def gdal_cache_bytes() -> int:
+    """The block-cache budget currently in force, in bytes.
+
+    Read from the configuration :func:`configure_gdal_cache` set, falling back to what that
+    function would have set for a process that never called it. This module owns the budget, so a
+    consumer sizing work against it asks here rather than asking GDAL, and the two can never
+    disagree about a number one of them chose.
+    """
+    from rasterio.env import get_gdal_config
+
+    configured = get_gdal_config("GDAL_CACHEMAX")
+    if configured is None:
+        return int(_memory_budget_bytes() * _GDAL_CACHE_SHARE)
+    return int(configured)
 
 
 def open_gdal_dataset(path: str | Path):
     """A read-only GDAL dataset for ``path``, with GDAL's own failure wrapped in this layer's
-    error naming the file."""
-    gdal = _gdal()
+    error naming the file.
+
+    Served through rasterio, which bundles its own GDAL, so no separate ``osgeo`` binding is
+    needed. The returned object is a rasterio dataset, not an ``osgeo.gdal.Dataset``.
+    """
+    import rasterio
+
     try:
-        return gdal.OpenEx(str(path), gdal.OF_RASTER | gdal.OF_READONLY)
-    except Exception as exc:  # noqa: BLE001, GDAL raises bare RuntimeError
+        return rasterio.open(str(path))
+    except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
         raise ValueError(f"GDAL cannot open raster '{path}': {exc}") from exc
 
 
@@ -650,27 +663,26 @@ class GdalSource(_ClosableSource):
     _backend = "gdal"
 
     def __init__(self, path: str | Path):
-        gdal = _gdal()
+        from rasterio.enums import ColorInterp
+
         self.path = Path(path)
         self._ds = open_gdal_dataset(self.path)
-        self.width = int(self._ds.RasterXSize)
-        self.height = int(self._ds.RasterYSize)
-        self.num_channels = int(self._ds.RasterCount)
-        band = self._ds.GetRasterBand(1)
-        from osgeo import gdal_array
-
-        self.dtype = np.dtype(gdal_array.GDALTypeCodeToNumericTypeCode(band.DataType))
+        self.width = int(self._ds.width)
+        self.height = int(self._ds.height)
+        self.num_channels = int(self._ds.count)
+        self.dtype = np.dtype(self._ds.dtypes[0])
         self._palette_lut: np.ndarray | None = None
-        if (self.num_channels == 1 and band.DataType == gdal.GDT_Byte
-                and band.GetColorInterpretation() == gdal.GCI_PaletteIndex):
-            table = band.GetRasterColorTable()
-            if table is not None:
+        if (self.num_channels == 1 and self.dtype == np.dtype("uint8")
+                and self._ds.colorinterp[0] == ColorInterp.palette):
+            table = self._ds.colormap(1)
+            if table:
                 lut = self._tiff_colormap_lut()
                 if lut is None:
                     # A container with no readable ColorMap tag: GDAL's converted entries.
                     lut = np.zeros((256, 3), dtype=np.uint8)
-                    for i in range(min(256, int(table.GetCount()))):
-                        lut[i] = table.GetColorEntry(i)[:3]
+                    for index, entry in table.items():
+                        if 0 <= int(index) < 256:
+                            lut[int(index)] = tuple(entry)[:3]
                 self._palette_lut = lut
                 self.num_channels = 3
                 self.dtype = np.dtype("uint8")
@@ -678,9 +690,7 @@ class GdalSource(_ClosableSource):
             self.band_interpretations = ("red", "green", "blue")
         else:
             self.band_interpretations = tuple(
-                gdal.GetColorInterpretationName(
-                    self._ds.GetRasterBand(i + 1).GetRasterColorInterpretation()).lower()
-                for i in range(self.num_channels))
+                interp.name.lower() for interp in self._ds.colorinterp)
 
     def _tiff_colormap_lut(self) -> "np.ndarray | None":
         """The palette as the file's own ColorMap tag states it, high byte per 16-bit entry.
@@ -717,26 +727,29 @@ class GdalSource(_ClosableSource):
 
     def read_region(self, rect: Rect, *,
                     target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+        from rasterio.enums import Resampling
+        from rasterio.windows import Window
+
         _check_region(rect, self.height, self.width)
+        window = Window(rect.x0, rect.y0, rect.width, rect.height)
         if self._palette_lut is not None:
-            indices = self._ds.ReadAsArray(rect.x0, rect.y0, rect.width, rect.height)
+            indices = self._ds.read(1, window=window)
             return _serve_region(self._palette_lut[indices], rect, self._backend, target_size)
         kwargs = {}
         scale, resample = 1.0, None
         if target_size is not None:
             out_w, out_h = _check_target_size(rect, target_size)
-            kwargs = {"buf_xsize": out_w, "buf_ysize": out_h,
-                      "resample_alg": _gdal().GRIORA_Average}
+            kwargs = {"out_shape": (self.num_channels, out_h, out_w),
+                      "resampling": Resampling.average}
             scale, resample = out_w / rect.width, "average"
-        arr = self._ds.ReadAsArray(rect.x0, rect.y0, rect.width, rect.height, **kwargs)
-        if arr.ndim == 2:
-            arr = arr[:, :, None]
-        else:
-            # GDAL returns [C, H, W]; contiguous copy in the platform's [H, W, C] order.
-            arr = np.ascontiguousarray(np.transpose(arr, (1, 2, 0)))
+        arr = self._ds.read(window=window, **kwargs)
+        # GDAL returns [C, H, W]; contiguous copy in the platform's [H, W, C] order.
+        arr = np.ascontiguousarray(np.transpose(arr, (1, 2, 0)))
         return arr, ReadSpec(self._backend, scale=scale, resample=resample)
 
     def _release(self) -> None:
+        if self._ds is not None:
+            self._ds.close()
         self._ds = None
 
 
@@ -817,7 +830,7 @@ def _tiff_needs_whole_decode(source: GdalSource, num_channels: int) -> bool:
     """
     # The raw band count, not the served one: a palette raster serves as three expanded channels
     # while the file's own header (what tifffile reports) still says one band.
-    gdal_frame = (source.height, source.width, int(source._ds.RasterCount))
+    gdal_frame = (source.height, source.width, int(source._ds.count))
     probe = _tiff_series_probe(source.path)
     if probe is None:
         return False

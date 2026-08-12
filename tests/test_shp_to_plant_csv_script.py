@@ -1,11 +1,11 @@
 """``scripts/shp_to_plant_csv.py``: shapefile -> ``read_plant_csvs`` CSV, with correct WGS84 axis
 order and point/polygon geometry handling.
 
-GDAL 3's authority-compliant axis order for EPSG:4326 is (lat, lon); a converter that reprojects
-without pinning ``OAMS_TRADITIONAL_GIS_ORDER`` on both the source and target SRS silently writes
-latitude into the ``WGS84_centroid_x`` (longitude) column. These tests build real synthetic
-shapefiles in a real projected CRS (UTM 15N, via ``osgeo.ogr``, no binary fixture committed) and
-check the output against an independently-computed pyproj transform, not just a plausible range.
+EPSG:4326's authority-declared axis order is (lat, lon); a converter that reprojects without
+``always_xy`` silently writes latitude into the ``WGS84_centroid_x`` (longitude) column. These
+tests build real synthetic shapefiles in a real projected CRS (UTM 15N, via fiona, no binary
+fixture committed) and check the output against an independently-computed transform, not just a
+plausible range.
 """
 
 from __future__ import annotations
@@ -31,95 +31,48 @@ def _reference_lonlat(native_x: float, native_y: float) -> tuple[float, float]:
     return transformer.transform(native_x, native_y)
 
 
-def _new_shapefile_layer(ds, geom_type, epsg: int | None):
-    from osgeo import ogr, osr
+_SCHEMA_PROPERTIES = {
+    "plot_name": "str", "accession_name": "str",
+    "plot_number": "float", "row_number": "float", "col_number": "float",
+}
 
-    srs = None
-    if epsg is not None:
-        srs = osr.SpatialReference()
-        srs.ImportFromEPSG(epsg)
-    layer = ds.CreateLayer("plants", srs=srs, geom_type=geom_type)
-    for name, kind in (
-        ("plot_name", ogr.OFTString), ("accession_name", ogr.OFTString),
-        ("plot_number", ogr.OFTReal), ("row_number", ogr.OFTReal), ("col_number", ogr.OFTReal),
-    ):
-        layer.CreateField(ogr.FieldDefn(name, kind))
-    return layer
+# The ESRI Shapefile driver truncates a field name over 10 characters when it writes the DBF, so a
+# fixture's properties are keyed by the same truncated form the script's own resolver looks for.
+_ATTRS_POINT = {"plot_name": "P1", "accession_name": "acc-A",
+                "plot_number": 1.0, "row_number": 2.0, "col_number": 3.0}
+_ATTRS_POLYGON = {"plot_name": "P2", "accession_name": "acc-B",
+                  "plot_number": 4.0, "row_number": 5.0, "col_number": 6.0}
 
 
-def _set_field(feature, layer, name: str, value) -> None:
-    """Set a feature field by its logical name, following the same truncated-name convention the
-    ESRI Shapefile DBF driver applies to a field name over 10 characters (the script's own
-    ``convert_shp_to_plant_csv`` resolves a source's schema the same way)."""
-    defn = layer.GetLayerDefn()
-    if defn.GetFieldIndex(name) >= 0:
-        feature.SetField(name, value)
-    else:
-        feature.SetField(name[:10], value)
+def _write_shapefile(path: Path, geom_type: str, geometry: dict, attrs: dict,
+                     epsg: int | None) -> Path:
+    import fiona
 
-
-def _add_point_feature(layer, x: float, y: float, **attrs) -> None:
-    from osgeo import ogr
-
-    feature = ogr.Feature(layer.GetLayerDefn())
-    for k, v in attrs.items():
-        _set_field(feature, layer, k, v)
-    geom = ogr.Geometry(ogr.wkbPoint)
-    geom.AddPoint(x, y)
-    feature.SetGeometry(geom)
-    layer.CreateFeature(feature)
-
-
-def _add_square_polygon_feature(layer, cx: float, cy: float, half: float, **attrs) -> None:
-    """A square centered exactly on ``(cx, cy)``, so its centroid is the center by construction,
-    not something this test would need to recompute geometrically."""
-    from osgeo import ogr
-
-    feature = ogr.Feature(layer.GetLayerDefn())
-    for k, v in attrs.items():
-        _set_field(feature, layer, k, v)
-    ring = ogr.Geometry(ogr.wkbLinearRing)
-    for dx, dy in ((-half, -half), (half, -half), (half, half), (-half, half), (-half, -half)):
-        ring.AddPoint(cx + dx, cy + dy)
-    poly = ogr.Geometry(ogr.wkbPolygon)
-    poly.AddGeometry(ring)
-    feature.SetGeometry(poly)
-    layer.CreateFeature(feature)
-
-
-@pytest.fixture
-def _ogr():
-    from osgeo import ogr, osr
-
-    ogr.UseExceptions()
-    osr.UseExceptions()
-    return ogr
-
-
-def _point_shapefile(tmp_path: Path, ogr_mod, *, epsg: int | None = UTM_15N_EPSG) -> Path:
-    path = tmp_path / "points.shp"
-    driver = ogr_mod.GetDriverByName("ESRI Shapefile")
-    ds = driver.CreateDataSource(str(path))
-    layer = _new_shapefile_layer(ds, ogr_mod.wkbPoint, epsg)
-    _add_point_feature(
-        layer, *POINT_NATIVE,
-        plot_name="P1", accession_name="acc-A", plot_number=1.0, row_number=2.0, col_number=3.0,
-    )
-    ds = None
+    schema = {"geometry": geom_type, "properties": dict(_SCHEMA_PROPERTIES)}
+    crs = f"EPSG:{epsg}" if epsg is not None else None
+    with fiona.open(str(path), "w", driver="ESRI Shapefile", crs=crs, schema=schema) as dst:
+        dst.write({"geometry": geometry, "properties": dict(attrs)})
     return path
 
 
-def _polygon_shapefile(tmp_path: Path, ogr_mod) -> Path:
-    path = tmp_path / "polys.shp"
-    driver = ogr_mod.GetDriverByName("ESRI Shapefile")
-    ds = driver.CreateDataSource(str(path))
-    layer = _new_shapefile_layer(ds, ogr_mod.wkbPolygon, UTM_15N_EPSG)
-    _add_square_polygon_feature(
-        layer, *POINT_NATIVE, half=10.0,
-        plot_name="P2", accession_name="acc-B", plot_number=4.0, row_number=5.0, col_number=6.0,
+def _point_shapefile(tmp_path: Path, *, epsg: int | None = UTM_15N_EPSG) -> Path:
+    return _write_shapefile(
+        tmp_path / "points.shp", "Point",
+        {"type": "Point", "coordinates": tuple(POINT_NATIVE)}, _ATTRS_POINT, epsg,
     )
-    ds = None
-    return path
+
+
+def _polygon_shapefile(tmp_path: Path) -> Path:
+    """A square centered exactly on ``POINT_NATIVE``, so its centroid is the center by
+    construction, not something this test would need to recompute geometrically."""
+    cx, cy = POINT_NATIVE
+    half = 10.0
+    ring = [(cx - half, cy - half), (cx + half, cy - half), (cx + half, cy + half),
+            (cx - half, cy + half), (cx - half, cy - half)]
+    return _write_shapefile(
+        tmp_path / "polys.shp", "Polygon",
+        {"type": "Polygon", "coordinates": [ring]}, _ATTRS_POLYGON, UTM_15N_EPSG,
+    )
 
 
 def _read_csv_rows(path: Path) -> list[dict]:
@@ -130,8 +83,8 @@ def _read_csv_rows(path: Path) -> list[dict]:
 # ── axis order + point geometry ─────────────────────────────────────────
 
 
-def test_point_geometry_reprojects_to_correct_unswapped_wgs84(tmp_path: Path, _ogr) -> None:
-    shp = _point_shapefile(tmp_path, _ogr)
+def test_point_geometry_reprojects_to_correct_unswapped_wgs84(tmp_path: Path) -> None:
+    shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
     result = convert_shp_to_plant_csv(shp, csv_path)
@@ -145,8 +98,8 @@ def test_point_geometry_reprojects_to_correct_unswapped_wgs84(tmp_path: Path, _o
     assert -100 < lon < -85
     assert 35 < lat < 50
 
-    # Matches an independent oracle (pyproj, not osgeo.osr) to float precision, not just a
-    # plausible range.
+    # Matches an independently-constructed transform to float precision, not just a plausible
+    # range.
     expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
     assert lon == pytest.approx(expected_lon, abs=1e-6)
     assert lat == pytest.approx(expected_lat, abs=1e-6)
@@ -158,21 +111,17 @@ def test_point_geometry_reprojects_to_correct_unswapped_wgs84(tmp_path: Path, _o
 
 def test_swapped_axis_order_would_fail_this_test(tmp_path: Path) -> None:
     """Pins the failure mode this converter guards against: transforming with the default
-    (authority-compliant, lat/lon) axis order instead of TRADITIONAL_GIS_ORDER lands outside a
-    plausible longitude range for UTM 15N. Exercises the same osgeo.osr call the script makes,
-    with the fix deliberately omitted, so a regression that drops the fix would be caught by the
-    assertion above failing, not by this test passing either way."""
-    from osgeo import osr
+    (authority-compliant, lat/lon) axis order instead of ``always_xy`` lands outside a plausible
+    longitude range for UTM 15N. Exercises the same pyproj call the script makes, with the fix
+    deliberately omitted, so a regression that drops the fix would be caught by the assertion
+    above failing, not by this test passing either way."""
+    import pyproj
 
-    src = osr.SpatialReference()
-    src.ImportFromEPSG(UTM_15N_EPSG)
-    wgs = osr.SpatialReference()
-    wgs.ImportFromEPSG(4326)
-    # Deliberately no SetAxisMappingStrategy call on either SRS.
-    transform = osr.CoordinateTransformation(src, wgs)
-    a, b, _z = transform.TransformPoint(*POINT_NATIVE)
+    # Deliberately no always_xy=True, the fix the script applies.
+    transform = pyproj.Transformer.from_crs(f"EPSG:{UTM_15N_EPSG}", "EPSG:4326")
+    a, b = transform.transform(*POINT_NATIVE)
 
-    # With no axis fix, GDAL 3 returns (lat, lon): the first coordinate lands in latitude's
+    # With no axis fix pyproj returns (lat, lon): the first coordinate lands in latitude's
     # plausible range, not longitude's, i.e. exactly the swap the fix prevents.
     assert 35 < a < 50
     assert not (-100 < a < -85)
@@ -181,8 +130,8 @@ def test_swapped_axis_order_would_fail_this_test(tmp_path: Path) -> None:
 # ── polygon geometry (centroid) ─────────────────────────────────────────
 
 
-def test_polygon_geometry_uses_centroid(tmp_path: Path, _ogr) -> None:
-    shp = _polygon_shapefile(tmp_path, _ogr)
+def test_polygon_geometry_uses_centroid(tmp_path: Path) -> None:
+    shp = _polygon_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
     result = convert_shp_to_plant_csv(shp, csv_path)
@@ -198,8 +147,8 @@ def test_polygon_geometry_uses_centroid(tmp_path: Path, _ogr) -> None:
 # ── CRS refusal ──────────────────────────────────────────────────────────
 
 
-def test_refuses_a_shapefile_with_no_resolvable_crs(tmp_path: Path, _ogr) -> None:
-    shp = _point_shapefile(tmp_path, _ogr, epsg=None)
+def test_refuses_a_shapefile_with_no_resolvable_crs(tmp_path: Path) -> None:
+    shp = _point_shapefile(tmp_path, epsg=None)
     csv_path = tmp_path / "plants.csv"
 
     with pytest.raises(ValueError, match="resolvable coordinate reference system"):
@@ -235,8 +184,8 @@ def test_round_trip_validation_passes_on_a_well_formed_csv(tmp_path: Path) -> No
 # ── field-name overrides for a source's own (possibly truncated) attribute names ────────────────
 
 
-def test_missing_optional_field_is_reported_and_written_empty(tmp_path: Path, _ogr) -> None:
-    shp = _point_shapefile(tmp_path, _ogr)
+def test_missing_optional_field_is_reported_and_written_empty(tmp_path: Path) -> None:
+    shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
     result = convert_shp_to_plant_csv(shp, csv_path, field_map={"accession_name": "no_such_field"})
@@ -246,22 +195,17 @@ def test_missing_optional_field_is_reported_and_written_empty(tmp_path: Path, _o
     assert rows[0]["accession_name"] == ""
 
 
-def test_field_map_override_picks_up_a_renamed_source_field(tmp_path: Path, _ogr) -> None:
+def test_field_map_override_picks_up_a_renamed_source_field(tmp_path: Path) -> None:
+    import fiona
+
     path = tmp_path / "renamed.shp"
-    driver = _ogr.GetDriverByName("ESRI Shapefile")
-    ds = driver.CreateDataSource(str(path))
-    layer = _new_shapefile_layer(ds, _ogr.wkbPoint, UTM_15N_EPSG)
     # ESRI Shapefile DBF field names are capped at 10 characters: a real source's "accession_name"
     # is commonly truncated like this.
-    layer.CreateField(_ogr.FieldDefn("ACC_NAME", _ogr.OFTString))
-    feature = _ogr.Feature(layer.GetLayerDefn())
-    feature.SetField("plot_name", "P1")
-    feature.SetField("ACC_NAME", "acc-Z")
-    geom = _ogr.Geometry(_ogr.wkbPoint)
-    geom.AddPoint(*POINT_NATIVE)
-    feature.SetGeometry(geom)
-    layer.CreateFeature(feature)
-    ds = None
+    schema = {"geometry": "Point", "properties": {"plot_name": "str", "ACC_NAME": "str"}}
+    with fiona.open(str(path), "w", driver="ESRI Shapefile",
+                    crs=f"EPSG:{UTM_15N_EPSG}", schema=schema) as dst:
+        dst.write({"geometry": {"type": "Point", "coordinates": tuple(POINT_NATIVE)},
+                   "properties": {"plot_name": "P1", "ACC_NAME": "acc-Z"}})
 
     csv_path = tmp_path / "plants.csv"
     result = convert_shp_to_plant_csv(path, csv_path, field_map={"accession_name": "ACC_NAME"})
@@ -274,12 +218,14 @@ def test_field_map_override_picks_up_a_renamed_source_field(tmp_path: Path, _ogr
 # ── zero-feature refusal ─────────────────────────────────────────────────
 
 
-def test_refuses_a_shapefile_with_zero_features(tmp_path: Path, _ogr) -> None:
+def test_refuses_a_shapefile_with_zero_features(tmp_path: Path) -> None:
+    import fiona
+
     path = tmp_path / "empty.shp"
-    driver = _ogr.GetDriverByName("ESRI Shapefile")
-    ds = driver.CreateDataSource(str(path))
-    _new_shapefile_layer(ds, _ogr.wkbPoint, UTM_15N_EPSG)
-    ds = None
+    schema = {"geometry": "Point", "properties": dict(_SCHEMA_PROPERTIES)}
+    with fiona.open(str(path), "w", driver="ESRI Shapefile",
+                    crs=f"EPSG:{UTM_15N_EPSG}", schema=schema):
+        pass
 
     with pytest.raises(ValueError, match="zero features"):
         convert_shp_to_plant_csv(path, tmp_path / "plants.csv")
@@ -288,8 +234,8 @@ def test_refuses_a_shapefile_with_zero_features(tmp_path: Path, _ogr) -> None:
 # ── CLI end to end ───────────────────────────────────────────────────────
 
 
-def test_main_cli_end_to_end(tmp_path: Path, _ogr) -> None:
-    shp = _point_shapefile(tmp_path, _ogr)
+def test_main_cli_end_to_end(tmp_path: Path) -> None:
+    shp = _point_shapefile(tmp_path)
     csv_path = tmp_path / "plants.csv"
 
     rc = main([str(shp), str(csv_path)])
@@ -300,8 +246,8 @@ def test_main_cli_end_to_end(tmp_path: Path, _ogr) -> None:
     assert len(rows) == 1
 
 
-def test_main_cli_refusal_returns_nonzero(tmp_path: Path, _ogr) -> None:
-    shp = _point_shapefile(tmp_path, _ogr, epsg=None)
+def test_main_cli_refusal_returns_nonzero(tmp_path: Path) -> None:
+    shp = _point_shapefile(tmp_path, epsg=None)
     csv_path = tmp_path / "plants.csv"
 
     rc = main([str(shp), str(csv_path)])
