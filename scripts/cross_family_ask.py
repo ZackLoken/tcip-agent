@@ -7,6 +7,10 @@ they ran under are recorded alongside them, so nothing here is optional.
 
 Conditions control what the harness could reach, not what it was asked. The question
 text is byte-identical across families in every condition.
+
+Runs on the standard library alone, so it needs no project environment and should be invoked as
+``python scripts/cross_family_ask.py``. Wrapping it in ``conda run`` buys nothing and fails
+outright wherever conda is absent from PATH, which reports a launched-nothing run as exit 0.
 """
 
 from __future__ import annotations
@@ -200,23 +204,58 @@ EXECUTABLES = {"claude": CLAUDE, "codex": CODEX, "antigravity": AGY}
 STDIN_FAMILIES = {"claude", "codex"}
 
 
-def extract_response(family: str, stdout: str, last_message: pathlib.Path | None) -> str:
-    """Pull the final assistant text out of whatever shape the harness emitted."""
+def denied_write_text(payload: object) -> str:
+    """The longest document a harness tried to write and was refused, or an empty string.
+
+    A read-only run can still make the model compose its answer as a file rather than as a reply:
+    Claude Code under ``--permission-mode plan`` drafts into a plan file, is denied, and then
+    replies with a short pointer to a document that was never saved. The draft survives in the
+    refusal record, so the answer is recoverable without relaxing the sandbox that produced it.
+    Without this the run reports success while the recorded answer is a sentence of apology.
+    """
+    if not isinstance(payload, dict):
+        return ""
+    best = ""
+    for denial in payload.get("permission_denials") or ():
+        if not isinstance(denial, dict):
+            continue
+        tool_input = denial.get("tool_input")
+        if not isinstance(tool_input, dict):
+            continue
+        content = tool_input.get("content")
+        if isinstance(content, str) and len(content) > len(best):
+            best = content
+    return best.strip()
+
+
+def extract_response(family: str, stdout: str, last_message: pathlib.Path | None) -> tuple[str, str]:
+    """Pull the final assistant text out of whatever shape the harness emitted.
+
+    Returns the text and the route it came from. The route is recorded per run because an answer
+    recovered from a refused write is not the same evidence as one the harness returned directly,
+    and a comparison that cannot tell them apart is reading two different things as one.
+    """
     if last_message and last_message.exists():
         text = last_message.read_text(encoding="utf-8", errors="replace").strip()
         if text:
-            return text
+            return text, "final_message_file"
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError:
         pass
     else:
         if isinstance(payload, dict):
+            drafted = denied_write_text(payload)
             for key in ("result", "response", "text", "content", "final_response"):
                 value = payload.get(key)
                 if isinstance(value, str) and value.strip():
-                    return value.strip()
-        return json.dumps(payload, indent=2)[:20000]
+                    reply = value.strip()
+                    if len(drafted) > len(reply):
+                        return drafted, "denied_write_draft"
+                    return reply, "result_field"
+            if drafted:
+                return drafted, "denied_write_draft"
+        return json.dumps(payload, indent=2)[:20000], "whole_payload"
     tail = []
     for line in stdout.splitlines():
         line = line.strip()
@@ -231,8 +270,8 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
             if isinstance(value, str):
                 tail.append(value)
     if tail:
-        return "\n".join(tail[-40:])
-    return stdout.strip()
+        return "\n".join(tail[-40:]), "stream_tail"
+    return stdout.strip(), "raw_stdout"
 
 
 def run_one(family: str, question_id: str, condition_name: str, prompt: str,
@@ -278,7 +317,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     duration = (datetime.datetime.now() - clock).total_seconds()
     (run_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    response = extract_response(family, stdout, last)
+    response, response_source = extract_response(family, stdout, last)
     (run_dir / "response.md").write_text(response, encoding="utf-8")
 
     meta = {
@@ -300,6 +339,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "exit_code": code,
         "timed_out": timed_out,
         "response_chars": len(response),
+        "response_source": response_source,
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
@@ -366,10 +406,15 @@ def main() -> int:
                 results.append(future.result())
 
     results.sort(key=lambda r: r["family"])
-    print(f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  version")
+    print(f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  {'answer from':<20}version")
     for meta in results:
         print(f"{meta['family']:<14}{meta['exit_code']:>6}{meta['duration_s']:>9}"
-              f"{meta['response_chars']:>9}  {meta['harness_version']}")
+              f"{meta['response_chars']:>9}  {meta['response_source']:<20}{meta['harness_version']}")
+    recovered = [m['family'] for m in results if m['response_source'] == "denied_write_draft"]
+    if recovered:
+        print(f"\nnote: recovered the answer from a refused write for: {', '.join(recovered)}. "
+              "That harness composed its answer as a file the sandbox denied, so its reply text "
+              "was only a pointer to it.")
 
     summary = args.out / args.question_id / args.condition / "summary.json"
     summary.write_text(json.dumps(results, indent=2), encoding="utf-8")
