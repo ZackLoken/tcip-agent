@@ -22,9 +22,16 @@ reaching for again versus one built narrowly for a specific past investigation.
   missing/test-fixture checkpoints, provenance smells, orphaned labels. Run at session start.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of
   truth for "how many domain tools exist," since the count drifts as tools are added/renamed.
-- `prove_test_fails_before.py` - extracts a baseline revision with `git archive` and runs a
-  given test file against it, to prove a regression test actually fails without its fix
-  rather than passing vacuously everywhere.
+- `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
+  current test tree so conftest and helpers travel with the test, proves the baseline's own
+  source is what gets imported, and reads pytest's per-test outcome to say whether a test
+  actually fails without its fix. Four verdicts on four exit codes: `GUARDS` (0), `VACUOUS` (1),
+  `INDETERMINATE` (2) when the baseline is not shown to precede the change, and `REFUSED` (3)
+  when nothing was selected, everything was skipped, collection failed, or every failure was a
+  missing import. Only `GUARDS` is evidence. The default baseline is `HEAD` for uncommitted work
+  and the merge-base against the integration branch otherwise; the previous commit is not a
+  baseline in a one-file-per-commit history, so pass `--baseline` when neither default applies.
+  `--test-rev` checks a guard claim already in the history.
 - `verify_claims.py` - lists every claim-shaped sentence (fallback/never/always/cannot/etc.)
   that a diff adds to comments and docstrings, so each gets verified deliberately instead of
   shipping as unverified reasoning.

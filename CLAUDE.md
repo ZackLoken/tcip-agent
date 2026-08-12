@@ -124,10 +124,15 @@ this and reaches only for grep has skipped a verification step, not merely a con
 index is rebuilt at each phase/session end, so it reflects the last committed state and lags
 uncommitted worktree edits; freshly written or uncommitted code is grep-only regardless.
 
-A test that guards a fix must be observed failing without it. Extract the baseline and run the
-new test against it (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`): the baseline
-is the commit immediately before the change, not the phase's start. A test that passes there guards
-nothing; say so rather than counting it.
+A test that guards a fix must be observed failing without it. Run the new test against the tree
+before the change (`python scripts/prove_test_fails_before.py <testfile> -k <expr>`), which for
+uncommitted work is `HEAD` and the tool's own default. The commit immediately before a test is not
+that tree: nearly every commit here carries one file, so the change spans several and the previous
+commit sits inside it. Name the pre-change revision with `--baseline` when neither default applies.
+Only `GUARDS` counts. `VACUOUS` means the test guards nothing, so say so rather than counting it;
+`INDETERMINATE` and `REFUSED` mean no evidence was produced at all, so treat them as a run to redo
+rather than as a result, and never read either as a pass. The tool records the failing assertion it
+observed, and citing that record is what makes a fail-before claim checkable by the next reader.
 
 Never report the gate before its slowest part finishes. ruff/mypy/typecheck return in seconds and
 `pytest tests/` takes minutes. Reporting the fast half as green is guessing. Wait, then report, and
