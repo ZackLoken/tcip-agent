@@ -176,7 +176,7 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   breeder's only surface is the browser GUI, and their clarity and flow through it are the product
   from their side, same weight as the agent's own reasoning surface.
 - A subject is not a trait. `subject` names an object class that must be isolated: old code
-  or docs may still say `campaign` or `annotation_type` — pre-rename terms for `subject`, backend
+  or docs may still say `campaign` or `annotation_type`, both pre-rename terms for `subject`, backend
   and web layer alike. On disk, labels are one file per image
   (`annotations/<date>/<stem>.json`, see `dataset_layout.py`) holding every subject's annotation
   records by name; `subject` is a field inside each record, resolved through the dataset's
