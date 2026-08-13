@@ -101,6 +101,31 @@ GUIDANCE_PREFIX = (
 )
 
 
+def as_text(stream: object) -> str:
+    """A captured stream as text. ``None`` and bytes are both real, and neither is an error.
+
+    ``subprocess.run`` yields ``None`` for a stream a harness never wrote, and
+    ``TimeoutExpired`` carries raw bytes even under ``text=True``.
+    """
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", errors="replace")
+    return str(stream)
+
+
+def failed_run_meta(family: str, exc: BaseException) -> dict:
+    """A metadata row for a run that raised, shaped like a real one so the summary still prints."""
+    return {
+        "question_id": None, "condition": None, "condition_description": None,
+        "family": family, "executable": None, "harness_version": "unknown",
+        "model_requested": None, "effort_requested": None,
+        "started": now(), "duration_s": 0.0, "exit_code": -3, "timed_out": False,
+        "response_chars": 0, "response_source": "runner_error",
+        "runner_error": f"{type(exc).__name__}: {exc}",
+    }
+
+
 def now() -> str:
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -315,6 +340,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         stdout, stderr, code, timed_out = "", f"launch failed: {exc}", -2, False
 
     duration = (datetime.datetime.now() - clock).total_seconds()
+    # A harness that produces nothing, or that a timeout captured as raw bytes, is an outcome to
+    # record rather than a crash: the run's own transcript is what makes the comparison auditable.
+    stdout, stderr = as_text(stdout), as_text(stderr)
     (run_dir / "stdout.txt").write_text(stdout, encoding="utf-8")
     (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     response, response_source = extract_response(family, stdout, last)
@@ -403,7 +431,13 @@ def main() -> int:
                 for family in families
             }
             for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
+                family = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as exc:  # noqa: BLE001
+                    # One family failing must not discard the families that answered: their
+                    # transcripts are the artifact, and a lost run is unrecoverable.
+                    results.append(failed_run_meta(family, exc))
 
     results.sort(key=lambda r: r["family"])
     print(f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  {'answer from':<20}version")
