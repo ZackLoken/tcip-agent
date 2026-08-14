@@ -1,0 +1,159 @@
+"""A finished run's record is immutable whichever way it finished.
+
+Both terminal outcomes are locked, the run that completed and the run that failed: neither can
+be re-opened to a non-terminal state, gain new epochs, have a recorded artifact pointer or a
+populated lineage edge rewritten, and every refusal lands on the append-only audit log. The lock
+stays additive, so a still-empty artifact name or lineage field takes its first write even after
+the run finished. A cancelled run is the separate case the lock deliberately leaves out: its
+record stays writable and re-openable.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+def _record(root: Path, experiment_id: str, name: str) -> dict:
+    return json.loads((root / ".tcip" / "experiments" / experiment_id / name).read_text())
+
+
+def _metric_rows(root: Path, experiment_id: str) -> list[dict]:
+    path = root / ".tcip" / "experiments" / experiment_id / "metrics.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _audit_refusals(root: Path) -> list[dict]:
+    path = root / ".tcip" / "audit.jsonl"
+    if not path.is_file():
+        return []
+    events = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [e for e in events if e.get("tool") == "experiment_mutation_refused"]
+
+
+def test_failed_run_cannot_be_reopened_to_a_non_terminal_state(tmp_path):
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    eid = "exp-014-hazelnut-catkin-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    update_status(eid, "running")
+    update_status(eid, "failed", error="out of memory at epoch 4")
+
+    res = update_status(eid, "running")
+    assert "error" in res
+    assert res["state"] == "failed"
+
+    status = _record(tmp_path, eid, "status.json")
+    assert status["state"] == "failed"
+    assert status["error"] == "out of memory at epoch 4"
+
+
+def test_failed_run_metric_history_takes_no_further_epochs(tmp_path):
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+
+    eid = "exp-015-chestnut-burr-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:burr_det"}})
+    update_status(eid, "running")
+    log_metrics(eid, 3, {"val_map50": 0.41})
+    log_metrics(eid, 4, {"val_map50": 0.47})
+    update_status(eid, "failed", error="loss went to nan")
+
+    res = log_metrics(eid, 5, {"val_map50": 0.99})
+    assert "error" in res
+
+    rows = _metric_rows(tmp_path, eid)
+    assert [r["epoch"] for r in rows] == [3, 4]
+    assert rows[-1]["val_map50"] == 0.47
+
+
+def test_failed_run_artifact_pointer_is_frozen_while_a_new_name_still_records(tmp_path):
+    from tcip_mcp.experiments import create_experiment, record_artifact, update_status
+
+    eid = "exp-016-currant-cluster-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:cluster_det"}})
+    update_status(eid, "running")
+    record_artifact(eid, "model_final", "/runs/016/model_final.pt")
+    update_status(eid, "failed", error="worker process died")
+
+    added = record_artifact(eid, "failure_log", "/runs/016/stderr.txt")
+    assert added["artifact"] == "failure_log"
+
+    refused = record_artifact(eid, "model_final", "/runs/017/model_final.pt")
+    assert "error" in refused
+
+    artifacts = _record(tmp_path, eid, "artifacts.json")
+    assert artifacts["model_final"]["path"] == "/runs/016/model_final.pt"
+    assert artifacts["failure_log"]["path"] == "/runs/016/stderr.txt"
+
+
+def test_failed_run_populated_lineage_edge_is_frozen_while_an_empty_one_accepts_its_first_write(
+    tmp_path,
+):
+    from tcip_mcp.experiments import create_experiment, update_lineage, update_status
+
+    eid = "exp-017-elderberry-umbel-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:umbel_det"}})
+    update_status(eid, "running")
+    update_lineage(eid, model_weights="/runs/017/model_best.pt")
+    update_status(eid, "failed", error="dataloader raised")
+
+    update_lineage(eid, predictions="/preds/017")
+    update_lineage(eid, model_weights="/runs/018/model_best.pt")
+
+    lineage = _record(tmp_path, eid, "lineage.json")
+    assert lineage["model_weights"] == "/runs/017/model_best.pt"
+    assert lineage["predictions"] == "/preds/017"
+
+
+def test_refused_mutations_on_a_failed_run_are_recorded_on_the_audit_log(tmp_path):
+    from tcip_mcp.experiments import (
+        create_experiment,
+        log_metrics,
+        record_artifact,
+        update_status,
+    )
+
+    eid = "exp-018-persimmon-fruit-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
+    update_status(eid, "running")
+    log_metrics(eid, 2, {"val_map50": 0.33})
+    record_artifact(eid, "model_final", "/runs/018/model_final.pt")
+    update_status(eid, "failed", error="killed by the wall-clock watcher")
+
+    log_metrics(eid, 3, {"val_map50": 0.90})
+    record_artifact(eid, "model_final", "/runs/019/model_final.pt")
+    update_status(eid, "running")
+
+    refusals = _audit_refusals(tmp_path)
+    assert len(refusals) == 3
+    assert {e["arguments"]["op"] for e in refusals} == {
+        "log_metrics", "record_artifact", "update_status",
+    }
+    assert {e["arguments"]["experiment_id"] for e in refusals} == {eid}
+    assert {e["status"] for e in refusals} == {"refused"}
+
+
+def test_cancelled_run_record_stays_writable_and_reopenable(tmp_path):
+    """A cancelled run is not locked the way a completed or failed one is: it stopped on request
+    rather than finishing, so its record must still take the epochs and the state a resumed run
+    records against it."""
+    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+
+    eid = "exp-019-black_locust-raceme-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:raceme_det"}})
+    update_status(eid, "running")
+    log_metrics(eid, 6, {"val_map50": 0.52})
+    update_status(eid, "cancelled")
+
+    appended = log_metrics(eid, 7, {"val_map50": 0.58})
+    assert "error" not in appended
+    assert appended.get("logged") is True
+
+    reopened = update_status(eid, "running")
+    assert "error" not in reopened
+    assert reopened["state"] == "running"
+
+    rows = _metric_rows(tmp_path, eid)
+    assert [r["epoch"] for r in rows] == [6, 7]
+    assert _record(tmp_path, eid, "status.json")["state"] == "running"
+    assert _audit_refusals(tmp_path) == []
