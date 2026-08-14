@@ -193,9 +193,15 @@ def test_override_is_not_fenced(monkeypatch):
     assert "--settings" not in argv
 
 
-def test_repo_root_finds_the_marker():
-    root = pty_host._repo_root()
-    assert (root / ".mcp.json").is_file() or (root / "CLAUDE.md").is_file()
+def test_repo_root_is_resolved_from_the_module_not_the_launch_cwd(tmp_path, monkeypatch):
+    """The root the fence binds its deny paths and hook commands to comes from this module's own
+    location, so the same directory is resolved however the web process was started, and it
+    contains the fence settings file the spawned session is handed."""
+    from_install_dir = pty_host._repo_root()
+    monkeypatch.chdir(tmp_path)
+    assert pty_host._repo_root() == from_install_dir
+    assert FENCE.is_relative_to(from_install_dir)
+    assert (from_install_dir / "CLAUDE.md").is_file()
 
 
 # ── the Bash guard hook ──────────────────────────────────────────────────
