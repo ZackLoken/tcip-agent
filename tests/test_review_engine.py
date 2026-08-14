@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,35 @@ def ctx() -> ReviewContext:
             Annotation(subject="catkin", geometry=BBox(700, 700, 800, 800), score=0.8),  # FP
         ],
     )
+
+
+@pytest.fixture
+def unordered_ctx() -> ReviewContext:
+    """A non-square image whose GT and prediction lists are in different orders.
+
+    Every box has a width unequal to its height and the two lists never pair a GT with the
+    prediction at the same position, so an index transposition and a width normalized against
+    the wrong image dimension both change the numbers rather than cancelling out.
+    """
+    return ReviewContext(
+        img_name="IMG_0501.JPG",
+        img_width=1200,
+        img_height=500,
+        gt=[
+            Annotation(subject="catkin", geometry=BBox(100, 100, 300, 200)),
+            Annotation(subject="catkin", geometry=BBox(700, 260, 900, 420)),
+            Annotation(subject="catkin", geometry=BBox(50, 400, 150, 460)),  # no prediction: an FN
+        ],
+        preds=[
+            Annotation(subject="catkin", geometry=BBox(704, 264, 904, 424), score=0.90),  # gt[1]
+            Annotation(subject="catkin", geometry=BBox(1000, 20, 1080, 100), score=0.80),  # an FP
+            Annotation(subject="catkin", geometry=BBox(104, 104, 304, 204), score=0.72),  # gt[0]
+        ],
+    )
+
+
+def _unordered_matches(ctx: ReviewContext) -> dict:
+    return compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
 
 
 def test_initial_state_is_empty(engine: ReviewEngine, tmp_path: Path) -> None:
@@ -167,9 +198,42 @@ def test_build_detection_list_filter_type(engine: ReviewEngine, ctx: ReviewConte
 def test_build_detection_list_filter_class(engine: ReviewEngine, ctx: ReviewContext) -> None:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     all_catkin = engine.build_detection_list(ctx, matches, filter_class="catkin")
+    # The fixture's whole match set is catkin (1 TP, 1 FP, 1 FN), so naming that class must keep
+    # every one of them: an empty result would satisfy the per-item check vacuously.
+    assert len(all_catkin) == 3
     assert all(d.class_name == "catkin" for d in all_catkin)
     none = engine.build_detection_list(ctx, matches, filter_class="nonexistent")
     assert none == []
+
+
+def test_class_filter_keeps_the_named_class_and_drops_the_others(engine: ReviewEngine) -> None:
+    """Naming a class must select that class's detections and exclude the rest, with both sides
+    of the partition non-empty so neither a pass-everything nor a drop-everything filter reads
+    as correct."""
+    ctx = ReviewContext(
+        img_name="IMG_0777.JPG",
+        img_width=900,
+        img_height=400,
+        gt=[
+            Annotation(subject="catkin", geometry=BBox(100, 100, 300, 180)),
+            Annotation(subject="leaf", geometry=BBox(500, 40, 700, 300)),
+            Annotation(subject="leaf", geometry=BBox(60, 250, 200, 380)),
+        ],
+        preds=[
+            Annotation(subject="leaf", geometry=BBox(504, 44, 704, 304), score=0.88),
+            Annotation(subject="catkin", geometry=BBox(760, 300, 860, 360), score=0.61),
+        ],
+    )
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
+
+    catkins = engine.build_detection_list(ctx, matches, filter_class="catkin")
+    leaves = engine.build_detection_list(ctx, matches, filter_class="leaf")
+    assert len(catkins) == 2  # the unmatched catkin GT and the catkin prediction that hit nothing
+    assert len(leaves) == 2  # the matched leaf and the leaf GT nothing was predicted for
+    assert {d.class_name for d in catkins} == {"catkin"}
+    assert {d.class_name for d in leaves} == {"leaf"}
+    assert sorted(d.det_type for d in catkins) == ["fn", "fp"]
+    assert sorted(d.det_type for d in leaves) == ["fn", "tp"]
 
 
 def test_record_and_find_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> None:
@@ -396,3 +460,186 @@ def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tm
         [(30.0, 30.0), (40.0, 30.0), (40.0, 40.0)],
         [(60.0, 30.0), (70.0, 30.0), (70.0, 40.0)],
     ]
+
+
+def test_a_matched_detection_pairs_the_gt_with_the_prediction_that_matched_it(
+    engine: ReviewEngine, unordered_ctx: ReviewContext
+) -> None:
+    """A walkable TP must index the GT and the prediction that actually matched each other.
+
+    The two lists are in different orders here, so a detection that read its GT out of the
+    prediction list (or the reverse) would zoom the reviewer to another object's box and key the
+    verdict to a pair nobody adjudicated.
+    """
+    matches = _unordered_matches(unordered_ctx)
+    dets = engine.build_detection_list(unordered_ctx, matches, filter_type="tp")
+    assert len(dets) == 2
+
+    for det in dets:
+        assert det.gt_idx is not None and det.pred_idx is not None
+        # The confidence carried on the detection belongs to the prediction it indexes.
+        assert unordered_ctx.preds[det.pred_idx].score == pytest.approx(det.conf)
+        # A GT annotation is the one without a score; a prediction indexed as GT would carry one.
+        assert unordered_ctx.gt[det.gt_idx].score is None
+
+    strongest = next(d for d in dets if d.conf == pytest.approx(0.90))
+    assert (strongest.gt_idx, strongest.pred_idx) == (1, 0)
+    # The auto-zoom box spans that GT and that prediction together, no other object's.
+    assert strongest.bbox == (700.0, 260.0, 904.0, 424.0)
+
+
+def test_persisted_verdict_boxes_scale_width_by_image_width(
+    engine: ReviewEngine, unordered_ctx: ReviewContext
+) -> None:
+    """A verdict's stored box is ``[cx, cy, w, h]`` with each term divided by its own dimension.
+
+    The image is wider than it is tall and the boxes are not square, so a width divided by the
+    height still produces plausible centers while every stored size is off by the aspect ratio,
+    which is what the calibration reference built from these entries measures objects with.
+    """
+    matches = _unordered_matches(unordered_ctx)
+    dets = engine.build_detection_list(unordered_ctx, matches, filter_type="tp")
+    strongest = next(d for d in dets if d.conf == pytest.approx(0.90))
+
+    engine.record_detection_action(strongest, unordered_ctx, action="accepted")
+    entry = engine.raw_state["image"][unordered_ctx.img_name]["detections"][0]
+
+    assert entry["gt_bbox_norm"] == pytest.approx([0.666667, 0.68, 0.166667, 0.32], abs=1e-6)
+    assert entry["pred_bbox_norm"] == pytest.approx([0.67, 0.688, 0.166667, 0.32], abs=1e-6)
+
+
+def test_gt_preexisting_keeps_the_state_from_before_the_review_session(
+    engine: ReviewEngine, unordered_ctx: ReviewContext
+) -> None:
+    """``gt_preexisting`` records whether the image had ground truth before review began.
+
+    A session that authors ground truth of its own must not turn that recorded False into True on
+    a later verdict: the pre-review fact is unrecoverable once overwritten.
+    """
+    empty = ReviewContext(
+        img_name="IMG_0900.JPG",
+        img_width=1200,
+        img_height=500,
+        gt=[],
+        preds=[Annotation(subject="catkin", geometry=BBox(200, 60, 320, 140), score=0.77)],
+    )
+    first = ReviewDetection(det_type="fp", class_name="catkin", conf=0.77, iou=None,
+                            gt_idx=None, pred_idx=0, bbox=(200, 60, 320, 140))
+    engine.record_detection_action(first, empty, action="rejected")
+    assert engine.raw_state["image"]["IMG_0900.JPG"]["gt_preexisting"] is False
+
+    # The reviewer then draws a missed object, so the session's own ctx now carries ground truth.
+    authored = replace(empty, gt=[Annotation(subject="catkin", geometry=BBox(600, 200, 720, 300))])
+    second = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
+                             gt_idx=0, pred_idx=None, bbox=(600, 200, 720, 300))
+    engine.record_detection_action(second, authored, action="accepted")
+    assert engine.raw_state["image"]["IMG_0900.JPG"]["gt_preexisting"] is False
+
+    # An image that genuinely did have ground truth before review still records True.
+    dets = engine.build_detection_list(unordered_ctx, _unordered_matches(unordered_ctx))
+    engine.record_detection_action(dets[0], unordered_ctx, action="accepted")
+    assert engine.raw_state["image"][unordered_ctx.img_name]["gt_preexisting"] is True
+
+
+def test_verdict_count_matches_bucket_stems_against_extensioned_log_keys(
+    engine: ReviewEngine, unordered_ctx: ReviewContext
+) -> None:
+    """Verdicts are counted by image stem on both sides of the comparison.
+
+    A prediction bucket enumerates bare ``<stem>.json`` names while the review log keys on the
+    image filename with its extension. Comparing the two vocabularies unstemmed makes every
+    reviewed bucket report zero verdicts, and bucket immutability stops holding silently.
+    """
+    matches = _unordered_matches(unordered_ctx)
+    dets = engine.build_detection_list(unordered_ctx, matches)
+    for det in dets[:3]:
+        engine.record_detection_action(det, unordered_ctx, action="accepted")
+    assert len(engine.raw_state["image"][unordered_ctx.img_name]["detections"]) == 3
+
+    assert engine.verdict_count_for_images(["IMG_0501"]) == 3
+    assert engine.verdict_count_for_images(["IMG_0501", "IMG_9999"]) == 3
+    assert engine.verdict_count_for_images(["IMG_9999"]) == 0
+    assert engine.verdict_count_for_images([]) == 0
+
+
+def test_completion_gate_counts_every_detection_not_only_the_filtered_ones(
+    engine: ReviewEngine, unordered_ctx: ReviewContext
+) -> None:
+    """Completion is judged against the whole match set, never the reviewer's active filter.
+
+    A session filtered to one match type adjudicates a subset; declaring the image finished there
+    would retire it with real, never-walked detections still unreviewed.
+    """
+    matches = _unordered_matches(unordered_ctx)
+    tp_only = engine.build_detection_list(unordered_ctx, matches, filter_type="tp")
+    assert len(tp_only) == 2
+    for det in tp_only:
+        engine.record_detection_action(det, unordered_ctx, action="accepted")
+    assert engine.check_image_review_complete(unordered_ctx.img_name, matches) is False
+    assert engine.get_image_review_status(unordered_ctx.img_name) == "started"
+
+    for det in engine.build_detection_list(unordered_ctx, matches, filter_type="fp"):
+        engine.record_detection_action(det, unordered_ctx, action="rejected")
+    assert engine.check_image_review_complete(unordered_ctx.img_name, matches) is False
+
+    for det in engine.build_detection_list(unordered_ctx, matches, filter_type="fn"):
+        engine.record_detection_action(det, unordered_ctx, action="accepted")
+    assert engine.check_image_review_complete(unordered_ctx.img_name, matches) is True
+
+
+def test_an_attested_miss_stays_attested_when_keyed_to_the_authored_geometry(
+    engine: ReviewEngine, unordered_ctx: ReviewContext
+) -> None:
+    """Marking a missed object authors ground truth and keys the entry to the drawn box, while
+    the attestation itself is read from the call site's own shape (neither index supplied).
+
+    Reading the attestation off the post-authoring geometry instead would report False for every
+    genuine find, and adjudication coverage, the half of the calibration gate this control exists
+    to supply, would silently read as unattested.
+    """
+    drawn = (500.0, 100.0, 620.0, 180.0)
+    det = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
+                          gt_idx=None, pred_idx=None, bbox=drawn)
+    authored = replace(
+        unordered_ctx,
+        gt=[*unordered_ctx.gt, Annotation(subject="catkin", geometry=BBox(*drawn))],
+    )
+    engine.record_detection_action(
+        det, unordered_ctx, action="edited",
+        norm_det=replace(det, gt_idx=len(authored.gt) - 1), norm_ctx=authored,
+    )
+
+    entry = engine.raw_state["image"][unordered_ctx.img_name]["detections"][0]
+    assert entry["missed_object_attested"] is True
+    assert entry["pred_bbox_norm"] is None
+    assert entry["gt_bbox_norm"] == pytest.approx([0.466667, 0.28, 0.1, 0.16], abs=1e-6)
+
+
+def test_a_shard_write_that_fails_to_land_leaves_the_review_dir_holding_only_shards(
+    engine: ReviewEngine, unordered_ctx: ReviewContext, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A shard write that never lands leaves nothing behind and costs only its own verdict.
+
+    The staging file it writes through must be gone whether or not the swap succeeded: the review
+    dir is enumerated as shards, so a stranded staging file accumulates alongside them. The
+    verdict already confirmed on disk stays complete and readable.
+    """
+    matches = _unordered_matches(unordered_ctx)
+    dets = engine.build_detection_list(unordered_ctx, matches)
+    engine.record_detection_action(dets[0], unordered_ctx, action="accepted")
+
+    def refuse(src, dst, **kwargs):
+        raise OSError("shard swap refused")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    engine.record_detection_action(dets[1], unordered_ctx, action="rejected")
+    monkeypatch.undo()
+
+    assert sorted(p.name for p in engine.shard_dir.iterdir()) == ["IMG_0501.JPG.json"]
+
+    reloaded = ReviewEngine(state_dir=tmp_path)
+    persisted = reloaded.raw_state["image"][unordered_ctx.img_name]["detections"]
+    assert len(persisted) == 1
+    assert persisted[0]["action"] == "accepted"
+    assert persisted[0]["det_status"] == "reviewed"
