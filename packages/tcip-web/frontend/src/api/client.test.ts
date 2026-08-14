@@ -39,6 +39,87 @@ describe("annotate.save lost-update handling", () => {
   });
 });
 
+describe("annotate.load", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reports the raster's own width and height, each in its own field", async () => {
+    // Non-square on purpose: equal dimensions would read the same whichever field they land in.
+    stubFetch(200, {
+      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      img_width: 4032,
+      img_height: 3024,
+      annotations: [{ subject: "bush", bbox: [10, 20, 110, 220] }],
+      base_mtime: "1783702599549301100",
+    });
+    const labels = await api.annotate.load("C:/data/images/2026-01-01/img1.jpg");
+    expect(labels.img_width).toBe(4032);
+    expect(labels.img_height).toBe(3024);
+    expect(labels.base_mtime).toBe("1783702599549301100");
+  });
+
+  it("splits the served annotation list into the canvas buckets", async () => {
+    stubFetch(200, {
+      image_path: "C:/data/images/2026-01-01/img1.jpg",
+      img_width: 4032,
+      img_height: 3024,
+      annotations: [{ subject: "bush", bbox: [10, 20, 110, 220] }],
+      base_mtime: null,
+    });
+    const labels = await api.annotate.load("C:/data/images/2026-01-01/img1.jpg");
+    expect(labels.boxes).toHaveLength(1);
+    expect(labels.boxes[0].x1).toBe(10);
+    expect(labels.boxes[0].y1).toBe(20);
+    expect(labels.boxes[0].x2).toBe(110);
+    expect(labels.boxes[0].y2).toBe(220);
+    expect(labels.polygons).toHaveLength(0);
+    expect(labels.points).toHaveLength(0);
+  });
+});
+
+describe("query string assembly", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("drops a null parameter instead of sending the text null", async () => {
+    stubFetch(200, { coverage: null });
+    await api.coverage.get("mosaic.tif", "bush", null);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/coverage?path=mosaic.tif&subject=bush");
+  });
+
+  it("drops an omitted parameter instead of sending the text undefined", async () => {
+    stubFetch(200, { path: "", parent: null, entries: [] });
+    await api.fs.list();
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/fs/list?");
+  });
+
+  it("keeps a parameter whose value is zero", async () => {
+    stubFetch(200, {});
+    await api.images.bands("mosaic.tif");
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/images/bands?path=mosaic.tif");
+    expect(api.images.url("mosaic.tif", { x0: 0, y0: 4067 })).toBe(
+      "/api/images?path=mosaic.tif&x0=0&y0=4067",
+    );
+  });
+});
+
+describe("request defaults", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the JSON content type on a request that names no headers of its own", async () => {
+    stubFetch(200, { status: "ok", current_image_index: 7 });
+    await api.dataset.nav(7);
+    const init = vi.mocked(fetch).mock.calls[0][1];
+    expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ current_image_index: 7 }));
+  });
+});
+
 function parseQuery(url: string): URLSearchParams {
   return new URLSearchParams(url.split("?")[1] ?? "");
 }
