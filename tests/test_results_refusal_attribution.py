@@ -1,0 +1,104 @@
+"""A Results refusal names the dimension that actually failed, and reports the others honestly.
+
+The refusal is the breeder's hand-off into calibration: it is read to decide which operating point
+to go and validate. So it carries per-dimension states, and each state belongs to the dimension it
+is printed beside. A refusal that swaps them, or that reports a dimension whose evidence is on disk
+as unvalidated, sends the breeder to recalibrate something that was never the problem while the real
+gap stays open.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
+from tcip_web.app import app
+
+from tests.test_tcip_web_results_routes import _phenology_fixture
+
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
+DOORS = ("per_plant_curves", "onset_dates")
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
+
+
+def _unvalidate_count_operating_point(body: dict) -> None:
+    """Strip the count operating point of its reference, leaving the classifier evidence intact."""
+    for bucket in body["predictions_by_date"].values():
+        path = Path(bucket) / "operating_point.json"
+        sidecar = json.loads(path.read_text(encoding="utf-8"))
+        sidecar["validated"] = False
+        sidecar["operating_point"]["conf"]["validated_against"] = VALIDATED_FALSE
+        path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+
+def _unvalidate_classifier(body: dict) -> None:
+    """Strip the positive-state classifier of its reference, leaving the count evidence intact."""
+    for bucket in body["predictions_by_date"].values():
+        (Path(bucket) / "classifier_operating_point.json").write_text(json.dumps({
+            "validated": False, "trait": "catkin", "experiment_id": "exp-1",
+            "operating_point": {"classifier": {"value": "elongated",
+                                               "validated_against": VALIDATED_FALSE}},
+        }), encoding="utf-8")
+
+
+def _refusal_detail(client: TestClient, body: dict, route: str) -> str:
+    resp = client.post(f"/api/results/{route}", json=body)
+    assert resp.status_code == 400, (route, resp.text[:200])
+    return resp.json()["detail"]
+
+
+def test_a_refusal_over_the_count_operating_point_says_the_classifier_is_validated(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """One dimension's evidence removed, the other's left in place: the refusal names the count
+    operating point alone and still reports the classifier's real on-disk reference."""
+    body = _phenology_fixture(tmp_path, validated=True, detections=4)
+    assert client.post("/api/results/onset_dates", json=body).status_code == 200
+    _unvalidate_count_operating_point(body)
+
+    for route in DOORS:
+        detail = _refusal_detail(client, body, route)
+        assert "['operating_point']" in detail, route
+        assert f"operating_point={VALIDATED_FALSE!r}" in detail, route
+        assert f"classifier={VALIDATED_HELD_OUT!r}" in detail, route
+
+
+def test_a_refusal_over_the_classifier_says_the_count_operating_point_is_validated(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The mirror case, so neither reading can be produced by a refusal that prints one fixed
+    attribution: with only the classifier's reference gone, the count operating point is reported
+    with the reference its own sidecar records."""
+    body = _phenology_fixture(tmp_path, validated=True, detections=4)
+    _unvalidate_classifier(body)
+
+    for route in DOORS:
+        detail = _refusal_detail(client, body, route)
+        assert "['classifier']" in detail, route
+        assert f"classifier={VALIDATED_FALSE!r}" in detail, route
+        assert f"operating_point={VALIDATED_HELD_OUT!r}" in detail, route
+
+
+def test_the_two_refusals_do_not_read_alike(client: TestClient, tmp_path: Path) -> None:
+    """The breeder is meant to act on the difference, so the two failures must not produce the same
+    text. The unvalidated bucket list is the same in both; what separates them is which dimension
+    is named."""
+    count_broken = _phenology_fixture(tmp_path / "count", validated=True, detections=4)
+    _unvalidate_count_operating_point(count_broken)
+    classifier_broken = _phenology_fixture(tmp_path / "classifier", validated=True, detections=4)
+    _unvalidate_classifier(classifier_broken)
+
+    count_detail = _refusal_detail(client, count_broken, "onset_dates")
+    classifier_detail = _refusal_detail(client, classifier_broken, "onset_dates")
+    assert count_detail != classifier_detail
+    assert "['classifier']" not in count_detail
+    assert "['operating_point']" not in classifier_detail
