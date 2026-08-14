@@ -104,6 +104,28 @@ describe("openProjectByName", () => {
     expect(arg.model_name).toBe("baseline");
   });
 
+  it("points both roots at the summary's own path, the same place the picker opens", async () => {
+    const p = project({
+      name: "site-a",
+      dates: ["2026-02-11"],
+      subjects: ["bush"],
+      models: ["baseline"],
+      subjects_by_date: { "2026-02-11": ["bush"] },
+      models_by_date: { "2026-02-11": ["baseline"] },
+    });
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      projects: [p],
+    });
+
+    await openProjectByName("site-a");
+
+    const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
+    expect(arg.project_root).toBe("/ws/site-a");
+    expect(arg.dataset_root).toBe("/ws/site-a");
+  });
+
   it("returns null for an unknown project", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",

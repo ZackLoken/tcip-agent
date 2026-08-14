@@ -162,6 +162,112 @@ describe("ResultsTab broken trait spec visibility", () => {
   });
 });
 
+describe("ResultsTab evidence gate", () => {
+  const CURVE_ROW = {
+    plant_id: "P1",
+    accession: null,
+    date: "2026-01-01",
+    n_images: 1,
+    n_total: 10,
+    n_positive: 3,
+    n_unclassified: 0,
+    n_missing: 0,
+    ratio: 0.3,
+  };
+  const ONSET_ROW = {
+    plant_id: "P1",
+    accession: null,
+    n_dates: 2,
+    n_dates_unclassified: 0,
+    n_dates_missing_images: 0,
+    n_observed_dates: 2,
+    stage_50per_date: "2026-02-01",
+  };
+  const UNVALIDATED = {
+    validated: { operating_point: "false", classifier: "validated_held_out" },
+    provisional: true,
+    validity_detail: {},
+    positive_class_assessed: true,
+  };
+
+  function mockTree() {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: ["2026-01-01"],
+      subjects: [],
+      model_names: ["baseline"],
+      subjects_by_date: {},
+      models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+    });
+  }
+
+  async function renderAndCompute() {
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.traits).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+  }
+
+  it("hands an unvalidated-evidence refusal to the calibration flow, not the raw error line", async () => {
+    mockTree();
+    // Opens like the backend refusal message, which the tab must classify as a refusal.
+    vi.spyOn(resultsApi, "perPlantCurves").mockRejectedValue(
+      new Error(
+        "phenology delivery requires a validated classifier and count operating point, " +
+          "reconciled from the prediction buckets' own sidecars (never a caller-asserted " +
+          "string). Unvalidated: ['operating_point'] (operating_point='missing', " +
+          "classifier='validated_held_out').",
+      ),
+    );
+
+    await renderAndCompute();
+
+    expect(
+      await screen.findByRole("button", { name: /ask the agent to calibrate this/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show provisional numbers/i })).toBeInTheDocument();
+  });
+
+  it("keeps both CSV doors shut while the displayed numbers are provisional", async () => {
+    mockTree();
+    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
+      rows: [CURVE_ROW],
+      n_plants: 1,
+      positive_class_id: 1,
+      ...UNVALIDATED,
+    });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [ONSET_ROW], ...UNVALIDATED });
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: /curves csv/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /milestones csv/i })).toBeDisabled();
+    // The row itself has to say so too; the banner explaining it scrolls out of view.
+    expect(screen.getByText("provisional")).toBeInTheDocument();
+    expect(screen.queryByText("valid")).not.toBeInTheDocument();
+  });
+
+  it("opens both CSV doors once the same rows arrive on validated evidence", async () => {
+    mockTree();
+    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
+      rows: [CURVE_ROW],
+      n_plants: 1,
+      positive_class_id: 1,
+      ...VALIDATED,
+    });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [ONSET_ROW], ...VALIDATED });
+
+    await renderAndCompute();
+    await waitFor(() => expect(screen.getByText("P1")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /milestones csv/i })).toBeEnabled();
+    expect(screen.getByText("valid")).toBeInTheDocument();
+  });
+});
+
 describe("ResultsTab onset table validity marker", () => {
   async function computeWithOnsetRows(
     rows: Awaited<ReturnType<typeof resultsApi.onsetDates>>["rows"],
