@@ -36,7 +36,7 @@ def _raw(path: Path) -> dict:
         return json.load(f)
 
 
-# ── GT box round-trip ────────────────────────────────────────────────────────
+# -- GT box round-trip --------------------------------------------------------
 
 
 def test_gt_round_trip_geometry_and_subjects(tmp_path: Path) -> None:
@@ -68,7 +68,7 @@ def test_gt_disk_schema_is_coco_xywh_without_score(tmp_path: Path) -> None:
     assert all("score" not in o for o in data["annotations"])
 
 
-# ── prediction box round-trip ────────────────────────────────────────────────
+# -- prediction box round-trip ------------------------------------------------
 
 
 def test_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
     ]
 
 
-# ── polygon GT + pred round-trip ─────────────────────────────────────────────
+# -- polygon GT + pred round-trip ---------------------------------------------
 
 
 def test_polygon_gt_round_trip(tmp_path: Path) -> None:
@@ -211,7 +211,7 @@ def test_polygon_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
     assert got[0].score == 0.75
 
 
-# ── provenance ───────────────────────────────────────────────────────────────
+# -- provenance ---------------------------------------------------------------
 
 PROV = {
     "created_by": "sam",
@@ -288,7 +288,7 @@ def test_provenance_set_by_mutation_survives_write(tmp_path: Path) -> None:
     assert again.score == 0.5
 
 
-# ── negative invariant: present-empty == confirmed negative, missing == unannotated ──
+# -- negative invariant: present-empty == confirmed negative, missing == unannotated --
 
 
 def test_keep_empty_writes_present_confirmed_negative(tmp_path: Path) -> None:
@@ -334,7 +334,7 @@ def test_present_negative_is_distinct_from_missing(tmp_path: Path) -> None:
     assert not os.path.exists(missing)
 
 
-# ── robustness: malformed inputs are skipped/empty, never raise ──────────────
+# -- robustness: malformed inputs are skipped/empty, never raise --------------
 
 
 def test_non_json_file_reads_empty(tmp_path: Path) -> None:
@@ -404,7 +404,11 @@ def test_bad_segmentation_yields_no_polygon(tmp_path: Path) -> None:
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     got = read_annotations(path)
+    # Every entry still reads back as its own annotation: an unusable segmentation costs the record
+    # its geometry, never the record itself (a dropped record would read as a smaller label set).
+    assert [a.subject for a in got] == ["leaf"] * 6
     assert all(not isinstance(a.geometry, Polygon) for a in got)  # no bad ring becomes a polygon
+    assert all(a.geometry is None for a in got)  # and no other geometry is invented in its place
 
 
 def test_annotations_null_or_absent_reads_empty(tmp_path: Path) -> None:
@@ -476,7 +480,83 @@ def test_non_finite_score_is_written_as_valid_json(tmp_path: Path) -> None:
     assert ann.score == 0.0
 
 
-# ── to_coco_dataset ──────────────────────────────────────────────────────────
+def test_boolean_score_field_is_not_a_confidence(tmp_path: Path) -> None:
+    """``true``/``false`` in a ``score`` field is not a confidence.
+
+    Reading a boolean as 1.0/0.0 would turn ground truth into a maximum-confidence (or a
+    zero-confidence) prediction, and the score is the only thing separating the two.
+    """
+    payload = {
+        "image": "a", "width": 320, "height": 240,
+        "annotations": [
+            {"subject": "catkin", "bbox": [10.0, 20.0, 100.0, 200.0], "score": True},
+            {"subject": "catkin", "bbox": [5.0, 6.0, 30.0, 12.0], "score": False},
+        ],
+    }
+    path = tmp_path / "IMG_bool.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    got = read_annotations(path)
+    assert len(got) == 2
+    assert [a.score for a in got] == [None, None]
+
+    # ...and the assembled dataset keeps them ground truth: no score key rides along.
+    coco = to_coco_dataset([(str(path), "IMG_bool.JPG")], subject="catkin", id_map={"catkin": 0})
+    assert len(coco["annotations"]) == 2
+    assert all("score" not in a for a in coco["annotations"])
+
+
+def test_polygon_wins_over_a_disagreeing_stored_box(tmp_path: Path) -> None:
+    """The polygon is the source of truth, so a co-stored box that disagrees with it is ignored.
+
+    A hand-authored or hand-edited file can carry a stale box next to a segmentation; reading that
+    box would shrink the instance to whatever a previous edit left behind.
+    """
+    path = tmp_path / "IMG_stale.json"
+    payload = {
+        "image": "IMG_stale", "width": 320, "height": 240,
+        "annotations": [{
+            "subject": "leaf",
+            "segmentation": [[c for xy in SQUARE for c in xy]],
+            "bbox": [0.0, 0.0, 5.0, 5.0],
+        }],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    (got,) = read_annotations(path)
+    assert isinstance(got.geometry, Polygon)
+    assert got.geometry.rings == [SQUARE]
+    b = bbox_of(got.geometry)
+    assert (b.x1, b.y1, b.x2, b.y2) == (10.0, 20.0, 110.0, 220.0)
+
+    # Assembly re-derives the box from the rings rather than passing the stale one through.
+    coco = to_coco_dataset([(str(path), "IMG_stale.JPG")], subject="leaf", id_map={"leaf": 0})
+    (ann,) = coco["annotations"]
+    assert ann["bbox"] == [10.0, 20.0, 100.0, 200.0]
+    assert ann["area"] == 100.0 * 200.0
+
+
+def test_written_polygon_box_covers_only_the_rings_that_survive(tmp_path: Path) -> None:
+    """The box written beside a segmentation spans the kept rings, not the dropped ones.
+
+    A degenerate ring is never written, so a box that still counted its coordinates would describe a
+    region no segmentation supports and would stretch the instance toward stray points.
+    """
+    stray = [(500.0, 400.0), (501.0, 401.0)]  # 2 points: not a shape, dropped on write
+    path = tmp_path / "labels" / "IMG_stray.json"
+    write_annotations(path, [Annotation(subject="leaf", geometry=Polygon([SQUARE, stray]))], 640, 480)
+
+    (rec,) = _raw(path)["annotations"]
+    assert rec["segmentation"] == [[c for xy in SQUARE for c in xy]]
+    assert rec["bbox"] == [10.0, 20.0, 100.0, 200.0]
+
+    # The read side agrees, computed by the real box derivation over what was actually kept.
+    (got,) = read_annotations(path)
+    b = bbox_of(got.geometry)
+    assert [b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1] == rec["bbox"]
+
+
+# -- to_coco_dataset ----------------------------------------------------------
 
 
 def _mixed_entries(tmp_path: Path) -> list[tuple[str, str]]:
@@ -593,7 +673,7 @@ def test_to_coco_dataset_empty_entries(tmp_path: Path) -> None:
                     "excluded_incomplete_attribute": []}
 
 
-# ── target_class_id: unlabeled vs. undecodable ───────────────────────────────
+# -- target_class_id: unlabeled vs. undecodable -------------------------------
 
 
 def test_target_class_id_distinguishes_unlabeled_from_undecodable() -> None:
@@ -671,3 +751,103 @@ def test_to_coco_dataset_excludes_the_whole_image_when_any_instance_is_unlabeled
         raise AssertionError("expected a ValueError")
     except ValueError:
         pass
+
+
+# -- subject scoping, class ids, and geometry-less labels in assembly ---------
+
+
+def test_an_image_empty_of_this_subject_is_no_negative_without_confirmation(tmp_path: Path) -> None:
+    """A negative is confirmed by a human, per subject, never inferred from an absence.
+
+    An image full of another subject's annotations holds no information about this one, so admitting
+    it as a negative would train real objects as background on the strength of a scope mismatch.
+    """
+    other_subject = tmp_path / "IMG_leaf.json"
+    write_annotations(other_subject, [
+        Annotation(subject="leaf", geometry=BBox(10.0, 20.0, 110.0, 220.0)),
+        Annotation(subject="leaf", geometry=BBox(200.0, 30.0, 240.0, 90.0)),
+    ], 640, 480)
+    confirmed = tmp_path / "IMG_conf.json"
+    write_annotations(confirmed, [], 640, 480, keep_empty=True)
+    populated = tmp_path / "IMG_cat.json"
+    write_annotations(populated, [Annotation(subject="catkin", geometry=BBox(5.0, 6.0, 35.0, 26.0))],
+                      640, 480)
+
+    coco = to_coco_dataset(
+        [(str(other_subject), "IMG_leaf.JPG"), (str(confirmed), "IMG_conf.JPG"),
+         (str(populated), "IMG_cat.JPG")],
+        subject="catkin", id_map={"catkin": 0}, confirmed_negative_names={"IMG_conf.JPG"},
+    )
+
+    assert [i["file_name"] for i in coco["images"]] == ["IMG_conf.JPG", "IMG_cat.JPG"]
+    (ann,) = coco["annotations"]
+    by_id = {i["id"]: i["file_name"] for i in coco["images"]}
+    assert by_id[ann["image_id"]] == "IMG_cat.JPG"
+    assert ann["bbox"] == [5.0, 6.0, 30.0, 20.0]
+
+
+def test_categories_and_class_ids_follow_the_run_id_map(tmp_path: Path) -> None:
+    """Class ids come from the run's own name to id assignment, which is neither dense nor ordered
+    the way the names are, and the emitted categories cover exactly the ids the annotations use."""
+    id_map = {"dormant": 7, "elongated": 3}
+    dormant_img = tmp_path / "IMG_dormant.json"
+    write_annotations(dormant_img, [Annotation(subject="catkin", geometry=BBox(10.0, 20.0, 40.0, 90.0),
+                                               attributes={"elongation": "dormant"})], 320, 240)
+    elongated_img = tmp_path / "IMG_elongated.json"
+    write_annotations(elongated_img, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 61.0, 12.0),
+                                                 attributes={"elongation": "elongated"})], 320, 240)
+
+    coco = to_coco_dataset(
+        [(str(dormant_img), "IMG_dormant.JPG"), (str(elongated_img), "IMG_elongated.JPG")],
+        subject="catkin", id_map=id_map, attribute="elongation",
+    )
+
+    assert coco["categories"] == [{"id": 3, "name": "elongated"}, {"id": 7, "name": "dormant"}]
+    by_image = {i["id"]: i["file_name"] for i in coco["images"]}
+    assert {by_image[a["image_id"]]: a["category_id"] for a in coco["annotations"]} == {
+        "IMG_dormant.JPG": 7, "IMG_elongated.JPG": 3}
+    # Every annotation's class id is one the emitted categories declare.
+    assert {a["category_id"] for a in coco["annotations"]} <= {c["id"] for c in coco["categories"]}
+
+
+def test_whole_image_rating_is_kept_but_never_becomes_a_target(tmp_path: Path) -> None:
+    """A geometry-less annotation is a whole-image rating, not a detection or segmentation target.
+
+    It has no box to train or match on, so it takes no class id and adds no COCO annotation; it also
+    carries no attribute gap, so its presence never pulls a fully labeled image into the
+    incomplete-attribute exclusion.
+    """
+    id_map = {"dormant": 7, "elongated": 3}
+    rating = Annotation(subject="catkin", attributes={"vigor": "high"})
+    assert target_class_id(rating, "catkin", None, {"catkin": 0}) is None
+    assert target_class_id(rating, "catkin", "elongation", id_map, allow_unlabeled=True) is None
+
+    path = tmp_path / "IMG_rated.json"
+    write_annotations(path, [
+        Annotation(subject="catkin", geometry=BBox(10.0, 20.0, 40.0, 90.0),
+                   attributes={"elongation": "dormant"}),
+        rating,
+    ], 320, 240)
+
+    coco = to_coco_dataset([(str(path), "IMG_rated.JPG")], subject="catkin", id_map=id_map,
+                           attribute="elongation")
+    assert coco["excluded_incomplete_attribute"] == []
+    assert [i["file_name"] for i in coco["images"]] == ["IMG_rated.JPG"]
+    (ann,) = coco["annotations"]
+    assert ann["category_id"] == 7
+    assert ann["bbox"] == [10.0, 20.0, 30.0, 70.0]
+
+
+def test_rating_only_image_counts_as_annotated_with_no_targets(tmp_path: Path) -> None:
+    """An image whose only annotation is a whole-image rating is annotated, not unannotated: it
+    enters the dataset with zero targets rather than being dropped or excluded as incomplete."""
+    id_map = {"dormant": 7, "elongated": 3}
+    path = tmp_path / "IMG_rating_only.json"
+    write_annotations(path, [Annotation(subject="catkin", attributes={"vigor": "low"})], 320, 240)
+
+    coco = to_coco_dataset([(str(path), "IMG_rating_only.JPG")], subject="catkin", id_map=id_map,
+                           attribute="elongation")
+    assert [i["file_name"] for i in coco["images"]] == ["IMG_rating_only.JPG"]
+    assert coco["annotations"] == []
+    assert coco["excluded_incomplete_attribute"] == []
+    assert coco["images"][0]["width"] == 320 and coco["images"][0]["height"] == 240
