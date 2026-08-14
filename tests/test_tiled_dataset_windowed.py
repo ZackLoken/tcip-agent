@@ -78,7 +78,7 @@ def _tiled(images_dir, labels_dir, **kwargs) -> TiledDetectionDataset:
     return TiledDetectionDataset(base, tile_size=64, overlap=0.2, **kwargs)
 
 
-# ── keep_regions ─────────────────────────────────────────────────────────
+# -- keep_regions ---------------------------------------------------------
 
 
 def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path):
@@ -127,7 +127,7 @@ def test_a_malformed_keep_region_refuses_by_name(tmp_path):
         _tiled(images_dir, labels_dir, keep_regions=[(115, 0, 0, 115)])
 
 
-# ── Sampler-facing properties ────────────────────────────────────────────
+# -- Sampler-facing properties --------------------------------------------
 
 
 def test_tile_entries_matches_index_order_and_getitem(tmp_path):
@@ -159,7 +159,7 @@ def test_source_frames_for_a_windowed_raster(tmp_path):
     }
 
 
-# ── Eager opens, backend-conditioned ─────────────────────────────────────
+# -- Eager opens, backend-conditioned -------------------------------------
 
 
 def test_photographic_construction_opens_no_raster_backend(tmp_path, monkeypatch):
@@ -191,11 +191,11 @@ def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
     images_dir, labels_dir, _arr = _tiff_project(tmp_path)
     # Corrupt the file after writing the labels: header parse now fails.
     (images_dir / "img0.tif").write_bytes(b"II*\x00garbage")
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="cannot open raster"):
         _tiled(images_dir, labels_dir)
 
 
-# ── Windowed reads ───────────────────────────────────────────────────────
+# -- Windowed reads -------------------------------------------------------
 
 
 def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
@@ -204,6 +204,7 @@ def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
     images_dir, labels_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir, labels_dir)
     img = load_image(images_dir / "img0.tif", 3)
+    assert len(ds.tile_entries) == 16, "the 200x200 frame tiles into 16 windows at stride 51"
     for i, (_stem, tx, ty) in enumerate(ds.tile_entries):
         expected = pil_to_tensor(crop_pad_tile(img, tx, ty, 64, 200, 200))
         got, target = ds[i]
@@ -262,7 +263,7 @@ def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(tmp_path):
     assert torch.allclose(img_tensor, expected)
 
 
-# ── Worker pickling ──────────────────────────────────────────────────────
+# -- Worker pickling ------------------------------------------------------
 
 
 def test_dataset_pickles_after_construction_and_after_a_read(tmp_path):
