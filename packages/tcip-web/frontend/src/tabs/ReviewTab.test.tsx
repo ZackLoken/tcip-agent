@@ -14,12 +14,24 @@ import { ReviewTab } from "@/tabs/ReviewTab";
 // divs and CanvasStage as a passthrough.
 vi.mock("konva", () => ({ default: {} }));
 vi.mock("react-konva", () => ({
-  // Expose stroke + dashed so symbology (dashed = under review) is assertable.
-  Rect: (props: { stroke?: string; dash?: number[] }) => (
+  // Expose stroke + dashed so symbology (dashed = under review) is assertable, and the box's own
+  // placement so a shape drawn from the wrong annotation is distinguishable from a missing one.
+  Rect: (props: {
+    stroke?: string;
+    dash?: number[];
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  }) => (
     <div
       data-testid="k-rect"
       data-stroke={props.stroke}
       data-dashed={props.dash ? "true" : "false"}
+      data-x={props.x}
+      data-y={props.y}
+      data-width={props.width}
+      data-height={props.height}
     />
   ),
   Line: (props: { stroke?: string; dash?: number[]; points?: number[] }) => (
@@ -413,6 +425,95 @@ describe("ReviewTab in-place edit", () => {
   });
 });
 
+describe("ReviewTab recorded verdict", () => {
+  const gtAnn: Annotation = { subject: "leaf", bbox: [14, 22, 52, 70], attributes: {} };
+
+  beforeEach(() => {
+    vi.spyOn(api.review, "backupLabels").mockResolvedValue({ status: "ok", files_backed_up: 0 });
+  });
+
+  it("shows a rejected prediction as rejected, both in the store and on the canvas badge", async () => {
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [24, 32, 68, 90] })], {
+        preds: [{ subject: "leaf", bbox: [24, 32, 68, 90], attributes: {}, score: 0.7 }],
+      }),
+    );
+    // Discarding a prediction leaves ground truth untouched, so the route reports no annotation
+    // status and this local mark is the only record the reviewer keeps seeing.
+    const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: null,
+      matches: matchesRes([]),
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Discard this prediction; ground truth unchanged (R)"));
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(actionSpy.mock.calls[0][0].action).toBe("rejected");
+
+    await waitFor(() => {
+      const reviewed = useStore.getState().review.matches!.detections[0];
+      expect(reviewed.reviewed).toBe(true);
+      expect(reviewed.reviewed_action).toBe("rejected");
+    });
+    expect(screen.getByText("rejected")).toBeInTheDocument();
+  });
+
+  it("marks an edited detection with the reviewer's own verdict, not a blanket acceptance", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det({ bbox: [14, 22, 52, 70] })], { gt: [gtAnn] }));
+    const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes(
+        [det({ bbox: [14, 22, 52, 70], reviewed: true, reviewed_action: "edited" })],
+        { gt: [gtAnn] },
+      ),
+    });
+    // Calls through to the real store action, so what it records is the argument the tab passes.
+    const markSpy = vi.spyOn(useStore.getState(), "markDetectionReviewed");
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Adjust this shape on the canvas (E)"));
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+
+    expect(markSpy).toHaveBeenCalledTimes(1);
+    expect(markSpy.mock.calls[0]).toEqual([0, "edited"]);
+    // An edit rewrites ground truth, so the route's recomputed matches land on top of the local
+    // mark; the detection still has to read as edited once they do.
+    await waitFor(() =>
+      expect(useStore.getState().review.matches!.detections[0].reviewed_action).toBe("edited"),
+    );
+    expect(screen.getByText("edited")).toBeInTheDocument();
+  });
+
+  it("abandons the verdict when the pristine label baseline cannot be captured", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det({ bbox: [14, 22, 52, 70] })], { gt: [gtAnn] }));
+    vi.spyOn(api.review, "backupLabels").mockRejectedValue(new Error("label dir is read-only"));
+    const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([det()], { gt: [gtAnn] }),
+    });
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("Keep this ground-truth object (A)"));
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
+        "Backup failed. Retry the action.",
+      ),
+    );
+    expect(actionSpy).not.toHaveBeenCalled();
+    expect(useStore.getState().review.matches!.detections[0].reviewed).toBe(false);
+  });
+});
+
 describe("ReviewTab mark-missed-object affordance", () => {
   let actionSpy: MockInstance<typeof api.review.action>;
   let backupSpy: MockInstance<typeof api.review.backupLabels>;
@@ -719,6 +820,36 @@ describe("ReviewTab symbology", () => {
       .find((r) => r.getAttribute("data-stroke") === "#00BFFF");
     expect(active).toBeDefined();
     expect(active!.getAttribute("data-dashed")).toBe("true");
+  });
+
+  it("draws the matched prediction next to the ground truth of the matched detection under review", async () => {
+    // A matched detection's verdict judges how far the predicted shape sits from the true one, so
+    // drawing the ground truth alone asks for that judgement with nothing to compare against.
+    matchesSpy.mockResolvedValue(
+      matchesRes([det({ det_type: "tp", gt_idx: 0, pred_idx: 0, bbox: [12, 20, 48, 66] })], {
+        gt: [{ subject: "leaf", bbox: [12, 20, 48, 66], attributes: {} }],
+        preds: [{ subject: "leaf", bbox: [17, 25, 61, 79], attributes: {}, score: 0.8 }],
+      }),
+    );
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+
+    const rects = screen.getAllByTestId("k-rect");
+    expect(rects).toHaveLength(2);
+    const geom = (el: HTMLElement) =>
+      ["data-x", "data-y", "data-width", "data-height"].map((a) => el.getAttribute(a));
+
+    // The ground truth keeps the matched-outcome green; the prediction rides on top in the dashed
+    // under-review blue, the symbology every other shape awaiting a verdict wears.
+    const gtRect = rects.find((r) => r.getAttribute("data-stroke") === "#4CAF50");
+    expect(gtRect).toBeDefined();
+    expect(geom(gtRect!)).toEqual(["12", "20", "36", "46"]);
+    expect(gtRect!.getAttribute("data-dashed")).toBe("false");
+
+    const predRect = rects.find((r) => r.getAttribute("data-stroke") === "#00BFFF");
+    expect(predRect).toBeDefined();
+    expect(geom(predRect!)).toEqual(["17", "25", "44", "54"]);
+    expect(predRect!.getAttribute("data-dashed")).toBe("true");
   });
 
   it("renders both a box and a polygon annotation on one image (no geometry kind hidden)", async () => {
