@@ -107,6 +107,21 @@ describe("CoverageTracker sub-cell union sweep", () => {
     expect(tracker.swept.has("A1")).toBe(true);
   });
 
+  it("never sweeps through a viewport narrower than one sub-cell, however densely it pans", () => {
+    tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
+    tracker.noteAuthoringScale(1);
+    // 100px passes are under the 128px sub-cell grain, so no sub-cell ever sits fully inside one.
+    for (let x0 = 0; x0 < 512; x0 += 10) {
+      tracker.noteViewport({ x0, y0: 0, x1: Math.min(x0 + 100, 512), y1: 512 }, 1);
+    }
+    expect(tracker.swept.has("A1")).toBe(false);
+    // The same cell sweeps once the passes are as wide as the grain, so the tracker was live.
+    for (let x0 = 0; x0 < 512; x0 += 128) {
+      tracker.noteViewport({ x0, y0: 0, x1: x0 + 128, y1: 512 }, 1);
+    }
+    expect(tracker.swept.has("A1")).toBe(true);
+  });
+
   it("does not sweep while the sub-cell union stays partial all session", () => {
     tracker.reset(KEY, BIG_GRID, [BIG_CELL, OTHER_CELL]);
     tracker.noteAuthoringScale(1);
@@ -167,6 +182,8 @@ describe("CoverageTracker posting", () => {
   it("debounces facts into one POST carrying both fact lists and the viewing context", async () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing({
+      bands: "3,2,1",
+      stretch: "p2",
       stats_source: "overview",
       display_bounds: "0..255",
       base_served_size: "150x100",
@@ -185,6 +202,9 @@ describe("CoverageTracker posting", () => {
     expect(body.grid).toEqual(GRID);
     expect(body.cells_swept).toEqual(["A1"]);
     expect(body.cells_served_at_native).toEqual(["B1"]);
+    // The symbology travels with the cells, or the record cannot say what rendering was seen.
+    expect(body.viewing.bands).toBe("3,2,1");
+    expect(body.viewing.stretch).toBe("p2");
     expect(body.viewing.stats_source).toBe("overview");
     expect(body.viewing.display_bounds).toBe("0..255");
     expect(body.viewing.base_served_size).toBe("150x100");
