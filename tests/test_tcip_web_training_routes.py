@@ -23,7 +23,14 @@ def test_validate_flags_missing_sections(client: TestClient) -> None:
     assert any("model_source" in s for s in body["issues"])
 
 
-def test_validate_accepts_minimal_config(client: TestClient, tmp_path: Path) -> None:
+def test_validates_verdict_tracks_the_issues_the_config_actually_raises(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The verdict the route reports is the accumulated issue list's own answer, in both
+    directions: a buildable config is accepted with nothing against it, and a single defect in an
+    otherwise identical config refuses it and says which field."""
+    import copy
+
     images = tmp_path / "images"
     labels = tmp_path / "labels"
     images.mkdir()
@@ -34,11 +41,15 @@ def test_validate_accepts_minimal_config(client: TestClient, tmp_path: Path) -> 
         "data": {"images_dir": str(images), "labels_dir": str(labels), "task": "detection"},
         "training": {"batch_size": 2, "stages": [{"lr": 1e-3, "epochs": 1}]},
     }
-    resp = client.post("/api/training/validate", json={"config": cfg})
-    body = resp.json()
-    # A real builder-import check may add issues; we only assert the route works.
-    assert "valid" in body
-    assert "issues" in body
+    body = client.post("/api/training/validate", json={"config": cfg}).json()
+    assert body["issues"] == [], body
+    assert body["valid"] is True
+
+    defective = copy.deepcopy(cfg)
+    defective["training"]["batch_size"] = 0
+    refused = client.post("/api/training/validate", json={"config": defective}).json()
+    assert refused["valid"] is False
+    assert any("batch_size" in issue for issue in refused["issues"]), refused["issues"]
 
 
 def test_list_runs_returns_shape(client: TestClient) -> None:
