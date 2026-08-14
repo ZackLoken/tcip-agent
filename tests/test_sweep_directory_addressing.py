@@ -1,0 +1,65 @@
+"""One sweep has one identity and one address.
+
+A sweep is discovered on disk by whatever a later reader finds in its manifest: the study name and
+the directory that name resolves to. If the manifest's recorded directory is not the one holding
+it, that reader lists a sweep whose trials it can never open.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+def _stub_sweep(monkeypatch, observed: dict):
+    """Run the sweep body without Ray: the search stub drives one trial through the objective."""
+    import tcip_mcp.tools.training_tools as tt
+
+    def fake_trial(config, report, base_config, trial_dir):
+        observed["trial_dir"] = trial_dir
+
+    def fake_search(**kw):
+        kw["objective_fn"]({"lr": 0.1}, lambda value: None)
+        return {"best_params": {"lr": 0.1}, "best_value": 0.25, "n_trials": 1,
+                "study_name": kw["study_name"]}
+
+    monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    return tt
+
+
+def test_a_sweeps_manifest_records_the_directory_that_holds_it(tmp_path: Path, monkeypatch) -> None:
+    """The manifest's ``sweep_dir`` is the sweep's own directory, not the shared root several
+    sweeps share, and the trials of that sweep live under exactly that recorded directory."""
+    observed: dict = {}
+    tt = _stub_sweep(monkeypatch, observed)
+    sweeps_root = tmp_path / "sweeps"
+
+    tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1,
+               output_dir=str(sweeps_root))
+
+    manifests = list(sweeps_root.glob("*/manifest.json"))
+    assert len(manifests) == 1  # one launch is one sweep, under one name
+    manifest = json.loads(manifests[0].read_text())
+
+    recorded_dir = Path(manifest["sweep_dir"])
+    assert recorded_dir == manifests[0].parent
+    assert recorded_dir.name == manifest["study_name"]
+    assert Path(observed["trial_dir"]).parent == recorded_dir
+    assert (sweeps_root / f"{manifest['study_name']}.json").is_file()
+
+
+def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
+        tmp_path: Path, monkeypatch) -> None:
+    """The default store under the project root addresses a sweep exactly as an explicit
+    ``output_dir`` does, so a reader needs no second convention for agent-launched sweeps."""
+    observed: dict = {}
+    tt = _stub_sweep(monkeypatch, observed)
+
+    result = tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1)
+
+    sweep_dir = tmp_path / ".tcip" / "hpo" / result["study_name"]
+    manifest = json.loads((sweep_dir / "manifest.json").read_text())
+    assert Path(manifest["sweep_dir"]) == sweep_dir
+    assert manifest["status"] == "completed"
+    assert Path(observed["trial_dir"]).parent == sweep_dir
