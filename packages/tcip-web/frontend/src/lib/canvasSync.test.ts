@@ -5,6 +5,9 @@ import {
   buildReviewShapes,
   computeViewport,
   createCanvasPusher,
+  measureCanvasHost,
+  notifyCanvasStateRequest,
+  onCanvasStateRequest,
   pointShapeVisible,
   type CanvasStateBody,
 } from "@/lib/canvasSync";
@@ -48,6 +51,35 @@ describe("computeViewport", () => {
       80,
     );
     expect(v).toBeNull();
+  });
+});
+
+describe("measureCanvasHost", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  const mountHost = (width: number, height: number) => {
+    const el = document.createElement("div");
+    el.setAttribute("data-canvas-host", "");
+    // jsdom lays nothing out, so the measured rect has to be supplied by the test.
+    el.getBoundingClientRect = () => ({ width, height, x: 0, y: 0, top: 0, left: 0 }) as DOMRect;
+    document.body.appendChild(el);
+    return el;
+  };
+
+  it("reports the mounted host's width and height, keeping them in that order", () => {
+    mountHost(640, 360);
+    expect(measureCanvasHost()).toEqual({ w: 640, h: 360 });
+  });
+
+  it("returns null when no canvas host is mounted", () => {
+    expect(measureCanvasHost()).toBeNull();
+  });
+
+  it("returns null when the host has collapsed to a sliver", () => {
+    mountHost(1, 360);
+    expect(measureCanvasHost()).toBeNull();
   });
 });
 
@@ -154,14 +186,32 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       polygons: [], // isolate the editable-box behavior from the derived-box overlay
       boxes: [
-        { x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} },
-        { x1: 8, y1: 8, x2: 9, y2: 9, subject: "other", attributes: {} },
+        { x1: 12, y1: 7, x2: 41, y2: 23, subject: base.activeSubject, attributes: {} },
+        { x1: 60, y1: 3, x2: 71, y2: 19, subject: "other", attributes: {} },
       ],
     });
     // Only the active subject's real box renders, solid (editable).
     expect(shapes).toHaveLength(1);
-    expect(shapes[0]).toMatchObject({ kind: "box", xyxy: [0, 0, 5, 5], label: "catkin" });
+    expect(shapes[0]).toMatchObject({
+      kind: "box",
+      xyxy: [12, 7, 41, 23],
+      label: base.activeSubject,
+    });
     expect(shapes[0].dashed).toBeFalsy();
+  });
+
+  it("an editable box keeps x before y in the wire tuple its renderer reads", () => {
+    // Pairwise-distinct coordinates so a slip in the server-consumed [x1, y1, x2, y2] order cannot hide.
+    const shapes = buildAnnotateShapes({
+      ...base,
+      mode: "box",
+      polygons: [],
+      boxes: [
+        { x1: 33.04, y1: 6.06, x2: 90.11, y2: 58.02, subject: base.activeSubject, attributes: {} },
+      ],
+    });
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].xyxy).toEqual([33, 6.1, 90.1, 58]);
   });
 
   it("box mode adds one read-only derived box per active-subject polygon, dashed, === ringsBbox", () => {
@@ -683,6 +733,35 @@ describe("createCanvasPusher", () => {
     expect(posts[0].shapes).not.toBeNull(); // ...but the owed geometry ships with it
   });
 
+  it("with no options, a burst waits out the documented trailing debounce and then posts", () => {
+    const posts: CanvasStateBody[] = [];
+    const p = createCanvasPusher((b) => {
+      posts.push(b);
+    });
+    p.schedule(body, true);
+    vi.advanceTimersByTime(399);
+    expect(posts).toHaveLength(0);
+    vi.advanceTimersByTime(2);
+    expect(posts).toHaveLength(1);
+    p.dispose();
+  });
+
+  it("with no options, continuous activity surfaces at the documented maxWait", () => {
+    const posts: CanvasStateBody[] = [];
+    const p = createCanvasPusher((b) => {
+      posts.push(b);
+    });
+    for (let i = 0; i < 4; i++) {
+      p.schedule(body, false);
+      vi.advanceTimersByTime(300); // re-arms faster than the default debounce can fire
+    }
+    p.schedule(body, false); // 1200 ms into the burst
+    expect(posts).toHaveLength(0);
+    vi.advanceTimersByTime(300); // 1500 ms: the send the maxWait ceiling owes
+    expect(posts).toHaveLength(1);
+    p.dispose();
+  });
+
   it("a null build keeps the full flag pending", () => {
     const posts: CanvasStateBody[] = [];
     const p = createCanvasPusher(
@@ -700,5 +779,65 @@ describe("createCanvasPusher", () => {
     p.schedule(build, false);
     vi.advanceTimersByTime(150);
     expect(posts[0].shapes).not.toBeNull(); // the owed geometry survived the null build
+  });
+});
+
+describe("canvas state request", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a request reaches every mounted tab's handler", () => {
+    const annotateHandler = vi.fn();
+    const reviewHandler = vi.fn();
+    const offAnnotate = onCanvasStateRequest(annotateHandler);
+    const offReview = onCanvasStateRequest(reviewHandler);
+    notifyCanvasStateRequest();
+    expect(annotateHandler).toHaveBeenCalledTimes(1);
+    expect(reviewHandler).toHaveBeenCalledTimes(1);
+    offAnnotate();
+    offReview();
+  });
+
+  it("an unsubscribed handler stops receiving requests", () => {
+    const unmounted = vi.fn();
+    const mounted = vi.fn();
+    const offUnmounted = onCanvasStateRequest(unmounted);
+    const offMounted = onCanvasStateRequest(mounted);
+    offUnmounted();
+    notifyCanvasStateRequest();
+    expect(unmounted).not.toHaveBeenCalled();
+    expect(mounted).toHaveBeenCalledTimes(1);
+    offMounted();
+  });
+
+  it("a request answered by flushing posts at once, without waiting out the debounce", () => {
+    const posts: CanvasStateBody[] = [];
+    const pusher = createCanvasPusher(
+      (b) => {
+        posts.push(b);
+      },
+      { debounceMs: 5000, maxWaitMs: 10000 },
+    );
+    const body = (): CanvasStateBody => ({
+      schema_version: 1,
+      project_root: "/p",
+      tab: "annotate",
+      image_path: "/p/img.jpg",
+      image: "img.jpg",
+      img_width: 120,
+      img_height: 90,
+      viewport: null,
+      classes: [],
+      shapes: [{ kind: "box", xyxy: [4, 9, 22, 15], color: "#fff" }],
+    });
+    const off = onCanvasStateRequest(() => {
+      pusher.schedule(body, true);
+      pusher.flush();
+    });
+    notifyCanvasStateRequest();
+    expect(posts).toHaveLength(1);
+    expect(posts[0].shapes).not.toBeNull();
+    off();
+    pusher.dispose();
   });
 });
