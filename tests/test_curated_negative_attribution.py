@@ -1,0 +1,184 @@
+"""Attribution and completeness of the confirmed negatives a review harvest materializes.
+
+A rejection verdict is a human's statement that one subject is absent from one image, and it only
+survives into training through the dataset-native status store, keyed by subject. So every rejected
+image has to reach that store, the subject it is keyed under has to be the one the review was about,
+and a review naming several subjects has to leave its negatives unattributed rather than pick one.
+The schema stamp written beside them decides whether quarantine can ever protect them, so it has to
+be the source registry's own digest for that subject.
+"""
+
+from __future__ import annotations
+
+import json
+
+from PIL import Image
+
+from tcip_mcp import class_registry
+from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, attribute_schema_digest
+from tcip_mcp.dataset_layout import image_status_digest_path, image_status_path, status_bucket
+from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
+
+
+def _image(images_dir, name: str, size) -> None:
+    images_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, (70, 110, 160)).save(images_dir / name)
+
+
+def _accepted(class_name: str, gt) -> dict:
+    return {"action": "accepted", "class_name": class_name, "gt_bbox_norm": gt,
+            "pred_bbox_norm": None}
+
+
+def _rejected(class_name: str, pred) -> dict:
+    return {"action": "rejected", "class_name": class_name, "gt_bbox_norm": None,
+            "pred_bbox_norm": pred}
+
+
+def _completed(detections: list[dict]) -> dict:
+    return {"img_status": "completed", "detections": detections}
+
+
+_TWO_SUBJECTS = (
+    Subject(name="catkin", attributes=(
+        Attribute(name="stage", type="ordinal", values=("dormant", "elongating", "shedding")),)),
+    Subject(name="leaf", attributes=(
+        Attribute(name="damage", type="categorical", values=("none", "blight")),)),
+)
+
+
+def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
+    """All rejected-only images land in the store the canonical locator resolves, under one bucket."""
+    src = tmp_path / "src"
+    _image(src, "pos.png", (120, 40))
+    for name in ("neg_a.png", "neg_b.png", "neg_c.png"):
+        _image(src, name, (40, 120))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.3])]),
+        "neg_a.png": _completed([_rejected("catkin", [0.2, 0.8, 0.1, 0.1])]),
+        "neg_b.png": _completed([_rejected("catkin", [0.6, 0.3, 0.2, 0.1])]),
+        "neg_c.png": _completed([_rejected("catkin", [0.4, 0.4, 0.3, 0.2]),
+                                 _rejected("catkin", [0.9, 0.1, 0.05, 0.05])]),
+    }}
+
+    r = materialize_dataset(state, str(src), str(out))
+    assert r["hard_negative"] == 3
+
+    store_file = image_status_path(out)
+    assert store_file.is_file()
+    store = json.loads(store_file.read_text())
+    assert list(store) == [status_bucket("catkin", None)]
+    assert store[status_bucket("catkin", None)] == {
+        "neg_a.png": "negative", "neg_b.png": "negative", "neg_c.png": "negative"}
+
+    assert confirmed_negative_names(out / "annotations", subject="catkin") == {
+        "neg_a.png", "neg_b.png", "neg_c.png"}
+
+    # No source registry to stamp against, so nothing is stamped, and an unstamped confirmation is
+    # admitted rather than quarantined.
+    assert not image_status_digest_path(out).exists()
+
+
+def test_explicit_subject_outranks_the_derived_one(tmp_path):
+    """The review's own subject keys the negatives even when the positives name another."""
+    src = tmp_path / "src"
+    _image(src, "pos.png", (100, 25))
+    _image(src, "neg.png", (25, 100))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "neg.png": _completed([_rejected("bush", [0.3, 0.3, 0.4, 0.4])]),
+    }}
+
+    r = materialize_dataset(state, str(src), str(out), subject="bush")
+    assert r["subject"] == "bush"
+    assert r["subjects"] == ["catkin"]
+    assert json.loads((out / "curated_manifest.json").read_text())["subject"] == "bush"
+
+    assert confirmed_negative_names(out / "annotations", subject="bush") == {"neg.png"}
+    assert confirmed_negative_names(out / "annotations", subject="catkin") == set()
+
+
+def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
+    """With no threaded subject and several in the verdicts, no subject may claim the negatives."""
+    src = tmp_path / "src"
+    _image(src, "catkins.png", (140, 35))
+    _image(src, "leaves.png", (35, 140))
+    _image(src, "neg.png", (60, 90))
+    out = tmp_path / "out"
+    state = {"image": {
+        "catkins.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "leaves.png": _completed([_accepted("leaf", [0.25, 0.75, 0.3, 0.1])]),
+        "neg.png": _completed([_rejected("catkin", [0.5, 0.5, 0.1, 0.1])]),
+    }}
+
+    r = materialize_dataset(state, str(src), str(out))
+    assert r["subjects"] == ["catkin", "leaf"]
+    assert r["subject"] is None
+    assert r["hard_negative"] == 1
+
+    assert not image_status_path(out).exists()
+    for subject in ("catkin", "leaf"):
+        assert confirmed_negative_names(out / "annotations", subject=subject) == set()
+
+    # The image is still in the dataset, as an unconfirmed empty rather than a mis-keyed negative.
+    assert json.loads((out / "annotations" / "neg.json").read_text())["annotations"] == []
+
+
+def test_negative_stamps_match_the_source_registry_schema(tmp_path):
+    """Each harvested negative is stamped with its own subject's current attribute-schema digest."""
+    root = tmp_path / "dataset"
+    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    root.mkdir()
+    class_registry.write_registry(root / "classes.json", registry)
+    images = root / "images"
+    _image(images, "pos.png", (130, 45))
+    _image(images, "neg_a.png", (45, 130))
+    _image(images, "neg_b.png", (90, 30))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "neg_a.png": _completed([_rejected("catkin", [0.2, 0.2, 0.1, 0.1])]),
+        "neg_b.png": _completed([_rejected("catkin", [0.7, 0.4, 0.2, 0.3])]),
+    }}
+
+    materialize_dataset(state, str(images), str(out))
+
+    catkin_digest = attribute_schema_digest(registry, "catkin")
+    leaf_digest = attribute_schema_digest(registry, "leaf")
+    assert catkin_digest and leaf_digest and catkin_digest != leaf_digest
+
+    stamps = json.loads(image_status_digest_path(out).read_text())
+    assert stamps[status_bucket("catkin", None)] == {
+        "neg_a.png": catkin_digest, "neg_b.png": catkin_digest}
+
+    quarantined: set[str] = set()
+    admitted = confirmed_negative_names(
+        out / "annotations", subject="catkin", quarantined_out=quarantined)
+    assert admitted == {"neg_a.png", "neg_b.png"}
+    assert quarantined == set()
+
+
+def test_materialized_dataset_carries_its_own_registry_copy(tmp_path):
+    """The output gets a classes.json of its own, so a later schema change is detectable here."""
+    root = tmp_path / "dataset"
+    registry = ClassRegistry(subjects=_TWO_SUBJECTS)
+    root.mkdir()
+    class_registry.write_registry(root / "classes.json", registry)
+    images = root / "images"
+    _image(images, "pos.png", (110, 55))
+    _image(images, "neg.png", (55, 110))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "neg.png": _completed([_rejected("catkin", [0.4, 0.6, 0.1, 0.2])]),
+    }}
+
+    materialize_dataset(state, str(images), str(out))
+
+    assert (out / "classes.json").is_file()
+    copied = class_registry.read_registry(out / "classes.json")
+    assert {s.name for s in copied.subjects} == {"catkin", "leaf"}
+    assert attribute_schema_digest(copied, "catkin") == attribute_schema_digest(registry, "catkin")
