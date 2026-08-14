@@ -182,6 +182,30 @@ describe("TerminalRail", () => {
     expect(termInstances[0].reset).toHaveBeenCalled();
   });
 
+  describe("control frames sent to the PTY", () => {
+    async function openSocket() {
+      render(<TerminalRail />);
+      await screen.findByTestId("terminal-host");
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      const ws = MockWebSocket.instances[0];
+      ws.readyState = MockWebSocket.OPEN;
+      ws.onopen?.();
+      return ws;
+    }
+
+    it("reports the emulator's rows and columns on attach, in that order", async () => {
+      const ws = await openSocket();
+      // Rows and columns differ, so a frame that transposes them cannot still read correct.
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "resize", rows: 30, cols: 100 }));
+    });
+
+    it("forwards a keystroke as an input frame carrying the typed characters", async () => {
+      const ws = await openSocket();
+      termInstances[0].onData.mock.calls[0][0]("ls\r");
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ type: "input", data: "ls\r" }));
+    });
+  });
+
   describe("sendToAgentTerminal hand-off", () => {
     it("sends a staged message as terminal input once the socket is open, then clears it", async () => {
       render(<TerminalRail />);

@@ -76,6 +76,23 @@ describe("ProjectPicker", () => {
     expect(screen.getByText("42 image(s)")).toBeInTheDocument();
   });
 
+  it("counts each card's dates, subjects and models from that project's own summary", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+
+    // The three counts differ within the first card, so a stat reading off the wrong list shows.
+    expect(await screen.findByText("2 dates")).toBeInTheDocument();
+    expect(screen.getByText("2 subjects")).toBeInTheDocument();
+    expect(screen.getByText("1 model")).toBeInTheDocument();
+    expect(screen.getByText("1 date")).toBeInTheDocument();
+    expect(screen.getByText("0 subjects")).toBeInTheDocument();
+    expect(screen.getByText("0 models")).toBeInTheDocument();
+  });
+
   it("shows an empty state when there are no projects", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
