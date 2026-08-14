@@ -100,6 +100,10 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      - name: ARCHITECTURE.md matches the tree
+        # The adopter-facing map must not drift from the code: every module-table path exists.
+        run: python scripts/check_architecture_doc.py
+
       - name: Run tests
         # TCIP_MIN_TESTS guards against the "missing dep silently skips ~15 files,
         # CI still green" mode; see tests/conftest.py and tests/test_core_deps.py.
