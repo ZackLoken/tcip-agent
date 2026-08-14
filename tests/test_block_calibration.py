@@ -602,3 +602,295 @@ def test_select_gt_for_band_empty_input_is_a_no_op():
     labels = np.zeros((0,), dtype=np.int64)
     kept_boxes, kept_labels = _select_gt_for_band(boxes, labels, (0, 0, 10, 10))
     assert len(kept_boxes) == 0 and len(kept_labels) == 0
+
+
+def test_band_rects_are_reported_in_full_mosaic_coordinates():
+    """Sub-banding recurses the strip split over the region's own local extent, so every returned
+    rect must be translated back by the region's origin before it can name real mosaic pixels. A
+    region that does not start at (0, 0) is the only fixture that can tell the two apart: bands
+    left in local coordinates still look like plausible rects, while addressing a different part
+    of the raster than the one the breeder attested."""
+    from tcip_mcp.pipelines.block_calibration import _band_rects
+
+    region = (500, 60, 1300, 260)
+    rx0, ry0, rx1, ry1 = region
+    bands = _band_rects(region, 3, TILE, 0.2, buffer_px=40, seed=0, name_prefix="cal")
+
+    assert len(bands) == 3
+    for name, (bx0, by0, bx1, by1) in bands.items():
+        assert rx0 <= bx0 < bx1 <= rx1, name
+        assert ry0 <= by0 < by1 <= ry1, name
+    ordered = sorted(bands.values())
+    for (_x0, _y0, x1, _y1), (nx0, _ny0, _nx1, _ny1) in zip(ordered, ordered[1:]):
+        assert x1 <= nx0
+
+
+def test_density_outlier_bands_are_flagged_against_their_own_siblings():
+    """The density smoke check names the bands whose GT count is a stark outlier in either
+    direction: a band far sparser than its siblings is the attestation error worth catching (a
+    region marked complete after only part of it was annotated), so a one-sided check on the dense
+    end would miss the case the flag exists for. Empty bands carry no density signal and are never
+    flagged; the feasibility gate is what speaks for them."""
+    from tcip_mcp.pipelines.block_calibration import _density_uniformity_flags
+
+    skewed = {"cal_0": 10, "cal_1": 11, "cal_2": 1, "cal_3": 60, "cal_4": 0}
+    assert _density_uniformity_flags(skewed) == ["cal_2", "cal_3"]
+    assert _density_uniformity_flags({"cal_0": 10, "cal_1": 11, "cal_2": 9}) == []
+
+
+def test_feasibility_counts_only_bands_that_carry_ground_truth():
+    """A band with no GT at all cannot contribute to an equivalence check, so it never counts
+    toward the two present bands the check needs. The refusal names the side and the shortfall;
+    a layout that genuinely has two GT-bearing bands passes untouched."""
+    from tcip_mcp.pipelines.block_calibration import BlockCalibrationRefused, _check_feasibility
+
+    with pytest.raises(BlockCalibrationRefused, match="leaves only 1 band"):
+        _check_feasibility({"test_0": 0, "test_1": 7, "test_2": 0}, side="test")
+    _check_feasibility({"cal_0": 4, "cal_1": 0, "cal_2": 9}, side="cal")
+
+
+def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path, monkeypatch):
+    """The cap the bundle carries must be the cap its own evidence was collected under, on both
+    surfaces that can truncate a band: the in-model ``detections_per_img`` and ``predict_tiled``'s
+    own post-merge cap. A bundle stamping a cap no band pass ran under describes a run that never
+    happened, and the density-derived cap here is deliberately not the one the predictor was
+    constructed with, so agreement cannot come from the construction default."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.operating_point import _current_detections_cap
+
+    real_predict_tiled = GenericPredictor.predict_tiled
+    caps: list[tuple[int | None, int | None]] = []
+
+    def _capture_caps(self, source, **kwargs):
+        caps.append((_current_detections_cap(self.model), self.max_dets))
+        return real_predict_tiled(self, source, **kwargs)
+
+    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_caps)
+
+    constructed_max_dets = 1000
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3,
+                                max_dets=constructed_max_dets)
+    bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    stamped = bundle.get("max_dets")._raw
+    assert len(caps) == prov["k_cal"] + prov["k_test"]
+    assert {in_model for in_model, _merge in caps} == {stamped}
+    assert {merge for _in_model, merge in caps} == {stamped}
+    assert stamped != constructed_max_dets
+
+
+def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
+    tmp_path: Path, monkeypatch,
+):
+    """``resolve_operating_point``'s conf-censoring guard only means anything if the floor recorded
+    beside the sweep is the floor the band detections were really kept at. Block calibration stages
+    its own low floor so hesitant detections survive to be swept, so a predictor handed a higher
+    threshold must be lowered to that floor before the bands run: leaving it filtering at the
+    caller's threshold censors the very evidence the recorded floor claims was kept."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    real_predict_tiled = GenericPredictor.predict_tiled
+    floors: list[float] = []
+
+    def _capture_floor(self, source, **kwargs):
+        floors.append(self.score_threshold)
+        return real_predict_tiled(self, source, **kwargs)
+
+    monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_floor)
+
+    constructed_threshold = 0.4
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=constructed_threshold, nms_iou=0.3, max_dets=1000)
+    bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    recorded_floor = bundle.get("conf").sweep["staged_conf_floor"]
+    assert len(floors) == prov["k_cal"] + prov["k_test"]
+    assert recorded_floor is not None and recorded_floor < constructed_threshold
+    assert set(floors) == {recorded_floor}
+
+
+def _build_attribute_scoped_experiment(
+    tmp_path: Path, *, trained_values: tuple[str, ...], reordered_values: tuple[str, ...],
+    labeled_value: str, experiment_id: str = "exp_block_attribute",
+) -> dict:
+    """A block-calibration experiment whose subject is scoped by a categorical attribute, with the
+    dataset's registry reordered after the run resolved and stamped its own name->id map.
+
+    ``trained_values`` is the attribute-value order declared while the run resolved its map (the
+    map ``subprocess_worker`` stamps onto ``config['data']['id_map']``, which every checkpoint
+    embeds and ``GenericPredictor`` reads back as ``predictor.config``); ``reordered_values`` is
+    the order the registry on disk declares now. ``labeled_value`` is the value every annotation
+    carries. Returns the same keys ``_build_experiment`` does plus ``recorded_id_map``.
+    """
+    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    def _write_registry(values: tuple[str, ...]) -> None:
+        write_registry(root / "classes.json", ClassRegistry(subjects=(
+            Subject(name="catkin", attributes=(
+                Attribute(name="stage", type="categorical", values=values),)),)))
+
+    root = tmp_path / "ds_attribute"
+    images_dir, labels_dir = root / "images", root / "annotations"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    stem = "mosaic"
+    _write_mosaic(images_dir / f"{stem}.tif")
+    _write_registry(trained_values)
+
+    boxes = [Annotation(subject="catkin", geometry=BBox(x, 80, x + 15, 110),
+                        attributes={"stage": labeled_value})
+            for x in range(10, WIDTH - 20, BOX_STEP)]
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), boxes, WIDTH, HEIGHT, keep_empty=True)
+
+    data_cfg = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+        "attribute": "stage", "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
+        "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
+                  "reserve_calibration_fraction": 0.15},
+    }
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    assert val_ds is not None
+    _subject, _attribute, recorded_id_map = _resolve_run_id_map("detection", data_cfg)
+    data_cfg["id_map"] = dict(recorded_id_map)
+    create_experiment(experiment_id, {"data": data_cfg})
+    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+
+    _write_registry(reordered_values)
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "in_chans": 3,
+                                      "min_size": TILE, "max_size": TILE * 2},
+                    "task": "detection", "in_chans": 3}
+    checkpoint_path = tmp_path / "model_best_attribute.pt"
+    torch.save({"model_source": model_source, "config": {"data": data_cfg},
+                "model_state_dict": build_model({"model_source": model_source}).state_dict()},
+               str(checkpoint_path))
+    return {
+        "root": root, "images_dir": images_dir, "labels_dir": labels_dir, "stem": stem,
+        "checkpoint_path": str(checkpoint_path), "experiment_id": experiment_id,
+        "spatial_manifest": data_cfg["split"]["spatial_manifest"],
+        "recorded_id_map": dict(recorded_id_map),
+    }
+
+
+def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_path: Path):
+    """Block calibration reads the mosaic's GT through the map the training run recorded, never
+    through a live re-derivation off the dataset's registry: a registry whose declared
+    attribute-value order changed after training assigns the same value a different id, and
+    decoding the reference under that order silently scores every real object as a class the model
+    was never trained to emit. The reserved regions carry only one attribute value, so the two
+    orders put the whole reference in two different classes and cannot agree by accident."""
+    exp = _build_attribute_scoped_experiment(
+        tmp_path, trained_values=("dormant", "elongated", "shed"),
+        reordered_values=("elongated", "dormant", "shed"), labeled_value="elongated")
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.class_registry import assign_class_ids, read_registry
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    live_id_map = assign_class_ids(read_registry(exp["root"] / "classes.json"), "catkin", "stage")
+    recorded_category = exp["recorded_id_map"]["elongated"] + 1
+    live_category = live_id_map["elongated"] + 1
+    assert recorded_category != live_category
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    bundle, _prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    per_class = bundle.get("conf").sweep["holdout_bias"]["per_class"]
+    recorded_entry = per_class.get(str(recorded_category))
+    assert recorded_entry is not None
+    assert recorded_entry["tp"] + recorded_entry["fn"] > 0
+    live_entry = per_class.get(str(live_category)) or {"tp": 0, "fn": 0}
+    assert live_entry["tp"] + live_entry["fn"] == 0
+
+
+def _attest_regions_complete_through_the_coverage_route(
+    client, image_path: str, regions: list[list[tuple[int, int, int, int]]],
+    *, subject: str = "catkin",
+) -> list[str]:
+    """Attest every reference-grid cell the given regions touch through the coverage route the
+    CoverageMinimap posts to, one cell per request, and return the attested cell names. The grid
+    posted is the one the grid route serves, the same lattice the browser draws."""
+    from tcip_mcp.pipelines.data.tiling import rects_overlap
+
+    grid_resp = client.get("/api/coverage/grid", params={"path": image_path, "tile_size": TILE})
+    assert grid_resp.status_code == 200, grid_resp.text
+    grid = grid_resp.json()
+    all_rects = [tuple(r) for region in regions for r in region]
+    covered = sorted(
+        c["name"] for c in grid["cells"]
+        if any(rects_overlap((c["x0"], c["y0"], c["x1"], c["y1"]), r) for r in all_rects)
+    )
+    for name in covered:
+        resp = client.post("/api/coverage/completeness", json={
+            "image_path": image_path, "subject": subject, "grid": grid, "cell": name,
+            "user": "zack"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["complete"] is True
+    return covered
+
+
+def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp_path: Path):
+    """The completeness gate must read the record the breeder's own attestation actually writes.
+    Every reserved cell here is toggled complete through the coverage route, so the record shape
+    the route produces (its bucket key, its grid, its per-cell digest stamp) is what the gate
+    resolves, rather than a store the test wrote in the shape the gate expects."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+
+    client = TestClient(app)
+    attested = _attest_regions_complete_through_the_coverage_route(
+        client, str(exp["raster_path"]),
+        [manifest["calibration_region"], manifest["test_region"]])
+    assert attested
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+    from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
+
+    for region in (manifest["calibration_region"], manifest["test_region"]):
+        assert incomplete_cells_for_rect(
+            str(exp["root"]), "catkin", exp["stem"], tuple(region[0])) == []
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    assert sum(prov["cal_gt_counts"].values()) > 0
+    assert bundle.get("conf").sweep["calibration_image_ids"]
