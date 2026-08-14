@@ -1,0 +1,155 @@
+"""What a launched run records about where it wrote and which data it trained on.
+
+Two ends of the reproduce-a-number chain meet at ``launch_training``: the artifact directory a
+later reader resolves from the experiment record, and the dataset identity the immutable lineage
+carries. The training body itself is a separate process, so these tests stand in for the child and
+assert only what the parent resolves, writes and hands to it.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def recorded_children(monkeypatch):
+    """Stand in for the training subprocess, recording the argv each launch hands it.
+
+    The child's own training body is another module's contract; what the parent resolves, writes
+    and passes across the process boundary is this module's.
+    """
+    children: list = []
+
+    class _RecordedChild:
+        def __init__(self, argv, **kwargs):
+            self.argv = list(argv)
+            self.pid = 4242
+            children.append(self)
+
+        def __class_getitem__(cls, item):
+            # subprocess.Popen carries subscripted annotations elsewhere in the environment.
+            return cls
+
+    monkeypatch.setattr(subprocess, "Popen", _RecordedChild)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+    return children
+
+
+def _canonical_dataset(root: Path, date: str = "2-11-26") -> tuple[Path, Path]:
+    """A small dataset in the canonical layout, the shape ``dataset_root_of`` resolves."""
+    from PIL import Image
+
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp import class_registry
+    from tcip_mcp.class_registry import ClassRegistry, Subject
+
+    images_dir = root / "images" / date
+    labels_dir = root / "annotations" / date
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    class_registry.write_registry(root / "classes.json",
+                                  ClassRegistry(subjects=(Subject(name="catkin"),)))
+    for i in range(2):
+        Image.new("RGB", (96, 64), color=(110, 120, 130)).save(images_dir / f"img_{i}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"img_{i}.json"),
+            [Annotation(subject="catkin", geometry=BBox(8, 6, 40, 22))], 96, 64)
+    return images_dir, labels_dir
+
+
+def _detection_config(images_dir: Path, labels_dir: Path) -> dict:
+    return {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "subject": "catkin", "auto_val": False},
+        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu"},
+    }
+
+
+def test_a_relative_output_dir_anchors_to_the_project_root_not_the_process_cwd(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """A relative ``output_dir`` names a directory inside the project. The run directory handed to
+    the child, the launch config written into it, and the path stamped into the experiment's
+    status.json all resolve under the project root, never under the launching process's cwd."""
+    pytest.importorskip("torchvision")
+    project = tmp_path / "project"
+    server_cwd = tmp_path / "server_cwd"
+    project.mkdir()
+    server_cwd.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+    monkeypatch.chdir(server_cwd)
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir), "runs/nightly")
+
+    run_dir = Path(res["output_dir"])
+    assert run_dir == project / "runs" / "nightly" / res["run_id"]
+    assert (run_dir / "launch_config.json").is_file()
+    assert not (server_cwd / "runs").exists()
+
+    argv = recorded_children[0].argv
+    assert argv[argv.index("--output-dir") + 1] == str(run_dir)
+
+    status = json.loads(
+        (project / ".tcip" / "experiments" / res["experiment_id"] / "status.json").read_text())
+    assert status["output_dir"] == str(run_dir)
+
+
+def test_an_absolute_output_dir_stays_the_callers_own_choice(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """The anchoring never captures a path the caller already made explicit: an absolute
+    ``output_dir`` outside the project is honored, with the run still nested under its run id."""
+    pytest.importorskip("torchvision")
+    project = tmp_path / "project"
+    scratch = tmp_path / "scratch_volume"
+    project.mkdir()
+    scratch.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir), str(scratch))
+
+    assert Path(res["output_dir"]) == scratch / res["run_id"]
+    assert (scratch / res["run_id"] / "launch_config.json").is_file()
+    # The experiment record itself still belongs to the project, wherever the weights go.
+    assert (project / ".tcip" / "experiments" / res["experiment_id"]).is_dir()
+
+
+def test_launched_run_records_the_datasets_identity_in_its_lineage(
+        tmp_path: Path, recorded_children) -> None:
+    """The lineage carries the identity of the data section's dataset, so the metric this run
+    produces can be traced back to the exact content it trained on. A registered dataset's minted
+    id and its recomputed fingerprint both land there, not None."""
+    pytest.importorskip("torchvision")
+    from tcip_mcp.tools.project_tools import register_dataset
+
+    ds_root = tmp_path / "ds"
+    images_dir, labels_dir = _canonical_dataset(ds_root)
+    registered = register_dataset(str(ds_root), crop="hazelnut")
+    assert registered["id"] and registered["fingerprint"]
+
+    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+
+    lineage = json.loads(
+        (tmp_path / ".tcip" / "experiments" / res["experiment_id"] / "lineage.json").read_text())
+    assert lineage["dataset_id"] == registered["id"]
+    assert lineage["dataset_fingerprint"] == registered["fingerprint"]
+
+
+def training_tools_launch(config: dict, output_dir: str) -> dict:
+    """Launch and assert the config was accepted, so a preflight refusal never reads as a
+    provenance failure in the tests above."""
+    from tcip_mcp.tools import training_tools
+
+    res = training_tools.launch_training(config, output_dir=output_dir)
+    assert "error" not in res, res
+    return res
