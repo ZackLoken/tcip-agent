@@ -775,6 +775,89 @@ describe("clicks outside the image extent are inert", () => {
   });
 });
 
+describe("AnnotateTab authoring writes what the annotator meant", () => {
+  it("bounds a new point by the image's own height on a taller-than-wide frame", async () => {
+    // Only a portrait frame separates the bounds: a y past the width but inside the height.
+    useStore.getState().setRegistry({ tip: {} });
+    useStore.setState((s) => ({
+      gui: { ...s.gui, mode: "point" as const, active_subject: "tip" },
+    }));
+    loadSpy.mockImplementation((imagePath) =>
+      Promise.resolve({ ...labelsFor(imagePath), img_width: 600, img_height: 900 }),
+    );
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    fireEvent.click(screen.getByTestId("canvas-stage"), { clientX: 420, clientY: 730 });
+    await flush();
+
+    expect(useStore.getState().canvas.points).toEqual([
+      { x: 420, y: 730, subject: "tip", attributes: {} },
+    ]);
+  });
+
+  it("addresses the save at the label file the annotations directory names for this image", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    pressSave();
+    await flush();
+
+    // The backend answers ok but writes nothing when this field is absent.
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][0].label_path).toBe("C:/data/annotations/2026-01-01/img1.json");
+  });
+
+  it("commits a drawn box under the subject the drag started on, not the one active at release", async () => {
+    useStore.getState().setRegistry({ subject_a: {}, subject_b: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(() => useStore.getState().setActiveSubject("subject_a"));
+    const stage = screen.getByTestId("canvas-stage");
+
+    fireEvent.mouseDown(stage, { clientX: 120, clientY: 60, button: 0 });
+    act(() => useStore.getState().setActiveSubject("subject_b"));
+    fireEvent.mouseMove(stage, { clientX: 470, clientY: 330 });
+    await nextFrame();
+    fireEvent.mouseUp(stage, { clientX: 470, clientY: 330 });
+    await flush();
+
+    expect(useStore.getState().canvas.boxes).toEqual([
+      { x1: 120, y1: 60, x2: 470, y2: 330, subject: "subject_a", attributes: {} },
+    ]);
+  });
+
+  it("carries a geometry-less image rating into the save payload", async () => {
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(() => {
+      const s = useStore.getState();
+      s.addImageAnnotation("subject_a");
+      s.updateImageAnnotation(0, { subject: "subject_a", attributes: { canopy_cover: "sparse" } });
+    });
+    pressSave();
+    await flush();
+
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][0].annotations).toEqual([
+      {
+        subject: "subject_a",
+        attributes: { canopy_cover: "sparse" },
+        created_by: null,
+        created_at: null,
+        accepted_by: null,
+        accepted_at: null,
+      },
+    ]);
+  });
+});
+
 describe("AnnotateTab labels show on selection or hover only", () => {
   // The legend is the standing symbology reference; a committed shape is named on the canvas
   // only while it is selected or hovered, for every shape kind.
