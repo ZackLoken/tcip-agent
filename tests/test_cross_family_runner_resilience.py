@@ -75,6 +75,9 @@ def test_one_familys_failure_leaves_the_others_results_intact(runner, tmp_path, 
 
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    # Keep the test hermetic: without this, main()'s harness-on-PATH check exits before the
+    # collection loop whenever the real codex/agy CLIs are absent (the CI environment).
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
     for fam in ("codex", "antigravity"):
         monkeypatch.setitem(runner.BUILDERS, fam, lambda *a, **k: (["stub", "argv"], None))
     monkeypatch.setattr(runner, "run_one", _dispatch)
