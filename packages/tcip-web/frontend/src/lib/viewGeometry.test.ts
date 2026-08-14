@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { clampView, zoomToRect } from "@/lib/viewGeometry";
 
 describe("clampView", () => {
@@ -81,12 +80,14 @@ describe("zoomToRect", () => {
       { x0: 0, y0: 0, x1: 1, y1: 1 },
       { host: { w: 1200, h: 800 }, imgW: 1000, imgH: 800, padX: 0, padY: 0 },
     );
-    expect(tiny.scale).toBe(MAX_SCALE);
+    // A one-pixel rect would fit at 800x, held at the ladder's top stop of 1000%.
+    expect(tiny.scale).toBe(10);
     const huge = zoomToRect(
       { x0: 0, y0: 0, x1: 100000, y1: 100000 },
       { host: { w: 100, h: 100 }, imgW: 100000, imgH: 100000, padX: 0, padY: 0 },
     );
-    expect(huge.scale).toBe(MIN_SCALE);
+    // The whole 100000px rect would fit at 0.001x, held at the bottom stop of 5%.
+    expect(huge.scale).toBe(0.05);
   });
 
   it("pan-clamps the centered view against the image (a corner rect pins to the edge)", () => {
