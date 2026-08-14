@@ -195,12 +195,19 @@ def test_golden_operating_point_pickers():
 # (never silently switches) on divergence.
 # --------------------------------------------------------------------------
 
-def _write_bare_trait(tmp_path: Path, name: str, **extra) -> None:
+def _write_bare_trait(name: str, **extra) -> None:
     """A minimal trait spec with no localization recorded (unlike seed_catkin_trait_spec's
-    CATKIN, which already carries localization="center_match")."""
+    CATKIN, which already carries localization="center_match").
+
+    Seeded at the directory the platform's own resolver returns for this test's pinned project
+    root, so the fixture cannot state a specs location the registry does not read from.
+    """
     import yaml
 
-    specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
+    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH
+
+    specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
     specs_dir.mkdir(parents=True, exist_ok=True)
     (specs_dir / f"{name}.yml").write_text(
         yaml.safe_dump({"name": name, "delivers": ["leaf_length"], **extra}), encoding="utf-8"
@@ -214,7 +221,7 @@ def _per_image(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
 def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: Path):
     from tcip_mcp.traits import get_trait
 
-    _write_bare_trait(tmp_path, "leaf")
+    _write_bare_trait("leaf")
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]  # char size 20 -> center_match
     result = resolve_match_criterion("leaf", _per_image(small_boxes))
     assert result["kind"] == "center_match"
@@ -224,8 +231,23 @@ def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: 
     assert get_trait("leaf").localization == "center_match"
 
 
+def test_derived_localization_kind_is_read_back_as_recorded_on_the_next_call(tmp_path: Path):
+    """A kind derived once has to land where the registry reads: the second call on the same
+    project reports it as recorded rather than deriving it again from that call's own GT, which is
+    what keeps one trait's governing criterion stable across sessions."""
+    _write_bare_trait("leaf")
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    first = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert first["kind_source"] == "data_derived_at_runtime"
+
+    second = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert second["kind_source"] == "recorded"
+    assert second["kind"] == first["kind"]
+    assert second["kind_diverged"] is False
+
+
 def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_path: Path):
-    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    _write_bare_trait("leaf", localization="iou_match")
     # Small boxes would derive center_match fresh, but a recorded kind must be used as-is.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
     result = resolve_match_criterion("leaf", _per_image(small_boxes))
@@ -234,7 +256,7 @@ def test_resolve_match_criterion_reuses_recorded_kind_without_rederiving(tmp_pat
 
 
 def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Path):
-    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    _write_bare_trait("leaf", localization="iou_match")
     # Small boxes: derive_localization_kind would say center_match, diverging from the recorded
     # iou_match. Must warn (kind_diverged=True), never silently switch what governs this call.
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
@@ -244,14 +266,14 @@ def test_resolve_match_criterion_flags_divergence_without_switching(tmp_path: Pa
 
 
 def test_resolve_match_criterion_no_divergence_when_kinds_agree(tmp_path: Path):
-    _write_bare_trait(tmp_path, "leaf", localization="center_match")
+    _write_bare_trait("leaf", localization="center_match")
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
     result = resolve_match_criterion("leaf", _per_image(small_boxes))
     assert result["kind_diverged"] is False
 
 
 def test_resolve_match_criterion_refuses_when_unrecorded_and_underivable(tmp_path: Path):
-    _write_bare_trait(tmp_path, "leaf")
+    _write_bare_trait("leaf")
     with pytest.raises(ValueError, match="no recorded localization kind"):
         resolve_match_criterion("leaf", [])  # no GT at all -> nothing to derive from
 
@@ -265,7 +287,7 @@ def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
 def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5(tmp_path: Path):
     """iou_match's threshold must be genuinely derived from the GT in hand
     (derive_iou_match_threshold), not pinned to 0.5."""
-    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    _write_bare_trait("leaf", localization="iou_match")
     # char size 300 -> derived threshold well above 0.5 (see test_derive_iou_match_threshold_*).
     large_boxes = [(0, 0, 300, 300), (500, 0, 300, 300)]
     result = resolve_match_criterion("leaf", _per_image(large_boxes))
@@ -275,7 +297,7 @@ def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0
 
 
 def test_resolve_match_criterion_iou_match_falls_back_honestly_when_underivable(tmp_path: Path):
-    _write_bare_trait(tmp_path, "leaf", localization="iou_match")
+    _write_bare_trait("leaf", localization="iou_match")
     result = resolve_match_criterion("leaf", [], iou_threshold=0.42)
     assert result["kind"] == "iou_match"
     assert result["iou_threshold"] == pytest.approx(0.42)  # caller/default, not a fabricated derivation
@@ -352,6 +374,25 @@ def test_quadratic_weighted_kappa_hand_computed():
     # against the expected-disagreement-under-independence formula -> kappa = 1 - 1/5.
     kappa = quadratic_weighted_kappa(torch.tensor([0, 1, 2]), torch.tensor([0, 2, 2]))
     assert kappa == pytest.approx(0.8)
+
+
+def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_rank():
+    """A head that emits continuous rank estimates is scored at the rank each estimate is nearest
+    to, so predictions that all round onto the true ranks are perfect agreement. Reading 1.6 as
+    rank 1 would report a disagreement the model does not have."""
+    fractional = torch.tensor([0.4, 1.6, 2.4, 2.6])
+    gt = torch.tensor([0, 2, 2, 3])
+    assert quadratic_weighted_kappa(fractional, gt) == pytest.approx(1.0)
+
+
+def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance():
+    """Chance correction comes from the scored set's own rank marginals, so a predictor that
+    always guesses the majority rank scores 0 however skewed that majority is: here it is exactly
+    right on 7 of 10 items and still says nothing beyond the marginals."""
+    gt = torch.tensor([0, 0, 0, 0, 0, 0, 0, 3, 3, 3])
+    always_majority = torch.zeros(10)
+    assert int((always_majority == gt).sum()) == 7
+    assert quadratic_weighted_kappa(always_majority, gt) == pytest.approx(0.0, abs=1e-9)
 
 
 def test_quadratic_weighted_kappa_empty_is_none():
@@ -477,6 +518,36 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "ovr"),
                             iou_type="bbox")
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
+
+
+def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch):
+    """``results_path`` names the readable test_results.json under the caller's output_dir, and its
+    contents are the same result the call returned. This is the only handle a caller keeps on a
+    finished evaluation, so a path that does not open, or opens onto different numbers, loses the
+    evaluation."""
+    import tcip_mcp.pipelines.model_build as model_build
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+
+    class _DummyModel:
+        def load_state_dict(self, state_dict):
+            pass
+
+        def to(self, device):
+            pass
+
+    ckpt_path = tmp_path / "model_best.pt"
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
+    monkeypatch.setattr(evaluation, "evaluate",
+                        lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.75})
+
+    out_dir = tmp_path / "runs" / "test"
+    r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(out_dir))
+
+    results_path = Path(r["results_path"])
+    assert results_path == out_dir / "test_results.json"
+    assert results_path.is_file()
+    assert json.loads(results_path.read_text()) == {k: v for k, v in r.items() if k != "results_path"}
 
 
 # --------------------------------------------------------------------------
