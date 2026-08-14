@@ -102,6 +102,29 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.date).toBe("2-11-26"); // unchanged
   });
 
+  it("applies a snapshot carrying the version already recorded", () => {
+    // Only an older version is a stale replay; a re-broadcast at the current version is real state.
+    s().mergeSnapshot(snapshot({ dataset: dataset({ date: "3-2-26" }) }), 5);
+    expect(s().gui.dataset.date).toBe("3-2-26");
+    expect(s().wsVersion).toBe(5);
+  });
+
+  it("keeps the local image-list array itself on a same-dataset snapshot", () => {
+    // Effects keyed on the image_list reference must not re-fire, so the array object has to
+    // survive, not just its contents.
+    const localList = s().gui.dataset.image_list;
+    const incoming = snapshot({
+      dataset: dataset({ predictions_dir: "/proj/ds/predictions/m2/2-11-26" }),
+    });
+    expect(incoming.dataset.image_list).not.toBe(localList);
+    expect(incoming.dataset.image_list).toEqual(localList);
+
+    s().mergeSnapshot(incoming, 6);
+
+    expect(s().gui.dataset.image_list).toBe(localList);
+    expect(s().gui.dataset.predictions_dir).toBe("/proj/ds/predictions/m2/2-11-26");
+  });
+
   it("adopts the persisted state on boot, with the tab from the project's own record", () => {
     // Boot adopts backend mode/filters/position; the tab is the client's per-project record,
     // since the backend's active_tab only moves on agent focus events (stale, often Review).
