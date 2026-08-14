@@ -1,0 +1,157 @@
+"""What the delivered majority-crossing marker is about, and what it is never about.
+
+A trait's ``majority_provisional`` says one thing: whether the breeders have confirmed that this
+trait's "most objects in state" phrase maps to the crossing key the spec names. It travels into the
+phenology CSV as its own column, per trait, and it is not the delivery gate's verdict on whether the
+numbers beside it were validated. Two different questions, two columns, two independent answers: a
+gate-cleared delivery of a trait whose majority reading is still unconfirmed, and an acknowledged
+unvalidated delivery of a trait whose reading is settled, are both real cases.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+from pathlib import Path
+
+import pytest
+
+from tcip_mcp.tools.phenology_tools import compute_phenology
+
+CATKIN_SPEC = {
+    "name": "catkin",
+    "delivers": ["catkin_05per_date", "catkin_50per_date", "catkin_95per_date",
+                 "catkin_elongation_date"],
+    "positive_class_name": "elongated",
+    "milestone_fractions": [0.05, 0.5, 0.95],
+    "milestone_on": "positive_fraction",
+    "majority_milestone": "95per",
+    "majority_provisional": True,
+    "phenology_prefix": "catkin",
+    "majority_label": "elongation",
+}
+
+PISTILLATE_SPEC = {
+    "name": "pistillate",
+    "delivers": ["pistillate_50per_date", "pistillate_flowering_date"],
+    "positive_class_name": "open",
+    "milestone_fractions": [0.5],
+    "milestone_on": "positive_fraction",
+    "majority_milestone": "50per",
+    "majority_provisional": False,
+    "phenology_prefix": "pistillate",
+    "majority_label": "flowering",
+}
+
+
+def _write_specs(project_root: Path) -> None:
+    import yaml
+
+    from tcip_mcp import traits
+
+    specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
+        (specs_dir / f"{spec['name']}.yml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+
+
+def _predictions(root: Path, positive_class: str, id_map: dict) -> tuple[Path, dict]:
+    """Two dates of classified predictions for one plant, plus the plant mapping that names it."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    dirs = {}
+    for date in ("2026-02-11", "2026-03-09"):
+        d = root / date
+        d.mkdir(parents=True, exist_ok=True)
+        json_io.write_annotations(
+            d / "P1.json",
+            [Annotation(subject=positive_class, geometry=BBox(1.0, 1.0, 4.0, 7.0), score=0.9)], 16, 9)
+        (d / "operating_point.json").write_text(json.dumps({
+            "validated": True,
+            "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
+            "id_map": id_map,
+        }), encoding="utf-8")
+        dirs[date] = str(d)
+    mapping_path = root / "plant_mapping.json"
+    mapping_path.write_text(json.dumps({
+        date: [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}] for date in dirs
+    }), encoding="utf-8")
+    return mapping_path, dirs
+
+
+def _stamp_classifier(pred_dir: str, trait: str, positive_class: str) -> None:
+    (Path(pred_dir) / "classifier_operating_point.json").write_text(json.dumps({
+        "validated": True,
+        "operating_point": {"classifier": {"value": positive_class,
+                                           "validated_against": "held_out_annotations"}},
+        "trait": trait,
+    }), encoding="utf-8")
+
+
+def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
+    """Run one trait's phenology delivery, either through the gate or by acknowledging it."""
+    root = tmp_path / spec["name"]
+    mapping_path, dirs = _predictions(
+        root, spec["positive_class_name"],
+        {"other": 0, spec["positive_class_name"]: 1})
+    classifier_dirs = None
+    if validated:
+        first = dirs["2026-02-11"]
+        _stamp_classifier(first, spec["name"], spec["positive_class_name"])
+        classifier_dirs = [first]
+    out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
+    res = compute_phenology(
+        trait=spec["name"],
+        mapping_path=str(mapping_path),
+        predictions_by_date=dirs,
+        output_csv_path=str(out_csv),
+        classifier_pred_dirs=classifier_dirs,
+        operating_point_validated="held_out_annotations",
+        acknowledge_unvalidated=not validated,
+    )
+    assert "error" not in res, res
+    with open(out_csv, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+@pytest.fixture(autouse=True)
+def _registry(tmp_path: Path) -> None:
+    _write_specs(tmp_path)
+
+
+def test_each_trait_carries_its_own_majority_mapping_marker(tmp_path: Path):
+    """Two traits, two different readings: catkin's majority phrase maps to its 95% crossing on an
+    unconfirmed reading, pistillate's to its 50% crossing on a confirmed one. Each delivery carries
+    its own prefix, its own label, and its own answer, with no column of the other trait's."""
+    catkin = _deliver(tmp_path, CATKIN_SPEC, validated=True)
+    pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=True)
+
+    assert catkin["catkin_elongation_provisional"] == "true"
+    assert pistillate["pistillate_flowering_provisional"] == "false"
+    assert "pistillate_flowering_provisional" not in catkin
+    assert "catkin_elongation_provisional" not in pistillate
+
+
+def test_the_majority_mapping_marker_is_not_the_delivery_gates_verdict(tmp_path: Path):
+    """The marker answers whether the breeders confirmed the majority reading, so it does not move
+    when the delivery gate does. Delivered with one measurement dimension cleared and the other
+    acknowledged unvalidated, a trait with a confirmed reading still reads confirmed, and each gate
+    dimension reports its own state in its own column beside it."""
+    pistillate = _deliver(tmp_path, PISTILLATE_SPEC, validated=False)
+
+    assert pistillate["pistillate_flowering_provisional"] == "false"
+    assert pistillate["positive_state_classifier_validated"] == "false"
+    assert pistillate["operating_point_validated"] == "held_out_annotations"
+
+
+def test_an_unconfirmed_majority_reading_survives_a_cleared_delivery_gate(tmp_path: Path):
+    """The other direction: clearing the gate validates the numbers, never the reading. catkin's
+    majority mapping is still unconfirmed in a delivery whose measurement dimensions all cleared."""
+    catkin = _deliver(tmp_path, CATKIN_SPEC, validated=True)
+
+    assert catkin["catkin_elongation_provisional"] == "true"
+    assert catkin["operating_point_validated"] != "false"
+    assert catkin["positive_state_classifier_validated"] != "false"
