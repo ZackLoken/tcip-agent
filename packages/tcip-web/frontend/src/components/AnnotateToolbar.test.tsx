@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
+import { classesApi } from "@/api/classes";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";
@@ -133,6 +134,100 @@ describe("AnnotateToolbar status filter", () => {
     const select = screen.getByTitle("Status filter");
     const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
     expect(options).toEqual(["All", "Unannotated", "Partial", "Complete", "Negative"]);
+  });
+});
+
+describe("AnnotateToolbar subject authoring", () => {
+  function seedDataset() {
+    useStore.setState((s) => ({
+      gui: {
+        ...s.gui,
+        dataset: {
+          ...s.gui.dataset,
+          project_root: "C:/proj",
+          dataset_root: "C:/data",
+          date: "2026-01-01",
+          annotations_dir: "C:/data/annotations/2026-01-01",
+        },
+      },
+    }));
+  }
+
+  function openSubjectMenu() {
+    fireEvent.click(screen.getByRole("button", { name: /select subject/ }));
+  }
+
+  function answerPrompt(answer: string | null) {
+    return vi.spyOn(window, "prompt").mockReturnValue(answer);
+  }
+
+  it("registers a typed name with its surrounding whitespace stripped", async () => {
+    // An untrimmed registry key would open a second subject that reads as the first.
+    seedDataset();
+    act(() => useStore.getState().setRegistry({ leaf: {} }));
+    const saveSpy = vi
+      .spyOn(classesApi, "save")
+      .mockResolvedValue({ status: "ok", n_subjects: 2, classes_path: "C:/data/classes.json" });
+    answerPrompt("  husk  ");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf", "husk"]);
+    expect(useStore.getState().gui.active_subject).toBe("husk");
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][1]).toEqual({ leaf: {}, husk: {} });
+  });
+
+  it("selects an existing subject rather than resetting its attribute definitions", async () => {
+    seedDataset();
+    const leafDef = {
+      attributes: { stage: { type: "ordinal" as const, values: ["early", "late"] } },
+    };
+    act(() => useStore.getState().setRegistry({ leaf: leafDef, husk: {} }));
+    const saveSpy = vi
+      .spyOn(classesApi, "save")
+      .mockResolvedValue({ status: "ok", n_subjects: 2, classes_path: "C:/data/classes.json" });
+    answerPrompt("leaf");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    expect(useStore.getState().registry.subjects).toEqual({ leaf: leafDef, husk: {} });
+    expect(useStore.getState().gui.active_subject).toBe("leaf");
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("adds nothing when the prompt is dismissed or answered with only whitespace", async () => {
+    seedDataset();
+    act(() => useStore.getState().setRegistry({ leaf: {} }));
+    const saveSpy = vi
+      .spyOn(classesApi, "save")
+      .mockResolvedValue({ status: "ok", n_subjects: 1, classes_path: "C:/data/classes.json" });
+    const promptSpy = answerPrompt(null);
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
+
+    promptSpy.mockReturnValue("   ");
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
+    expect(useStore.getState().gui.active_subject).toBeNull();
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });
 
