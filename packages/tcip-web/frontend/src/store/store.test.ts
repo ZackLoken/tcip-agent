@@ -120,6 +120,34 @@ describe("canvas store", () => {
     // A hand-drawn shape is exactly one contour: the drawing tool never authors a second ring.
     expect(s().canvas.polygons[0].rings).toHaveLength(1);
   });
+
+  it("commitCurrentPolygon clamps each vertex to its own axis on a non-square image", () => {
+    s().loadLabelsIntoCanvas({
+      image_path: "wide.jpg",
+      img_width: 120,
+      img_height: 80,
+      boxes: [],
+      polygons: [],
+      points: [],
+      imageAnnotations: [],
+    });
+    useStore.setState((st) => ({ gui: { ...st.gui, active_subject: "subject_a" } }));
+    s().setCurrentPolygon([
+      [-10, 40],
+      [200, 95],
+      [30, 90],
+      [50, 20],
+    ]);
+
+    expect(s().commitCurrentPolygon()).toBe(true);
+    expect(s().canvas.polygons).toHaveLength(1);
+    expect(s().canvas.polygons[0].rings[0]).toEqual([
+      [0, 40],
+      [120, 80],
+      [30, 80],
+      [50, 20],
+    ]);
+  });
 });
 
 describe("canvas store points", () => {
