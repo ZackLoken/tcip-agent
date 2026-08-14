@@ -7,6 +7,8 @@ subscribed WebSocket clients.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,9 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp.web_client import VALID_PANELS
 from tcip_web.app import app
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 
 
 @pytest.fixture
@@ -99,6 +104,8 @@ class TestPostPanelEventRoute:
         assert state["review"]["conf_threshold"] == 0.3
 
     def test_annotate_focus_persists_advisory_state(self, client: TestClient) -> None:
+        """An annotate_focus event carrying a mode and an active_subject writes both into the
+        advisory state, alongside the tab it lands on."""
         resp = client.post(
             "/api/events/app",
             json={
@@ -111,6 +118,60 @@ class TestPostPanelEventRoute:
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "polygon"
         assert state["active_subject"] == "catkin"
+
+    def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
+        self, client: TestClient, data_dir: Path, monkeypatch,
+    ) -> None:
+        """The state an agent reads back is driven by the event the focus tool really posts.
+
+        The payload is taken from the producer rather than written here, so the two halves of the
+        bridge are held to the same key names: a producer and a consumer that stop agreeing on
+        what a field is called cannot both keep passing.
+        """
+        from tcip_mcp import web_client
+        from tcip_mcp.tools.annotation_tools import focus
+
+        posted: dict = {}
+
+        def _capture(panel: str, event_type: str, data: dict) -> dict:
+            posted.update(panel=panel, event_type=event_type, data=data)
+            return {"delivered": True, "status": "ok"}
+
+        monkeypatch.setattr(web_client, "post_panel_event", _capture)
+        res = focus("annotate", str(data_dir), str(data_dir), "catkin", "2-11-26",
+                    mode="point", image_index=2)
+        assert "error" not in res, res
+        assert posted["event_type"] == "annotate_focus"
+
+        resp = client.post(f"/api/events/{posted['panel']}",
+                           json={"event_type": posted["event_type"], "data": posted["data"]})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        state = client.get("/api/dataset/state").json()
+        assert state["active_tab"] == "annotate"
+        assert state["mode"] == "point"
+
+    def test_the_browser_tabs_and_the_backend_agree_on_the_panel_names(self) -> None:
+        """Every GUI tab subscribes to the panel of its own name.
+
+        The vocabulary is written down in three places, one Python set and two TypeScript
+        literals, so a panel renamed or dropped in one of them leaves either a tab with no live
+        subscription or a subscription no tab is listening on. ``app`` is the app-level channel
+        and has no tab of its own.
+        """
+        app_tsx = (FRONTEND_SRC / "App.tsx").read_text(encoding="utf-8")
+        types_ts = (FRONTEND_SRC / "store" / "types.ts").read_text(encoding="utf-8")
+
+        subscribed = re.search(r"const TAB_PANELS: TabName\[\] = \[(.*?)\];", app_tsx, re.S)
+        declared = re.search(r"export type TabName =(.*?);", types_ts, re.S)
+        assert subscribed is not None, "TAB_PANELS is no longer where this test reads it"
+        assert declared is not None, "TabName is no longer where this test reads it"
+
+        subscribed_names = set(re.findall(r'"([^"]+)"', subscribed.group(1)))
+        declared_names = set(re.findall(r'"([^"]+)"', declared.group(1)))
+        assert subscribed_names, "no panel names parsed out of TAB_PANELS"
+        assert subscribed_names == declared_names
+        assert subscribed_names == set(VALID_PANELS) - {"app"}
 
 
 class TestPushPanelDataTool:
@@ -159,6 +220,25 @@ class TestPortDiscovery:
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
         assert resolve_web_port(project_root=tmp_path) == 34567
 
+    def test_the_port_the_backend_writes_is_the_port_a_tool_process_reads(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """The backend's own writer and the MCP-side resolver meet at one file.
+
+        Both halves run here rather than the file being hand-written, so a tool in another process
+        finds the port the backend actually bound instead of quietly falling back to the default.
+        """
+        from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
+        from tcip_web.__main__ import _write_port_file
+
+        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
+        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+        bound = 41871
+        assert bound != DEFAULT_PORT
+        _write_port_file(bound)
+        assert resolve_web_port(project_root=tmp_path) == bound
+        assert resolve_web_port() == bound
+
     def test_default_when_neither_available(self, tmp_path: Path, monkeypatch) -> None:
         from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
 
@@ -176,32 +256,202 @@ class TestPortDiscovery:
 
 
 class TestTrainingToolOutputSchema:
-    def test_launch_training_output_has_run_id(self) -> None:
+    def test_launch_training_returns_the_run_id_its_artifacts_are_nested_under(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """The identifier a launch hands back is the run the platform registered, and the
+        directory that run writes into is that identifier's own.
+
+        A caller holds one string afterwards; polling status with it and reading metrics under it
+        have to reach the same run, so the two are checked against the registry rather than
+        against each other.
+        """
+        pytest.importorskip("torchvision")
+        monkeypatch.chdir(tmp_path)
+
+        from PIL import Image
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+        from tcip_mcp.pipelines.training import tensorboard_manager
+        from tcip_mcp.pipelines.training.generic_trainer import get_run
         from tcip_mcp.tools import training_tools
 
-        assert hasattr(training_tools, "launch_training")
+        images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+        val_images, val_labels = tmp_path / "val_images", tmp_path / "val_labels"
+        for d in (images_dir, labels_dir, val_images, val_labels):
+            d.mkdir()
+        for i in range(2):
+            Image.new("RGB", (128, 128)).save(images_dir / f"t{i}.png")
+            json_io.write_annotations(
+                str(labels_dir / f"t{i}.json"),
+                [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
+        Image.new("RGB", (128, 128)).save(val_images / "v0.png")
+        json_io.write_annotations(
+            str(val_labels / "v0.json"),
+            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 128, 128)
 
-    def test_check_training_status_schema(self) -> None:
+        class _NoChild:
+            """Stands in for the training subprocess: this test is about what the launch reports,
+            not about the training body, so no child is spawned."""
+
+            pid = 4242
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        monkeypatch.setattr(training_tools.subprocess, "Popen", _NoChild)
+        monkeypatch.setattr(tensorboard_manager, "launch_tensorboard", lambda *a, **k: {})
+
+        cfg = {
+            "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                             "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+                             "task": "detection"},
+            "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                     "subject": "catkin", "val_images_dir": str(val_images),
+                     "val_labels_dir": str(val_labels)},
+            "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                         "mixed_precision": False, "device": "cpu"},
+        }
+        res = training_tools.launch_training(cfg, str(tmp_path / "runs"))
+
+        assert "error" not in res, res
+        assert res["status"] == "launched"
+        registered = get_run(res["run_id"])
+        assert registered is not None, f"no run registered under {res['run_id']!r}"
+        assert Path(res["output_dir"]) == tmp_path / "runs" / res["run_id"]
+        assert res["pid"] == _NoChild.pid
+
+    def test_check_training_status_answers_for_the_run_it_was_asked_about(
+        self, tmp_path: Path,
+    ) -> None:
+        """A status read carries the identifier of the run it describes, plus that run's own
+        progress, so a caller tracking several runs at once can tell the answers apart. An
+        identifier that names no run is refused rather than answered for some other run.
+        """
+        from tcip_mcp.pipelines.training.generic_trainer import create_run
         from tcip_mcp.tools import training_tools
 
-        assert hasattr(training_tools, "check_training_status")
+        early = create_run({"seed": 11}, str(tmp_path / "early"))
+        early.status, early.current_epoch, early.best_metric = "running", 1, 0.81
+        late = create_run({"seed": 12}, str(tmp_path / "late"))
+        late.status, late.current_epoch, late.best_metric = "completed", 9, 0.07
+
+        status = training_tools.check_training_status(late.run_id)
+        assert status["run_id"] == late.run_id
+        assert status["run_id"] != early.run_id
+        assert status["status"] == "completed"
+        assert status["epoch"] == 9
+        assert status["best_metric"] == 0.07
+        assert status["output_dir"] == str(tmp_path / "late")
+
+        assert "error" in training_tools.check_training_status("run_that_was_never_created")
 
 
 class TestInferenceToolOutputSchema:
-    def test_run_inference_output_schema(self, data_dir: Path) -> None:
-        from tcip_mcp.tools import inference_tools
+    def test_run_inference_reports_back_the_operating_point_it_was_handed(
+        self, tmp_path: Path,
+    ) -> None:
+        """A dry run reports the operating point a real pass would measure at, each dimension as
+        the caller named it.
 
-        assert hasattr(inference_tools, "run_inference")
+        Every value here is distinct, so a dimension reported in another's place is visible rather
+        than hidden behind two fields that happen to share a default.
+        """
+        from tcip_mcp.tools.inference_tools import run_inference
 
-    def test_export_predictions_schema(self) -> None:
-        from tcip_mcp.tools import inference_tools
+        ckpt = tmp_path / "detector.pt"
+        ckpt.write_bytes(b"a dry run never loads the weights")
+        res = run_inference(str(ckpt), images_dir=str(tmp_path), dry_run=True, tile=True,
+                            tile_size=512, overlap=0.35, conf_threshold=0.17, max_dets=37,
+                            global_nms_iou=0.55, postprocess="nmm")
 
-        assert hasattr(inference_tools, "export_predictions")
+        assert "error" not in res, res
+        assert res["dry_run"] is True
+        assert res["checkpoint_path"] == str(ckpt)
+        op = res["operating_point"]
+        assert op["conf"] == 0.17
+        assert op["tile_size"] == 512
+        assert op["overlap"] == 0.35
+        assert op["max_dets"] == 37
+        assert op["cross_tile_nms"] == 0.55
+        assert op["postprocess"] == "nmm"
+        assert op["tiled"] is True
+        assert op["tiled_source"] == "explicit"
 
-    def test_tabulate_counts_schema(self) -> None:
-        from tcip_mcp.tools import inference_tools
+    def test_export_predictions_writes_one_file_per_image_carrying_that_images_detections(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """A prediction bucket holds one file per image the pass saw, named for that image's own
+        stem and holding that image's own detections.
 
-        assert hasattr(inference_tools, "tabulate_counts")
+        The three images here have three different detection counts, one of them zero, so a bucket
+        that pairs a file to the wrong image, or drops the image that found nothing, does not read
+        as correct.
+        """
+        import tcip_mcp.tools.inference_tools as itools
+        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+
+        def _boxes(n: int) -> list[list[float]]:
+            return [[10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0] for i in range(1, n + 1)]
+
+        counts = {"row3_plant07": 1, "row3_plant11": 0, "row9_plant02": 4}
+        results = [
+            {"image": f"{stem}.jpg", "width": 800, "height": 600, "boxes": _boxes(n),
+             "scores": [0.9] * n, "labels": [1] * n, "count": n}
+            for stem, n in counts.items()
+        ]
+        monkeypatch.setattr(itools, "run_inference", lambda **kw: {
+            "results": results, "image_count": len(results),
+            "total_detections": sum(counts.values()), "id_map": None,
+            "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
+            "validated": True, "conf_source": "calibration",
+            "checkpoint_sha256": "0f1e2d3c4b5a", "experiment_id": "exp_row_block",
+            "produced_at": "2026-01-01T00:00:00Z"})
+
+        out = tmp_path / "preds"
+        res = itools.export_predictions("m.pt", images_dir=str(tmp_path), output_dir=str(out))
+
+        assert "error" not in res, res
+        assert res["image_count"] == len(counts)
+        assert res["output_dir"] == str(out)
+        assert sorted(Path(p).stem for p in res["files"]) == sorted(counts)
+        written = {p.stem: len(json.loads(p.read_text())["annotations"])
+                   for p in out.glob("*.json") if p.name != "operating_point.json"}
+        assert written == counts
+
+    def test_tabulate_counts_writes_each_images_own_count_into_the_csv(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """The delivered CSV carries the count measured for each image, one row each.
+
+        The counts across the block are deliberately uneven, including a zero, so a CSV that
+        flattens them or drops the empty frame reads differently from one that reports what was
+        measured.
+        """
+        import csv
+
+        import tcip_mcp.tools.inference_tools as itools
+        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+
+        counts = {"row3_plant07.jpg": 2, "row3_plant11.jpg": 0, "row9_plant02.jpg": 17}
+        monkeypatch.setattr(itools, "run_inference", lambda **kw: {
+            "results": [{"image": name, "count": n, "scores": [0.9] * n}
+                        for name, n in counts.items()],
+            "image_count": len(counts), "total_detections": sum(counts.values()),
+            "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
+            "validated": True, "conf_source": "calibration"})
+
+        out_csv = tmp_path / "block_counts.csv"
+        res = itools.tabulate_counts("m.pt", str(tmp_path), str(out_csv),
+                                     trait="catkin", calibration_labels_dir=str(tmp_path))
+
+        assert "error" not in res, res
+        assert res["csv_path"] == str(out_csv)
+        assert res["image_count"] == len(counts)
+        assert res["total_detections"] == sum(counts.values())
+        assert res["operating_point_validated"] == VALIDATED_HELD_OUT
+        rows = list(csv.DictReader(out_csv.read_text(encoding="utf-8").splitlines()))
+        assert {r["image"]: int(r["detection_count"]) for r in rows} == counts
 
 
 class TestHpoToolOutputSchema:

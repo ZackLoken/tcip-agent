@@ -293,21 +293,54 @@ def test_a_five_band_raster_composites_its_first_three_bands(client: TestClient,
     assert resp.headers["x-tcip-stats-source"] == "served_array"
 
 
+def _pinned_stretch_raster(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """A non-square 4-band raster whose bands span different ranges, with the display pixels a
+    ``minmax`` stretch owes it worked out by hand.
+
+    Every value sits on a quarter of its own band's span, so the display byte each one is owed is
+    an exact number (0, 63, 127, 191, 255 after the truncating uint8 cast) rather than something
+    re-derived from the stretch's own arithmetic. Returns the raster and the ``3,0,1`` composite it
+    is owed.
+    """
+    bands = [
+        [[0, 100, 200], [300, 400, 400]],           # spans 0..400
+        [[1400, 1300, 1200], [1100, 1000, 1400]],   # spans 1000..1400
+        [[7, 8, 9], [10, 11, 12]],                  # never selected: band choice has to matter
+        [[20, 40, 60], [80, 100, 20]],              # spans 20..100
+    ]
+    block = np.stack([np.array(b, dtype="uint16") for b in bands], axis=-1)
+    arr = np.tile(block, (2, 2, 1))
+    owed_block = np.stack([
+        np.array([[0, 63, 127], [191, 255, 0]], dtype="uint8"),      # band 3
+        np.array([[0, 63, 127], [191, 255, 255]], dtype="uint8"),    # band 0
+        np.array([[255, 191, 127], [63, 0, 255]], dtype="uint8"),    # band 1
+    ], axis=-1)
+    tifffile.imwrite(str(path), arr)
+    return arr, np.tile(owed_block, (2, 2, 1))
+
+
 def test_the_served_composite_is_the_shared_display_primitives_own_pixels(
     client: TestClient, tmp_path: Path,
 ):
     """What the route encodes is ``composite_display_rgb``'s output byte for byte: the viewer and
-    any other consumer of that primitive see one set of pixels, not two matching expressions."""
+    any other consumer of that primitive see one set of pixels, not two matching expressions.
+
+    The pixels that primitive owes a known raster are pinned here independently of how it computes
+    them, so the two sides agreeing is evidence about the display pixels and not just about both
+    calling one function.
+    """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
 
     path = tmp_path / "capture.tif"
-    arr = _multiband(path)
+    arr, owed = _pinned_stretch_raster(path)
+    composed = composite_display_rgb(arr, [3, 0, 1], "minmax")
+    assert composed.tolist() == owed.tolist()
+
     resp = client.get("/api/images", params={
         "path": str(path), "bands": "3,0,1", "stretch": "minmax", "quality": 90})
     assert resp.status_code == 200
     buf = io.BytesIO()
-    Image.fromarray(composite_display_rgb(arr, [3, 0, 1], "minmax"), mode="RGB").save(
-        buf, "JPEG", quality=90)
+    Image.fromarray(composed, mode="RGB").save(buf, "JPEG", quality=90)
     assert resp.content == buf.getvalue()
 
 

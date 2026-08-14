@@ -163,11 +163,18 @@ def test_a_recorded_resize_is_read_through_the_builders_own_conventions():
 
 def test_a_preset_name_resolves_through_the_same_preset_the_run_built():
     """A preset string is not a ``[w, h]`` pair; it resolves through
-    ``get_augmentation_preset``, at the same default size every production caller builds it with."""
+    ``get_augmentation_preset``, at the same default size every production caller builds it with.
+
+    That default is pinned here rather than read back off the preset, so the size a preset name
+    reproduces is a stated fact and not whatever the two sides happen to agree on today. A caller
+    that names its own size gets that one instead.
+    """
     from tcip_mcp.pipelines.data.augmentations import get_augmentation_preset, recorded_resize
 
+    assert recorded_resize("nadir_rotation") == (640, 640)
     assert recorded_resize("nadir_rotation") == tuple(
         get_augmentation_preset("nadir_rotation")["resize"])
+    assert tuple(get_augmentation_preset("nadir_rotation", (512, 384))["resize"]) == (512, 384)
 
 
 def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize():

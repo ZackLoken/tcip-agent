@@ -108,8 +108,14 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
 
     res = cancel_job("j1")
     assert res["cancel_requested"] is True and job.cancel_event.is_set()
-    with pytest.raises(Exception):
-        cancel_job("missing")  # 404 -> HTTPException
+    # Cancelling a job that was never registered is a client-side miss, so it has to reach the
+    # browser as a 404 and name the id: any other status reads to the caller as a real outcome.
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as cancel_miss:
+        cancel_job("missing")
+    assert cancel_miss.value.status_code == 404
+    assert "missing" in cancel_miss.value.detail
 
     _worker(job)  # honors the pre-set cancel
     assert job.status == "cancelled"
