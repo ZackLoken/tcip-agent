@@ -48,6 +48,65 @@ function lastSocket(): FakeWebSocket {
   return FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
 }
 
+describe("StateSocket.connect", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("opens the state socket once and does not stack a second one while it is live", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(lastSocket().url).toContain("/ws/state");
+
+    lastSocket().open();
+    socket.connect();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    socket.close();
+  });
+
+  it("reconnects after a drop and holds the delay at 15 seconds once the backoff saturates", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    // Never opens, so each delay doubles: 500, 1000, 2000, 4000, 8000, then the cap.
+    for (const delay of [500, 1000, 2000, 4000, 8000]) {
+      lastSocket().drop();
+      vi.advanceTimersByTime(delay);
+    }
+    expect(FakeWebSocket.instances).toHaveLength(6);
+
+    lastSocket().drop();
+    vi.advanceTimersByTime(14_999);
+    expect(FakeWebSocket.instances).toHaveLength(6);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.instances).toHaveLength(7);
+
+    // A successful open puts the next delay back to 500ms.
+    lastSocket().open();
+    lastSocket().drop();
+    vi.advanceTimersByTime(500);
+    expect(FakeWebSocket.instances).toHaveLength(8);
+    socket.close();
+  });
+
+  it("close suppresses any further reconnect", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+
+    socket.close();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
 describe("StateSocket.subscribePanel", () => {
   beforeEach(() => {
     vi.useFakeTimers();
