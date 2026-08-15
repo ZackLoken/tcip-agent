@@ -103,3 +103,56 @@ def test_one_familys_failure_leaves_the_others_results_intact(runner, tmp_path, 
     assert rows["antigravity"]["exit_code"] == 0
     assert rows["codex"]["response_source"] == "runner_error"
     assert "harness blew up" in rows["codex"]["runner_error"]
+
+
+def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
+    runner, tmp_path, monkeypatch
+) -> None:
+    """An editor-saved BOM is an encoding artifact, not part of the question text."""
+    seen: list[str] = []
+
+    real_run_one = runner.run_one
+
+    def _capture(family, qid, condition, prompt, *args, **kwargs):
+        seen.append(prompt)
+        return real_run_one(family, qid, condition, prompt, *args, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None))
+    monkeypatch.setattr(runner, "run_one", _capture)
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8-sig")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"),
+        "--families", "codex",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() == 0
+    assert len(seen) == 1
+    assert seen[0] == "question"
+
+
+def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_child(
+    runner, tmp_path, monkeypatch
+) -> None:
+    """The child gets utf-8 stdin and its utf-8 stdout decodes intact, whatever the locale."""
+    echo_child = [sys.executable, "-c",
+                  "import sys; sys.stdin.reconfigure(encoding='utf-8'); "
+                  "sys.stdout.reconfigure(encoding='utf-8'); "
+                  "sys.stdout.write(sys.stdin.read())"]
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (echo_child, None))
+
+    prompt = "a box-drawing rule: ───"
+    meta = runner.run_one("codex", "qid", "as-shipped", prompt,
+                          tmp_path, tmp_path / "out", 30, None, None)
+
+    run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
+    body = (run_dir / "prompt.txt").read_text(encoding="utf-8")
+    assert "─" in body
+    assert (run_dir / "stdout.txt").read_text(encoding="utf-8") == body
+    assert meta["exit_code"] == 0

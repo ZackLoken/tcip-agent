@@ -325,6 +325,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
             input=body if family in STDIN_FAMILIES else None,
             capture_output=True,
             text=True,
+            # Never the console codepage: cp1252 stdin kills a run on the first unencodable character.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=str(cwd),
             check=False,
@@ -408,7 +411,7 @@ def main() -> int:
               "condition has repository access only. Antigravity covers MCP questions for a "
               "second family.\n")
 
-    prompt = args.prompt_file.read_text(encoding="utf-8")
+    prompt = args.prompt_file.read_text(encoding="utf-8-sig")
     print(f"question : {args.question_id}")
     print(f"condition: {args.condition} ({CONDITIONS[args.condition]['description']})")
     print(f"families : {', '.join(families)}")
