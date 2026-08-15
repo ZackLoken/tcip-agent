@@ -75,6 +75,20 @@ def milestone_date_columns(spec) -> list[str]:
     return [f"{spec.phenology_prefix}_{sfx}_date" for sfx, _ in _milestone_columns(spec)]
 
 
+def majority_provisional_column(spec) -> str | None:
+    """The column that marks a trait's majority alias as a provisional reading, or ``None`` when the
+    spec names no majority crossing for it to qualify.
+
+    The single owner of that column's name. ``phenology_csv_columns`` declares it and every delivery
+    door stamps it through this same function, so declaration and production cannot disagree: a
+    stamped key the schema does not declare makes ``write_phenology_csv`` raise on an unknown key,
+    and a declared column nothing stamps ships permanently blank.
+    """
+    if not spec.majority_milestone:
+        return None
+    return f"{spec.phenology_prefix}_{spec.majority_label}_provisional"
+
+
 def phenology_csv_columns(spec) -> list[str]:
     """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitSpec``.
 
@@ -84,11 +98,7 @@ def phenology_csv_columns(spec) -> list[str]:
     prefix and columns with no change here. The surrounding provenance columns (operating point,
     classifier validation, producer identity, coverage disclosure) are genuinely trait-neutral.
     """
-    # Only when the spec names a majority crossing, the alias's provisional marker qualifies that
-    # alias, so without one there is nothing for it to mark (``phenology_tools`` gates its stamp on
-    # the same condition; the two must agree or ``write_phenology_csv`` raises on an unknown key).
-    provisional = ([f"{spec.phenology_prefix}_{spec.majority_label}_provisional"]
-                   if spec.majority_milestone else [])
+    provisional_column = majority_provisional_column(spec)
     return [
         "plant_id",
         "accession",
@@ -110,7 +120,7 @@ def phenology_csv_columns(spec) -> list[str]:
         # claim the data does not support, which is the failure mode this platform exists to
         # prevent.
         *[f"{c}_bound" for c in milestone_date_columns(spec)],
-        *provisional,
+        *([provisional_column] if provisional_column else []),
         *PROVENANCE_COLUMNS,
     ]
 

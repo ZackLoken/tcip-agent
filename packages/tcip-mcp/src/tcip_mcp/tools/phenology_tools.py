@@ -797,7 +797,7 @@ def compute_phenology(
 
     # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
     # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
-    # spec. The column name derives from the spec too, matching phenology_csv_columns.
+    # spec. The column name comes from majority_provisional_column, the same owner the schema reads.
     # The tile scale is a dimension of the same count operating point with no column of its own, so
     # a tile scale that only reached delivery via acknowledge_unvalidated floors this column too.
     stamp = {
@@ -808,12 +808,9 @@ def compute_phenology(
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),
     }
-    # Only when the spec names a majority crossing, the marker qualifies that alias, and
-    # phenology_csv_columns declares the column under the same condition, so stamping it for a trait
-    # without one would raise on an unknown stamp key rather than ship a permanently-blank column.
-    if spec.majority_milestone:
-        stamp[f"{spec.phenology_prefix}_{spec.majority_label}_provisional"] = (
-            "true" if spec.majority_provisional else "false")
+    provisional_column = phenology.majority_provisional_column(spec)
+    if provisional_column:
+        stamp[provisional_column] = "true" if spec.majority_provisional else "false"
     csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path), spec, stamp=stamp)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares,
     # not a single hardcoded "50per" key, a trait authored with different milestone fractions has
