@@ -59,8 +59,10 @@ def test_a_status_write_lands_at_the_shared_locator_and_creates_no_second_store(
     assert _on_disk(tmp_path) == {"catkin": {"IMG_0001.JPG": "complete"}}
 
     tcip_dir = tmp_path / ".tcip"
+    # The .lock artifact can outlive the write (filelock version, platform); it is not a state file.
     written = sorted(
-        p.relative_to(tcip_dir).as_posix() for p in tcip_dir.rglob("*") if p.is_file())
+        p.relative_to(tcip_dir).as_posix()
+        for p in tcip_dir.rglob("*") if p.is_file() and p.suffix != ".lock")
     assert written == ["audit.jsonl", "state/image_status.json"]
 
 
