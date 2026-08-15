@@ -92,6 +92,52 @@ def test_mentioned_trait_names_finds_single_word_traits() -> None:
     assert "dbh" in found
 
 
+def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(monkeypatch, tmp_path) -> None:
+    """One read of the controlled vocabulary serves both the runtime registry and this check.
+    Two reads can disagree, and the disagreement shows up as a skill passing a check the platform
+    would fail on the same name, so the vocabulary the guardrail sees is the registry's."""
+    from tcip_mcp import traits
+
+    monkeypatch.setattr(
+        traits, "_crops_traits",
+        lambda: [{"name": "measure_one", "crops": ["crop_one"]}])
+
+    allnames, by_crop = guardrail.load_vocab()
+    assert allnames == {"measure_one"}
+    assert by_crop["crop_one"] == {"measure_one"}
+
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Records `plant_height` for the block.", encoding="utf-8")
+    assert guardrail.unknown_trait_tokens(skill) == ["plant_height"]
+
+
+def test_the_guardrail_refuses_a_vocabulary_that_reads_empty(monkeypatch, tmp_path) -> None:
+    """The registry's load answers with nothing when crops.yml will not read, and a check run
+    against nothing reports every skill clean. So an empty vocabulary is a refusal, naming the
+    file, rather than a pass."""
+    from tcip_mcp import traits
+
+    monkeypatch.setattr(traits, "_crops_traits", list)
+
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Nothing trait-shaped here.", encoding="utf-8")
+    with pytest.raises(ValueError) as excinfo:
+        guardrail.unknown_trait_tokens(skill)
+    assert str(traits.crops_yml_path()) in str(excinfo.value)
+
+
+def test_a_readable_vocabulary_is_still_checked_rather_than_refused(tmp_path) -> None:
+    """The refusal above must not turn every run into a refusal: the real controlled vocabulary
+    loads, carries its crop assignments, and a clean skill still comes back clean."""
+    allnames, by_crop = guardrail.load_vocab()
+    assert "dbh" in allnames
+    assert by_crop["hazelnut"]
+
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("Measure `dbh` on the standing tree.", encoding="utf-8")
+    assert guardrail.unknown_trait_tokens(skill) == []
+
+
 def test_off_crop_tokens_catches_single_word_mis_assignment(tmp_path) -> None:
     """Fails before the fix: a single-word real trait referenced on the wrong crop's skill was
     invisible to the old regex-extraction-based `off_crop_tokens`, so a real mis-assignment went

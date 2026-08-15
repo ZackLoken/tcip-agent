@@ -248,6 +248,64 @@ def test_unknown_trait_still_hard_fails():
         get_trait("banana")
 
 
+# ── one spelling of a spec file, and one writer that cannot lose an edit ─────────
+
+def test_a_spec_authored_with_the_other_yaml_spelling_is_adopted_under_the_canonical_one(
+    tmp_path: Path,
+):
+    """Spec files are hand-authored, so both suffixes get written by hand. The registry addresses
+    one of them, so a scan renames the other rather than leaving an authored trait unreachable."""
+    import yaml
+
+    (tmp_path / "leaf.yaml").write_text(
+        yaml.safe_dump({"name": "leaf", "delivers": ["leaf_length"]}), encoding="utf-8")
+
+    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+
+    assert [s.name for s in specs] == ["leaf"]
+    assert errors == []
+    assert sorted(p.name for p in tmp_path.glob("*.y*ml")) == ["leaf.yml"]
+
+
+def test_a_second_spelling_beside_the_canonical_file_is_reported_rather_than_overwriting_it(
+    tmp_path: Path,
+):
+    """Adopting the canonical name must never consume the file already under it: the registry keeps
+    serving what it holds and names the other file, so a breeder can merge the two by hand."""
+    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
+    import yaml
+
+    (tmp_path / "leaf.yaml").write_text(
+        yaml.safe_dump({"name": "leaf", "delivers": ["leaf_width"]}), encoding="utf-8")
+
+    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+
+    assert [s.delivers for s in specs] == [("leaf_length",)]
+    assert [e["file"] for e in errors] == ["leaf.yaml"]
+    assert (tmp_path / "leaf.yaml").is_file()
+
+
+def test_a_spec_write_that_lost_the_race_is_refused_rather_than_silently_winning(tmp_path: Path):
+    """A spec is read, merged into and written back from more than one process, so the store takes
+    the version the writer read; a write from a stale one is refused instead of dropping whatever
+    the other writer recorded."""
+    import tcip_store as ts
+
+    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
+    key = traits.trait_spec_key(tmp_path, "leaf")
+    stale = ts.read_versioned(key).version
+    traits.write_trait_spec_fields(
+        "leaf", {"count_bias_tolerance_frac": 1.0}, ["count_bias_tolerance_frac: agent_proposed_unvalidated"],
+        specs_dir=tmp_path)
+
+    with pytest.raises(ts.VersionConflict):
+        ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]}, expect=stale)
+    with pytest.raises(ts.PolicyViolation):
+        ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]})
+
+    assert load_trait_specs(specs_dir=tmp_path)[0].count_bias_tolerance_frac == 1.0
+
+
 def test_catkin_config_semantics_match_reference_fixture():
     # This module's pytestmark seeds a real catkin.yml matching tests/_trait_fixtures.CATKIN,
     # proving the config path round-trips every field faithfully, not just the ones this test

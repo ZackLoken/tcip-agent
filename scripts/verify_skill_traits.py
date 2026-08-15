@@ -23,7 +23,14 @@ others with no underscore, invisible to both checks it fed):
   rather than regex extraction. Because it searches for known names instead of extracting
   candidates, it cannot miss a single-word trait the way the regex-based check structurally can.
 
-CLI: `python scripts/verify_skill_traits.py <skill.md> [crop_key]`, exit 0 clean, 1 unknown.
+The vocabulary itself is read through the runtime registry's own crops.yml load
+(`tcip_mcp.traits`), so the guardrail and the platform police the same names from the same read.
+That load is tolerant by design (it drops a malformed record and answers with nothing at all when
+the file will not read), which for a guardrail would mean passing on a registry that is broken, so
+`load_vocab` refuses an empty or shapeless vocabulary rather than checking against it.
+
+CLI: `python scripts/verify_skill_traits.py <skill.md> [crop_key]`, exit 0 clean, 1 unknown,
+2 unusable arguments or an unreadable vocabulary.
 """
 
 from __future__ import annotations
@@ -33,30 +40,33 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
+from tcip_mcp import traits as registry
 
 
-def repo_root() -> Path:
-    """Walk up from this file to the repo root (the dir holding .github/skills/crops)."""
-    here = Path(__file__).resolve()
-    for parent in [here.parent, *here.parents]:
-        if (parent / ".github" / "skills" / "crops" / "crops.yml").exists():
-            return parent
-    return here.parent.parent
+def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
+    """Every crops.yml trait name, and the names each crop declares.
 
-
-def crops_yml_path() -> Path:
-    return repo_root() / ".github" / "skills" / "crops" / "crops.yml"
-
-
-def load_vocab(path: Path | None = None) -> tuple[set[str], dict[str, set[str]]]:
-    path = path or crops_yml_path()
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    Raises ``ValueError`` when the registry reads empty or a record carries no crop list: a check
+    run against a vocabulary that failed to load reports a clean skill either way, which is the
+    one answer this guardrail must never give by accident.
+    """
+    records = registry._crops_traits()
+    if not records:
+        raise ValueError(
+            f"{registry.crops_yml_path()} declared no usable trait records, so there is no "
+            "vocabulary to check against; fix the file before trusting this check"
+        )
     allnames: set[str] = set()
     by_crop: dict[str, set[str]] = collections.defaultdict(set)
-    for trait in data["traits"]:
+    for trait in records:
+        crops = trait.get("crops")
+        if not isinstance(crops, list) or not crops:
+            raise ValueError(
+                f"trait {trait['name']!r} in {registry.crops_yml_path()} declares no crops, so "
+                "its per-crop assignment cannot be checked"
+            )
         allnames.add(trait["name"])
-        for crop in trait["crops"]:
+        for crop in crops:
             by_crop[crop].add(trait["name"])
     return allnames, by_crop
 
@@ -120,8 +130,12 @@ def main() -> int:
         return 2
     skill_path = sys.argv[1]
     crop_key = sys.argv[2] if len(sys.argv) > 2 else None
-    unknown = unknown_trait_tokens(skill_path, crop_key)
-    off_crop = off_crop_tokens(skill_path, crop_key) if crop_key else []
+    try:
+        unknown = unknown_trait_tokens(skill_path, crop_key)
+        off_crop = off_crop_tokens(skill_path, crop_key) if crop_key else []
+    except ValueError as e:
+        print(f"cannot check {skill_path}: {e}")
+        return 2
     print(f"== {skill_path} ==")
     if unknown:
         print(f"UNKNOWN (not a crops.yml trait, not an allow-listed platform token): {len(unknown)}")

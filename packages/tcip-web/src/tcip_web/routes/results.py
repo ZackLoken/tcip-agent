@@ -467,8 +467,7 @@ def list_traits(project_root: str) -> dict:
     _guard(project_root)
     from tcip_mcp.traits import load_trait_specs_with_errors
 
-    specs, errors = load_trait_specs_with_errors(
-        specs_dir=Path(project_root) / ".tcip" / "state" / "trait_specs")
+    specs, errors = load_trait_specs_with_errors(project_root=project_root)
     return {
         "traits": sorted(spec.name for spec in specs),
         "milestone_fractions_by_trait": {

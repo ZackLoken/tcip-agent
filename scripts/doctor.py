@@ -198,7 +198,8 @@ def check_region_completeness(root: Path, findings: list) -> None:
 def check_trait_specs(root: Path, findings: list) -> None:
     from tcip_mcp.traits import load_trait_specs_with_errors
 
-    _specs, errors = load_trait_specs_with_errors(specs_dir=root / ".tcip" / "state" / "trait_specs")
+    # Diagnosing a project must leave it as it was found, so a stray spelling is named, not renamed.
+    _specs, errors = load_trait_specs_with_errors(project_root=root, adopt_canonical_suffix=False)
     for e in errors:
         findings.append(("error", f"trait spec {e['file']} failed to load: {e['reason']}"))
 
@@ -211,6 +212,11 @@ def main() -> int:
     if not root.is_dir():
         print(f"error: not a directory: {root}")
         return 2
+
+    # Its own process entry point, so it binds the storage backend the seam has no default for.
+    from tcip_store.file_backend import bind_default
+
+    bind_default()
 
     findings: list[tuple[str, str]] = []
     for check in (check_negatives, check_registry, check_provenance, check_state,

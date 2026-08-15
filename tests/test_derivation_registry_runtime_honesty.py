@@ -84,6 +84,24 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
     assert _resolve(label)([list(boxes)]) == pytest.approx(result["iou_threshold"])
 
 
+def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
+    """A picker's label, and the variant it earns over confirmed review verdicts, are the picker
+    registry's own text. A second list of them would let a registered picker stamp a label no
+    implementation is recorded for, which is the auditing gap this registry exists to close, so
+    the labels are read from the registry rather than restated beside it."""
+    from tcip_mcp.pipelines import derivations, operating_point
+
+    label = "a sweep registered by this test"
+    monkeypatch.setitem(
+        operating_point.COUNT_OBJECTIVE_PICKERS, "objective_registered_by_this_test",
+        (lambda records: None, label))
+
+    live = derivations.DERIVATION_IMPLEMENTATIONS
+    _picker, existing = next(iter(operating_point.COUNT_OBJECTIVE_PICKERS.values()))
+    assert live[label] == live[existing]
+    assert live[label + operating_point.REVIEW_VERDICT_LABEL_SUFFIX] == live[existing]
+
+
 def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped_tolerance():
     """Same demand on the center-match branch, where the reported tolerance is the derived
     fraction scaled by the GT's own average characteristic size: both sides of the comparison run

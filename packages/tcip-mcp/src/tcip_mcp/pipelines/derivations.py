@@ -609,18 +609,9 @@ def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]
     return float(min(max(float(np.percentile(tail, percentile)) + margin, lo), hi))
 
 
-# Every ``derived_from`` label ever stamped by ``resolution.derived()`` must appear here, mapped
-# to the callable that actually computes it, or to an explicit non-derivation marker
-# ("caller-input" / "placeholder") when the constructor is reused for a non-derived value.
-# tests/test_provenance_honesty.py enforces this, so a data-sounding label can never again be
-# stamped without an implementation behind it (the cross_tile_nms costume bug).
-DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
+_STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "probed bands of": "tcip_mcp.pipelines.derivations.probe_channels",  # f-string prefix
     "max class id + 1 in the label set": "tcip_mcp.pipelines.derivations.num_classes_from_distribution",
-    "count-unbiased center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
-    "count-unbiased center-match sweep over review verdicts": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
-    "F1-max center-match sweep": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
-    "F1-max center-match sweep over review verdicts": "tcip_mcp.pipelines.operating_point.sweep_operating_point",
     "GT neighbor-IoU distribution (p99 + margin)": "tcip_mcp.pipelines.derivations.derive_cross_tile_nms",
     "GT nearest-neighbor spacing (p10 + margin)": "tcip_mcp.pipelines.derivations.derive_localization_tolerance_frac",
     "GT characteristic-size spread (p10 / mean)": "tcip_mcp.pipelines.derivations.derive_sliver_frac",
@@ -634,3 +625,47 @@ DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "caller override": "caller-input",
     "no GT for this dataset; unvalidated placeholder": "placeholder",
 }
+"""The derivation labels that are authored here, everything except the count-objective ones.
+
+Every ``derived_from`` label ``resolution.derived()`` can stamp resolves through
+:data:`DERIVATION_IMPLEMENTATIONS` to the callable that computes it, or to an explicit
+non-derivation marker ("caller-input" / "placeholder") when the constructor carries a value nothing
+derived. tests/test_provenance_honesty.py enforces that, so a data-sounding label cannot be stamped
+without an implementation behind it.
+"""
+
+_SWEEP_IMPLEMENTATION = "tcip_mcp.pipelines.operating_point.sweep_operating_point"
+
+
+def _derivation_implementations() -> dict[str, object]:
+    """Every registered derivation label, the count-objective ones read from the picker registry.
+
+    A picker's label, and the variant it earns sweeping confirmed review verdicts, are the picker
+    registry's to state (``operating_point.COUNT_OBJECTIVE_PICKERS`` plus
+    ``operating_point.REVIEW_VERDICT_LABEL_SUFFIX``), so registering a picker registers its labels
+    and no second list of them can drift from the text a run actually stamps.
+
+    Resolved on access rather than at import: ``operating_point`` imports this module, and it pulls
+    torch in with it, which reaching the picker registry eagerly would impose on every caller of a
+    torch-free derivation.
+    """
+    from tcip_mcp.pipelines.operating_point import (
+        COUNT_OBJECTIVE_PICKERS,
+        REVIEW_VERDICT_LABEL_SUFFIX,
+    )
+
+    return {
+        **{
+            label + suffix: _SWEEP_IMPLEMENTATION
+            for _picker, label in COUNT_OBJECTIVE_PICKERS.values()
+            for suffix in ("", REVIEW_VERDICT_LABEL_SUFFIX)
+        },
+        **_STATIC_DERIVATION_IMPLEMENTATIONS,
+    }
+
+
+def __getattr__(name: str) -> dict[str, object]:
+    """Serve ``DERIVATION_IMPLEMENTATIONS`` on access, so its picker half is read live."""
+    if name == "DERIVATION_IMPLEMENTATIONS":
+        return _derivation_implementations()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
