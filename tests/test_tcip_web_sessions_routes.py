@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -157,6 +158,34 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
         s["negative_confirmation_seconds"] + s["review_seconds"] + s["new_annotation_seconds"]
         == s["total_time_seconds"]
     )
+
+
+def test_a_status_store_that_will_not_decode_reports_its_time_as_review(
+    client: TestClient, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreadable confirmation store must not read as a confirmed negative.
+
+    The route only displays these numbers, so it keeps answering, but it names the store in the
+    log and counts the time as review: the reading that claims the least.
+    """
+    project_root = tmp_path / "proj"
+    dataset_root = tmp_path / "data"
+    (dataset_root / ".tcip" / "state").mkdir(parents=True)
+    (dataset_root / ".tcip" / "state" / "image_status.json").write_bytes(b"{not a status store")
+
+    pr = str(project_root)
+    client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
+    client.post("/api/sessions/image_event", json={
+        "project_root": pr, "dataset_root": str(dataset_root), "subject": "catkin",
+        "date": "2026-02-11", "image_name": "IMG_UNREADABLE", "session_seconds_delta": 4.0,
+        "annotations_added_delta": 0, "final_annotation_count": 0,
+    })
+
+    with caplog.at_level(logging.WARNING):
+        s = client.get("/api/sessions/load", params={"project_root": pr}).json()["sessions"][0]
+    assert s["review_seconds"] == 4.0
+    assert s["negative_confirmation_seconds"] == 0.0
+    assert str(dataset_root) in caplog.text
 
 
 def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_ended(

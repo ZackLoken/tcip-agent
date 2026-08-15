@@ -11,7 +11,6 @@ WebSocket broadcast): this data is occasional and long-form.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,11 +34,15 @@ def _guard(project_root: str) -> None:
 
 
 def _reports_dir(project_root: str) -> Path:
-    return Path(project_root) / ".tcip" / "reports"
+    from tcip_mcp.tools.meta_tools import _reports_dir as reports_dir
+
+    return reports_dir(project_root)
 
 
 def _retrospectives_dir(project_root: str) -> Path:
-    return Path(project_root) / ".tcip" / "retrospectives"
+    from tcip_mcp.tools.meta_tools import _retrospectives_dir as retrospectives_dir
+
+    return retrospectives_dir(project_root)
 
 
 @router.get("/reports")
@@ -56,13 +59,20 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
         reverse=True,
     )
 
+    from tcip_store import DecodeError, read
+
+    from tcip_mcp.tools.meta_tools import friction_report_key
+
     reports: list[dict[str, Any]] = []
     for path in files[:limit]:
-        raw = path.read_text(encoding="utf-8").strip()
         try:
-            entry = json.loads(raw.splitlines()[0]) if raw else {}
-        except (json.JSONDecodeError, IndexError):
-            entry = {"detail": raw, "category": "", "malformed": True}
+            entry = read(friction_report_key(project_root, path.stem), default={})
+        except DecodeError:
+            # Show the breeder what is in an unreadable report rather than dropping the row.
+            entry = {"detail": path.read_text(encoding="utf-8").strip(),
+                     "category": "", "malformed": True}
+        if not isinstance(entry, dict):
+            entry = {"detail": str(entry), "category": "", "malformed": True}
         reports.append({
             "file": path.name,
             "timestamp": entry.get("timestamp"),
@@ -88,6 +98,10 @@ def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
         reverse=True,
     )
 
+    from tcip_store import read
+
+    from tcip_mcp.tools.meta_tools import retrospective_key
+
     retrospectives: list[dict[str, Any]] = []
     for path in files[:limit]:
         retrospectives.append({
@@ -95,7 +109,7 @@ def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
             "modified": datetime.fromtimestamp(
                 path.stat().st_mtime, tz=timezone.utc
             ).isoformat(),
-            "content": path.read_text(encoding="utf-8"),
+            "content": read(retrospective_key(project_root, path.stem), default=""),
         })
 
     return {

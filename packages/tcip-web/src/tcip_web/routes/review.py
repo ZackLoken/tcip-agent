@@ -20,6 +20,7 @@ import os
 import shutil
 import threading
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,7 +43,6 @@ from tcip_annotation.json_io import annotation_from_payload, read_annotations
 from tcip_annotation.state import Annotation
 from tcip_mcp.dataset_layout import derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-from tcip_mcp.utils.atomic_io import append_jsonl, read_json
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 
@@ -72,27 +72,28 @@ def _get_engine(project_root: str) -> ReviewEngine:
     return _engines[key]
 
 
-def _audit(project_root: str, tool: str, arguments: dict) -> None:
-    """Append a GUI review mutation to ``<project_root>/.tcip/audit.jsonl`` (best-effort).
+def _audit(scope: str, tool: str, arguments: dict) -> None:
+    """Record a GUI review mutation in the audit log ``scope`` names.
 
-    Review verdicts + GT writes change tracked state, so (like @audited MCP tools and
-    the annotate save path) they belong in the append-only log. Never fails the request.
+    A verdict is validation evidence held in the review store under the root the request
+    named, so those events are recorded there. A review that edits ground truth or stamps a
+    prediction bucket changes a record that travels with the dataset, so its caller resolves
+    the dataset root and passes it instead. Never fails the request.
     """
-    if not project_root:
+    if not scope:
         return
-    try:
-        append_jsonl(
-            os.path.join(project_root, ".tcip", "audit.jsonl"),
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool": tool,
-                "source": "gui",
-                "arguments": arguments,
-                "status": "ok",
-            },
-        )
-    except Exception:
-        pass
+    from tcip_mcp.audit import record_event
+
+    record_event(tool, arguments, source="gui", scope=scope)
+
+
+def _dataset_root_of_all(paths: Iterable[Optional[str]]) -> Optional[str]:
+    """The one dataset root every path in ``paths`` belongs to, or None when that is not a
+    single answer: an event names one log, and picking among several roots would be a guess."""
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    roots = {str(root) for p in paths if p and (root := dataset_root_of(p)) is not None}
+    return roots.pop() if len(roots) == 1 else None
 
 
 def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict]:
@@ -661,11 +662,16 @@ def save_gt(payload: SaveGtPayload) -> dict:
         gt=[annotation_from_payload(d, author=author, now=now_iso) for d in payload.annotations],
     )
     ok = engine.save_gt(ctx, path=payload.label_path)
-    _audit(payload.project_root, "gui_review_save_gt", {
-        "image_name": payload.image_name,
-        "label_path": payload.label_path,
-        "n_annotations": len(payload.annotations),
-    })
+    # Ground truth travels with its dataset, so the edit is recorded beside the labels it changed.
+    gt_root = _dataset_root_of_all([payload.label_path])
+    if gt_root is None:
+        logger.warning("no dataset root for %s; GT edit not audited", payload.label_path)
+    else:
+        _audit(gt_root, "gui_review_save_gt", {
+            "image_name": payload.image_name,
+            "label_path": payload.label_path,
+            "n_annotations": len(payload.annotations),
+        })
     return {"status": "ok" if ok else "partial"}
 
 
@@ -873,13 +879,18 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         if update_sidecar(d, _promote):
             stamped.append(d)
 
-    _audit(req.project_root, "gui_review_validate_reference", {
-        "trait": req.trait,
-        "validated": result["validated"],
-        "reference": result["reference"],
-        "reviewed_image_count": n,
-        "buckets_stamped": stamped,
-    })
+    # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
+    bucket_root = _dataset_root_of_all(bucket_dirs)
+    if bucket_root is None:
+        logger.warning("no single dataset root for %s; validation not audited", bucket_dirs)
+    else:
+        _audit(bucket_root, "gui_review_validate_reference", {
+            "trait": req.trait,
+            "validated": result["validated"],
+            "reference": result["reference"],
+            "reviewed_image_count": n,
+            "buckets_stamped": stamped,
+        })
     return ValidateReferenceResponse(
         validated=bool(result["validated"]),
         reference=result["reference"],
@@ -907,13 +918,9 @@ class ImageStatusesResponse(BaseModel):
 
 
 def _has_objects(path: Path) -> bool:
-    """True if ``path`` is a per-image label JSON with a non-empty ``annotations`` list. An empty
-    (confirmed-negative) or missing file has nothing to review."""
-    try:
-        data = read_json(path, default=None)
-    except Exception:
-        return False
-    return isinstance(data, dict) and bool(data.get("annotations"))
+    """True if ``path`` holds at least one annotation record, read through the one label reader.
+    An empty (confirmed-negative) or missing file has nothing to review."""
+    return bool(read_annotations(str(path)))
 
 
 def _stems_with_objects(*dirs: Optional[str]) -> set[str]:

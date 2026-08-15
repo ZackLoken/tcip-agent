@@ -22,8 +22,6 @@ import pytest
 
 pytest.importorskip("torch")  # operating_point imports evaluation, which imports torch
 
-from tcip_mcp.utils.atomic_io import atomic_write_json  # noqa: E402
-
 from tcip_mcp.pipelines.feedback import (  # noqa: E402
     describe_review_validation,
     resolve_operating_point_from_review,
@@ -305,7 +303,7 @@ def test_per_class_keys_survive_the_sweep_artifact_round_trip():
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     path = Path(os.environ["TCIP_PROJECT_ROOT"]) / "sweep.json"
-    atomic_write_json(path, {"sweep": b.params["conf"].sweep})
+    path.write_text(json.dumps({"sweep": b.params["conf"].sweep}), encoding="utf-8")
     reloaded = json.loads(path.read_text(encoding="utf-8"))["sweep"]
     assert reloaded["holdout_bias"]["per_class"] == b.params["conf"].sweep["holdout_bias"]["per_class"]
     assert reloaded["per_class_count_bias_failures"] == ["1", "2"]

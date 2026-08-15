@@ -132,12 +132,12 @@ def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int
     from tcip_annotation import json_io as _json_io
 
     from tcip_mcp.dataset_layout import (
-        annotation_path, region_completeness_digest_path, region_completeness_path, status_bucket,
+        annotation_path, region_completeness_digest_key, region_completeness_key, status_bucket,
     )
     from tcip_mcp.pipelines.data.tiling import rects_overlap
     from tcip_mcp.pipelines.reference_grid import grid_geometry, reference_cells
     from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
-    from tcip_mcp.utils.atomic_io import atomic_write_json
+    from tcip_store import transaction
 
     grid = grid_geometry(WIDTH, HEIGHT, TILE, 0.0)
     cells = reference_cells(WIDTH, HEIGHT, TILE, 0.0, clamp=True)
@@ -154,11 +154,15 @@ def _attest_regions_complete(root: Path, stem: str, regions: list[list[tuple[int
         "grid": grid, "cells_complete": covered, "attested_by": "test", "attested_at": "now",
         "stem": stem, "date": None, "subject": subject,
     }}
-    atomic_write_json(region_completeness_path(root), store)
     digests = {bucket: {
         c.name: cell_annotation_digest(annotations, subject, c) for c in cells if c.name in covered
     }}
-    atomic_write_json(region_completeness_digest_path(root), digests)
+    # Digest first, the order the coverage route commits them in: an attestation with no digest
+    # beside it reads as stale.
+    digest_key, completeness_key = region_completeness_digest_key(root), region_completeness_key(root)
+    with transaction(digest_key, completeness_key) as txn:
+        txn.write(digest_key, digests)
+        txn.write(completeness_key, store)
 
 
 def test_block_calibration_refuses_when_regions_unattested(tmp_path: Path):

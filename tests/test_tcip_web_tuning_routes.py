@@ -143,6 +143,27 @@ def test_trials_of_an_unknown_sweep_are_a_404(client, hpo_root) -> None:
     assert client.get("/api/tuning/sweeps/hpo_missing/trials").status_code == 404
 
 
+def test_a_trial_id_cannot_walk_out_of_its_sweep(client, hpo_root) -> None:
+    """A trial id arrives as a path segment, so a name carrying a separator is refused rather
+    than resolved into a log somewhere else. The ordinary id is still served."""
+    sweep = _write_sweep(hpo_root, "hpo_walk0001")
+    _write_trial(sweep, "aaa_00000", metrics=[{"epoch": 1, "val_loss": 0.5}])
+    outside = hpo_root.parent / "elsewhere.jsonl"
+    outside.write_text(json.dumps({"epoch": 99}) + "\n", encoding="utf-8")
+
+    from fastapi import HTTPException
+
+    from tcip_web.routes import tuning
+
+    with pytest.raises(HTTPException) as exc:
+        tuning.get_trial_metrics("hpo_walk0001", "../../elsewhere")
+    assert exc.value.status_code == 400
+
+    served = client.get("/api/tuning/sweeps/hpo_walk0001/trials/aaa_00000/metrics").json()
+    assert served["exists"] is True
+    assert [row["epoch"] for row in served["metrics"]] == [1]
+
+
 def test_a_sweep_id_cannot_walk_out_of_the_hpo_root(hpo_root) -> None:
     from fastapi import HTTPException
 

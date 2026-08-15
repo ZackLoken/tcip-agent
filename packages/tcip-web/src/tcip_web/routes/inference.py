@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -83,30 +82,17 @@ _job_lock = threading.Lock()
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Append a GUI inference mutation to ``<dataset_root>/.tcip/audit.jsonl`` (best-effort).
+    """Record a GUI inference mutation in the audit log of the dataset it wrote into.
 
     Predictions are dataset-native, not project-private (a dataset can be opened by more than one
     project, see ``dataset_layout.dataset_root_of``), so there is no single project's audit log a
-    prediction write here unambiguously belongs to. Mirrors ``classes._audit_dataset_write`` /
-    ``review._audit`` in shape, diverges from them only in root. Never fails the request.
+    prediction write here unambiguously belongs to. Never fails the request.
     """
     if not dataset_root:
         return
-    try:
-        from tcip_mcp.utils.atomic_io import append_jsonl
+    from tcip_mcp.audit import record_event
 
-        append_jsonl(
-            os.path.join(dataset_root, ".tcip", "audit.jsonl"),
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool": tool,
-                "source": "gui",
-                "arguments": arguments,
-                "status": "ok",
-            },
-        )
-    except Exception:
-        pass
+    record_event(tool, arguments, source="gui", scope=dataset_root)
 
 
 def _summary(job: InferenceJob) -> dict:

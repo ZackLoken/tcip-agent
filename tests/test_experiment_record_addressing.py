@@ -49,15 +49,17 @@ def test_a_split_manifest_is_read_from_the_store_the_experiment_module_resolves(
     manifest exists as having no recorded training membership at all: a disjointness check
     that silently cannot answer.
     """
+    from tcip_store import store
+
     from tcip_mcp.pipelines.operating_point import _train_disjointness
-    from tcip_mcp.utils.atomic_io import atomic_write_json
 
     elsewhere = tmp_path / "relocated_experiments"
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", elsewhere)
     experiment_id = "exp-015-chestnut-burr-det"
     experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
     manifest = elsewhere / experiment_id / "split.json"
-    atomic_write_json(manifest, {"train": ["img_001"], "group_by": "stem"})
+    store.replace(experiments.split_key(experiment_id),
+                  {"train": ["img_001"], "group_by": "stem"})
     assert manifest.is_file()
 
     checked = _train_disjointness(experiment_id, {"img_002"}, {"img_003"})
@@ -76,7 +78,7 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     pytest.importorskip("torch")
     from torch.utils.data import DataLoader
 
-    from tcip_web.routes._metrics_common import read_metrics_file
+    from tcip_store import read_log
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate
@@ -111,7 +113,7 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     ctx.default_train()
 
     assert run.status == "completed", run.error
-    rows = read_metrics_file(record_dir / "metrics.jsonl")["metrics"]
+    rows = read_log(experiments.metrics_key(experiment_id)).records
     assert [row["epoch"] for row in rows] == [1, 2]
     assert all(row.get("timestamp") for row in rows)
 
@@ -120,10 +122,11 @@ def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp
     """An HPO trial has no experiment record, and the Tuning view reads its rows from the
     trial's own directory: routing every row through the experiment log would leave it blank.
     """
-    from tcip_web.routes._metrics_common import read_metrics_file
+    from tcip_store import read_log
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.tools.training_tools import trial_metrics_key
 
     trial_dir = tmp_path / "sweep" / "trial_7"
     run = create_run({"model_source": {}}, str(trial_dir))
@@ -131,6 +134,6 @@ def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp
                        experiment_id=None)
     ctx._epoch_sink(1, {"val_loss": 0.25})
 
-    body = read_metrics_file(Path(trial_dir) / "metrics.jsonl")
-    assert body["exists"] is True
-    assert body["metrics"] == [{"epoch": 1, "val_loss": 0.25}]
+    page = read_log(trial_metrics_key(trial_dir.parent, trial_dir.name))
+    assert (Path(trial_dir) / "metrics.jsonl").is_file()
+    assert page.records == [{"epoch": 1, "val_loss": 0.25}]

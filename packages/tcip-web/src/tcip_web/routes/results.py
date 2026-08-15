@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import os
-from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Literal, Optional
@@ -54,27 +52,17 @@ def _guard(*paths: str | None) -> None:
 
 
 def _audit(project_root: str, tool: str, arguments: dict) -> None:
-    """Append a GUI results mutation to ``<project_root>/.tcip/audit.jsonl`` (best-effort).
+    """Record a GUI results mutation in the project's audit log.
 
-    Mirrors ``review._audit`` in shape; never fails the request.
+    A delivery and the plant mapping behind it are project state, not dataset state: the
+    dataset can be read by more than one project, but the export is this project's own
+    outward action. Never fails the request.
     """
     if not project_root:
         return
-    try:
-        from tcip_mcp.utils.atomic_io import append_jsonl
+    from tcip_mcp.audit import record_event
 
-        append_jsonl(
-            os.path.join(project_root, ".tcip", "audit.jsonl"),
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool": tool,
-                "source": "gui",
-                "arguments": arguments,
-                "status": "ok",
-            },
-        )
-    except Exception:
-        pass
+    record_event(tool, arguments, source="gui", scope=project_root)
 
 
 def _project_root_of_state_path(path: str) -> Optional[str]:

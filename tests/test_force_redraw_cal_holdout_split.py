@@ -46,9 +46,10 @@ def test_force_redraw_records_old_to_new_membership_diff(tmp_path: Path):
     assert result["new_membership"]["calibration"] or result["new_membership"]["holdout"]
 
     # A later, unrelated call keeps the redraw a deliberate, one-off action, not automatic.
-    from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path
-    from tcip_mcp.utils.atomic_io import read_json
-    locked_after = read_json(cal_holdout_lock_path("redraw-tool-test"))
+    from tcip_store import read
+
+    from tcip_mcp.pipelines.data.splits import cal_holdout_lock_key
+    locked_after = read(cal_holdout_lock_key("redraw-tool-test"))
     assert locked_after["calibration"] == result["new_membership"]["calibration"]
     assert locked_after["seed"] == 2
 

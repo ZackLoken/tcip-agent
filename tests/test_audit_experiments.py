@@ -17,7 +17,7 @@ import pytest
 class TestAuditLogging:
     def setup_method(self):
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.audit_path = self.tmpdir / "audit.jsonl"
+        self.audit_path = self.tmpdir / ".tcip" / "audit.jsonl"
 
     def teardown_method(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -26,14 +26,14 @@ class TestAuditLogging:
         from tcip_mcp.audit import audited
 
         with patch.object(
-            __import__("tcip_mcp.audit", fromlist=["AUDIT_PATH"]),
-            "AUDIT_PATH",
-            self.audit_path,
+            __import__("tcip_mcp.audit", fromlist=["AUDIT_ROOT"]),
+            "AUDIT_ROOT",
+            self.tmpdir,
         ):
             # Re-import to get patched version
             import tcip_mcp.audit as audit_mod
-            original = audit_mod.AUDIT_PATH
-            audit_mod.AUDIT_PATH = self.audit_path
+            original = audit_mod.AUDIT_ROOT
+            audit_mod.AUDIT_ROOT = self.tmpdir
 
             @audited
             def my_tool(x: int = 0) -> dict:
@@ -52,14 +52,14 @@ class TestAuditLogging:
             assert "duration_ms" in entry
             assert "timestamp" in entry
 
-            audit_mod.AUDIT_PATH = original
+            audit_mod.AUDIT_ROOT = original
 
     def test_audited_logs_exception(self):
         from tcip_mcp.audit import audited
 
         import tcip_mcp.audit as audit_mod
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         @audited
         def failing_tool() -> dict:
@@ -74,7 +74,7 @@ class TestAuditLogging:
         assert entry["status"] == "exception"
         assert "test error" in entry["error"]
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
     def test_redaction(self):
         from tcip_mcp.audit import _redact
@@ -91,8 +91,8 @@ class TestAuditLogging:
         from tcip_mcp.audit import audited
 
         import tcip_mcp.audit as audit_mod
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         @audited
         def my_tool(x: int, y: str = "default") -> dict:
@@ -103,14 +103,14 @@ class TestAuditLogging:
         entry = json.loads(self.audit_path.read_text().strip().splitlines()[0])
         assert entry["arguments"] == {"x": 5, "y": "explicit"}
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
     def test_audited_positional_binding_fills_unstated_defaults(self):
         from tcip_mcp.audit import audited
 
         import tcip_mcp.audit as audit_mod
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         @audited
         def my_tool(x: int, y: str = "default") -> dict:
@@ -121,7 +121,7 @@ class TestAuditLogging:
         entry = json.loads(self.audit_path.read_text().strip().splitlines()[0])
         assert entry["arguments"] == {"x": 5, "y": "default"}
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
     def test_audited_call_arity_error_still_logs_and_raises(self):
         """A real call-site bug (wrong arity) must still be logged before it propagates: the
@@ -129,8 +129,8 @@ class TestAuditLogging:
         from tcip_mcp.audit import audited
 
         import tcip_mcp.audit as audit_mod
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         @audited
         def my_tool(x: int) -> dict:
@@ -144,7 +144,7 @@ class TestAuditLogging:
         entry = json.loads(lines[0])
         assert entry["status"] == "exception"
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
     def test_audited_binding_failure_falls_back_without_aborting_a_call_that_would_succeed(
         self, monkeypatch,
@@ -159,8 +159,8 @@ class TestAuditLogging:
         from tcip_mcp.audit import audited
 
         import tcip_mcp.audit as audit_mod
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         @audited
         def my_tool(x: int, y: str = "default") -> dict:
@@ -179,7 +179,7 @@ class TestAuditLogging:
         # Degraded fallback: the positional x is lost, y survives via kwargs.
         assert entry["arguments"] == {"y": "explicit"}
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
 
 # ── Experiment tracking ──
@@ -398,7 +398,7 @@ class TestExperiments:
 class TestModelRegistryReplaceAudit:
     def setup_method(self):
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.audit_path = self.tmpdir / "audit.jsonl"
+        self.audit_path = self.tmpdir / ".tcip" / "audit.jsonl"
 
     def teardown_method(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -412,8 +412,8 @@ class TestModelRegistryReplaceAudit:
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry
 
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
         reg.register_model("exp1", self._ckpt("a.pt", b"first"), {})
@@ -430,14 +430,14 @@ class TestModelRegistryReplaceAudit:
         assert replace_events[0]["arguments"]["superseded_sha256"] == first_sha
         assert replace_events[0]["arguments"]["new_sha256"] == second_sha
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
     def test_reregistering_identical_content_is_not_audited_as_a_replace(self):
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry
 
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
         ckpt = self._ckpt("a.pt", b"same bytes")
@@ -448,14 +448,14 @@ class TestModelRegistryReplaceAudit:
         events = [json.loads(line) for line in lines]
         assert not [e for e in events if e.get("tool") == "model_registry_replace"]
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original
 
     def test_first_registration_under_a_name_is_not_audited_as_a_replace(self):
         import tcip_mcp.audit as audit_mod
         from tcip_mcp.model_registry import ModelRegistry
 
-        original = audit_mod.AUDIT_PATH
-        audit_mod.AUDIT_PATH = self.audit_path
+        original = audit_mod.AUDIT_ROOT
+        audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
         reg.register_model("brand_new", self._ckpt("a.pt", b"content"), {})
@@ -464,4 +464,4 @@ class TestModelRegistryReplaceAudit:
         events = [json.loads(line) for line in lines]
         assert not [e for e in events if e.get("tool") == "model_registry_replace"]
 
-        audit_mod.AUDIT_PATH = original
+        audit_mod.AUDIT_ROOT = original

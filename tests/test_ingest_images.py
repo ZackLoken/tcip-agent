@@ -305,14 +305,14 @@ def test_ingest_survives_a_bad_file_mid_batch(tmp_path, monkeypatch):
 
     import tcip_mcp.tools.ingest_tools as it
 
-    real_write = it.atomic_write_bytes
+    real_put = it.store.put_blob
 
-    def flaky_write(path, data):
-        if Path(path).stem == "bad":
+    def flaky_put(key, data, **kwargs):
+        if Path(key.parts[-1]).stem == "bad":
             raise OSError("simulated locked file")
-        return real_write(path, data)
+        return real_put(key, data, **kwargs)
 
-    monkeypatch.setattr(it, "atomic_write_bytes", flaky_write)
+    monkeypatch.setattr(it.store, "put_blob", flaky_put)
 
     manifest = ingest_images(source=str(src), name="proj_resilient")
 
@@ -394,8 +394,8 @@ def test_ingest_non_recursive_skips_subfolders(tmp_path):
 def test_ingest_writes_audit_entry(tmp_path, monkeypatch):
     import tcip_mcp.audit as audit_mod
 
-    audit_path = tmp_path / "audit.jsonl"
-    monkeypatch.setattr(audit_mod, "AUDIT_PATH", audit_path)
+    audit_path = tmp_path / ".tcip" / "audit.jsonl"
+    monkeypatch.setattr(audit_mod, "AUDIT_ROOT", tmp_path)
 
     src = tmp_path / "raw"
     _make_image(src / "a.png")

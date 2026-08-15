@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
-from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+from tcip_mcp.class_registry import ClassRegistry, RegistryError, Subject, write_registry
 from tcip_mcp.dataset_layout import (
     annotation_dir,
     classes_path,
@@ -76,6 +77,21 @@ def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
     _registry(root)
     assert list_subjects(root) == ["leaf", "bush", "catkin"]
     assert list_subjects(tmp_path / "no_such_dataset") == []
+
+
+def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(tmp_path: Path) -> None:
+    """Absence and corruption are different answers on the class registry.
+
+    Reading unreadable bytes as an empty registry hands every caller a dataset that declares
+    no subjects, which is indistinguishable from one that genuinely has none: the labels under
+    it are name-based and undecodable without it, so the read refuses instead.
+    """
+    root = tmp_path
+    _registry(root)
+    classes_path(root).write_bytes(b"{ this is not a registry")
+
+    with pytest.raises(RegistryError):
+        list_subjects(root)
 
 
 def test_declared_subjects_and_subjects_labelled_on_a_date_are_not_interchangeable(

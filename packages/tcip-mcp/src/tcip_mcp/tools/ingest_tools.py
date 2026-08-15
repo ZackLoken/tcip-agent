@@ -14,11 +14,12 @@ import logging
 from glob import glob
 from pathlib import Path
 
+from tcip_store import store
+
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 from tcip_mcp.server import mcp
-from tcip_mcp.utils.atomic_io import atomic_write_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -262,12 +263,14 @@ def ingest_images(
             continue
 
         # One bad file (locked by antivirus, vanished, unreadable) must not abort the whole
-        # batch; record it and keep going. Reading bytes never mutates the original;
-        # atomic_write_bytes writes a temp file + fsync + os.replace, so a crash mid-copy
-        # can't leave a torn image.
+        # batch; record it and keep going. Reading bytes never mutates the original, and the
+        # blob becomes the image only once it is whole, so a crash mid-copy can't leave a torn
+        # image.
         try:
             data = src_path.read_bytes()
-            atomic_write_bytes(dest, data)
+            store.put_blob(
+                dataset_layout.image_key(dest_root, bucket, src_path.stem, src_path.suffix), data
+            )
         except OSError as exc:
             errors.append({"source": str(src_path), "error": str(exc)})
             continue

@@ -29,7 +29,7 @@ def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(
     dataset_root = tmp_path / "shared_dataset"
     dataset_root.mkdir()
     log = dataset_root / ".tcip" / "audit.jsonl"
-    monkeypatch.setattr(audit_module, "AUDIT_PATH", log)
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", dataset_root)
 
     resp = client.post(
         "/api/classes/image_status",

@@ -20,6 +20,33 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tcip_store import Key, StoreDescriptor, append, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
+_CAPTURE_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
+"""The capture log under a root's own ``.tcip/``."""
+
+LEARNING_CAPTURE_STORE = "learning_capture"
+_CAPTURE_PARTS = ("learning_capture",)
+register_store(
+    StoreDescriptor(
+        name=LEARNING_CAPTURE_STORE,
+        kind="log",
+        key_fields=("document",),
+        codec=json_codec(indent=None, default=None),
+        locator=_CAPTURE_LOG,
+    )
+)
+
+
+def learning_capture_key(root: str | Path) -> Key:
+    """The session-boundary log under ``root``.
+
+    Every session's hook appends here, from its own process, so the entries are serialized and
+    each one is on disk before the hook exits rather than buffered in a bare handle.
+    """
+    return Key(LEARNING_CAPTURE_STORE, str(Path(root).resolve()), _CAPTURE_PARTS)
+
 
 def main() -> None:
     try:
@@ -27,9 +54,9 @@ def main() -> None:
     except Exception:
         payload = {}
     try:
-        cwd = payload.get("cwd") or "."
-        d = Path(cwd) / ".tcip"
-        d.mkdir(parents=True, exist_ok=True)
+        from tcip_store.file_backend import bind_default
+
+        bind_default()
         try:
             from tcip_mcp.workspace import read_active_project
 
@@ -44,8 +71,7 @@ def main() -> None:
             "note": "session ended; run scripts/distill_learnings.py to review the workspace "
                     "projects' reports and retrospectives",
         }
-        with (d / "learning_capture.jsonl").open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        append(learning_capture_key(payload.get("cwd") or "."), entry)
     except Exception:
         pass  # never let the capture backstop fail the session
 

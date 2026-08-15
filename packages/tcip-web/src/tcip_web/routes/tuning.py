@@ -20,7 +20,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_web.routes._metrics_common import read_metrics_file
+from tcip_web.routes._metrics_common import metrics_response
 
 logger = logging.getLogger(__name__)
 
@@ -271,15 +271,26 @@ def list_trials(sweep_id: str) -> dict:
 
 @router.get("/sweeps/{sweep_id}/trials/{trial_id}/metrics")
 def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
-    """Every metrics row one trial has written."""
-    from tcip_web.paths import safe_join
+    """Every metrics row one trial has written.
+
+    ``exists`` reports whether the log holds anything: rows, an entry still being appended, or
+    bytes that will not decode. A trial that has logged nothing and a trial with no log at all
+    are the same answer to the caller, which is what the Tuning view asks.
+    """
+    from tcip_store import BadKey, read_log
+
+    from tcip_mcp.tools.training_tools import trial_metrics_key
 
     root = _sweep_root(sweep_id)
     try:
-        path = safe_join(root, f"{_TRIAL_DIR_PREFIX}{trial_id}", "metrics.jsonl")
-    except ValueError as exc:
+        page = read_log(trial_metrics_key(root, f"{_TRIAL_DIR_PREFIX}{trial_id}"))
+    except BadKey as exc:
         raise HTTPException(400, f"invalid trial_id: {trial_id}") from exc
-    return read_metrics_file(path)
+    if page.corrupt:
+        logger.warning("trial %s has %d metrics rows that do not decode",
+                       trial_id, len(page.corrupt))
+    rows = [dict(row) for row in page.records]
+    return metrics_response(rows, exists=bool(rows or page.torn_tail or page.corrupt))
 
 
 @router.get("/ray-dashboard")

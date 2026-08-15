@@ -7,7 +7,7 @@ so the backend doesn't have to guess a dataset layout.
 
 from __future__ import annotations
 
-import os
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -26,6 +26,8 @@ from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import PredictionReference, store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/annotate", tags=["annotate"])
 
@@ -125,32 +127,29 @@ def _ann_dict(a: Annotation) -> dict:
 
 
 def _audit_gui_write(payload: "SavePayload") -> None:
-    """Append a GUI label-write to the project's audit log, mirroring @audited MCP tools.
+    """Record a GUI label-write in the audit log of the dataset it wrote into.
 
-    Best-effort and project-scoped (``<project_root>/.tcip/audit.jsonl``); a missing
-    project_root or any I/O error just skips the entry, never fails the save.
+    Labels travel with their dataset, so their trail belongs beside them rather than in
+    whichever project happened to open the dataset. A label path outside a dataset tree names
+    no such log, so the entry is skipped and named rather than guessed into another root.
     """
-    if not payload.project_root:
-        return
-    try:
-        from tcip_mcp.utils.atomic_io import append_jsonl
+    from tcip_mcp.audit import record_event
+    from tcip_mcp.dataset_layout import dataset_root_of
 
-        append_jsonl(
-            os.path.join(payload.project_root, ".tcip", "audit.jsonl"),
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool": "gui_save_labels",
-                "source": "gui",
-                "arguments": {
-                    "image_path": payload.image_path,
-                    "label_path": payload.label_path,
-                    "n_annotations": len(payload.annotations),
-                },
-                "status": "ok",
-            },
-        )
-    except Exception:
-        pass
+    root = dataset_root_of(payload.label_path) if payload.label_path else None
+    if root is None:
+        logger.warning("no dataset root for %s; label write not audited", payload.label_path)
+        return
+    record_event(
+        "gui_save_labels",
+        {
+            "image_path": payload.image_path,
+            "label_path": payload.label_path,
+            "n_annotations": len(payload.annotations),
+        },
+        source="gui",
+        scope=str(root),
+    )
 
 
 @router.get("/labels")
