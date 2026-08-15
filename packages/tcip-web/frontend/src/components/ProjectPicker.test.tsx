@@ -25,22 +25,22 @@ import type { ProjectSummary } from "@/api/client";
 
 const PROJECTS: ProjectSummary[] = [
   {
-    name: "hazelnut_catkin_valley-farm",
-    path: "/ws/hazelnut_catkin_valley-farm",
+    name: "crop_a_subject_a_valley-farm",
+    path: "/ws/crop_a_subject_a_valley-farm",
     created: 1_700_000_000,
     modified: 1_700_000_500,
     dates: ["2026-02-11", "2026-03-01"],
-    subjects: ["catkin", "bush"],
+    subjects: ["subject_a", "bush"],
     models: ["baseline"],
-    // catkin labelled (+ baseline predicted) on 02-11; bush labelled on 03-01.
-    subjects_by_date: { "2026-02-11": ["catkin"], "2026-03-01": ["bush"] },
+    // subject_a labelled (+ baseline predicted) on 02-11; bush labelled on 03-01.
+    subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-01": ["bush"] },
     models_by_date: { "2026-02-11": ["baseline"], "2026-03-01": [] },
     image_count: 42,
     is_active: false,
   },
   {
-    name: "chestnut_burr_site-b",
-    path: "/ws/chestnut_burr_site-b",
+    name: "crop_b_burr_site-b",
+    path: "/ws/crop_b_burr_site-b",
     created: 1_700_000_000,
     modified: 1_700_000_100,
     dates: ["2026-03-05"],
@@ -71,8 +71,8 @@ describe("ProjectPicker", () => {
     });
     render(<ProjectPicker />);
 
-    expect(await screen.findByText("hazelnut_catkin_valley-farm")).toBeInTheDocument();
-    expect(screen.getByText("chestnut_burr_site-b")).toBeInTheDocument();
+    expect(await screen.findByText("crop_a_subject_a_valley-farm")).toBeInTheDocument();
+    expect(screen.getByText("crop_b_burr_site-b")).toBeInTheDocument();
     expect(screen.getByText("42 image(s)")).toBeInTheDocument();
   });
 
@@ -112,9 +112,9 @@ describe("ProjectPicker", () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       selection: {
-        project_root: "/ws/hazelnut_catkin_valley-farm",
-        dataset_root: "/ws/hazelnut_catkin_valley-farm",
-        subject: "catkin",
+        project_root: "/ws/crop_a_subject_a_valley-farm",
+        dataset_root: "/ws/crop_a_subject_a_valley-farm",
+        subject: "subject_a",
         date: "2026-03-01",
         image_list: [],
         current_image_index: 0,
@@ -125,18 +125,18 @@ describe("ProjectPicker", () => {
     } as any);
 
     render(<ProjectPicker />);
-    fireEvent.click(await screen.findByText("hazelnut_catkin_valley-farm"));
+    fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
     // Default date is the most recent ISO date.
     fireEvent.click(screen.getByText("Open project"));
 
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    expect(arg.project_root).toBe("/ws/hazelnut_catkin_valley-farm");
+    expect(arg.project_root).toBe("/ws/crop_a_subject_a_valley-farm");
     expect(arg.dataset_root).toBe(arg.project_root);
     expect(arg.date).toBe("2026-03-01");
     // Store now holds the selection (dataset ready).
     await waitFor(() =>
-      expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/hazelnut_catkin_valley-farm"),
+      expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/crop_a_subject_a_valley-farm"),
     );
   });
 
@@ -147,18 +147,18 @@ describe("ProjectPicker", () => {
       projects: PROJECTS,
     });
     render(<ProjectPicker />);
-    fireEvent.click(await screen.findByText("hazelnut_catkin_valley-farm"));
+    fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
 
     // Default date is the most recent ISO date (2026-03-01), where only 'bush' is labelled.
     const subjectSelect = screen.getByLabelText("Subject") as HTMLSelectElement;
     let opts = Array.from(subjectSelect.options).map((o) => o.value);
     expect(opts).toContain("bush");
-    expect(opts).not.toContain("catkin");
+    expect(opts).not.toContain("subject_a");
 
-    // Switch to 2026-02-11, where only 'catkin' is labelled.
+    // Switch to 2026-02-11, where only 'subject_a' is labelled.
     fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-02-11" } });
     opts = Array.from(subjectSelect.options).map((o) => o.value);
-    expect(opts).toContain("catkin");
+    expect(opts).toContain("subject_a");
     expect(opts).not.toContain("bush");
   });
 

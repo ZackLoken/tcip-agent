@@ -101,12 +101,12 @@ function setupDataset() {
     gui: {
       ...s.gui,
       mode: "box" as const,
-      active_subject: "catkin",
+      active_subject: "subject_a",
       dataset: {
         ...s.gui.dataset,
         project_root: "C:/proj",
         dataset_root: "C:/data",
-        subject: "catkin",
+        subject: "subject_a",
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
@@ -118,7 +118,9 @@ function setupDataset() {
 }
 
 function addBox() {
-  useStore.getState().addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "catkin", attributes: {} });
+  useStore
+    .getState()
+    .addBox({ x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} });
 }
 
 const flush = () => act(async () => {});
@@ -213,7 +215,7 @@ describe("AnnotateTab save/load race", () => {
       "C:/proj",
       "img1.jpg",
       "partial",
-      "catkin",
+      "subject_a",
       "2026-01-01",
       "C:/data",
       "C:/data/annotations/2026-01-01",
@@ -275,7 +277,7 @@ describe("AnnotateTab subject rendering", () => {
   });
 
   it("box mode draws an active-subject polygon's read-only derived box (dashed, no handles), never a stored box", async () => {
-    useStore.getState().setRegistry({ catkin: {} });
+    useStore.getState().setRegistry({ subject_a: {} });
     const poly = {
       rings: [
         [
@@ -284,7 +286,7 @@ describe("AnnotateTab subject rendering", () => {
           [10, 10],
         ],
       ] as [number, number][][],
-      subject: "catkin",
+      subject: "subject_a",
       attributes: {},
     };
     loadSpy.mockImplementation((imagePath) =>
@@ -301,13 +303,13 @@ describe("AnnotateTab subject rendering", () => {
     const rects = screen.getAllByTestId("k-rect");
     expect(rects).toHaveLength(1);
     expect(rects[0]).toHaveAttribute("data-dash", "true");
-    expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("catkin"));
+    expect(rects[0]).toHaveAttribute("data-stroke", subjectColor("subject_a"));
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
     expect(useStore.getState().canvas.polygons).toHaveLength(1);
   });
 
   it("box mode still draws a real editable box solid, distinct from a derived one", async () => {
-    useStore.getState().setRegistry({ catkin: {} });
+    useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -525,7 +527,7 @@ describe("AnnotateTab point tool", () => {
 
 describe("AnnotateTab AttributePanel", () => {
   it("collapses to a pill when nothing is selected and there are no image-level ratings", async () => {
-    useStore.getState().setRegistry({ catkin: {} });
+    useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
@@ -535,14 +537,14 @@ describe("AnnotateTab AttributePanel", () => {
   });
 
   it("reopens on its own when a shape gets selected, and can be closed manually", async () => {
-    useStore.getState().setRegistry({ catkin: {} });
+    useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();
 
     act(addBox);
     fireEvent.mouseDown(screen.getByTestId("canvas-stage"), { clientX: 30, clientY: 30 });
-    // The subject registry also has a "catkin" entry in the (always-mounted, hover-revealed)
+    // The subject registry also has a "subject_a" entry in the (always-mounted, hover-revealed)
     // legend, so assert on the panel's own close button rather than ambiguous shared text.
     expect(screen.getByRole("button", { name: "Close attributes panel" })).toBeInTheDocument();
     expect(useStore.getState().canvas.selectedPolygonIdx).toBeNull(); // sanity: a box, not a polygon, is selected
@@ -575,7 +577,7 @@ describe("AnnotateTab ioError banner", () => {
 
 describe("AnnotateTab legend", () => {
   it("explains the dashed derived box only in box mode", async () => {
-    useStore.getState().setRegistry({ catkin: {} });
+    useStore.getState().setRegistry({ subject_a: {} });
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
     await flush();

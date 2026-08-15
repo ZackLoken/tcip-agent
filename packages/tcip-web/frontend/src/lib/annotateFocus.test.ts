@@ -26,7 +26,7 @@ afterEach(() => vi.clearAllMocks());
 
 describe("applyAnnotateFocus", () => {
   it("switches the dataset, then applies mode + index + tab locally", async () => {
-    seedDataset({ dataset_root: "/ws/proj", subject: "catkin", date: "2026-02-11" });
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       selection: {
@@ -66,7 +66,7 @@ describe("applyAnnotateFocus", () => {
   });
 
   it("keeps the focus index even if the /select WS snapshot (index 0) arrives afterward", async () => {
-    seedDataset({ dataset_root: "/ws/proj", subject: "catkin", date: "2026-02-11" });
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-02-11" });
     const newIdentity = {
       project_root: "/ws/proj",
       dataset_root: "/ws/proj",

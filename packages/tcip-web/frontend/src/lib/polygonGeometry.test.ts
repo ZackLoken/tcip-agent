@@ -55,7 +55,7 @@ describe("polygonBbox / computePolygonBboxes", () => {
 
   it("a multi-ring polygon's bbox spans every ring, not just the first", () => {
     // The derived box a breeder sees in box mode is the whole object's footprint; ring-0-only
-    // bounds would draw a box around one half of an occlusion-split catkin.
+    // bounds would draw a box around one half of an occlusion-split subject_a.
     expect(ringsBbox([SQUARE, FAR_SQUARE])).toEqual([0, 0, 110, 110]);
     expect(computePolygonBboxes([{ rings: [SQUARE, FAR_SQUARE] }])).toEqual([[0, 0, 110, 110]]);
   });
