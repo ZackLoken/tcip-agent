@@ -344,10 +344,7 @@ def export_aggregated_csv(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
-    # The column must reflect the floor across every gated dimension: with acknowledge_unvalidated
-    # an ungrounded tile scale can still reach here, misreporting a partial delivery as validated.
-    stamp["measurement_validated"] = (VALIDATED_FALSE if gate.unvalidated
-                                      else gate.stamp["measurement"])
+    stamp["measurement_validated"] = gate.column_stamp("measurement")
     fieldnames = [
         "plant_id", "crop", "trait_name", "value", "units", "value_key",
         "confidence", "n_images", "pipeline_version",

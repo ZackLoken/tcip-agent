@@ -218,7 +218,6 @@ def _worker(job: InferenceJob) -> None:
         from tcip_mcp.pipelines.inference.predictor import build_predictor
         from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
         from tcip_mcp.pipelines.resolution import raw_operating_point
-        from tcip_mcp.utils.atomic_io import atomic_write_json
 
         predictor = build_predictor(
             checkpoint_path=job.checkpoint_path,
@@ -297,24 +296,34 @@ def _worker(job: InferenceJob) -> None:
         except Exception:  # noqa: BLE001 (no run scope for the map; predictions decode by raw id)
             id_map = None
 
-        provenance = op_bundle.to_provenance()
-        provenance["validated"] = op_bundle.is_shippable
-        provenance["checkpoint_sha256"] = identity["sha256"]
-        provenance["experiment_id"] = identity["experiment_id"]
-        provenance["id_map"] = id_map
+        from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+
         # overlap has no home in ResolvedBundle's tracked params (only conf/cross_tile_nms/tiled/
-        # tile_size/max_dets are), surface the value + source this run actually used directly,
-        # matching the MCP door's own run_inference (inference_tools.py).
-        provenance["overlap"] = resolved_overlap
-        provenance["overlap_source"] = overlap_source
+        # tile_size/max_dets are), so the value and source this run actually used travel directly.
+        provenance = operating_point_stamp(
+            op_bundle.to_provenance()["operating_point"],
+            validated=op_bundle.is_shippable,
+            tile_size_validated=gate.stamp.get("tile_size"),
+            shippable_issues=op_bundle.shippable_issues(),
+            id_map=id_map,
+            trait=None,
+            dataset_hash=op_bundle.dataset_hash,
+            checkpoint=Path(job.checkpoint_path).stem,
+            checkpoint_sha256=identity["sha256"],
+            experiment_id=identity["experiment_id"],
+            images_dir=job.images_dir,
+            raster_path=None,
+            produced_at=datetime.now(timezone.utc).isoformat(),
+            overlap=resolved_overlap,
+            overlap_source=overlap_source,
+        )
         if getattr(predictor, "task", None) == "instance_seg":
             # The unvalidated mask-binarize threshold write_predictions_json will use for every mask
-            # in this run: a run constant, so it travels once here (see export.py's
-            # mask_binarize_provenance docstring), never per-annotation.
+            # in this run: a run constant, so it travels once here, never per-annotation.
             from tcip_mcp.pipelines.postprocessing.export import mask_binarize_provenance
 
             provenance["mask_binarize"] = mask_binarize_provenance()
-        atomic_write_json(output_dir / "operating_point.json", provenance)
+        write_sidecar(output_dir, provenance)
 
         for img in images:
             if job.cancel_event.is_set():

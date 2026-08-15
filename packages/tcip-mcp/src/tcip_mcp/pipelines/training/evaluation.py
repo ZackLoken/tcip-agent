@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
 
@@ -1207,8 +1207,9 @@ def run_full_frame_evaluation(
     ckpt_path: str, images_dir: str, labels_dir: str, output_dir: str, *,
     subject: str | None = None, attribute: str | None = None,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
-    tile_size: int | None = None, overlap: float | None = None, global_nms_iou: float = 0.3,
-    max_dets: int = 1000, postprocess: str = "nms", device: str | None = None,
+    tile_size: int | None = None, overlap: float | None = None,
+    global_nms_iou: float = DEFAULT_NMS_IOU,
+    max_dets: int = DEFAULT_MAX_DETS, postprocess: str = "nms", device: str | None = None,
     trait: str | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame,

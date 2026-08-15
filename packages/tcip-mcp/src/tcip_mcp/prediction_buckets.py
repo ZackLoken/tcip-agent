@@ -14,8 +14,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-# operating_point.json is a provenance stamp beside the predictions, not a per-image label.
-_NON_LABEL_JSON = {"operating_point.json"}
+from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
 
 
 def bucket_stems(*dirs: Path | str) -> set[str]:
@@ -26,7 +25,7 @@ def bucket_stems(*dirs: Path | str) -> set[str]:
         if not p.is_dir():
             continue
         for f in p.glob("*.json"):
-            if f.name not in _NON_LABEL_JSON:
+            if f.name not in SIDECAR_FILENAMES:
                 stems.add(f.stem)
     return stems
 

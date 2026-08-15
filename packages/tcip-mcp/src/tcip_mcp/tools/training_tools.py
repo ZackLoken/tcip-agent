@@ -1650,6 +1650,8 @@ def get_worst_predictions(
     from tcip_annotation.json_io import read_annotations
     from tcip_annotation.state import Point
 
+    from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
+
     def _boxes(path) -> list:
         """The annotations this count heuristic counts, a geometry-less label and a ``Point`` are
         not detections, so neither belongs in a box count on either side of the comparison."""
@@ -1658,7 +1660,7 @@ def get_worst_predictions(
 
     scores: list[tuple[str, float]] = []
     for pred_file in pred_path.glob("*.json"):
-        if pred_file.name == "operating_point.json":
+        if pred_file.name in SIDECAR_FILENAMES:
             continue
         gt_file = gt_path / pred_file.name
         preds = _boxes(pred_file)

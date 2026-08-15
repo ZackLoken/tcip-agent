@@ -571,6 +571,7 @@ def resolve_operating_point(
     tiled_source: str = "default",
     cross_tile_nms: float | None = None,
     max_dets: int | None = None,
+    max_dets_derived_from: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
     experiment_id: str | None = None,
     staged_conf_floor: float | None = None,
@@ -587,6 +588,12 @@ def resolve_operating_point(
     (a mosaic's own reserved calibration/test regions) supplies them to get the geometric
     containment check instead, the only shape that can prove disjointness for a within-mosaic
     reference with no separate image identity of its own.
+
+    ``max_dets_derived_from`` is how a caller-supplied ``max_dets`` was produced, in the caller's own
+    words, and is the only way a caller-supplied cap earns a derivation label here: a caller that
+    supplies a number without saying where it came from gets an explicit "caller override" stamp
+    rather than this function's density-formula label on a number this function did not derive. It
+    is ignored when ``max_dets`` is ``None``, since the cap is then derived here and labeled here.
 
     ``tile_size_source``/``tiled_source`` are the caller's own resolution of whether each value was
     an explicit override, derived from the checkpoint's persisted training geometry, or a documented
@@ -941,6 +948,7 @@ def resolve_operating_point(
                                  dataset_hash=dataset_hash, sweep=sweep_data)
         if max_dets is None:
             max_dets = _max_dets_from_density(calibration_records)
+            max_dets_derived_from = "~1.5x p99 GT objects/image"
     else:
         # No GT for this dataset: cannot calibrate. Carry an unvalidated placeholder (un-shippable
         # via the firewall), no valley heuristic, no chosen value dressed as trustworthy.
@@ -981,11 +989,14 @@ def resolve_operating_point(
             if nms is not None
             else default("cross_tile_nms", DEFAULT_NMS_IOU)
         )
-    params["max_dets"] = (
-        derived("max_dets", int(max_dets),
-                derived_from="~1.5x p99 GT objects/image")
-        if max_dets is not None else default("max_dets", DEFAULT_MAX_DETS)
-    )
+    if max_dets is None:
+        params["max_dets"] = default("max_dets", DEFAULT_MAX_DETS)
+    elif max_dets_derived_from:
+        params["max_dets"] = derived("max_dets", int(max_dets),
+                                     derived_from=max_dets_derived_from)
+    else:
+        params["max_dets"] = ResolvedParam("max_dets", int(max_dets), source="explicit",
+                                           derived_from="caller override")
     return ResolvedBundle(trait=trait_name, dataset_hash=dataset_hash, params=params)
 
 

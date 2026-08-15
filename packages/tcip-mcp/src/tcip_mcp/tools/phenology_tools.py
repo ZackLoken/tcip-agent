@@ -152,15 +152,13 @@ def _resolve_producer_identity(predictions_by_date: dict[str, str]) -> dict:
     so a curve spliced from two models is not silently attributed to one. Best-effort, a missing
     sidecar contributes nothing rather than failing the delivery.
     """
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
     shas: set[str] = set()
     exps: set[str] = set()
     for pred_dir in predictions_by_date.values():
-        sidecar = Path(pred_dir) / "operating_point.json"
-        if not sidecar.is_file():
-            continue
-        try:
-            data = json.loads(sidecar.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        data = read_operating_point_sidecar(pred_dir)
+        if not data:
             continue
         if data.get("checkpoint_sha256"):
             shas.add(str(data["checkpoint_sha256"]))
@@ -378,7 +376,6 @@ def calibrate_classifier_operating_point(
     """
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
     from tcip_mcp.traits import TraitUnknownError, get_trait
-    from tcip_mcp.utils.atomic_io import atomic_write_json
 
     try:
         spec = get_trait(trait_name)
@@ -400,9 +397,10 @@ def calibrate_classifier_operating_point(
 
     from tcip_mcp.project_paths import resolve_output_path
 
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
     out = resolve_output_path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(out / "classifier_operating_point.json", {
+    write_sidecar(out, {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_class_name}},
         "validated": result["passed"],
@@ -410,7 +408,7 @@ def calibrate_classifier_operating_point(
         "sweep_data": result["sweep_data"],
         "experiment_id": experiment_id,
         "trait": trait_name,
-    })
+    }, "classifier_operating_point")
     return {
         "output_dir": str(out),
         "validated_against": result["validated_against"],
@@ -515,7 +513,6 @@ def calibrate_ordinal_regression_operating_point(
     )
     from tcip_mcp.pipelines.resolution import csv_dataset_hash
     from tcip_mcp.traits import TraitUnknownError, get_trait
-    from tcip_mcp.utils.atomic_io import atomic_write_json
 
     try:
         get_trait(trait_name)
@@ -569,9 +566,10 @@ def calibrate_ordinal_regression_operating_point(
 
     from tcip_mcp.project_paths import resolve_output_path
 
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
     out = resolve_output_path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(out / f"{task}_operating_point.json", {
+    write_sidecar(out, {
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},
         "validated": result["passed"],
@@ -579,7 +577,7 @@ def calibrate_ordinal_regression_operating_point(
         "sweep_data": result["sweep_data"],
         "experiment_id": experiment_id,
         "trait": trait_name,
-    })
+    }, f"{task}_operating_point")
     return {
         "output_dir": str(out),
         "validated_against": result["validated_against"],
@@ -709,7 +707,6 @@ def compute_phenology(
     # held-out GT, presence of the class is not enough. Refuse unless explicitly acknowledged,
     # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
         bind_classifier_validity,
         check_delivery_gate,
         reconcile_classifier_validity,
@@ -798,12 +795,10 @@ def compute_phenology(
     # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
     # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
     # spec. The column name comes from majority_provisional_column, the same owner the schema reads.
-    # The tile scale is a dimension of the same count operating point with no column of its own, so
-    # a tile scale that only reached delivery via acknowledge_unvalidated floors this column too.
     stamp = {
         "operating_point_conf": operating_point_conf,
-        "operating_point_validated": (VALIDATED_FALSE if "tile_size" in gate.unvalidated
-                                      else gate.stamp["operating_point"]),
+        "operating_point_validated": gate.column_stamp(
+            "operating_point", own_column=("classifier",)),
         "positive_state_classifier_validated": gate.stamp["classifier"],
         "producer_model_sha256": producer.get("sha256"),
         "producer_experiment_id": producer.get("experiment_id"),

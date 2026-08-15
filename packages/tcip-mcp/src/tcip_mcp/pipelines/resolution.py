@@ -13,7 +13,8 @@ number* unless it was checked against the right kind of real-world reference for
 ``unvalidated_value(...)`` and say so explicitly. This makes an unvalidated measurement value
 physically un-shippable rather than merely discouraged.
 
-Pure stdlib, no torch, safe to import anywhere.
+No torch, safe to import anywhere; the storage seam (``tcip_store``) is the one dependency beyond
+the standard library, since the prediction buckets' provenance stamps are declared here.
 """
 
 from __future__ import annotations
@@ -24,6 +25,10 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+import tcip_store
+from tcip_store import Key, StoreDescriptor, StoreError, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 # --- vocabularies ---------------------------------------------------------
 SOURCES = ("explicit", "derived", "default")
@@ -49,16 +54,41 @@ VALIDATED_FALSE = "false"
 # scale, and a tile geometry are checked against fundamentally different references, and none may
 # satisfy another's requirement.
 VALIDATION_KINDS = ("annotations", "physical", "geometry")
+_GEOMETRY_REFERENCE_BY_SOURCE: dict[str, str] = {
+    "derived": VALIDATED_PERSISTED_GEOMETRY,
+    "explicit": VALIDATED_EXPLICIT_GEOMETRY,
+}
+"""Which ``tile_size_source`` earns which geometry reference, stated once for both directions:
+:func:`resolve_tile_size_param` stamps a reference from a source and :func:`tile_size_source_of`
+recovers the source behind a recorded one, so a door reading a persisted stamp back cannot disagree
+with the door that wrote it about what counts as a real basis for a tile scale."""
 _ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
     "annotations": (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED),
     "physical": (VALIDATED_PHYSICAL_MEASUREMENT,),
-    "geometry": (VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY),
+    "geometry": tuple(_GEOMETRY_REFERENCE_BY_SOURCE.values()),
 }
 
 
 def accepted_references(validation_kind: str) -> tuple[str, ...]:
     """The validated_against values that legitimately clear validation for this kind."""
     return _ACCEPTED_REFERENCES[validation_kind]
+
+
+def tile_size_source_of(reference: str | None, *, tile_size: int | None) -> str:
+    """The ``tile_size_source`` a recorded geometry reference was earned by.
+
+    The inverse of what :func:`resolve_tile_size_param` stamps, for a caller holding a persisted
+    stamp rather than a live resolution (the review-promotion path, reading a bucket's sidecar back
+    to re-resolve an operating point from it). Reading the reference, never the bare ``source``
+    field a sidecar also carries, is what stops a native-size-ratio tile edge from being re-read as
+    a real persisted geometry: that tier is a basis to tile at all but never an accepted geometry
+    reference, so it comes back as ``"native_ratio"`` whenever a tile size is present with no
+    accepted reference behind it, and ``"default"`` when there is no tile size at all.
+    """
+    for source, accepted in _GEOMETRY_REFERENCE_BY_SOURCE.items():
+        if reference == accepted:
+            return source
+    return "native_ratio" if tile_size is not None else "default"
 
 
 # The union of every real (non-"false") shippable reference, across every kind, used only by
@@ -309,13 +339,13 @@ def resolve_tile_size_param(
         return derived(
             "tile_size", int(tile_size), derived_from="persisted training tile geometry",
             requires_validation=True, validation_kind="geometry",
-            validated_against=VALIDATED_PERSISTED_GEOMETRY,
+            validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["derived"],
         )
     if tile_size_source == "explicit" and tile_size is not None:
         return ResolvedParam(
             "tile_size", int(tile_size), source="explicit", derived_from="caller override",
             requires_validation=True, validation_kind="geometry",
-            validated_against=VALIDATED_EXPLICIT_GEOMETRY,
+            validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["explicit"],
         )
     if tile_size_source == "native_ratio":
         return ResolvedParam(
@@ -371,6 +401,34 @@ def raw_operating_point(
         "tiled": tiled_param,
         "tile_size": tile_param,
         "max_dets": default("max_dets", max_dets),
+    })
+
+
+def block_calibrated_export_operating_point(
+    block_bundle: ResolvedBundle, *, trait: str, tile_size: int | None, tile_size_source: str,
+) -> ResolvedBundle:
+    """The whole-mosaic export operating point a block-calibrated bundle ships at.
+
+    The third regime beside :func:`raw_operating_point` and
+    :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point`, resolved here rather than
+    assembled at the export door, so what carries over from a block calibration and what does not
+    is stated once. ``conf`` and ``cross_tile_nms`` carry over unchanged: those are what the mosaic's
+    reserved calibration and test bands measured. ``max_dets`` deliberately does not, and is
+    committed to ``None`` (uncapped): the block bundle's own cap is derived from the density of one
+    reserved band, and adopting it wholesale would truncate the count over the whole mosaic, which
+    is the phenotype. Tiling is always on, since a raster too large to load whole has no untiled
+    alternative, and the tile scale is gated through the same :func:`resolve_tile_size_param` every
+    other door resolves through.
+    """
+    return ResolvedBundle(trait=trait, dataset_hash=block_bundle.dataset_hash, params={
+        "conf": block_bundle.get("conf"),
+        "cross_tile_nms": block_bundle.get("cross_tile_nms"),
+        "tiled": default("tiled", True),
+        "tile_size": resolve_tile_size_param(
+            tile_size, tiled=True, tile_size_source=tile_size_source),
+        "max_dets": default(
+            "max_dets", None,
+            derived_from="block calibration: not transferred, uncapped for the whole-mosaic pass"),
     })
 
 
@@ -596,17 +654,155 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     return h.hexdigest()[:16]
 
 
-# --- on-disk operating-point reconciliation (the delivery gate reads the sidecar, not a caller string) ---
+# --- the prediction bucket's provenance stamps (the delivery gate reads these, not a caller string) ---
+
+_SIDECAR_LOCATOR = RootedFileLocator(suffix=".json")
+"""A stamp sits directly in the bucket it describes, addressed by its own document name."""
+
+_SIDECAR_STORES: dict[str, str] = {
+    document: register_store(
+        StoreDescriptor(
+            name=f"{document}_sidecar",
+            kind="record",
+            key_fields=("document",),
+            codec=json_codec(),
+            concurrency="cas",
+            locator=_SIDECAR_LOCATOR,
+        )
+    ).name
+    for document in (
+        "operating_point",
+        "classifier_operating_point",
+        "ordinal_operating_point",
+        "regression_operating_point",
+        "resolve_scale",
+    )
+}
+"""One store per measurement dimension, never one store holding every dimension's fields: the
+dimensions are structurally independent (a physical scale is a fact about the imagery, a classifier
+stamp is about a state call, the count operating point is about a threshold), and a single document
+is exactly what would let a generic writer conflate them."""
+
+SIDECAR_FILENAMES = frozenset(f"{document}.json" for document in _SIDECAR_STORES)
+"""Every provenance stamp a prediction bucket carries beside its per-image records.
+
+A stamp is not a per-image label: a reader enumerating a bucket's prediction files excludes these,
+or it invents an image stem no image has and reads a stamp as if it were detections. Stated once
+here, so a stamp added for a new dimension is excluded on every path that enumerates a bucket."""
+
+
+def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:
+    """One prediction bucket's provenance stamp for one measurement dimension.
+
+    ``cas`` on every one of them: the review-promotion path merges its own validation fields into a
+    stamp the producing run already wrote, from a different process, so an unconditional replace
+    there would drop the producer's own record of what made the predictions.
+    """
+    try:
+        store = _SIDECAR_STORES[document]
+    except KeyError:
+        raise ValueError(
+            f"{document!r} is not a prediction-bucket stamp; declared documents are "
+            f"{sorted(_SIDECAR_STORES)}"
+        ) from None
+    return Key(store, str(pred_dir), (document,))
+
+
+def _read_sidecar(pred_dir: str | Path, document: str) -> dict | None:
+    """One bucket's stamp for one dimension, or ``None`` when absent or unreadable.
+
+    Never raises: an unreadable stamp floors the dimension it describes to unvalidated at every
+    reconciler below, which is the safe direction, where a raised decode error would take down a
+    delivery gate that has a well-defined answer for a stamp it cannot trust.
+    """
+    try:
+        return tcip_store.read(sidecar_key(pred_dir, document), default=None)
+    except StoreError:
+        return None
+
+
+def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_point") -> None:
+    """Write one bucket's stamp whole, under the stamp's own lock."""
+    Path(pred_dir).mkdir(parents=True, exist_ok=True)
+    key = sidecar_key(pred_dir, document)
+    with tcip_store.transaction(key) as txn:
+        txn.write(key, stamp)
+
+
+def update_sidecar(
+    pred_dir: str | Path, updater: Callable[[dict], dict | None],
+    document: str = "operating_point",
+) -> bool:
+    """Merge into one bucket's existing stamp, reading and writing inside one lock hold.
+
+    ``updater`` receives the stored stamp (``{}`` when there is none) and returns the value to
+    store, or ``None`` to leave it exactly as it was. Returns whether anything was written. The
+    read and the write are one transaction, so a promotion can never overwrite fields another
+    process stamped between them, and a no-downgrade decision the updater makes is made against
+    what is actually stored rather than against a value read before the lock.
+    """
+    key = sidecar_key(pred_dir, document)
+    with tcip_store.transaction(key) as txn:
+        current = txn.read(key, default={})
+        updated = updater(current if isinstance(current, dict) else {})
+        if updated is None:
+            return False
+        txn.write(key, updated)
+    return True
+
+
+def operating_point_stamp(
+    operating_point: dict | None,
+    *,
+    validated: bool,
+    tile_size_validated: str | None,
+    shippable_issues: list[str],
+    id_map: dict | None,
+    trait: str | None,
+    dataset_hash: str | None,
+    checkpoint: str | None,
+    checkpoint_sha256: str | None,
+    experiment_id: str | None,
+    images_dir: str | None,
+    raster_path: str | None,
+    produced_at: str | None,
+    **fields: Any,
+) -> dict:
+    """The ``operating_point.json`` stamp every path that writes predictions records beside them.
+
+    One constructor for every producer (the agent's image and raster export doors, the GUI's own
+    inference worker), so a provenance key one path needs exists on all of them and a reader can
+    ask the same question of any bucket. Every field is required, with no default that would let a
+    door quietly omit what stands behind its counts; the per-path additions a single producer has
+    (a persisted sweep, a mask-binarize threshold, a block calibration's own record) travel through
+    ``fields``.
+
+    ``validated`` is the producing door's own verdict over the dimensions it resolved. The tile
+    scale is floored in here rather than at each door: a bucket whose tile geometry has no real
+    basis produced its counts at a scale nothing justifies, so it is not a validated bucket no
+    matter what the conf dimension earned.
+    """
+    return {
+        "trait": trait,
+        "dataset_hash": dataset_hash,
+        "operating_point": operating_point,
+        "id_map": id_map,
+        "validated": bool(validated) and tile_size_validated != VALIDATED_FALSE,
+        "tile_size_validated": tile_size_validated,
+        "shippable_issues": list(shippable_issues),
+        "checkpoint": checkpoint,
+        "checkpoint_sha256": checkpoint_sha256,
+        "experiment_id": experiment_id,
+        "images_dir": images_dir,
+        "raster_path": raster_path,
+        "produced_at": produced_at,
+        **fields,
+    }
+
 
 def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
     """The bucket's ``operating_point.json`` stamp, or ``None`` if absent/unreadable (never raises)."""
-    p = Path(pred_dir) / "operating_point.json"
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return _read_sidecar(pred_dir, "operating_point")
 
 
 def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
@@ -618,13 +814,7 @@ def read_classifier_operating_point_sidecar(pred_dir: str | Path) -> dict | None
     ``validated``/``operating_point.conf.validated_against``, which must stay the count dimension's
     alone).
     """
-    p = Path(pred_dir) / "classifier_operating_point.json"
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return _read_sidecar(pred_dir, "classifier_operating_point")
 
 
 def read_ordinal_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
@@ -635,13 +825,7 @@ def read_ordinal_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
     :func:`read_classifier_operating_point_sidecar`, a generic writer must not conflate these
     dimensions.
     """
-    p = Path(pred_dir) / "ordinal_operating_point.json"
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return _read_sidecar(pred_dir, "ordinal_operating_point")
 
 
 def read_regression_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
@@ -650,13 +834,7 @@ def read_regression_operating_point_sidecar(pred_dir: str | Path) -> dict | None
     A file distinct from every other operating-point sidecar, same reasoning as
     :func:`read_classifier_operating_point_sidecar`/:func:`read_ordinal_operating_point_sidecar`.
     """
-    p = Path(pred_dir) / "regression_operating_point.json"
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return _read_sidecar(pred_dir, "regression_operating_point")
 
 
 def read_scale_sidecar(pred_dir: str | Path) -> dict | None:
@@ -668,13 +846,7 @@ def read_scale_sidecar(pred_dir: str | Path) -> dict | None:
     (a physical scale is a fact about the imagery, not a count calibration), the same reasoning that
     keeps ``classifier_operating_point.json`` its own file rather than a field inside this one.
     """
-    p = Path(pred_dir) / "resolve_scale.json"
-    if not p.is_file():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    return _read_sidecar(pred_dir, "resolve_scale")
 
 
 def _sidecar_reference(
@@ -1008,6 +1180,24 @@ class DeliveryGateResult:
     unvalidated: tuple[str, ...]  # dimensions whose validity is not a shippable reference
     stamp: dict[str, str]  # per-dimension validity to stamp onto the deliverable
     reason: str = ""  # generic refusal message when not ok
+
+    def column_stamp(self, dimension: str, *, own_column: tuple[str, ...] = ()) -> str:
+        """The value the deliverable's column for ``dimension`` carries.
+
+        Not the same thing as ``stamp[dimension]``, which is only that one dimension's own cleared
+        reference. A column stands for the trustworthiness of the number beside it, and with
+        ``acknowledge_unvalidated`` an ungrounded dimension still reaches the writer, so stamping
+        this dimension's own (possibly real) reference alone would report a partly acknowledged
+        provisional delivery as fully validated. Every gated dimension without a column of its own
+        therefore floors this one. Name in ``own_column`` the dimensions the deliverable does stamp
+        into columns of their own; those report themselves and never floor this one.
+
+        Owned here rather than re-derived per door so the doors cannot drift into disagreeing about
+        what a validated column means.
+        """
+        if any(name not in own_column for name in self.unvalidated):
+            return VALIDATED_FALSE
+        return self.stamp[dimension]
 
 
 def check_delivery_gate(

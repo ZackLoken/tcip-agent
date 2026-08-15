@@ -260,7 +260,7 @@ def _sweep_summary(conf_param) -> dict:
     sweep = conf_param.sweep or {}
     hb = sweep.get("holdout_bias") or {}
     return {
-        "count_unbiased_conf": conf_param._raw,
+        "count_unbiased_conf": conf_param.unvalidated_value(acknowledge_unvalidated=True),
         "f1_max_conf": sweep.get("f1_max_conf"),
         "holdout_bias": hb.get("count_bias_mean") if isinstance(hb, dict) else None,
         # The pooled bias above is the one number a class-compensating refusal reads "fine" on, so
@@ -833,8 +833,8 @@ def _export_predictions_raster(
     tile_resize = native_ratio_tile_resize(predictor, tile_size_source)
 
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, check_delivery_gate, raw_operating_point, resolve_tile_size_param,
-        tile_size_gate_flag,
+        VALIDATED_FALSE, block_calibrated_export_operating_point, check_delivery_gate,
+        operating_point_stamp, raw_operating_point, tile_size_gate_flag, write_sidecar,
     )
 
     conf_source = "default"
@@ -847,7 +847,7 @@ def _export_predictions_raster(
             BlockCalibrationRefused, resolve_block_calibration_records,
         )
         from tcip_mcp.pipelines.raster_source import raster_identity_matches
-        from tcip_mcp.pipelines.resolution import VALIDATED_SAME_MOSAIC_IDENTITY, default
+        from tcip_mcp.pipelines.resolution import VALIDATED_SAME_MOSAIC_IDENTITY
 
         try:
             block_bundle, block_prov = resolve_block_calibration_records(
@@ -885,16 +885,9 @@ def _export_predictions_raster(
         set_detector_operating_point(predictor.model, score_thresh=conf, detections_per_img=max_dets)
         predictor.max_dets = None
 
-        op_bundle = type(block_bundle)(trait=trait, dataset_hash=block_bundle.dataset_hash, params={
-            "conf": block_bundle.get("conf"),
-            "cross_tile_nms": block_bundle.get("cross_tile_nms"),
-            "tiled": default("tiled", True),
-            "tile_size": resolve_tile_size_param(
-                resolved_tile, tiled=True, tile_size_source=tile_size_source),
-            "max_dets": default(
-                "max_dets", None,
-                derived_from="block calibration: not transferred, uncapped for the whole-mosaic pass"),
-        })
+        op_bundle = block_calibrated_export_operating_point(
+            block_bundle, trait=trait, tile_size=resolved_tile,
+            tile_size_source=tile_size_source)
         op_provenance = op_bundle.to_provenance()["operating_point"]
 
         tile_ref = tile_size_gate_flag(op_provenance)
@@ -950,22 +943,24 @@ def _export_predictions_raster(
     has_masks = bool(result.get("masks"))
 
     produced_at = datetime.now(timezone.utc).isoformat()
-    validated = bool(op_bundle.is_shippable) and tile_size_validated != VALIDATED_FALSE
+    validated = bool(op_bundle.is_shippable)
     if trait is not None:
         validated = validated and claim_scope_validated != VALIDATED_FALSE
-    op_stamp = {
-        "operating_point": op_provenance,
-        "id_map": id_map,
-        "validated": validated,
-        "tile_size_validated": tile_size_validated,
-        "shippable_issues": op_bundle.shippable_issues(),
-        "checkpoint": Path(checkpoint_path).stem,
-        "checkpoint_sha256": sha,
-        "experiment_id": identity["experiment_id"],
-        "images_dir": None,
-        "raster_path": str(raster_path),
-        "produced_at": produced_at,
-    }
+    op_stamp = operating_point_stamp(
+        op_provenance,
+        validated=validated,
+        tile_size_validated=tile_size_validated,
+        shippable_issues=op_bundle.shippable_issues(),
+        id_map=id_map,
+        trait=op_bundle.trait or None,
+        dataset_hash=op_bundle.dataset_hash,
+        checkpoint=Path(checkpoint_path).stem,
+        checkpoint_sha256=sha,
+        experiment_id=identity["experiment_id"],
+        images_dir=None,
+        raster_path=str(raster_path),
+        produced_at=produced_at,
+    )
     if has_masks:
         op_stamp["mask_binarize"] = mask_binarize_provenance()
     if block_prov is not None:
@@ -988,9 +983,7 @@ def _export_predictions_raster(
             op_stamp["raster_content_identity"] = dataclasses.asdict(export_identity)
         except Exception:
             logger.warning("export-time raster content identity could not be recorded", exc_info=True)
-    from tcip_mcp.utils.atomic_io import atomic_write_json
-
-    atomic_write_json(out / "operating_point.json", op_stamp)
+    write_sidecar(out, op_stamp)
 
     exp_id = identity["experiment_id"]
     if exp_id:
@@ -1217,7 +1210,8 @@ def export_predictions(
         )
 
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE, check_delivery_gate, resolve_tile_size_param, tile_size_gate_flag,
+        check_delivery_gate, operating_point_stamp, resolve_tile_size_param, tile_size_gate_flag,
+        write_sidecar,
     )
 
     # Gate before the (expensive) pass where possible, matching the raster_path regime: a light,
@@ -1263,8 +1257,6 @@ def export_predictions(
         return {"error": gate.reason, "tile_size_validated": tile_ref}
     tile_size_validated = gate.stamp.get("tile_size")
 
-    from tcip_mcp.utils.atomic_io import atomic_write_json
-
     out.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     # Producer carries the checkpoint's content hash so an accepted prediction's GT names the exact
@@ -1279,29 +1271,31 @@ def export_predictions(
         written.append(str(out_json))
         has_masks = has_masks or bool(r.get("masks"))
 
-    # ``validated`` is derived from the run's resolved bundle, never hardcoded. tile_size gates the
-    # same stamp: a write reached only via acknowledge_unvalidated floors it to unvalidated.
-    op_stamp = {"operating_point": result.get("operating_point"),
-               "id_map": id_map,
-               "validated": bool(result.get("validated", False)) and tile_size_validated != VALIDATED_FALSE,
-               "tile_size_validated": tile_size_validated,
-               "shippable_issues": result.get("shippable_issues", []),
-               "checkpoint": Path(checkpoint_path).stem,
-               "checkpoint_sha256": sha,
-               "experiment_id": result.get("experiment_id"),
-               "images_dir": images_dir,
-               "produced_at": result.get("produced_at"),
-               # The sweep artifact (the evidence a conf was derived, not chosen) needs a pointer
-               # in the delivered sidecar, or a reviewer could see "validated" but not the
-               # curve that justified it without re-deriving it themselves.
-               "sweep_path": result.get("sweep_path"),
-               "sweep_summary": result.get("sweep_summary")}
+    # ``validated`` is derived from the run's resolved bundle, never hardcoded. The sweep artifact
+    # is the evidence a conf was derived rather than chosen, so its pointer travels in the stamp.
+    op_stamp = operating_point_stamp(
+        result.get("operating_point"),
+        validated=bool(result.get("validated", False)),
+        tile_size_validated=tile_size_validated,
+        shippable_issues=result.get("shippable_issues", []),
+        id_map=id_map,
+        trait=trait,
+        dataset_hash=result.get("dataset_hash"),
+        checkpoint=Path(checkpoint_path).stem,
+        checkpoint_sha256=sha,
+        experiment_id=result.get("experiment_id"),
+        images_dir=images_dir,
+        raster_path=None,
+        produced_at=result.get("produced_at"),
+        sweep_path=result.get("sweep_path"),
+        sweep_summary=result.get("sweep_summary"),
+    )
     if has_masks:
         # The unvalidated mask-binarize threshold write_predictions_json used for every mask in this
         # run, a run constant, so it travels once here rather than per-annotation (see
         # export.py's mask_binarize_provenance docstring).
         op_stamp["mask_binarize"] = mask_binarize_provenance()
-    atomic_write_json(out / "operating_point.json", op_stamp)
+    write_sidecar(out, op_stamp)
 
     # Close the data→model→predictions chain: link this bucket into the producing run's lineage.
     # Additive first-write, the terminal-state lock permits it into a still-empty predictions field.
@@ -1458,12 +1452,7 @@ def tabulate_counts(
         "operating_point_conf": op.get("conf"),
         "produced_at": result.get("produced_at"),
     }
-    # gate.ok already means every gated dimension cleared (or was explicitly acknowledged), but the
-    # CSV's single measurement_validated column must reflect the whole gate, not just conf's own
-    # reference: with acknowledge_unvalidated=True a genuinely-unvalidated tile_size can still reach
-    # here, and stamping conf's (possibly real) reference alone would misreport a partially
-    # acknowledged-provisional delivery as fully validated.
-    csv_measurement_validated = VALIDATED_FALSE if gate.unvalidated else gate.stamp["operating_point"]
+    csv_measurement_validated = gate.column_stamp("operating_point")
     csv_path = export_detection_csv(
         result["results"], output_path, provenance=provenance,
         measurement_validated=csv_measurement_validated,
