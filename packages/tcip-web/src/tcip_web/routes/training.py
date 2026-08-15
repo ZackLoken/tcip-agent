@@ -76,6 +76,7 @@ def _historical_training_runs() -> list[dict]:
         reconstruct_run_status,
         status_key,
     )
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
     exp_root = experiments_dir()
     if not exp_root.exists():
@@ -91,7 +92,7 @@ def _historical_training_runs() -> list[dict]:
             # One unreadable record must not cost the breeder the whole run listing.
             logger.warning("experiment %s has a member that does not decode", d.name, exc_info=True)
             continue
-        if not isinstance(config, dict) or not config.get("model_source"):
+        if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
             continue  # not a training experiment (e.g. review-feedback lineage)
         run_id = status.get("run_id", d.name)  # the real run_id when stamped, else the
                                                 # experiment_id itself as the fallback

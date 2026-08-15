@@ -57,6 +57,11 @@ _STATE_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
 _DATASET_DOC = RootedFileLocator(suffix=".json")
 """The documents that travel with the image set, at the dataset root itself."""
 
+_IMAGE_TREE = RootedFileLocator(prefix=("images",))
+"""The ingested imagery, one file per capture under its date bucket. No suffix on the locator:
+the extension is part of the file's own name, because a dataset holds whatever formats its
+captures came in."""
+
 _LABEL_TREE = RootedFileLocator(prefix=("annotations",), suffix=LABEL_EXT["json"])
 """Ground truth, one file per image under its capture date."""
 
@@ -105,7 +110,7 @@ def image_root(dataset_root: str | Path) -> Path:
     The top-level call a consumer that walks or stats the tree needs, so an archiver, a scanner
     or a cache signature asks this module where the tree is instead of spelling the segment again.
     """
-    return Path(dataset_root, "images")
+    return Path(dataset_root, *_IMAGE_TREE.prefix)
 
 
 def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
@@ -113,9 +118,44 @@ def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
     return image_root(dataset_root).joinpath(*_date_seg(date))
 
 
+def image_filename(stem: str, ext: str) -> str:
+    """The file name one capture's bytes are stored under (``ext`` includes the leading dot)."""
+    return f"{stem}{ext}"
+
+
 def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: str) -> Path:
     """Canonical write path for an image (``ext`` includes the leading dot)."""
-    return image_dir(dataset_root, date) / f"{stem}{ext}"
+    return _entry_path(_IMAGE_TREE, dataset_root, (*_date_seg(date), image_filename(stem, ext)))
+
+
+IMAGERY_STORE = "imagery"
+register_store(
+    StoreDescriptor(
+        name=IMAGERY_STORE,
+        kind="blob",
+        key_fields=("date", "filename"),
+        path_readable=True,
+        locator=_IMAGE_TREE,
+    )
+)
+
+
+def image_key(dataset_root: str | Path, date: str, stem: str, ext: str) -> Key:
+    """One ingested capture's bytes.
+
+    A blob: the imagery is the breeder's own data, it travels with the dataset, and nothing
+    read-modify-writes it. Path-readable because the readers open it through libraries that
+    take a path (rasterio, PIL) rather than a file object.
+
+    ``date`` is required, on the same terms as :func:`label_key`: an undated layout has labels
+    and predictions this key shape cannot address either.
+    """
+    if not date:
+        raise ValueError(
+            f"image_key needs a capture date for {stem!r}: the undated dataset layout "
+            f"({image_dir(dataset_root, None)}) has no key shape yet"
+        )
+    return Key(IMAGERY_STORE, str(dataset_root), (date, image_filename(stem, ext)))
 
 
 def list_dates(dataset_root: str | Path) -> list[str]:
@@ -703,7 +743,12 @@ def prediction_key(dataset_root: str | Path, model: Optional[str], date: str, st
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
     """The dataset's subjects, in the registry's declared order (delegated to ``class_registry``;
-    this module never parses ``classes.json`` itself). ``[]`` when there is no registry."""
+    this module never parses ``classes.json`` itself). ``[]`` when there is no registry.
+
+    A registry that is present but unreadable raises rather than reading as no subjects: every
+    name-based label under it is undecodable without it, so absence and corruption are
+    different answers here.
+    """
     from tcip_mcp import class_registry
 
     cp = classes_path(dataset_root)
@@ -711,7 +756,7 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
         return []
     try:
         registry = class_registry.read_registry(cp)
-    except (OSError, class_registry.RegistryError):
+    except OSError:
         return []
     return [s.name for s in registry.subjects]
 

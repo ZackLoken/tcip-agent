@@ -20,9 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from collections import OrderedDict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -32,7 +30,6 @@ from pydantic import BaseModel
 from tcip_store import StoreError
 
 from tcip_mcp.dataset_layout import IMAGE_STATUSES
-from tcip_mcp.utils.atomic_io import read_json
 
 logger = logging.getLogger(__name__)
 
@@ -94,31 +91,18 @@ def _resolve_dataset_root(dataset_root: str | None, annotations_dir: str | None)
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
-    """Append a dataset-native GUI mutation to ``<dataset_root>/.tcip/audit.jsonl`` (best-effort).
+    """Record a dataset-native GUI mutation in that dataset's own audit log.
 
     ``image_status.json`` and ``classes.json`` are dataset-native, not project-private (a dataset can
     be opened by more than one project, see ``dataset_layout.image_status_path``), so there is no
     single project's audit log a write here unambiguously belongs to. Colocating the trail with the
-    state it describes, rather than guessing a project, is deliberate: mirrors
-    ``annotate._audit_gui_write`` / ``review._audit`` in shape, diverges from them only in root.
+    state it describes, rather than guessing a project, is deliberate.
     """
     if not dataset_root:
         return
-    try:
-        from tcip_mcp.utils.atomic_io import append_jsonl
+    from tcip_mcp.audit import record_event
 
-        append_jsonl(
-            os.path.join(dataset_root, ".tcip", "audit.jsonl"),
-            {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool": tool,
-                "source": "gui",
-                "arguments": arguments,
-                "status": "ok",
-            },
-        )
-    except Exception:
-        pass
+    record_event(tool, arguments, source="gui", scope=dataset_root)
 
 
 def _subjects_in_dir(d: Path) -> set[str]:
@@ -228,11 +212,19 @@ def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None)
     return root
 
 
-def _load_status_store(path: Path) -> dict[str, dict[str, str]]:
-    """The status store, normalized. One definition, shared with doctor.py."""
-    from tcip_mcp.dataset_layout import normalize_status_store
+def _load_status_store(dataset_root: str) -> dict[str, dict[str, str]]:
+    """The dataset's status store, normalized. Absence is an empty store; a store that will not
+    decode is a 500 rather than an empty answer, because reading it as empty would tell the
+    breeder their confirmations are gone."""
+    from tcip_store import DecodeError, read
 
-    return normalize_status_store(read_json(path, default={}))
+    from tcip_mcp.dataset_layout import image_status_key, normalize_status_store
+
+    try:
+        return normalize_status_store(read(image_status_key(dataset_root), default={}))
+    except DecodeError as exc:
+        raise HTTPException(500, f"the image status store under {dataset_root} "
+                                 f"does not decode: {exc}") from exc
 
 
 def _bucket(subject: str | None, date: str | None) -> str:
@@ -287,12 +279,7 @@ def get_image_status(project_root: str, subject: str | None = None, date: str | 
     root = _resolve_dataset_root(dataset_root, annotations_dir)
     if not root:
         return {"statuses": {}}
-    from tcip_mcp.dataset_layout import image_status_path
-
-    path = image_status_path(root)
-    if not path.exists():
-        return {"statuses": {}}
-    return {"statuses": _load_status_store(path).get(_bucket(subject, date), {})}
+    return {"statuses": _load_status_store(root).get(_bucket(subject, date), {})}
 
 
 @router.post("/image_status")

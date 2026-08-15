@@ -236,11 +236,12 @@ class TrainContext:
             self.epoch_hook(epoch, metrics)
         try:
             if self.experiment_id is None:
-                from tcip_mcp.utils.atomic_io import append_jsonl
+                from tcip_store import append
 
-                out = Path(self.run.output_dir)
-                out.mkdir(parents=True, exist_ok=True)
-                append_jsonl(out / "metrics.jsonl", {"epoch": epoch, **metrics})
+                from tcip_mcp.tools.training_tools import trial_metrics_key_for_dir
+
+                append(trial_metrics_key_for_dir(self.run.output_dir),
+                       {"epoch": epoch, **metrics})
                 return
             from tcip_mcp.experiments import log_metrics
 
@@ -381,8 +382,12 @@ def dispatch_train_body(ctx: TrainContext) -> None:
         ctx.default_train()  # today's trainer
 
     if ctx.final_weights is None:
-        out = Path(run.output_dir)
-        best, final = out / "model_best.pt", out / "model_final.pt"
+        from tcip_store import blob_path
+
+        from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key
+
+        best = blob_path(checkpoint_key(run.output_dir, "model_best"))
+        final = blob_path(checkpoint_key(run.output_dir, "model_final"))
         if best.is_file():
             ctx.set_final_weights(str(best))
         elif final.is_file():

@@ -274,6 +274,33 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     return result
 
 
+_RUN_DOC = RootedFileLocator(suffix=".json")
+"""One document in a run's own output directory."""
+
+LAUNCH_CONFIG_STORE = "run_launch_config"
+_LAUNCH_CONFIG_PARTS = ("launch_config",)
+register_store(
+    StoreDescriptor(
+        name=LAUNCH_CONFIG_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_RUN_DOC,
+    )
+)
+
+
+def launch_config_key(output_dir: Path | str) -> Key:
+    """The bootstrap config a training subprocess reads itself out of.
+
+    Keyed off the run's output directory, which the child is given, so neither side carries a
+    path to the other's document. ``last_writer_wins``: the launching process writes the whole
+    config once, before the child exists, and the child only reads it.
+    """
+    return Key(LAUNCH_CONFIG_STORE, str(Path(output_dir).resolve()), _LAUNCH_CONFIG_PARTS)
+
+
 @mcp.tool()
 @audited
 def launch_training(
@@ -359,10 +386,7 @@ def launch_training(
     # read from here (see subprocess_worker.py), only passed as the explicit CLI arg below,
     # because this file is written before config["experiment_id"] is guaranteed resolved in the
     # fresh-id-relaunch branch.
-    from tcip_mcp.utils.atomic_io import atomic_write_json
-    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    launch_config_path = Path(run.output_dir) / "launch_config.json"
-    atomic_write_json(launch_config_path, config)
+    store.replace(launch_config_key(run.output_dir), config)
 
     child_env = _child_env_for_launch(config)
 
@@ -371,7 +395,6 @@ def launch_training(
             sys.executable, "-m", "tcip_mcp.pipelines.training.subprocess_worker",
             "--run-id", run.run_id,
             "--experiment-id", experiment_id,
-            "--config-path", str(launch_config_path),
             "--output-dir", run.output_dir,
             "--resume-from", resume_from,
         ],
@@ -720,6 +743,17 @@ register_store(
     )
 )
 
+TRIAL_METRICS_STORE = "hpo_trial_metrics"
+register_store(
+    StoreDescriptor(
+        name=TRIAL_METRICS_STORE,
+        kind="log",
+        key_fields=("trial", "document"),
+        codec=json_codec(indent=None),
+        locator=RootedFileLocator(suffix=".jsonl"),
+    )
+)
+
 
 def _sweep_name(study_name: str) -> str:
     """``study_name`` once it is known to name one sweep and not a path through the store.
@@ -766,6 +800,41 @@ def trial_config_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
     """
     return Key(TRIAL_CONFIG_STORE, str(Path(sweep_root).resolve()),
                (trial_dir_name, "resolved_config"))
+
+
+def _trial_name(trial_dir_name: str) -> str:
+    """``trial_dir_name`` once it is known to name one trial and not a path through the sweep.
+
+    A trial name reaches this from an HTTP path segment, so a separator, a drive letter or a
+    parent reference is refused here rather than resolved into a record somewhere else.
+    """
+    if PureWindowsPath(trial_dir_name).name != trial_dir_name or trial_dir_name == "..":
+        raise BadKey(
+            f"trial name {trial_dir_name!r} is not a single name: a name carrying a path "
+            "separator, a drive or a parent reference would address a record outside the sweep"
+        )
+    return trial_dir_name
+
+
+def trial_metrics_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
+    """One trial's epoch-by-epoch metrics, one entry per row, append only.
+
+    A trial has no experiment record, so its rows belong to the sweep rather than to the
+    experiment metrics log: same scope as :func:`trial_config_key`, which is the directory the
+    Tuning view reads a trial back from.
+    """
+    return Key(TRIAL_METRICS_STORE, str(Path(sweep_root).resolve()),
+               (_trial_name(trial_dir_name), "metrics"))
+
+
+def trial_metrics_key_for_dir(trial_dir: Path | str) -> Key:
+    """The metrics log of the trial that writes into ``trial_dir``.
+
+    What a trainer holds is its own output directory, not the sweep it belongs to, so the
+    split into (sweep root, trial name) is made here rather than at each caller.
+    """
+    path = Path(trial_dir).resolve()
+    return trial_metrics_key(path.parent, path.name)
 
 
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
@@ -1857,7 +1926,7 @@ def evaluate_model(
     import torch
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.training.generic_trainer import get_run, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, get_run, task_collate
     from tcip_mcp.pipelines.training.evaluation import (
         run_full_frame_evaluation, run_test_evaluation,
     )
@@ -1870,7 +1939,7 @@ def evaluate_model(
         run = get_run(run_id_or_ckpt)
         if run is None:
             return {"error": f"Not a checkpoint path or known run id: {run_id_or_ckpt}"}
-        ckpt = str(Path(run.output_dir) / "model_best.pt")
+        ckpt = str(store.blob_path(checkpoint_key(run.output_dir, "model_best")))
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}
 

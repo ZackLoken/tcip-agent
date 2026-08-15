@@ -5,16 +5,15 @@ other concurrent run's process. Everything here mirrors what running the same bo
 in-process would do; only the process boundary differs.
 
 Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --run-id ... --experiment-id
-... --config-path ... --output-dir ... --resume-from ...``, never imported for its functions
-elsewhere, only run as ``__main__``.
+... --output-dir ... --resume-from ...``, never imported for its functions elsewhere, only run as
+``__main__``. The bootstrap config is read from the run's own output directory, which is the
+record the launching process wrote it to, so the two processes cannot disagree on where it is.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,6 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--run-id", required=True)
     p.add_argument("--experiment-id", required=True)
-    p.add_argument("--config-path", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--resume-from", default="")
     return p.parse_args()
@@ -135,7 +133,7 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     return (subject, attribute, id_map) if id_map else None
 
 
-def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resume_from: str) -> None:
+def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> None:
     """The training body, identical in substance to running synchronously in-process, just
     executing in this dedicated process instead."""
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
@@ -148,11 +146,14 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
     # stock cache default instead of the platform budget the server/backend entry points set.
     configure_gdal_cache()
     # Its own process entry point, so it binds its own storage backend too.
+    from tcip_store import store
     from tcip_store.file_backend import bind_default
 
     bind_default()
 
-    config = json.loads(Path(config_path).read_text())
+    from tcip_mcp.tools.training_tools import launch_config_key
+
+    config = store.read(launch_config_key(output_dir))
     run_obj = attach_run(run_id, config, output_dir)
 
     model_source = config.get("model_source", {})
@@ -245,7 +246,7 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
 
 def main() -> None:
     args = _parse_args()
-    run(args.run_id, args.experiment_id, args.config_path, args.output_dir, args.resume_from)
+    run(args.run_id, args.experiment_id, args.output_dir, args.resume_from)
 
 
 if __name__ == "__main__":

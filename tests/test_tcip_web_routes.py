@@ -506,18 +506,21 @@ def test_annotate_save_persists_box_as_box(client, dataset_root, tmp_path) -> No
     assert (b.x1, b.y1, b.x2, b.y2) == (50.0, 40.0, 70.0, 60.0)  # box, written as drawn
 
 
-def test_annotate_save_writes_audit_entry(
+def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
+    """Labels travel with their dataset, so the trail of a label write is recorded beside them
+    and not in the log of whichever project happened to have the dataset open."""
     proj = tmp_path / "proj"
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     resp = _save_box(client, img_path, label_path, project_root=str(proj))
     assert resp.status_code == 200
 
-    audit = proj / ".tcip" / "audit.jsonl"
+    audit = tmp_path / ".tcip" / "audit.jsonl"
     assert audit.exists()
     assert "gui_save_labels" in audit.read_text()
+    assert not (proj / ".tcip" / "audit.jsonl").exists()
 
 
 # ── /api/review ─────────────────────────────────────────────────────────
@@ -888,6 +891,28 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
     )
     assert status.json()["status"] == "completed"
     assert "gui_review_mark_complete" in (project_root / ".tcip" / "audit.jsonl").read_text()
+
+
+def test_review_gt_edit_audits_into_the_log_of_the_dataset_it_wrote(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """A review that edits ground truth changes a record that travels with the dataset, so the
+    entry belongs beside the labels rather than in the project that reviewed them. The verdict
+    events, whose store hangs off the project root, stay where they are."""
+    project_root = tmp_path / "proj"
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+
+    resp = client.post("/api/review/save_gt", json={
+        "project_root": str(project_root),
+        "image_name": "IMG_0000.JPG", "image_path": str(img_path), "label_path": str(label_path),
+        "annotations": [{"subject": "catkin", "bbox": [10.0, 10.0, 30.0, 30.0]}],
+    })
+    assert resp.status_code == 200
+
+    audit = tmp_path / ".tcip" / "audit.jsonl"
+    assert "gui_review_save_gt" in audit.read_text(encoding="utf-8")
+    assert not (project_root / ".tcip" / "audit.jsonl").exists()
 
 
 def test_review_action_records_subject_name_and_reviewer(

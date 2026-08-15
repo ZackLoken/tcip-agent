@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from tcip_store import BadKey, Key, StoreDescriptor, json_codec, register_store
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
@@ -19,6 +21,69 @@ from tcip_mcp.pipelines.resolution import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SWEEP_DIR = (".tcip", "artifacts")
+_SWEEP_STEM = "operating_point_sweep_"
+
+
+class _SweepArtifactLocator:
+    """One conf sweep per set of inputs, named for the digest of the inputs it was swept over.
+
+    The digest is in the filename rather than in a directory of its own, the same convention
+    the locked calibration/holdout split beside it uses.
+    """
+
+    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
+        (body_hash,) = parts
+        return PurePosixPath(*_SWEEP_DIR, f"{_SWEEP_STEM}{body_hash}.json")
+
+    def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
+        segments = relative_path.parts
+        if segments[:len(_SWEEP_DIR)] != _SWEEP_DIR or len(segments) != len(_SWEEP_DIR) + 1:
+            return None
+        name = segments[-1]
+        if not name.startswith(_SWEEP_STEM) or not name.endswith(".json"):
+            return None
+        return (name[len(_SWEEP_STEM):-len(".json")],)
+
+
+CONFIDENCE_SWEEP_STORE = "confidence_sweep"
+register_store(
+    StoreDescriptor(
+        name=CONFIDENCE_SWEEP_STORE,
+        kind="record",
+        key_fields=("inputs_hash",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_SweepArtifactLocator(),
+    )
+)
+
+
+def confidence_sweep_key(inputs_hash: str) -> Key:
+    """The full confidence sweep one calibration produced.
+
+    ``last_writer_wins``: the name is the digest of every input the curve depends on, so the
+    same name is the same curve and a rerun writes what is already there.
+    """
+    if PurePosixPath(inputs_hash).name != inputs_hash or inputs_hash in ("", ".", ".."):
+        raise BadKey(
+            f"sweep identity {inputs_hash!r} is not a single name: an identity carrying a path "
+            "separator would address a record outside the artifact store"
+        )
+    from tcip_mcp.project_paths import project_root
+
+    return Key(CONFIDENCE_SWEEP_STORE, str(project_root().resolve()), (inputs_hash,))
+
+
+def confidence_sweep_path(inputs_hash: str) -> Path:
+    """Where that sweep lands on disk, for the provenance that names the file it was kept in."""
+    from tcip_mcp.project_paths import project_root
+
+    key = confidence_sweep_key(inputs_hash)
+    return project_root().joinpath(
+        *_SweepArtifactLocator().relative_path(key.scope, key.parts).parts
+    )
 
 
 def _recorded_training_id_map(predictor) -> dict | None:
@@ -354,18 +419,26 @@ def force_redraw_cal_holdout_split(
 
     from datetime import datetime, timezone
 
+    from tcip_store import DecodeError, store
+
     from tcip_mcp.audit import record_event
     from tcip_mcp.pipelines.data.splits import (
-        cal_holdout_lock_path, count_label_lines, label_image_stems,
+        cal_holdout_lock_key, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
-    from tcip_mcp.utils.atomic_io import read_json
 
     if identity_hash is None:
         identity_hash = dataset_hash(labels_dir)
 
-    old_lock = read_json(cal_holdout_lock_path(identity_hash), default=None)
+    try:
+        old_lock = store.read(cal_holdout_lock_key(identity_hash), default=None)
+    except DecodeError:
+        # A redraw is the recovery for a lock whose bytes do not decode, so an unreadable one
+        # is redrawn over rather than blocking the call; the entry it replaces is unknowable.
+        logger.warning("the locked split for %s does not decode; redrawing over it",
+                       identity_hash, exc_info=True)
+        old_lock = None
     old_membership = ({"calibration": old_lock.get("calibration", []),
                        "holdout": old_lock.get("holdout", [])} if old_lock else None)
 
@@ -685,10 +758,8 @@ def run_inference(
             import hashlib
             import json as _json
 
-            from tcip_mcp.project_paths import project_root
-            from tcip_mcp.utils.atomic_io import atomic_write_json
-            art = project_root() / ".tcip" / "artifacts"
-            art.mkdir(parents=True, exist_ok=True)
+            from tcip_store import store
+
             sweep_key = {
                 "trait": trait,
                 "dataset_hash": cal_hash,
@@ -702,9 +773,9 @@ def run_inference(
             body_hash = hashlib.sha256(
                 _json.dumps(sweep_key, sort_keys=True, default=str).encode()
             ).hexdigest()[:16]
-            sweep_path = art / f"operating_point_sweep_{body_hash}.json"
-            atomic_write_json(sweep_path, {**sweep_key, "sweep": conf_param.sweep})
-            extra["sweep_path"] = str(sweep_path)
+            store.replace(confidence_sweep_key(body_hash),
+                          {**sweep_key, "sweep": conf_param.sweep})
+            extra["sweep_path"] = str(confidence_sweep_path(body_hash))
         except Exception:
             logger.warning("could not persist operating-point sweep", exc_info=True)
     else:

@@ -47,8 +47,6 @@ import tcip_store
 from tcip_store import Key, StoreDescriptor, json_codec, register_store
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.utils.atomic_io import read_json
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -255,13 +253,23 @@ def _refresh_session_aggregate(s: dict[str, Any]) -> None:
 def _status_bucket_for(cache: dict[str, dict[str, str]], dataset_root: str,
                        subject: str | None, date: str | None) -> dict[str, str]:
     """One (dataset_root, subject, date) bucket of image_name -> status, read at most once per
-    call to :func:`_classify_session_seconds` regardless of how many images in a session share it."""
-    from tcip_mcp.dataset_layout import image_status_path, normalize_status_store, status_bucket
+    call to :func:`_classify_session_seconds` regardless of how many images in a session share it.
+
+    A dataset with no confirmations yet has no bucket, which is an empty one. A store that will
+    not decode is named in the log and read as holding no confirmation for these images, so
+    their time is reported as review rather than silently as confirmed negatives.
+    """
+    from tcip_mcp.dataset_layout import image_status_key, normalize_status_store, status_bucket
 
     key = f"{dataset_root}\0{subject or ''}\0{date or ''}"
     if key not in cache:
-        store = normalize_status_store(read_json(image_status_path(dataset_root), default={}))
-        cache[key] = store.get(status_bucket(subject or "", date), {})
+        try:
+            raw = tcip_store.read(image_status_key(dataset_root), default={})
+        except tcip_store.DecodeError:
+            logger.warning("the image status store under %s does not decode; session time on "
+                           "its images is reported as review", dataset_root, exc_info=True)
+            raw = {}
+        cache[key] = normalize_status_store(raw).get(status_bucket(subject or "", date), {})
     return cache[key]
 
 

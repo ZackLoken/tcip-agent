@@ -508,10 +508,10 @@ def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
     import sys
     import time
 
-    from tcip_mcp.experiments import create_experiment, experiments_dir, update_status
+    from tcip_mcp.experiments import create_experiment, status_key, update_status
     from tcip_mcp.pipelines.training.generic_trainer import attach_run
     from tcip_mcp.tools.training_tools import _watch_wall_clock
-    from tcip_mcp.utils.atomic_io import read_json
+    from tcip_store import DecodeError, read
 
     create_experiment("exp_timeout", {"model_source": {"builder": "x:y"}})
     update_status("exp_timeout", "running")
@@ -530,13 +530,15 @@ def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
         assert run.status == "failed"
 
         # The failure reason must land through the real status channel, not only the
-        # in-memory mark check_training_status ignores for a pid-bearing run. Polls the status.json
-        # file directly via read_json (already OSError-tolerant, unlike get_experiment's raw read)
-        # since a Windows AV/indexer can transiently hold the file mid-write.
-        status_path = experiments_dir() / "exp_timeout" / "status.json"
+        # in-memory mark check_training_status ignores for a pid-bearing run. Polls the record
+        # itself, tolerating a read that lands mid-write, since a Windows AV/indexer can
+        # transiently hold the file.
         status: dict = {}
         for _ in range(50):
-            status = read_json(status_path, default={})
+            try:
+                status = read(status_key("exp_timeout"), default={})
+            except DecodeError:
+                status = {}
             if status.get("error"):
                 break
             time.sleep(0.1)
