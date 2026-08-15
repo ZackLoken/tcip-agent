@@ -63,9 +63,11 @@ def _current_user() -> str:
 
 
 def _get_engine(project_root: str) -> ReviewEngine:
+    from tcip_mcp.prediction_buckets import review_state_dir_of
+
     key = str(Path(project_root).resolve())
     if key not in _engines:
-        state_dir = Path(project_root) / ".tcip" / "state"
+        state_dir = review_state_dir_of(project_root)
         _engines[key] = ReviewEngine(state_dir=state_dir, current_user=_current_user())
     return _engines[key]
 
@@ -1088,9 +1090,11 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     if not Path(payload.images_dir).is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
 
-    # Same review-state location _get_engine resolves from project_root: the caller supplies the
-    # project, not the platform's own internal state layout.
-    review_state_dir = str(Path(payload.project_root) / ".tcip" / "state")
+    from tcip_mcp.prediction_buckets import review_state_dir_of
+
+    # The same store _get_engine opens for this project: the queue skips images this engine
+    # already holds verdicts for, so the two must not read different stores.
+    review_state_dir = str(review_state_dir_of(payload.project_root))
 
     job = PriorityQueueJob(
         job_id=f"pq-{uuid.uuid4().hex[:8]}",

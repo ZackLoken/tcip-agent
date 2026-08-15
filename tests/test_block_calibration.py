@@ -834,6 +834,64 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     assert live_entry["tp"] + live_entry["fn"] == 0
 
 
+def _drop_the_checkpoints_recorded_id_map(checkpoint_path: str) -> None:
+    """Strip ``config['data']['id_map']`` from a saved checkpoint, leaving a run whose decode map
+    can only come from the dataset's registry."""
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    payload["config"]["data"].pop("id_map", None)
+    torch.save(payload, checkpoint_path)
+
+
+def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path):
+    """An attribute-scoped run whose checkpoint recorded no map and whose dataset has no registry
+    has nothing to decode the mosaic's ground truth with. The decode resolver every
+    prediction-writing door already calls carries that precondition, so this path refuses by name
+    instead of restating the prefer-recorded-else-derive rule and reaching the registry read."""
+    exp = _build_attribute_scoped_experiment(
+        tmp_path, trained_values=("dormant", "elongated", "shed"),
+        reordered_values=("dormant", "elongated", "shed"), labeled_value="elongated",
+        experiment_id="exp_block_no_id_map")
+    _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"])
+    (exp["root"] / "classes.json").unlink()
+
+    from tcip_mcp.pipelines.block_calibration import (
+        BlockCalibrationRefused, resolve_block_calibration_records,
+    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    with pytest.raises(BlockCalibrationRefused, match="records no name->id map"):
+        resolve_block_calibration_records(
+            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+
+def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tmp_path: Path):
+    """The refusal above must not swallow the legitimate case: a checkpoint that carries its own
+    recorded map needs no registry at all, so calibration resolves with classes.json gone."""
+    exp = _build_attribute_scoped_experiment(
+        tmp_path, trained_values=("dormant", "elongated", "shed"),
+        reordered_values=("dormant", "elongated", "shed"), labeled_value="elongated",
+        experiment_id="exp_block_recorded_no_registry")
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+    (exp["root"] / "classes.json").unlink()
+
+    from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    bundle, prov = resolve_block_calibration_records(
+        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+
+    assert sum(prov["cal_gt_counts"].values()) > 0
+    assert bundle.get("conf").sweep["calibration_image_ids"]
+
+
 def _attest_regions_complete_through_the_coverage_route(
     client, image_path: str, regions: list[list[tuple[int, int, int, int]]],
     *, subject: str = "catkin",
