@@ -145,3 +145,18 @@ def test_no_subject_threaded_carries_no_confirmation(tmp_path: Path):
 
     assert [name for name in ("train", "val", "test")
             if image_status_path(out / name).is_file()] == []
+
+
+def test_carried_registry_is_byte_identical_to_the_source_registry(tmp_path: Path):
+    """The split's registry is the source's own document, not a re-serialization of it: a digest
+    or an id assignment taken against either one has to read the same declared order."""
+    root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
+    out = tmp_path / "splits"
+    result = make_splits(
+        str(root), output_path=str(out), materialize=True, subject=SUBJECT,
+        train_ratio=0.5, val_ratio=0.25, test_ratio=0.25, seed=3,
+    )
+    assert "error" not in result
+    holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
+
+    assert (out / holder / "classes.json").read_bytes() == (root / "classes.json").read_bytes()

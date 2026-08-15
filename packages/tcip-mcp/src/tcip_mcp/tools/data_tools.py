@@ -2,14 +2,65 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 from pathlib import Path
 from typing import Any
 
+import tcip_store
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
+
+_SPLIT_DOC = RootedFileLocator(suffix=".json")
+"""A split output directory's own documents. The directory is wherever the caller asked the
+partition to be written, so no dataset resolver owns its layout and the entries are addressed
+by name under it, the way a label tree no resolver describes is addressed."""
+
+SPLIT_STEM_LIST_STORE = "split_stem_list"
+register_store(
+    StoreDescriptor(
+        name=SPLIT_STEM_LIST_STORE,
+        kind="record",
+        key_fields=("split",),
+        codec=json_codec(default=None),
+        concurrency="last_writer_wins",
+        locator=_SPLIT_DOC,
+    )
+)
+
+
+def split_stem_list_key(split_dir: str | Path, split_name: str) -> Key:
+    """The stems one split of a partition holds.
+
+    ``last_writer_wins``: the whole list is written once from a partition the caller already
+    computed, and no writer merges into the stored list.
+    """
+    return Key(SPLIT_STEM_LIST_STORE, str(Path(split_dir).absolute()), (split_name,))
+
+
+SPLIT_MANIFEST_STORE = "split_manifest"
+_SPLIT_MANIFEST_PARTS = ("split_manifest",)
+register_store(
+    StoreDescriptor(
+        name=SPLIT_MANIFEST_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(default=None),
+        concurrency="last_writer_wins",
+        locator=_SPLIT_DOC,
+    )
+)
+
+
+def split_manifest_key(split_dir: str | Path) -> Key:
+    """How a split directory's partition was produced, so it can be reconstructed.
+
+    ``last_writer_wins``: written once, whole, at the end of the partition that produced it.
+    """
+    return Key(SPLIT_MANIFEST_STORE, str(Path(split_dir).absolute()), _SPLIT_MANIFEST_PARTS)
 
 
 def _scan_dataset(root: str) -> dict:
@@ -310,11 +361,10 @@ def make_splits(
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
         for split_name, split_stems in parts.items():
-            with open(out_dir / f"{split_name}.json", "w") as f:
-                json.dump(sorted(split_stems), f, indent=2)
-        with open(out_dir / "split_manifest.json", "w") as f:
-            json.dump({"seed": seed, "dataset_hash": dataset_hash, "group_by": resolved_group_by,
-                       "splits": {k: sorted(v) for k, v in parts.items()}}, f, indent=2)
+            tcip_store.replace(split_stem_list_key(out_dir, split_name), sorted(split_stems))
+        tcip_store.replace(split_manifest_key(out_dir), {
+            "seed": seed, "dataset_hash": dataset_hash, "group_by": resolved_group_by,
+            "splits": {k: sorted(v) for k, v in parts.items()}})
         manifest_dir = str(out_dir)
 
     result = {
@@ -433,9 +483,9 @@ def _make_spatial_split(
     out_dir = Path(output_path) if output_path else Path(folder_path) / "splits"
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in split.regions:
-        (out_dir / f"{name}.json").write_text(json.dumps(sorted(ids[name]), indent=2))
-    (out_dir / "split_manifest.json").write_text(json.dumps(
-        {"seed": seed, "group_by": "spatial_strip", "spatial": spatial_manifest}, indent=2))
+        tcip_store.replace(split_stem_list_key(out_dir, name), sorted(ids[name]))
+    tcip_store.replace(split_manifest_key(out_dir), {
+        "seed": seed, "group_by": "spatial_strip", "spatial": spatial_manifest})
 
     return {
         "splits": {name: len(ids[name]) for name in split.regions},
@@ -456,11 +506,11 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
     No subject threaded -> nothing to attribute the confirmations to, so none are carried.
     """
-    import shutil as _shutil
-
     if not subject:
         return
-    from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+    from tcip_mcp.class_registry import (
+        RegistryError, attribute_schema_digest, copy_registry, read_registry,
+    )
     from tcip_mcp.dataset_layout import (
         CONFIRMED_NEGATIVE, annotation_date, classes_path, dataset_root_of,
         replace_image_status_store, stamp_image_status_digests, status_bucket,
@@ -490,7 +540,7 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
             continue
         try:
             candidate = attribute_schema_digest(read_registry(cp), subject)
-        except (OSError, ValueError):
+        except (OSError, RegistryError):
             candidate = None
         if candidate is not None:
             digest, src_classes = candidate, cp
@@ -506,5 +556,5 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         split_root.mkdir(parents=True, exist_ok=True)
         replace_image_status_store(split_root, {bucket_key: carried})
         if digest is not None and src_classes is not None:
-            _shutil.copy2(src_classes, classes_path(split_root))
+            copy_registry(src_classes, classes_path(split_root))
             stamp_image_status_digests(split_root, bucket_key, carried, digest)

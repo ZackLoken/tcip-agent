@@ -8,9 +8,23 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import tcip_store
+from tcip_store import (
+    Key,
+    StoreDescriptor,
+    Version,
+    VersionConflict,
+    json_codec,
+    register_store,
+    text_codec,
+)
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
-from tcip_mcp.utils.atomic_io import atomic_write_text
+
+_PROJECT_STATE_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".json")
+"""A project's own top-level ``.tcip`` documents, one of each per project."""
 
 
 def _project_dir(project_path: str) -> Path:
@@ -23,30 +37,58 @@ def _project_dir(project_path: str) -> Path:
 # --- dataset identity registry (project -> datasets it uses) --------------
 
 
-def _datasets_registry_path(project_root: str | Path) -> Path:
-    return Path(project_root) / ".tcip" / "datasets.json"
+DATASET_REGISTRY_STORE = "dataset_registry"
+_DATASET_REGISTRY_PARTS = ("datasets",)
+register_store(
+    StoreDescriptor(
+        name=DATASET_REGISTRY_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(default=None, trailing_newline=True),
+        concurrency="cas",
+        locator=_PROJECT_STATE_DOC,
+    )
+)
+
+
+def dataset_registry_key(project_root: str | Path) -> Key:
+    """The project's record of which datasets it uses, keyed by dataset id.
+
+    ``cas``: :func:`upsert_dataset` reads the whole list, replaces one entry and writes it
+    back, so an unconditional write drops a dataset another registration had just added.
+    """
+    return Key(DATASET_REGISTRY_STORE, str(Path(project_root).absolute()), _DATASET_REGISTRY_PARTS)
+
+
+def _registry_entries(document: object) -> list[dict]:
+    """The registry's entries, from a document that decoded: the one normalization both the
+    reader and the upsert share, so they cannot disagree about what a non-list document means."""
+    return document if isinstance(document, list) else []
 
 
 def read_datasets(project_root: str | Path) -> list[dict]:
-    """The project's ``.tcip/datasets.json`` registry (``[{id, path, crop, fingerprint}]``), or []."""
-    p = _datasets_registry_path(project_root)
-    if not p.is_file():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return data if isinstance(data, list) else []
+    """The project's dataset registry (``[{id, path, crop, fingerprint}]``), or [] when absent.
+
+    A registry present but undecodable raises rather than reading as empty: an empty answer
+    here would make the next :func:`upsert_dataset` write a list holding one entry and drop
+    every other dataset identity the project had recorded.
+    """
+    return _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
 
 
 def upsert_dataset(project_root: str | Path, entry: dict) -> None:
     """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset updates
-    the ``path`` of its existing id rather than duplicating, so identity survives a move."""
-    p = _datasets_registry_path(project_root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    regs = [r for r in read_datasets(project_root) if r.get("id") != entry.get("id")]
-    regs.append(entry)
-    atomic_write_text(p, json.dumps(sorted(regs, key=lambda r: str(r.get("id", ""))), indent=2) + "\n")
+    the ``path`` of its existing id rather than duplicating, so identity survives a move.
+
+    The read and the write are one transaction, so two registrations running at once cannot
+    each write a list assembled from the state before the other's entry landed.
+    """
+    key = dataset_registry_key(project_root)
+    with tcip_store.transaction(key) as txn:
+        regs = [r for r in _registry_entries(txn.read(key, default=[]))
+                if r.get("id") != entry.get("id")]
+        regs.append(entry)
+        txn.write(key, sorted(regs, key=lambda r: str(r.get("id", ""))))
 
 
 @mcp.tool()
@@ -66,7 +108,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         crop: The crop this dataset's imagery is of (e.g. ``hazelnut``). Required; the expert's fact.
         project_root: Project to register the dataset under. Empty defaults to ``dataset_root``.
     """
-    from tcip_mcp.dataset_layout import dataset_identity_path
+    from tcip_mcp.dataset_layout import dataset_identity_key, dataset_identity_path
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
     root = Path(dataset_root)
@@ -75,21 +117,62 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     if not crop:
         return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
 
-    ident_path = dataset_identity_path(root)
-    existing: dict = {}
-    if ident_path.is_file():
-        try:
-            existing = json.loads(ident_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            existing = {}
+    ident_key = dataset_identity_key(root)
+    try:
+        existing = tcip_store.read(ident_key, default={})
+    except tcip_store.DecodeError as exc:
+        return {"error": f"{dataset_identity_path(root)} exists but does not decode ({exc}); "
+                         "minting a fresh id over it would sever every record that cites the old one"}
+    if not isinstance(existing, dict):
+        return {"error": f"{dataset_identity_path(root)} is not an identity document; "
+                         "minting a fresh id over it would sever every record that cites the old one"}
     ds_id = existing.get("id") or uuid.uuid4().hex[:12]  # minted once; stable across re-runs and moves
     fingerprint = dataset_fingerprint(root)
     identity = {"crop": crop, "id": ds_id, "fingerprint": fingerprint}
-    atomic_write_text(ident_path, json.dumps(identity, indent=2) + "\n")
+    tcip_store.replace(ident_key, identity)
 
     proj = Path(project_root) if project_root else root
     upsert_dataset(proj, {"id": ds_id, "path": str(root), "crop": crop, "fingerprint": fingerprint})
     return {"dataset_root": str(root), **identity}
+
+
+PROJECT_CONFIG_STORE = "project_config"
+_PROJECT_CONFIG_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".toml")
+_PROJECT_CONFIG_PARTS = ("config",)
+register_store(
+    StoreDescriptor(
+        name=PROJECT_CONFIG_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=text_codec(),
+        concurrency="last_writer_wins",
+        locator=_PROJECT_CONFIG_DOC,
+    )
+)
+
+DEFAULT_PROJECT_CONFIG = (
+    "# TCIP project configuration\n"
+    "[project]\n"
+    'name = ""\n'
+    'crop = ""\n'
+    "\n"
+    "[data]\n"
+    'root = "data"\n'
+    "\n"
+    "[training]\n"
+    'device = "cuda"\n'
+    "seed = 42\n"
+)
+
+
+def project_config_key(project_root: str | Path) -> Key:
+    """The project's configuration document.
+
+    ``last_writer_wins``: scaffolding writes it once and nothing in the platform reads it back
+    to re-serialize it, so there is no read-modify-write to lose. The write that creates it is
+    still conditional, on the document being absent, which is what keeps a human's edits.
+    """
+    return Key(PROJECT_CONFIG_STORE, str(Path(project_root).absolute()), _PROJECT_CONFIG_PARTS)
 
 
 def _scaffold_project(project_path: str) -> dict:
@@ -103,22 +186,12 @@ def _scaffold_project(project_path: str) -> dict:
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
 
-    config_path = tcip / "config.toml"
-    if not config_path.exists():
-        atomic_write_text(
-            config_path,
-            "# TCIP project configuration\n"
-            "[project]\n"
-            'name = ""\n'
-            'crop = ""\n'
-            "\n"
-            "[data]\n"
-            'root = "data"\n'
-            "\n"
-            "[training]\n"
-            "device = \"cuda\"\n"
-            "seed = 42\n"
+    try:
+        tcip_store.replace(
+            project_config_key(project_path), DEFAULT_PROJECT_CONFIG, expect=Version.ABSENT,
         )
+    except VersionConflict:
+        pass  # a project that already has a config keeps it: this scaffolding is idempotent
 
     return {
         "project_path": project_path,
@@ -243,8 +316,7 @@ def inspect_project(project_path: str = "") -> dict:
         return status
 
     # Config
-    config_path = tcip / "config.toml"
-    status["has_config"] = config_path.is_file()
+    status["has_config"] = tcip_store.exists(project_config_key(project_path))
 
     # Models
     models_dir = tcip / "models"

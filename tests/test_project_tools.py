@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
+import pytest
+
+import tcip_store
 from tcip_mcp.tools.project_tools import (
     init_project,
     inspect_project,
@@ -11,6 +15,7 @@ from tcip_mcp.tools.project_tools import (
     import_project,
     read_datasets,
     register_dataset,
+    upsert_dataset,
 )
 
 
@@ -220,3 +225,91 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     py_entries = [n for n in names if n.endswith("my_model.py")]
     assert py_entries, f"model_src's .py source is missing from the archive: {names}"
     assert any(n.endswith("manifest.json") for n in names)
+
+
+class _BarrierId(str):
+    """A dataset id that parks at a barrier the first time it is rendered for the registry's sort.
+
+    The rendering sits after the registry has been read and before it is written back, which is
+    the window a lost update opens in, so a writer holding no lock across that pair waits there
+    until every other writer has read the same state it did.
+    """
+
+    barrier: threading.Barrier
+
+    def __str__(self) -> str:
+        if not self.__dict__.get("parked"):
+            self.__dict__["parked"] = True
+            try:
+                type(self).barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+        return str.__str__(self)
+
+
+def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
+    """Two writers adding different datasets at once both land. Each reads the whole list,
+    drops one entry and writes the list back, so a pair that is not serialized writes lists
+    assembled before the other's entry existed and one dataset's identity disappears."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    _BarrierId.barrier = threading.Barrier(2, timeout=1.0)
+    failures: list[BaseException] = []
+
+    def register(name: str) -> None:
+        try:
+            upsert_dataset(project, {"id": _BarrierId(name), "path": str(tmp_path / name),
+                                     "crop": "hazelnut", "fingerprint": name})
+        except BaseException as exc:  # recorded, never swallowed into a passing test
+            failures.append(exc)
+
+    threads = [threading.Thread(target=register, args=(name,)) for name in ("aaa", "bbb")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    assert not failures, failures
+    assert sorted(r["id"] for r in read_datasets(project)) == ["aaa", "bbb"]
+
+
+def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(tmp_path: Path):
+    """A registry read as empty would make the next registration write a one-entry list and drop
+    every other dataset identity the project had recorded, so corruption is not absence here."""
+    project = tmp_path / "proj"
+    (project / ".tcip").mkdir(parents=True)
+
+    assert read_datasets(project) == []  # a project with nothing registered yet
+
+    (project / ".tcip" / "datasets.json").write_bytes(b'[{"id": "aaa"')  # truncated mid-list
+    with pytest.raises(tcip_store.DecodeError):
+        read_datasets(project)
+
+
+def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id(tmp_path: Path):
+    """Minting a new id over an identity that will not decode severs every experiment, split and
+    delivered number citing the old one, so the tool refuses and names the document."""
+    src = tmp_path / "proj"
+    _make_dataset(src)
+    truncated = b'{"id": "known_id"'
+    (src / "dataset.json").write_bytes(truncated)
+
+    refused = register_dataset(str(src), crop="hazelnut")
+
+    assert "error" in refused and "dataset.json" in refused["error"]
+    assert (src / "dataset.json").read_bytes() == truncated  # nothing written over it
+    assert read_datasets(src) == []
+
+
+def test_scaffolding_twice_keeps_the_config_the_first_run_wrote(tmp_path: Path):
+    """Scaffolding is idempotent and never overwrites a config a human has since edited."""
+    from tcip_mcp.tools.project_tools import _scaffold_project
+
+    _scaffold_project(str(tmp_path))
+    edited = b'[project]\nname = "edited by hand"\n'
+    (tmp_path / ".tcip" / "config.toml").write_bytes(edited)
+
+    _scaffold_project(str(tmp_path))
+
+    assert (tmp_path / ".tcip" / "config.toml").read_bytes() == edited
+    assert inspect_project(str(tmp_path))["has_config"] is True

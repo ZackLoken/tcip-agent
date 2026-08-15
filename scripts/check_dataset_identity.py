@@ -29,6 +29,11 @@ def main() -> int:
                     help="project root holding .tcip/datasets.json (default: dataset_root)")
     args = ap.parse_args()
 
+    # Its own process entry point, so it binds the storage backend the seam has no default for.
+    from tcip_store.file_backend import bind_default
+
+    bind_default()
+
     root: Path = args.dataset_root
     current = dataset_fingerprint(root)
     if current is None:

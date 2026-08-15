@@ -158,3 +158,40 @@ def test_absent_or_null_attributes_valid_but_falsy_malformed_refused():
     for bad in (False, 0, "", []):  # a falsy but wrong-typed attributes is malformed, not "none"
         with pytest.raises(RegistryError):
             registry_from_dict({"bush": {"attributes": bad}})
+
+
+def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(tmp_path):
+    """Absence and corruption are different answers, and neither is an empty registry: reading an
+    undecodable one as empty leaves every name-based label under it with nothing to resolve against.
+    """
+    path = tmp_path / "classes.json"
+    path.write_bytes(b'{"catkin": {"description": "a hazelnut catkin"')  # truncated mid-object
+
+    with pytest.raises(RegistryError):
+        read_registry(path)
+    with pytest.raises(FileNotFoundError):
+        read_registry(tmp_path / "absent" / "classes.json")
+
+    # a registry that does decode still reads, so the refusal has not swallowed valid work.
+    write_registry(path, ClassRegistry(subjects=(Subject(name="catkin"),)))
+    assert read_registry(path).subject("catkin") is not None
+
+
+def test_a_copied_registry_holds_the_source_document_byte_for_byte(tmp_path):
+    """A registry placed beside another dataset's data declares exactly what its source declares,
+    so a digest or an id assignment taken against either one reads the same declared order."""
+    from tcip_mcp.class_registry import copy_registry
+
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    write_registry(source / "classes.json", ClassRegistry(subjects=(
+        Subject(name="catkin", description="a männlich flower"),
+        Subject(name="bush"),
+    )))
+
+    copy_registry(source / "classes.json", destination / "classes.json")
+
+    assert (destination / "classes.json").read_bytes() == (source / "classes.json").read_bytes()
+    assert [s.name for s in read_registry(destination / "classes.json").subjects] == \
+        ["catkin", "bush"]
