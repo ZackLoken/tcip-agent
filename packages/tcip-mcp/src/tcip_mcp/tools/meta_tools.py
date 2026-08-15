@@ -15,6 +15,17 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tcip_store import (
+    Key,
+    StoreDescriptor,
+    json_codec,
+    register_store,
+    replace,
+    text_codec,
+    transaction,
+)
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
 
@@ -30,22 +41,75 @@ REPORT_CATEGORIES = {
 }
 
 
-def _project_dir(project_path: str) -> Path:
-    p = Path(project_path) / ".tcip"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+_REPORT_DOC = RootedFileLocator(prefix=(".tcip", "reports"), suffix=".jsonl")
+"""One friction report per document, under the project."""
+
+_RETROSPECTIVE_DOC = RootedFileLocator(prefix=(".tcip", "retrospectives"), suffix=".md")
+"""One retrospective per project identifier, under the project."""
+
+FRICTION_REPORT_STORE = "friction_reports"
+RETROSPECTIVE_STORE = "retrospectives"
+
+register_store(
+    StoreDescriptor(
+        name=FRICTION_REPORT_STORE,
+        kind="record",
+        key_fields=("report",),
+        codec=json_codec(indent=None, default=None, trailing_newline=True),
+        concurrency="last_writer_wins",
+        locator=_REPORT_DOC,
+    )
+)
+
+register_store(
+    StoreDescriptor(
+        name=RETROSPECTIVE_STORE,
+        kind="record",
+        key_fields=("project",),
+        codec=text_codec(),
+        concurrency="cas",
+        locator=_RETROSPECTIVE_DOC,
+    )
+)
+
+
+def friction_report_key(project_path: str, report_id: str) -> Key:
+    """One friction report.
+
+    ``last_writer_wins``: the identifier carries a timestamp and random suffix, so each
+    report is written once, whole, by the call that produced it.
+    """
+    return Key(FRICTION_REPORT_STORE, str(project_path), (report_id,))
+
+
+def retrospective_key(project_path: str, project_id: str) -> Key:
+    """One project's retrospective document.
+
+    ``cas``: a retrospective is appended to by reading the existing text and writing the
+    concatenation, so two sessions finishing at once would otherwise drop one of the two
+    sections. :func:`project_retrospective` names this key in a transaction.
+    """
+    return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
+
+
+def _report_path(project_path: str, report_id: str) -> Path:
+    root = Path(project_path)
+    return root.joinpath(*_REPORT_DOC.relative_path(str(root), (report_id,)).parts)
+
+
+def _retrospective_path(project_path: str, project_id: str) -> Path:
+    root = Path(project_path)
+    return root.joinpath(*_RETROSPECTIVE_DOC.relative_path(str(root), (project_id,)).parts)
 
 
 def _reports_dir(project_path: str) -> Path:
-    d = _project_dir(project_path) / "reports"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Where the report documents live, without creating anything: the read side scans it."""
+    return Path(project_path, *_REPORT_DOC.prefix)
 
 
 def _retrospectives_dir(project_path: str) -> Path:
-    d = _project_dir(project_path) / "retrospectives"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    """Where the retrospective documents live, without creating anything."""
+    return Path(project_path, *_RETROSPECTIVE_DOC.prefix)
 
 
 @mcp.tool()
@@ -91,10 +155,7 @@ def claude_reports(
     now = datetime.now(timezone.utc)
     timestamp_compact = now.strftime("%Y%m%dT%H%M%SZ")
     suffix = secrets.token_hex(2)
-    filename = f"{timestamp_compact}_{category}_{suffix}.jsonl"
-
-    reports = _reports_dir(project_path)
-    report_path = reports / filename
+    report_id = f"{timestamp_compact}_{category}_{suffix}"
 
     entry = {
         "timestamp": now.isoformat(),
@@ -104,8 +165,8 @@ def claude_reports(
         "user_disagreement": user_disagreement,
     }
 
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    replace(friction_report_key(project_path, report_id), entry)
+    report_path = _report_path(project_path, report_id)
 
     from tcip_mcp.project_status import record_report
 
@@ -164,7 +225,7 @@ def load_project_memory(
 def _load_reports(
     project_path: str, limit: int, category: str, filter_substring: str
 ) -> dict:
-    reports_dir = Path(project_path) / ".tcip" / "reports"
+    reports_dir = _reports_dir(project_path)
     if not reports_dir.exists():
         return {
             "reports": [],
@@ -173,7 +234,7 @@ def _load_reports(
         }
 
     files = sorted(
-        reports_dir.glob("*.jsonl"),
+        reports_dir.glob(f"*{_REPORT_DOC.suffix}"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -252,8 +313,7 @@ def project_retrospective(
             your approach?
     """
     now = datetime.now(timezone.utc)
-    retros = _retrospectives_dir(project_path)
-    retro_path = retros / f"{project_id}.md"
+    retro_path = _retrospective_path(project_path, project_id)
 
     section_header = f"## Retrospective: {now.isoformat()}"
     body = f"""{section_header}
@@ -289,15 +349,18 @@ def project_retrospective(
 ---
 """
 
-    if retro_path.exists():
-        existing = retro_path.read_text(encoding="utf-8")
-        content = existing.rstrip() + "\n\n" + body
-        appended = True
-    else:
-        content = f"# {project_id}\n\n{body}"
-        appended = False
-
-    retro_path.write_text(content, encoding="utf-8")
+    # The read, the concatenation and the write are one serialized step: two sessions
+    # finishing at once would otherwise each append to the text they read and drop a section.
+    key = retrospective_key(project_path, project_id)
+    with transaction(key) as txn:
+        existing = txn.read(key, default=None)
+        if existing is not None:
+            content = existing.rstrip() + "\n\n" + body
+            appended = True
+        else:
+            content = f"# {project_id}\n\n{body}"
+            appended = False
+        txn.write(key, content)
 
     from tcip_mcp.project_status import record_retrospective
 
@@ -335,7 +398,7 @@ def record_distillation_pass(project_path: str) -> dict:
 def _load_retrospectives(
     project_path: str, limit: int, filter_substring: str
 ) -> dict:
-    retros_dir = Path(project_path) / ".tcip" / "retrospectives"
+    retros_dir = _retrospectives_dir(project_path)
     if not retros_dir.exists():
         return {
             "retrospectives": [],
@@ -344,7 +407,7 @@ def _load_retrospectives(
         }
 
     files = sorted(
-        retros_dir.glob("*.md"),
+        retros_dir.glob(f"*{_RETROSPECTIVE_DOC.suffix}"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

@@ -115,6 +115,46 @@ def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
     assert _meta(tmp_path)["image_path"] == "C:/img/a.jpg"
 
 
+def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(tmp_path):
+    """A push takes the meta record's lock, so it cannot overwrite what a holder is editing.
+
+    The push runs on its own thread while another thread holds the key, and is observed still
+    waiting; once the holder lets go the push completes and its document is what the record
+    holds. Both halves matter: waiting alone would be a push that never lands.
+    """
+    import threading
+
+    import tcip_store as ts
+
+    from tcip_web.routes.canvas import CanvasStatePayload, canvas_meta_key, push_canvas_state
+
+    key = canvas_meta_key(str(tmp_path))
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold() -> None:
+        with ts.transaction(key):
+            holding.set()
+            release.wait(10)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert holding.wait(10)
+
+    payload = CanvasStatePayload(**_payload(tmp_path, "C:/img/a.jpg"))
+    pushing = threading.Thread(target=lambda: push_canvas_state(payload))
+    pushing.start()
+    pushing.join(0.5)
+    waiting = pushing.is_alive()
+
+    release.set()
+    holder.join(10)
+    pushing.join(10)
+    assert waiting, "the push wrote while another writer held the record's lock"
+    assert not pushing.is_alive()
+    assert ts.read(key)["image_path"] == "C:/img/a.jpg"
+
+
 def test_heartbeat_for_new_image_invalidates_geometry_by_identity(client, tmp_path):
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/a.jpg", shapes=SHAPES))
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/b.jpg", shapes=None))

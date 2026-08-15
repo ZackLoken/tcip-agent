@@ -81,6 +81,15 @@ def _propose_over_the_region(image: Path) -> dict:
     return result
 
 
+def test_accept_refuses_an_image_no_run_staged_proposals_for(patched_frame: Path) -> None:
+    """Nothing staged is a refusal naming the tool to run, never an empty acceptance."""
+    from tcip_mcp.tools.vision_tools import accept_proposals
+
+    accepted = accept_proposals(image_path=str(patched_frame),
+                                assignments=[{"candidate_id": 0, "subject": "leaf"}])
+    assert accepted["error"] == "No proposals found for region. Run propose_annotations first."
+
+
 def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     patched_frame: Path, tmp_path: Path,
 ) -> None:

@@ -8,21 +8,19 @@ when shapes actually change. State is split across two files under
   - ``canvas_live.json``: the small meta document; overwritten atomically by every push.
   - ``canvas_shapes.json``: the geometry blob; written only by full pushes.
 
-There is no read-modify-write merge (so no lock and no interleaving that can resurrect stale
-geometry): each file is written atomically, and the reader (``capture_live_canvas``) treats the
-geometry as valid only when its ``(image_path, tab)`` identity matches the meta document:
-a heartbeat for a different image/tab implicitly invalidates stale shapes.
+There is no read-modify-write merge, so nothing can interleave and resurrect stale geometry:
+each document is replaced whole, and the reader (``capture_live_canvas``) treats the geometry
+as valid only when its ``(image_path, tab)`` identity matches the meta document: a heartbeat
+for a different image/tab implicitly invalidates stale shapes.
 
-Both writes skip ``fsync``: this is ephemeral live-view state re-pushed every heartbeat (as
-often as every debounce cycle), not durable review/annotation history, and a crash losing the
-last push costs nothing, the next push repaints it.
+Both records declare ``durable=False``, so a push returns after the atomic replace and before
+any flush: this is ephemeral live-view state re-pushed every heartbeat (as often as every
+debounce cycle), not durable review/annotation history, and a crash losing the last push costs
+nothing, the next push repaints it.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +28,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import Key, StoreDescriptor, json_codec, register_store, replace
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_web.paths import assert_path_allowed
@@ -127,54 +125,22 @@ def _guard_project_root(project_root: str) -> None:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _write_json_no_fsync(path: Path, obj: dict) -> None:
-    """Atomic replace (temp file + ``os.replace``) without ``fsync``: see module docstring."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(obj, indent=2, default=str)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(data)
-        _replace_with_retry(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-
-
-def _replace_with_retry(src: str, dst: Path, *, attempts: int = 5, delay: float = 0.05) -> None:
-    """``os.replace`` with a short retry: a Windows virus scanner / indexer can momentarily
-    hold the destination. Mirrors ``tcip_mcp.utils.atomic_io._replace_with_retry``."""
-    for attempt in range(attempts):
-        try:
-            os.replace(src, dst)
-            return
-        except PermissionError:
-            if attempt == attempts - 1:
-                raise
-            time.sleep(delay)
-
-
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
     _guard_project_root(payload.project_root)
     now = time.time()
-    mp = meta_path(payload.project_root)
-    mp.parent.mkdir(parents=True, exist_ok=True)
 
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
         # sees an identity mismatch (stale), never a false match.
-        _write_json_no_fsync(shapes_path(payload.project_root), {
+        replace(canvas_geometry_key(payload.project_root), {
             "image_path": payload.image_path,
             "tab": payload.tab,
             "shapes": payload.shapes,
             "received_at": now,
         })
 
-    _write_json_no_fsync(mp, {
+    replace(canvas_meta_key(payload.project_root), {
         "schema_version": payload.schema_version,
         "received_at": now,
         "received_at_iso": datetime.now(timezone.utc).isoformat(),

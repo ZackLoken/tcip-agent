@@ -22,35 +22,64 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-STATUS_FILENAME = "project_status.json"
+from tcip_store import (
+    DecodeError,
+    Key,
+    StoreDescriptor,
+    json_codec,
+    read,
+    register_store,
+    transaction,
+)
+from tcip_store.file_backend import RootedFileLocator
+
+_STATUS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The status pointer, one document per project."""
+
+PROJECT_STATUS_STORE = "project_status"
+_STATUS_PARTS = ("project_status",)
+register_store(
+    StoreDescriptor(
+        name=PROJECT_STATUS_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_STATUS_DOC,
+    )
+)
+
+
+def project_status_key(project_path: str | Path) -> Key:
+    """The project's status pointer.
+
+    ``cas``: every writer here increments a counter it just read, so the read and the write
+    have to be one serialized step. :func:`_update` names this key in a transaction and does
+    the read-and-decide inside it.
+    """
+    return Key(PROJECT_STATUS_STORE, str(project_path), _STATUS_PARTS)
 
 
 def project_status_path(project_path: str | Path) -> Path:
     """``<project_path>/.tcip/state/project_status.json``."""
-    return Path(project_path, ".tcip", "state", STATUS_FILENAME)
+    root = Path(project_path)
+    return root.joinpath(*_STATUS_DOC.relative_path(str(root), _STATUS_PARTS).parts)
 
 
 def read_project_status(project_path: str | Path) -> dict[str, Any]:
     """The project's status summary, or ``{}`` if none exists yet.
 
     Distinguishes absence from corruption: a missing file is genuinely "no history yet" and
-    returns ``{}``; a file that exists but fails to parse, or parses to something other than a
+    returns ``{}``; a file that exists but fails to decode, or decodes to something other than a
     dict (mirrors :func:`tcip_mcp.dataset_layout.normalize_status_store`'s shape guard), returns
     ``{"_corrupt": True}`` instead, so callers surface that honestly rather than silently reading a
     permanent-fixture store as if it were a clean slate.
     """
-    import json
-
-    path = project_status_path(project_path)
-    if not path.is_file():
-        return {}
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # ValueError covers json.JSONDecodeError and UnicodeDecodeError (both its subclasses):
-        # a non-UTF-8 file must not slip past this into an unhandled exception, which would break
-        # the "status-file trouble must never break the write it's attached to" invariant _update
-        # exists for.
+        raw = read(project_status_key(project_path), default={})
+    except (OSError, DecodeError):
+        # An unreadable pointer is reported as corrupt, not as absent: this store is a
+        # permanent fixture, so "cannot be read" is never "no history yet".
         return {"_corrupt": True}
     if not isinstance(raw, dict):
         return {"_corrupt": True}
@@ -62,24 +91,27 @@ def _update(project_path: str | Path, mutate: Callable[[dict[str, Any]], None]) 
     to. A status-file write failing must not fail the report/retrospective/distillation-pass write
     it's recording, same shape as ``audit.py``'s own best-effort append.
 
-    ``mutate`` reads and mutates the current dict *in place*, entirely inside the
-    ``file_transaction`` lock: an increment (``data[k] = data.get(k, 0) + 1``) computed from a
-    read taken outside the lock, then passed in as an absolute value, would lose updates under
+    ``mutate`` reads and mutates the current dict *in place*, entirely inside the transaction
+    that holds this key: an increment (``data[k] = data.get(k, 0) + 1``) computed from a read
+    taken outside the lock, then passed in as an absolute value, would lose updates under
     concurrent callers (two callers reading the same pre-increment value, each writing the same
-    post-increment one). Putting the read-and-decide step inside ``mutate`` is what makes
-    ``file_transaction`` actually serialize the increment, not just the write.
+    post-increment one). Putting the read-and-decide step inside ``mutate`` is what makes the
+    transaction actually serialize the increment, not just the write.
     """
-    from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction, read_json
-
-    path = project_status_path(project_path)
+    key = project_status_key(project_path)
     try:
-        with file_transaction(path):
-            data = read_json(path, default={})
+        with transaction(key) as txn:
+            try:
+                data = txn.read(key, default={})
+            except DecodeError:
+                # A corrupt pointer is replaced rather than propagated: the counters it held
+                # are unreadable, and refusing here would fail the write being recorded.
+                data = {}
             if not isinstance(data, dict):
                 data = {}
             data.pop("_corrupt", None)
             mutate(data)
-            atomic_write_json(path, data)
+            txn.write(key, data)
     except Exception:
         pass
 

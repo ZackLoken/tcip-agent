@@ -9,13 +9,22 @@ so the persisted file is a record, not a resumable state.)
 
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import (
+    DecodeError,
+    Key,
+    StoreDescriptor,
+    json_codec,
+    read,
+    register_store,
+    replace,
+)
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_mcp.project_paths import project_root, resolve_state
-from tcip_mcp.utils.atomic_io import atomic_write_json, read_json
+from tcip_mcp.project_paths import project_root
+
+logger = logging.getLogger(__name__)
 
 _REGISTRY_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
 """One registry document per job kind, under the platform state root."""
@@ -43,31 +52,35 @@ def job_registry_key(name: str) -> Key:
     return Key(JOB_REGISTRY_STORE, str(project_root().resolve()), (name,))
 
 
-def _state_path(name: str) -> Path:
-    # Resolved at use time against the pinned platform root: a bare CWD-relative path would
-    # scatter job records by launch dir (and let tests pollute the repo's real .tcip/).
-    return resolve_state(Path(*_REGISTRY_DOC.relative_path("", (name,)).parts))
-
-
 MAX_JOBS = 100
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
 
 
 def persist(name: str, summaries: list[dict]) -> None:
-    """Atomically write job summaries to ``.tcip/state/<name>.json`` (best-effort)."""
+    """Atomically write job summaries to ``.tcip/state/<name>.json``.
+
+    A failure here loses the GUI's history of this registry across a restart, not the jobs
+    themselves, so it is logged with the registry it belongs to rather than raised into the
+    route that was reporting a job's progress.
+    """
     try:
-        atomic_write_json(_state_path(name), summaries)
-    except Exception:  # pragma: no cover - persistence is best-effort
-        pass
+        replace(job_registry_key(name), summaries)
+    except Exception:
+        logger.exception("Could not persist the %s job registry", name)
 
 
 def load(name: str) -> list[dict]:
     """Read persisted job summaries from ``.tcip/state/<name>.json``.
 
-    Returns ``[]`` when the file is missing/unparseable or doesn't hold a list, a
-    restart with no prior state (or a corrupt file) starts clean rather than raising.
+    Returns ``[]`` when the file is missing/undecodable or doesn't hold a list. Absence and
+    corruption are folded together on purpose here, unlike stores where they differ: this
+    file is a record of jobs whose threads are already gone, so a restart that cannot read it
+    starts clean rather than refusing to start.
     """
-    data = read_json(_state_path(name), default=[])
+    try:
+        data = read(job_registry_key(name), default=[])
+    except DecodeError:
+        return []
     return data if isinstance(data, list) else []
 
 
