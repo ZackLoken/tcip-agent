@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tcip_store import stored_number, stored_numbers
+
 logger = logging.getLogger(__name__)
 
 
@@ -231,9 +233,13 @@ class TrainContext:
         an experiment logs through ``experiments.log_metrics``, which owns that record's
         members and holds the terminal-state lock. An HPO trial has no experiment record, and
         its rows belong to the trial directory the Tuning view reads them back from.
+
+        ``epoch_hook`` is fired with the metrics the body produced, not the stored form: a
+        pruner compares numbers, and a diverged loss has to keep comparing as the worst one.
         """
         if self.epoch_hook is not None:
             self.epoch_hook(epoch, metrics)
+        stored = stored_numbers(metrics)
         try:
             if self.experiment_id is None:
                 from tcip_store import append
@@ -241,11 +247,11 @@ class TrainContext:
                 from tcip_mcp.tools.training_tools import trial_metrics_key_for_dir
 
                 append(trial_metrics_key_for_dir(self.run.output_dir),
-                       {"epoch": epoch, **metrics})
+                       {"epoch": epoch, **stored})
                 return
             from tcip_mcp.experiments import log_metrics
 
-            log_metrics(self.experiment_id, epoch, metrics)
+            log_metrics(self.experiment_id, epoch, stored)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Metric log failed (%s epoch %s): %s",
                            self.experiment_id or self.run.run_id, epoch, exc)
@@ -423,7 +429,7 @@ def run_training_envelope(ctx: TrainContext) -> None:
     _snapshot_run_provenance(ctx)  # refresh with the real resume/RNG-restore outcome
     _finalize_run(ctx)
 
-    record_event("training_run", {**audit_args, "best_metric": run.best_metric},
+    record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
                  status=run.status or "failed",
                  duration_ms=round((time.monotonic() - t0) * 1000, 1))
 

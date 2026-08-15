@@ -27,7 +27,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, StoreError, json_codec, register_store
+from tcip_store import (
+    RECORD_JSON,
+    Key,
+    StoreDescriptor,
+    StoreError,
+    check_json_value,
+    register_store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 # --- vocabularies ---------------------------------------------------------
@@ -665,7 +672,7 @@ _SIDECAR_STORES: dict[str, str] = {
             name=f"{document}_sidecar",
             kind="record",
             key_fields=("document",),
-            codec=json_codec(),
+            codec=RECORD_JSON,
             concurrency="cas",
             locator=_SIDECAR_LOCATOR,
         )
@@ -722,7 +729,13 @@ def _read_sidecar(pred_dir: str | Path, document: str) -> dict | None:
 
 
 def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_point") -> None:
-    """Write one bucket's stamp whole, under the stamp's own lock."""
+    """Write one bucket's stamp whole, under the stamp's own lock.
+
+    A stamp is assembled by its producer, and ``operating_point_stamp`` carries a producer's
+    own extra fields through ``**fields``, so what it holds is checked here, where every
+    sidecar write passes, rather than at each producer.
+    """
+    check_json_value(stamp, path="stamp")
     Path(pred_dir).mkdir(parents=True, exist_ok=True)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
@@ -747,6 +760,7 @@ def update_sidecar(
         updated = updater(current if isinstance(current, dict) else {})
         if updated is None:
             return False
+        check_json_value(updated, path="stamp")
         txn.write(key, updated)
     return True
 

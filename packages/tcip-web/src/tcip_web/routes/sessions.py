@@ -44,7 +44,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ register_store(
         name=ANNOTATION_STATS_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_ANNOTATION_STATS_DOC,
     )

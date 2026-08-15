@@ -39,6 +39,51 @@ def test_an_ordinary_experiment_id_still_addresses_its_own_members(tmp_path):
     assert key.parts == (experiment_id, "metrics")
 
 
+def test_an_experiment_payload_that_json_cannot_hold_is_refused_at_the_entry_point(tmp_path):
+    """Config, metrics and lineage arrive as the caller's own dicts, so the field that will
+    not encode is named here rather than surfacing as a codec failure naming only the file.
+
+    A refusal matters most for a measurement: an unserializable value used to become its
+    repr, which reads as a real recorded number forever after.
+    """
+    experiment_id = "exp-020-json-boundary"
+    experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
+
+    with pytest.raises(TypeError) as config_refused:
+        experiments.create_experiment("exp-021-json-boundary", {"weights": Path("model_best.pt")})
+    assert "config.weights" in str(config_refused.value)
+
+    with pytest.raises(TypeError) as overwrite_refused:
+        experiments.overwrite_config_if_pristine(experiment_id, {"weights": Path("model_best.pt")})
+    assert "config.weights" in str(overwrite_refused.value)
+
+    with pytest.raises(ValueError) as metrics_refused:
+        experiments.log_metrics(experiment_id, 1, {"loss": float("nan")})
+    assert "metrics.loss" in str(metrics_refused.value)
+
+    with pytest.raises(TypeError) as lineage_refused:
+        experiments.update_lineage(experiment_id, predictions=Path("predictions/live"))
+    assert "updates.predictions" in str(lineage_refused.value)
+
+    assert not experiments.experiment_exists("exp-021-json-boundary")
+    assert experiments.read_metrics(experiment_id) == []
+
+
+def test_an_ordinary_experiment_payload_is_still_written_by_every_entry_point(tmp_path):
+    """The refusal above must not cost an ordinary run its config, its rows or its lineage."""
+    experiment_id = "exp-022-json-boundary"
+
+    experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
+    experiments.overwrite_config_if_pristine(experiment_id, {"model_source": {"builder": "m:g"}})
+    experiments.log_metrics(experiment_id, 1, {"loss": 0.5})
+    experiments.update_lineage(experiment_id, predictions="predictions/live")
+
+    record = experiments.get_experiment(experiment_id)
+    assert record["config"]["model_source"]["builder"] == "m:g"
+    assert [row["epoch"] for row in experiments.read_metrics(experiment_id)] == [1]
+    assert record["lineage"]["predictions"] == "predictions/live"
+
+
 def test_a_split_manifest_is_read_from_the_store_the_experiment_module_resolves(
     tmp_path, monkeypatch
 ):

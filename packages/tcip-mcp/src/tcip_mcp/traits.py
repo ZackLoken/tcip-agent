@@ -339,6 +339,7 @@ register_store(
         kind="record",
         key_fields=("trait",),
         codec=_YamlCodec(),
+        codec_exemption="a trait spec is YAML a human edits by hand, not JSON",
         concurrency="cas",
         enumerable=True,
         locator=_SPEC_FILE,

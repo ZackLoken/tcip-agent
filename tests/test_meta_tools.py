@@ -14,7 +14,7 @@ from tcip_mcp.tools.meta_tools import (
 )
 
 
-def test_claude_reports_writes_jsonl_file(tmp_path: Path):
+def test_claude_reports_writes_one_json_document(tmp_path: Path):
     result = claude_reports(
         str(tmp_path),
         category="missing_tool",
@@ -24,7 +24,7 @@ def test_claude_reports_writes_jsonl_file(tmp_path: Path):
 
     report_path = Path(result["report_path"])
     assert report_path.exists()
-    assert report_path.suffix == ".jsonl"
+    assert report_path.suffix == ".json"
     assert report_path.parent == tmp_path / ".tcip" / "reports"
     assert result["category"] == "missing_tool"
 
@@ -53,7 +53,7 @@ def test_claude_reports_one_file_per_report(tmp_path: Path):
             detail=f"report {i}",
         )
 
-    files = list((tmp_path / ".tcip" / "reports").glob("*.jsonl"))
+    files = list((tmp_path / ".tcip" / "reports").glob("*.json"))
     assert len(files) == 3
 
 
@@ -334,10 +334,10 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
 def test_record_distillation_pass_never_touches_reports_or_retrospectives(tmp_path: Path):
     # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
     claude_reports(str(tmp_path), category="missing_tool", detail="a")
-    before = list((tmp_path / ".tcip" / "reports").glob("*.jsonl"))
+    before = list((tmp_path / ".tcip" / "reports").glob("*.json"))
 
     record_distillation_pass(str(tmp_path))
 
-    after = list((tmp_path / ".tcip" / "reports").glob("*.jsonl"))
+    after = list((tmp_path / ".tcip" / "reports").glob("*.json"))
     assert before == after
     assert json.loads(before[0].read_text())["detail"] == "a"

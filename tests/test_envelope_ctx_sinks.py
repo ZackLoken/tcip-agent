@@ -64,6 +64,32 @@ def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
     assert [r["map50"] for r in rows] == [0.10, 0.60]
 
 
+def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(tmp_path):
+    """A diverged loss is real information the run has to record, and NaN is not JSON: the
+    row keeps the epoch, states the value is absent, and says why."""
+    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=None)
+
+    ctx.log_metrics(2, {"val_loss": float("nan"), "map50": 0.0})
+
+    rows = [json.loads(x) for x in
+            (tmp_path / "out" / "metrics.jsonl").read_text().splitlines() if x.strip()]
+    assert rows == [{"epoch": 2, "val_loss": None, "val_loss_state": "nan", "map50": 0.0}]
+
+
+def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(tmp_path):
+    """The stored row cannot carry a non-finite value, but a pruner compares numbers, so the
+    hook sees what the training body produced rather than the record's representation."""
+    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    seen: list[dict] = []
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=None,
+                       epoch_hook=lambda epoch, metrics: seen.append(dict(metrics)))
+
+    ctx.log_metrics(1, {"val_loss": float("inf")})
+
+    assert seen[0]["val_loss"] == float("inf")
+
+
 def test_only_real_scalars_reach_the_summary_writer(tmp_path):
     """A boolean flag or a text label is not a curve; plotting one misreads it as a number."""
     run = create_run(dict(CONFIG), str(tmp_path / "out"))

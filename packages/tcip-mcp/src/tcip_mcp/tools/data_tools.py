@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
@@ -25,7 +25,7 @@ register_store(
         name=SPLIT_STEM_LIST_STORE,
         kind="record",
         key_fields=("split",),
-        codec=json_codec(default=None),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SPLIT_DOC,
     )
@@ -48,7 +48,7 @@ register_store(
         name=SPLIT_MANIFEST_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(default=None),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SPLIT_DOC,
     )

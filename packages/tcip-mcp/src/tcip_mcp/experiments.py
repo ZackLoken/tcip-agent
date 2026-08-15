@@ -23,13 +23,15 @@ from pathlib import Path
 from typing import Any
 
 from tcip_store import (
+    LOG_JSON,
+    RECORD_JSON,
     BadKey,
     DecodeError,
     Key,
     StoreDescriptor,
     Version,
     VersionConflict,
-    json_codec,
+    check_json_value,
     register_store,
     store,
 )
@@ -98,7 +100,7 @@ register_store(
         name=EXPERIMENT_CONFIG_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_MEMBER_DOC,
     )
@@ -120,7 +122,7 @@ register_store(
         name=EXPERIMENT_STATUS_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_MEMBER_DOC,
     )
@@ -143,7 +145,7 @@ register_store(
         name=EXPERIMENT_LINEAGE_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_MEMBER_DOC,
     )
@@ -165,7 +167,7 @@ register_store(
         name=EXPERIMENT_ARTIFACTS_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_MEMBER_DOC,
     )
@@ -187,7 +189,7 @@ register_store(
         name=EXPERIMENT_ENV_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_MEMBER_DOC,
     )
@@ -208,7 +210,7 @@ register_store(
         name=EXPERIMENT_SPLIT_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_MEMBER_DOC,
     )
@@ -230,7 +232,7 @@ register_store(
         name=EXPERIMENT_METRICS_STORE,
         kind="log",
         key_fields=("experiment_id", "document"),
-        codec=json_codec(indent=None),
+        codec=LOG_JSON,
         locator=_MEMBER_LOG,
     )
 )
@@ -310,7 +312,12 @@ def create_experiment(
     ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on (the
     content end of the reproduce-a-number chain), written into the immutable lineage at creation. They
     are set once here and never via ``update_lineage`` (identity, not a mutable edge).
+
+    The config is the caller's own dict, so it is checked against what JSON can hold before
+    the write, naming the offending field rather than leaving the codec to refuse a payload
+    it can only describe by store and key.
     """
+    check_json_value(config, path="config")
     try:
         store.replace(config_key(experiment_id), config, expect=Version.ABSENT)
     except VersionConflict:
@@ -354,6 +361,7 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     record that already has metrics rows must stay protected too, so this checks the same full
     predicate ``_ensure_experiment`` uses, not just the terminal-state lock alone.
     """
+    check_json_value(config, path="config")
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
     has_metrics = bool(read_metrics(experiment_id))
@@ -574,7 +582,11 @@ def log_metrics(
     The one writer of that log: a training body routes its rows here rather than opening the
     file beside it, so the module that declares the record's members is the module that
     appends to them and the terminal-state lock cannot be written around.
+
+    A bespoke loop's row is its own dict, so it is checked field by field first: a tensor or
+    a non-finite loss is named here, where the caller can see which metric it was.
     """
+    check_json_value(metrics, path="metrics")
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
@@ -623,7 +635,12 @@ def update_lineage(
     experiment_id: str,
     **updates: Any,
 ) -> dict[str, Any]:
-    """Update lineage fields (model_weights, predictions, etc.)."""
+    """Update lineage fields (model_weights, predictions, etc.).
+
+    The updates are the caller's own kwargs, merged whole into the stored document, so they
+    are checked against what JSON can hold before any of them lands.
+    """
+    check_json_value(updates, path="updates")
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 

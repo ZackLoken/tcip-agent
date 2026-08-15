@@ -30,7 +30,7 @@ def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
     (proj / ".tcip" / "reports").mkdir(parents=True)
     (proj / ".tcip" / "retrospectives").mkdir(parents=True)
     for i in range(reports):
-        (proj / ".tcip" / "reports" / f"r{i}.jsonl").write_text("{}\n")
+        (proj / ".tcip" / "reports" / f"r{i}.json").write_text("{}\n")
     for i in range(retros):
         (proj / ".tcip" / "retrospectives" / f"s{i}.md").write_text("# retro\n")
     (ws / ".active").write_text("hazelnut_demo\n")

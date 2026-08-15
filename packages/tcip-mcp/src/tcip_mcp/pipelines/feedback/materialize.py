@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
@@ -45,7 +45,7 @@ register_store(
         name=CURATED_MANIFEST_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(default=None),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_CURATED_DOC,
     )

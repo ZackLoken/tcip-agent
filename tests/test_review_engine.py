@@ -85,12 +85,17 @@ def test_persistence_round_trip(tmp_path: Path) -> None:
     assert eng2.is_image_reviewed("IMG_0001.JPG")
 
 
-def test_save_review_state_is_compact_json(engine: ReviewEngine, tmp_path: Path) -> None:
-    # No indent/whitespace: a shard is rewritten whole on every verdict to that image, so
-    # compact serialization roughly halves the bytes serialized and written per save.
+def test_save_review_state_writes_the_canonical_record_spelling(
+    engine: ReviewEngine, tmp_path: Path
+) -> None:
+    """A shard is spelled the way every record is, so a breeder who opens one and a reader
+    that parses one meet the same document."""
+    from tcip_store import RECORD_JSON
+
     engine.mark_image_reviewed("IMG_0133.JPG")
-    raw = (tmp_path / "review" / "IMG_0133.JPG.json").read_text(encoding="utf-8")
-    assert "\n" not in raw and "  " not in raw
+    raw = (tmp_path / "review" / "IMG_0133.JPG.json").read_bytes()
+
+    assert raw == RECORD_JSON.encode(RECORD_JSON.decode(raw))
     assert engine.raw_state["image"]["IMG_0133.JPG"]["img_status"] == "completed"
 
 

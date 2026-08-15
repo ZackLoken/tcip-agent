@@ -380,7 +380,7 @@ class FileBackend:
         with self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
-            data = _encode(descriptor, value)
+            data = _encode(descriptor, key, value)
             temp = self._stage_bytes(path, data, durable=descriptor.durable)
             self._apply_staged(temp, path, durable=descriptor.durable)
             return _version_of(data)
@@ -434,7 +434,7 @@ class FileBackend:
         directory entry too so the log file itself survives the same crash."""
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        data = _encode(descriptor, record)
+        data = _encode(descriptor, key, record)
         if b"\n" in data:
             raise ValueError(
                 f"log store {key.store!r} encoded an entry containing a newline: a log entry "
@@ -636,7 +636,7 @@ class _FileTxn:
                 descriptor = get_descriptor(key.store)
                 path = self._backend.path_for(key)
                 staged.temp_path = self._backend._stage_bytes(
-                    path, _encode(descriptor, staged.value), durable=descriptor.durable
+                    path, _encode(descriptor, key, staged.value), durable=descriptor.durable
                 )
         except BaseException:
             for _, staged in pending:
@@ -653,9 +653,23 @@ class _FileTxn:
                 self._backend._apply_staged(staged.temp_path, path, durable=descriptor.durable)
 
 
-def _encode(descriptor: StoreDescriptor, value: Any) -> bytes:
+def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:
+    """The value's bytes, or a refusal naming the entry and what would not encode.
+
+    ``json.dumps`` names neither the store nor the key, and the canonical codec refuses a
+    non-finite number and an unserializable object rather than fabricating a spelling for
+    either, so the message has to say which record and which type before a caller can act
+    on it.
+    """
     assert descriptor.codec is not None
-    return descriptor.codec.encode(value)
+    try:
+        return descriptor.codec.encode(value)
+    except (TypeError, ValueError) as exc:
+        raise StoreError(
+            f"{key.store}{list(key.parts)} under {key.scope} does not encode: {exc}. "
+            f"The value is a {type(value).__name__}; convert what it holds to a JSON type "
+            "at the writer rather than leaving the codec to spell it."
+        ) from exc
 
 
 def _decode(descriptor: StoreDescriptor, key: Key, data: bytes) -> Any:

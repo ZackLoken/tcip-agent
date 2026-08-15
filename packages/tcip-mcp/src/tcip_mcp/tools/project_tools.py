@@ -10,11 +10,11 @@ from pathlib import Path
 
 import tcip_store
 from tcip_store import (
+    RECORD_JSON,
     Key,
     StoreDescriptor,
     Version,
     VersionConflict,
-    json_codec,
     register_store,
     text_codec,
 )
@@ -44,7 +44,7 @@ register_store(
         name=DATASET_REGISTRY_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(default=None, trailing_newline=True),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_PROJECT_STATE_DOC,
     )

@@ -12,10 +12,10 @@ from __future__ import annotations
 import logging
 
 from tcip_store import (
+    RECORD_JSON,
     DecodeError,
     Key,
     StoreDescriptor,
-    json_codec,
     read,
     register_store,
     replace,
@@ -35,7 +35,7 @@ register_store(
         name=JOB_REGISTRY_STORE,
         kind="record",
         key_fields=("registry",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_REGISTRY_DOC,
     )

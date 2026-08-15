@@ -22,7 +22,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, stored_number
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -208,7 +208,7 @@ register_store(
         name=RAY_DASHBOARD_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(prefix=(".tcip", "state"), suffix=".json"),
     )
@@ -454,7 +454,7 @@ def tune_search(
     for r in results:
         all_trials.append({
             "params": {k: r.config.get(k) for k in space},
-            "value": (r.metrics or {}).get(metric),
+            **stored_number("value", (r.metrics or {}).get(metric)),
             "iterations": (r.metrics or {}).get("training_iteration"),
             "state": "ERROR" if r.error else "COMPLETE",
         })
@@ -462,7 +462,7 @@ def tune_search(
     best = results.get_best_result(metric=metric, mode=mode)
     result: dict[str, Any] = {
         "best_params": {k: best.config.get(k) for k in space},
-        "best_value": (best.metrics or {}).get(metric),
+        **stored_number("best_value", (best.metrics or {}).get(metric)),
         "n_trials": len(results),
         "study_name": study_name,
         "all_trials": all_trials,

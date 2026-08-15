@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path, PurePosixPath
 
-from tcip_store import BadKey, Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, register_store
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
@@ -53,7 +53,7 @@ register_store(
         name=CONFIDENCE_SWEEP_STORE,
         kind="record",
         key_fields=("inputs_hash",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SweepArtifactLocator(),
     )

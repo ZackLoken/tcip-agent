@@ -177,9 +177,14 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(tm
     assert read_registry(path).subject("catkin") is not None
 
 
-def test_a_copied_registry_holds_the_source_document_byte_for_byte(tmp_path):
+def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path):
     """A registry placed beside another dataset's data declares exactly what its source declares,
-    so a digest or an id assignment taken against either one reads the same declared order."""
+    so a digest or an id assignment taken against either one reads the same declared order.
+
+    Every record now shares one spelling, so equal bytes no longer distinguish a copy from a
+    re-serialization; what this pins is that the document and its subject order survive, and
+    that the copy carries the canonical bytes rather than a spelling of its own.
+    """
     from tcip_mcp.class_registry import copy_registry
 
     source, destination = tmp_path / "source", tmp_path / "destination"

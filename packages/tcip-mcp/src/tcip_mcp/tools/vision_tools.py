@@ -48,7 +48,7 @@ ts.register_store(
         name=PROPOSAL_STAGING_STORE,
         kind="record",
         key_fields=("image",),
-        codec=ts.json_codec(indent=None, default=str),
+        codec=ts.RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_PROPOSAL_DOC,
     )
@@ -787,6 +787,13 @@ def propose_annotations(
             "summary": f"Engine {engine!r} proposed no candidates",
             "candidates": [],
         }
+
+    # A bespoke engine's candidates are its own dicts, so what a segmenter returns natively
+    # (an array, a numpy scalar) is named here rather than stored as a repr of itself.
+    try:
+        ts.check_json_value(candidates, path="candidates")
+    except (TypeError, ValueError) as exc:
+        return {"error": f"Engine {engine!r} proposed a candidate the store cannot hold: {exc}"}
 
     read = _display_for_path(image_path)
     out = render_candidates(read.pixels, candidates, native_size=read.native_size)

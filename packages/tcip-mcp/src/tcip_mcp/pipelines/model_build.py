@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tcip_store import Key, StoreDescriptor, json_codec, register_store, store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
 from tcip_store.file_backend import RootedFileLocator
 
 MODEL_SOURCE_KEY = "model_source"
@@ -185,7 +185,7 @@ register_store(
         name=SNAPSHOT_MANIFEST_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(prefix=_SNAPSHOT_DIR, suffix=".json"),
     )

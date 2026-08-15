@@ -5,6 +5,7 @@ immutability on relaunch, and canonical-format confidence parsing in get_worst_p
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -711,3 +712,82 @@ def test_ensure_experiment_resume_into_pristine_id_still_attaches(tmp_path, monk
                              resume_from="ckpt/checkpoint_epoch_5.pt", run_id="r9",
                              output_dir="out")
     assert eid == "pre2"
+
+
+def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
+    tmp_path, monkeypatch
+):
+    """The caller's config is stored twice, as the launch config and as the experiment's
+    snapshot, so the field that will not encode is named before either write and before a
+    subprocess is spawned for a run whose provenance could not be recorded."""
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(training_tools, "preflight_config",
+                        lambda config, smoke=False: {"valid": False, "issues": ["stub"]})
+
+    with pytest.raises(TypeError) as refused:
+        training_tools.launch_training({"model_source": {"builder": Path("m.py")}})
+    assert "config.model_source.builder" in str(refused.value)
+
+
+def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, monkeypatch):
+    """The refusal above must not stop a legitimate config: it reaches preflight and comes
+    back with preflight's own verdict rather than a refusal from the boundary check."""
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    monkeypatch.setattr(
+        training_tools, "preflight_config",
+        lambda config, smoke=False: seen.append(config) or {"valid": False, "issues": ["stub"]})
+
+    result = training_tools.launch_training({"model_source": {"builder": "m:f"}})
+
+    assert result == {"error": "Invalid config", "issues": ["stub"]}
+    assert seen == [{"model_source": {"builder": "m:f"}}]
+
+
+def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
+    tmp_path, monkeypatch
+):
+    """The space reaches the sweep manifest and the base config reaches every trial's resolved
+    config, so both are checked before a single trial is trained against them."""
+    from tcip_mcp.pipelines.training import hpo
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(hpo, "tune_search", lambda *args, **kwargs: {"best_params": {},
+                                                                    "best_value": 0.1,
+                                                                    "n_trials": 1})
+
+    with pytest.raises(TypeError) as space_refused:
+        training_tools.run_hpo({"model_source": {"builder": "m:f"}},
+                               param_space={"lr": Path("lr.txt")})
+    assert "param_space.lr" in str(space_refused.value)
+
+    with pytest.raises(TypeError) as config_refused:
+        training_tools.run_hpo({"model_source": {"builder": Path("m.py")}},
+                               param_space={"lr": [0.1, 0.01]})
+    assert "base_config.model_source.builder" in str(config_refused.value)
+
+
+def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
+    """The refusal above must not cost a legitimate sweep its search."""
+    from tcip_mcp.pipelines.training import hpo
+    from tcip_mcp.tools import training_tools
+
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def fake_search(*args, **kwargs):
+        seen.append(kwargs.get("param_space", args[1] if len(args) > 1 else None))
+        return {"best_params": {"lr": 0.01}, "best_value": 0.1, "n_trials": 1}
+
+    monkeypatch.setattr(hpo, "tune_search", fake_search)
+
+    result = training_tools.run_hpo({"model_source": {"builder": "m:f"}},
+                                    param_space={"lr": [0.1, 0.01]}, n_trials=1)
+
+    assert result["best_params"] == {"lr": 0.01}
+    assert seen == [{"lr": [0.1, 0.01]}]

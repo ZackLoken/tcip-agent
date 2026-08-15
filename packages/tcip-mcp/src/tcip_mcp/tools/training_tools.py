@@ -10,7 +10,17 @@ import threading
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from tcip_store import BadKey, Key, StoreDescriptor, StoreError, json_codec, register_store, store
+from tcip_store import (
+    LOG_JSON,
+    RECORD_JSON,
+    BadKey,
+    Key,
+    StoreDescriptor,
+    StoreError,
+    check_json_value,
+    register_store,
+    store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
@@ -284,7 +294,7 @@ register_store(
         name=LAUNCH_CONFIG_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_RUN_DOC,
     )
@@ -326,6 +336,9 @@ def launch_training(
             cooperative grace period is attempted (a hung process isn't responding to cooperative
             signals). Omit for no timeout (the default).
     """
+    # The caller's config is stored twice, as the launch config and as the experiment's
+    # snapshot, so what it holds is checked before either write.
+    check_json_value(config, path="config")
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
     validation = preflight_config(config, smoke=True)
@@ -713,7 +726,7 @@ register_store(
         name=SWEEP_MANIFEST_STORE,
         kind="record",
         key_fields=("study_name", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(suffix=".json"),
     )
@@ -725,7 +738,7 @@ register_store(
         name=STUDY_RESULT_STORE,
         kind="record",
         key_fields=("study_name",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(suffix=".json"),
     )
@@ -737,7 +750,7 @@ register_store(
         name=TRIAL_CONFIG_STORE,
         kind="record",
         key_fields=("trial", "document"),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(suffix=".json"),
     )
@@ -749,7 +762,7 @@ register_store(
         name=TRIAL_METRICS_STORE,
         kind="log",
         key_fields=("trial", "document"),
-        codec=json_codec(indent=None),
+        codec=LOG_JSON,
         locator=RootedFileLocator(suffix=".jsonl"),
     )
 )
@@ -1008,6 +1021,10 @@ def run_hpo(
 
     if param_space is None:
         param_space = get_default_space()
+    # Both reach a stored record: the space into the sweep manifest, the base config into
+    # every trial's resolved config once a sampled point is applied to it.
+    check_json_value(param_space, path="param_space")
+    check_json_value(base_config, path="base_config")
 
     import uuid
     from datetime import datetime, timezone
