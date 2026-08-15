@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, origin_allowed, safe_join
-from tcip_web.routes._metrics_common import read_metrics_file
+if TYPE_CHECKING:
+    from tcip_store import Key
+
+from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, origin_allowed
+from tcip_web.routes._metrics_common import metrics_response
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,8 @@ def _historical_training_runs() -> list[dict]:
     name does not necessarily equal the real ``run_id``; a directory whose ``status.json`` never
     stamped ``run_id`` still resolves correctly through the shared resolver's exact-match
     strategy: defaulting to ``d.name`` here means the lookup is for the directory's own name,
-    which trivially matches itself, and ``current_epoch`` is populated from ``metrics.jsonl`` via
-    that same resolver. The inline fallback below is reached only when
+    which trivially matches itself, and ``current_epoch`` is populated from the run's metrics
+    log via that same resolver. The inline fallback below is reached only when
     ``reconstruct_run_status`` itself returns ``None`` or resolves to a *different* directory than
     the one being iterated (a malformed/unreadable ``status.json``, or a genuine identity
     anomaly), a narrower, degenerate case, not the common case of a directory whose ``status.json``
@@ -108,13 +109,21 @@ def _historical_training_runs() -> list[dict]:
     return runs
 
 
-def _metrics_path(project_root: str, run_id: str) -> Path:
-    """``<project_root>/.tcip/experiments/<run_id>/metrics.jsonl`` with traversal guarded.
+def _metrics_key(project_root: str, run_id: str) -> "Key | None":
+    """The metrics log of the experiment that claims ``run_id``, under ``project_root``.
 
-    ``run_id`` is an untrusted path component, so it is joined via ``safe_join`` (which
-    rejects ``..`` / absolute paths), raises ``ValueError`` on an attempted escape.
+    ``None`` when no record claims the run: the experiment may not exist yet on a run just
+    launched, and the caller then has nothing to serve rather than an empty log to assert.
+    A relaunch mints an experiment id that is not the run id, so the id is resolved from the
+    records themselves rather than assumed; ``run_id`` never becomes a path component here,
+    and the key constructor refuses one that carries a separator.
     """
-    return safe_join(Path(project_root) / ".tcip" / "experiments", run_id, "metrics.jsonl")
+    from tcip_mcp.experiments import metrics_key, resolve_experiment_for_run
+
+    experiment_id = resolve_experiment_for_run(run_id, root=project_root)
+    if experiment_id is None:
+        return None
+    return metrics_key(experiment_id, root=project_root)
 
 
 class ConfigPayload(BaseModel):
@@ -215,16 +224,18 @@ def cancel_run_route(run_id: str) -> dict:
 
 @router.get("/runs/{run_id}/metrics")
 def get_run_metrics(project_root: str, run_id: str) -> dict:
-    """Read the full metrics.jsonl for a run."""
+    """Every metrics row a run has logged."""
+    from tcip_store import read_log
+
     try:
         assert_project_root_allowed(project_root)
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
-    try:
-        metrics_path = _metrics_path(project_root, run_id)
-    except ValueError:
-        raise HTTPException(400, f"invalid run_id: {run_id}") from None
-    return read_metrics_file(metrics_path)
+    key = _metrics_key(project_root, run_id)
+    if key is None:
+        return metrics_response([], exists=False)
+    page = read_log(key)
+    return metrics_response([dict(row) for row in page.records], exists=True)
 
 
 class ExperimentComparePayload(BaseModel):
@@ -241,44 +252,29 @@ def compare_runs_route(payload: ExperimentComparePayload) -> dict:
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 
-def _read_metrics_after(path: Path, offset: int) -> tuple[list[dict], int]:
-    """Read metrics.jsonl rows written since byte ``offset``, seeking there instead of
-    re-parsing from the start every poll tick. Returns the byte offset to resume from next
-    time; a trailing incomplete line (a write still in flight) is left unread and replayed
-    once it's complete."""
-    if not path.exists():
-        return [], offset
-    rows: list[dict] = []
-    with path.open("rb") as f:
-        f.seek(offset)
-        chunk = f.read()
-    new_offset = offset
-    for raw_line in chunk.splitlines(keepends=True):
-        if not raw_line.endswith(b"\n"):
-            break
-        new_offset += len(raw_line)
-        line = raw_line.decode("utf-8").strip()
-        if not line:
-            continue
-        try:
-            rows.append(json.loads(line))
-        except Exception:
-            continue
-    return rows, new_offset
-
-
 async def _stream_metrics(
     ws: WebSocket, project_root: str, run_id: str, poll_seconds: float = 1.0
 ) -> None:
-    try:
-        metrics_path = _metrics_path(project_root, run_id)
-    except ValueError:
-        await ws.send_json({"type": "error", "error": f"invalid run_id: {run_id}"})
-        return
-    cursor = 0
+    """Push every row of a run's metrics log to the browser as it is appended.
+
+    The cursor is the log's own resume token, so each tick reads only what was appended
+    since the last one and an entry still being written is replayed once it is complete.
+    The run's record is re-resolved until it exists, since a stream can be opened before the
+    launch has created it.
+    """
+    from tcip_store import read_log
+
+    key = None
+    cursor: str | None = None
 
     while True:
-        rows, cursor = _read_metrics_after(metrics_path, cursor)
+        if key is None:
+            key = _metrics_key(project_root, run_id)
+        rows: list[dict] = []
+        if key is not None:
+            page = read_log(key, after=cursor)
+            cursor = page.cursor
+            rows = [dict(row) for row in page.records]
         for row in rows:
             await ws.send_json({"type": "metric", "run_id": run_id, "row": row})
 
@@ -302,7 +298,7 @@ async def _stream_metrics(
 
 @router.websocket("/runs/{run_id}/stream")
 async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: str) -> None:
-    """Tail metrics.jsonl for ``run_id`` and push new rows to the browser."""
+    """Tail ``run_id``'s metrics log and push new rows to the browser."""
     if not origin_allowed(websocket.headers.get("origin")):
         await websocket.close(code=1008, reason="origin not allowed")
         return

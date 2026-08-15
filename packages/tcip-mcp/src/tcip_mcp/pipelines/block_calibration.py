@@ -34,20 +34,30 @@ class BlockCalibrationRefused(ValueError):
     states exactly what's missing, never a generic gate failure."""
 
 
+def _reserved_spatial_regions(split: dict) -> dict | None:
+    """The reserved calibration/test regions of a spatial-strip split, or ``None``.
+
+    ``None`` when the manifest is not a spatial-strip split at all, or when it reserved no
+    calibration or no test region: the one predicate behind both the cheap precheck and the
+    resolver's own refusals, so the two cannot disagree about whether a run qualifies.
+    """
+    if split.get("group_by") != "spatial_strip":
+        return None
+    spatial = split.get("spatial") or {}
+    if not spatial.get("calibration_region") or not spatial.get("test_region"):
+        return None
+    return spatial
+
+
 def reserved_calibration_region_available(experiment_id: str) -> bool:
     """Whether ``experiment_id``'s own persisted split is a spatial-strip split with a non-empty
     reserved ``calibration`` region: the cheap, dataset-free precondition check
     ``export_predictions`` runs before deciding whether a ``trait`` + ``raster_path`` export may
     proceed into block calibration at all, rather than the unconditional refusal it used to be.
     """
-    from tcip_mcp.experiments import experiments_dir
-    from tcip_mcp.utils.atomic_io import read_json
+    from tcip_mcp.experiments import read_split_manifest
 
-    split = read_json(experiments_dir() / experiment_id / "split.json", default={})
-    if not isinstance(split, dict) or split.get("group_by") != "spatial_strip":
-        return False
-    spatial = split.get("spatial") or {}
-    return bool(spatial.get("calibration_region")) and bool(spatial.get("test_region"))
+    return _reserved_spatial_regions(read_split_manifest(experiment_id)) is not None
 
 
 def _band_rects(
@@ -192,8 +202,9 @@ def resolve_block_calibration_records(
     at least two georeferenced plants and the training raster carries a real geotransform; a
     ``BandGroupRef`` source (no single file to read tags from) always falls back to GT-spacing.
     """
-    from tcip_mcp.experiments import experiments_dir
-    from tcip_mcp.utils.atomic_io import read_json
+    from tcip_store import store
+
+    from tcip_mcp.experiments import config_key, read_split_manifest
 
     if experiment_id is None:
         from tcip_mcp.model_registry import resolve_model_identity
@@ -207,23 +218,22 @@ def resolve_block_calibration_records(
             "knowing which training run's split produced them."
         )
 
-    exp_dir = experiments_dir() / experiment_id
-    split = read_json(exp_dir / "split.json", default={})
-    if not isinstance(split, dict) or split.get("group_by") != "spatial_strip":
+    split = read_split_manifest(experiment_id)
+    if split.get("group_by") != "spatial_strip":
         raise BlockCalibrationRefused(
             f"block calibration refused: experiment {experiment_id!r} has no spatial-strip split "
             "manifest (split.json's group_by != 'spatial_strip'); block calibration only applies "
             "to a single-mosaic training run with a reserved calibration region."
         )
-    spatial = split.get("spatial") or {}
-    cal_region = spatial.get("calibration_region") or []
-    test_region = spatial.get("test_region") or []
-    if not cal_region or not test_region:
+    spatial = _reserved_spatial_regions(split)
+    if spatial is None:
         raise BlockCalibrationRefused(
             f"block calibration refused: experiment {experiment_id!r}'s spatial split reserved no "
             "calibration region (train it with data.split.reserve_calibration_fraction set) or no "
             "test region."
         )
+    cal_region = spatial["calibration_region"]
+    test_region = spatial["test_region"]
     stem = spatial.get("stem")
     if not stem:
         raise BlockCalibrationRefused(
@@ -231,7 +241,7 @@ def resolve_block_calibration_records(
             "no stem to resolve the training mosaic's own image/label files from."
         )
 
-    config = read_json(exp_dir / "config.json", default={})
+    config = store.read(config_key(experiment_id), default={})
     data_cfg = (config.get("data") if isinstance(config, dict) else None) or {}
     labels_dir, images_dir = data_cfg.get("labels_dir"), data_cfg.get("images_dir")
     subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")

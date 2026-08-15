@@ -21,7 +21,6 @@ provenance/registration entirely (``_finalize_run`` never fires for a trial).
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -223,20 +222,32 @@ class TrainContext:
 
     # ---- envelope-owned sinks: keep a custom loop audited + immutable ----
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
-        """Route epoch metrics into the experiment store, and fire ``epoch_hook`` if attached
-        (an HPO trial's per-epoch pruning signal; independent of ``experiment_id``, since a
-        trial runs with ``experiment_id=None``)."""
+        """Route one epoch's metrics to the log that owns them, and fire ``epoch_hook`` if
+        attached (an HPO trial's per-epoch pruning signal; independent of ``experiment_id``,
+        since a trial runs with ``experiment_id=None``).
+
+        Every training body's rows arrive here, the default trainer's and a bespoke loop's
+        alike, so the row shape and the destination are decided in one place. A run tracked as
+        an experiment logs through ``experiments.log_metrics``, which owns that record's
+        members and holds the terminal-state lock. An HPO trial has no experiment record, and
+        its rows belong to the trial directory the Tuning view reads them back from.
+        """
         if self.epoch_hook is not None:
             self.epoch_hook(epoch, metrics)
-        if self.experiment_id is None:
-            return
         try:
+            if self.experiment_id is None:
+                from tcip_mcp.utils.atomic_io import append_jsonl
+
+                out = Path(self.run.output_dir)
+                out.mkdir(parents=True, exist_ok=True)
+                append_jsonl(out / "metrics.jsonl", {"epoch": epoch, **metrics})
+                return
             from tcip_mcp.experiments import log_metrics
 
             log_metrics(self.experiment_id, epoch, metrics)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Experiment metric log failed (%s epoch %s): %s",
-                           self.experiment_id, epoch, exc)
+            logger.warning("Metric log failed (%s epoch %s): %s",
+                           self.experiment_id or self.run.run_id, epoch, exc)
 
     def set_final_weights(self, path: str) -> None:
         """Declare the shippable checkpoint for this run. ``dispatch_train_body`` derives
@@ -257,13 +268,11 @@ class TrainContext:
             self.trial_report(float(value))
 
     def log_metrics(self, epoch: int, metrics: dict) -> None:
-        """Custom-loop metric sink: experiment store + metrics.jsonl + TB (default_train writes
-        metrics.jsonl/TB itself, so it uses ``_epoch_sink`` and does not double-write)."""
+        """Custom-loop metric sink: the run's own metrics log plus TensorBoard.
+
+        ``default_train`` reaches the same log through ``_epoch_sink`` and writes its own
+        TensorBoard scalars, so it never routes through here."""
         self._epoch_sink(epoch, metrics)
-        out = Path(self.run.output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        with open(out / "metrics.jsonl", "a") as f:
-            f.write(json.dumps({"epoch": epoch, **metrics}) + "\n")
         if self.tb is not None:
             for k, v in metrics.items():
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -327,22 +336,22 @@ def _snapshot_run_provenance(ctx: TrainContext) -> None:
     if ctx.experiment_id is None:
         return
     try:
-        from tcip_mcp.experiments import experiments_dir
+        from tcip_store import store
+
+        from tcip_mcp.experiments import env_key, experiment_dir, experiment_exists
         from tcip_mcp.pipelines.model_build import capture_env, snapshot_model_source
         from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
-        from tcip_mcp.utils.atomic_io import atomic_write_json
 
         kind = KIND_TCIP_MODULE
         env = {"env": capture_env(), "seed": ctx.seed, "model_kind": kind,
                "run_id": ctx.run.run_id,
                "resumed_from": ctx.resume_from or None,
                "rng_state_restored": getattr(ctx.run, "rng_state_restored", None)}
-        exp_dir = experiments_dir() / ctx.experiment_id
-        if exp_dir.is_dir():
-            atomic_write_json(exp_dir / "env.json", env)
+        if experiment_exists(ctx.experiment_id):
+            store.replace(env_key(ctx.experiment_id), env)
             # Bespoke run: copy the agent's model/training source (+ sha256) so it is reproducible
             # from an importable builder, not exec. No-op for the composed default path.
-            snapshot_model_source(ctx.config, exp_dir)
+            snapshot_model_source(ctx.config, experiment_dir(ctx.experiment_id))
     except Exception:  # noqa: BLE001
         # A dropped provenance snapshot is a real gap in the model+env link, surface it, don't
         # bury it at debug (matches audit.py's own "a dropped audit line" stance).

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 from tcip_mcp.pipelines.derivations import probe_channels
-from tcip_mcp.pipelines.model_build import build_model
+from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, STATE_DICT_KEY, build_model
 from tcip_mcp.pipelines.image_utils import BandGroupRef, load_image, pad_tile, pil_to_tensor
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU
@@ -67,7 +67,8 @@ def _display_path(source: str | Path | BandGroupRef) -> str:
 class GenericPredictor:
     """Load any bespoke ``model_source`` checkpoint and run inference.
 
-    The checkpoint must contain 'model_source' and 'model_state_dict'.
+    The checkpoint must carry the model reference and the weights (``model_build``'s
+    ``MODEL_SOURCE_KEY`` / ``STATE_DICT_KEY``).
     Task type is read from the model_source.
 
     The input geometry the run trained at travels on the checkpoint's embedded config and is
@@ -99,7 +100,7 @@ class GenericPredictor:
         ckpt = checkpoint if checkpoint is not None else torch.load(
             checkpoint_path, map_location=self.device, weights_only=False)
         # A bespoke checkpoint carries the importable-builder ref; build_model re-imports it.
-        self.model_source = ckpt.get("model_source")
+        self.model_source = ckpt.get(MODEL_SOURCE_KEY)
         self.kind = KIND_TCIP_MODULE
         self.config = ckpt.get("config", {})
 
@@ -114,7 +115,7 @@ class GenericPredictor:
         self.train_augmentation = self.config.get("augmentation")
 
         self.model = build_model(ckpt)  # re-imported bespoke builder (no exec)
-        self.model.load_state_dict(ckpt["model_state_dict"])
+        self.model.load_state_dict(ckpt[STATE_DICT_KEY])
         self.model.to(self.device)
         self.model.eval()
 

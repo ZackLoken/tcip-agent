@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, STATE_DICT_KEY
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -76,16 +78,18 @@ def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
         raise ValueError(
             f"Cannot determine model kind for {checkpoint_path}: checkpoint did not unpickle to a "
             f"dict (got {type(ckpt).__name__}), so it carries none of the structural markers "
-            "('kind' / 'model_source'+'model_state_dict') this platform's own checkpoints do."
+            f"('kind' / {MODEL_SOURCE_KEY!r}+{STATE_DICT_KEY!r}) this platform's own "
+            "checkpoints do."
         )
     stamped = ckpt.get("kind")
     if stamped:
         return str(stamped)
     # Structural fallback for tcip checkpoints whose kind wasn't stamped.
-    if "model_source" in ckpt and "model_state_dict" in ckpt:
+    if MODEL_SOURCE_KEY in ckpt and STATE_DICT_KEY in ckpt:
         return KIND_TCIP_MODULE
     raise ValueError(
-        f"Cannot determine model kind for {checkpoint_path}: no 'kind'/'model_source' (tcip). "
+        f"Cannot determine model kind for {checkpoint_path}: no 'kind'/{MODEL_SOURCE_KEY!r} "
+        f"(tcip). "
         f"Top-level keys: {sorted(ckpt)[:12]}"
     )
 

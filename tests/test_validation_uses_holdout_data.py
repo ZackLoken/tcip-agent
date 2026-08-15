@@ -8,7 +8,6 @@ that scored the training data would report visibly different numbers and pick a 
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -70,9 +69,18 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     models: list = []
     _capture_model(monkeypatch, models)
 
+    from tcip_mcp.experiments import create_experiment, read_metrics
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
     out_dir = tmp_path / "out"
-    run = create_run(_config(out_dir, epochs=1, early_stopping={"enabled": False}), str(out_dir))
-    run = train(run, train_loader, val_loader=val_loader, task="regression")
+    config = _config(out_dir, epochs=1, early_stopping={"enabled": False})
+    create_experiment("exp-holdout", config)
+    run = create_run(config, str(out_dir))
+    # The production wiring: the trainer hands each row to the envelope's sink, which logs it
+    # to the experiment's own record.
+    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
+                       task="regression", experiment_id="exp-holdout")
+    run = ctx.default_train()
 
     assert run.status == "completed", run.error
     assert len(models) == 1
@@ -92,8 +100,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     # A regression run selects by val_loss, so the checkpoint objective is the holdout number too.
     assert run.best_metric == pytest.approx(on_holdout["loss"], abs=1e-6)
 
-    persisted = [json.loads(line) for line in
-                 (out_dir / "metrics.jsonl").read_text().splitlines() if line.strip()]
+    persisted = read_metrics("exp-holdout")
     assert len(persisted) == 1
     assert persisted[0]["val_loss"] == pytest.approx(on_holdout["loss"], abs=1e-6)
 

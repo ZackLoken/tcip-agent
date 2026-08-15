@@ -1175,11 +1175,11 @@ def run_test_evaluation(
     matches the training-run val mAP), not the delivery regime, the stamp keeps the two from being
     silently conflated. See ``run_full_frame_evaluation`` for a delivery-grade metric.
     """
-    from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
 
     ckpt = torch.load(ckpt_path, map_location=device)
     model = build_model(ckpt)
-    model.load_state_dict(ckpt["model_state_dict"])
+    model.load_state_dict(ckpt[STATE_DICT_KEY])
     model.to(device)
 
     metrics = evaluate(model, loader, device, task, conf_threshold=conf_threshold,

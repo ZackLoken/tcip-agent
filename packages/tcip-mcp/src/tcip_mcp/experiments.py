@@ -6,21 +6,36 @@ Stores experiment state in .tcip/experiments/<experiment_id>/:
   artifacts.json, pointers to model weights, predictions
   lineage.json, data → model → predictions chain
   status.json, current state and timestamps
+  split.json, the train/val membership, seed and dataset identity a metric is reproducible with
+  env.json, the library versions, seed and model kind behind a reproducible run
+
+This module declares the record's members, so it is also the one place they are addressed:
+every reader and writer takes a key from a constructor here rather than composing a path of
+its own, and ``experiment_dir`` serves the run artifacts that live beside the record without
+being members of it (checkpoints, TensorBoard logs, a bespoke run's source snapshot).
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import (
+    BadKey,
+    DecodeError,
+    Key,
+    StoreDescriptor,
+    Version,
+    VersionConflict,
+    json_codec,
+    register_store,
+    store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.project_paths import project_root, resolve_state
-from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction, read_json
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +50,13 @@ def experiments_dir() -> Path:
     return resolve_state(EXPERIMENTS_DIR)
 
 
-def _exp_dir(experiment_id: str) -> Path:
+def experiment_dir(experiment_id: str) -> Path:
+    """One experiment's directory: the record's members plus the run artifacts beside them.
+
+    A caller that needs a member document asks for its key instead. This serves the files the
+    record's own layout does not name: weights, TensorBoard event files, and the per-file
+    source snapshot a bespoke run copies in.
+    """
     return experiments_dir() / experiment_id
 
 
@@ -48,18 +69,27 @@ _MEMBER_LOG = RootedFileLocator(suffix=".jsonl")
 """One append-only member log inside its experiment's directory."""
 
 
-def experiments_scope() -> str:
+def experiments_scope(root: Path | str | None = None) -> str:
     """The root every experiment key hangs off: the experiment store, made absolute.
 
     Absolute because a key names a root rather than a process's current directory, and
     resolved per call because ``EXPERIMENTS_DIR`` is relative until a platform root is
-    pinned, and a pin can land mid-process.
+    pinned, and a pin can land mid-process. ``root`` names a different platform root than
+    this process's own, for a caller (the web backend serving a run of the project the
+    browser has open) whose subject is a project it is not itself pinned to.
     """
-    return str(experiments_dir().resolve())
+    if root is None:
+        return str(experiments_dir().resolve())
+    return str((Path(root) / EXPERIMENTS_DIR).resolve())
 
 
-def _member_key(store: str, experiment_id: str, document: str) -> Key:
-    return Key(store, experiments_scope(), (experiment_id, document))
+def _member_key(store_name: str, experiment_id: str, document: str, root: Path | str | None) -> Key:
+    if "/" in experiment_id or "\\" in experiment_id or experiment_id in ("", ".", ".."):
+        raise BadKey(
+            f"experiment id {experiment_id!r} is not a single name: an id carrying a path "
+            "separator would address a record outside the experiment store"
+        )
+    return Key(store_name, experiments_scope(root), (experiment_id, document))
 
 
 EXPERIMENT_CONFIG_STORE = "experiment_config"
@@ -75,13 +105,13 @@ register_store(
 )
 
 
-def config_key(experiment_id: str) -> Key:
+def config_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The config snapshot a run trained under.
 
     ``last_writer_wins``: it is written whole at creation and replaced only while the record
     is still pristine, never merged into.
     """
-    return _member_key(EXPERIMENT_CONFIG_STORE, experiment_id, "config")
+    return _member_key(EXPERIMENT_CONFIG_STORE, experiment_id, "config", root)
 
 
 EXPERIMENT_STATUS_STORE = "experiment_status"
@@ -97,14 +127,14 @@ register_store(
 )
 
 
-def status_key(experiment_id: str) -> Key:
+def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The run's state, timestamps and liveness heartbeat.
 
     ``cas``: every writer here reads the document and updates fields inside it, from the
     training subprocess and the tool process at once, so an unconditional write drops the
     heartbeat or the run identity another writer just stamped.
     """
-    return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, "status")
+    return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, "status", root)
 
 
 EXPERIMENT_LINEAGE_STORE = "experiment_lineage"
@@ -120,13 +150,13 @@ register_store(
 )
 
 
-def lineage_key(experiment_id: str) -> Key:
+def lineage_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The data to model to predictions chain.
 
     ``cas``: ``update_lineage`` merges fields into the stored document under a lock, so an
     unconditional write erases an edge another writer recorded.
     """
-    return _member_key(EXPERIMENT_LINEAGE_STORE, experiment_id, "lineage")
+    return _member_key(EXPERIMENT_LINEAGE_STORE, experiment_id, "lineage", root)
 
 
 EXPERIMENT_ARTIFACTS_STORE = "experiment_artifacts"
@@ -142,13 +172,13 @@ register_store(
 )
 
 
-def artifacts_key(experiment_id: str) -> Key:
+def artifacts_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The run's artifact pointers.
 
     ``cas``: ``record_artifact`` adds one name to the stored mapping under a lock, so an
     unconditional write drops the pointers already recorded.
     """
-    return _member_key(EXPERIMENT_ARTIFACTS_STORE, experiment_id, "artifacts")
+    return _member_key(EXPERIMENT_ARTIFACTS_STORE, experiment_id, "artifacts", root)
 
 
 EXPERIMENT_ENV_STORE = "experiment_env"
@@ -164,12 +194,34 @@ register_store(
 )
 
 
-def env_key(experiment_id: str) -> Key:
+def env_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The environment capture behind a reproducible run.
 
     ``last_writer_wins``: the envelope writes it whole, once, from state it already holds.
     """
-    return _member_key(EXPERIMENT_ENV_STORE, experiment_id, "env")
+    return _member_key(EXPERIMENT_ENV_STORE, experiment_id, "env", root)
+
+
+EXPERIMENT_SPLIT_STORE = "experiment_split"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_SPLIT_STORE,
+        kind="record",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_MEMBER_DOC,
+    )
+)
+
+
+def split_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
+    """The train/val membership, seed and dataset identity this run's metrics belong to.
+
+    ``last_writer_wins``: one writer composes the whole manifest once, from the datasets the
+    run actually built, and nothing merges into it afterwards.
+    """
+    return _member_key(EXPERIMENT_SPLIT_STORE, experiment_id, "split", root)
 
 
 EXPERIMENT_METRICS_STORE = "experiment_metrics"
@@ -184,9 +236,9 @@ register_store(
 )
 
 
-def metrics_key(experiment_id: str) -> Key:
+def metrics_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The run's epoch-by-epoch metrics, one entry per row, append only."""
-    return _member_key(EXPERIMENT_METRICS_STORE, experiment_id, "metrics")
+    return _member_key(EXPERIMENT_METRICS_STORE, experiment_id, "metrics", root)
 
 
 # Once a run reaches a terminal state its record is immutable (experiments are immutable). The lock
@@ -206,14 +258,27 @@ _TERMINAL_STATES = {"completed", "failed"}
 _RECORDED_AS_DONE = {"completed", "failed", "cancelled"}
 
 
-def _current_state(exp_dir: Path) -> str | None:
-    status_path = exp_dir / "status.json"
-    if not status_path.is_file():
-        return None
+def _read_member(key: Key, default: Any = None) -> Any:
+    """One member document, with an unreadable record folded onto ``default``.
+
+    Every caller here already treated a corrupt member the way it treats an absent one, so the
+    fold is stated once rather than repeated at each read.
+    """
     try:
-        return json.loads(status_path.read_text()).get("state")
-    except (json.JSONDecodeError, OSError):
-        return None
+        return store.read(key, default=default)
+    except DecodeError:
+        logger.warning("experiment member %s does not decode", list(key.parts), exc_info=True)
+        return default
+
+
+def experiment_exists(experiment_id: str) -> bool:
+    """Whether this id names a real experiment record, by its config snapshot."""
+    return store.exists(config_key(experiment_id))
+
+
+def _current_state(experiment_id: str) -> str | None:
+    status = _read_member(status_key(experiment_id), {})
+    return status.get("state") if isinstance(status, dict) else None
 
 
 def _audit_refused(experiment_id: str, op: str, detail: dict[str, Any]) -> None:
@@ -236,31 +301,29 @@ def create_experiment(
     dataset_id: str | None = None,
     dataset_fingerprint: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new experiment directory with config snapshot.
+    """Create a new experiment record with its config snapshot.
+
+    The config snapshot is written create-only, so an id that already names an experiment is
+    refused inside the write's own lock rather than after a separate existence check that two
+    callers could both pass.
 
     ``dataset_id`` / ``dataset_fingerprint`` record the identity of the data this run trained on (the
     content end of the reproduce-a-number chain), written into the immutable lineage at creation. They
     are set once here and never via ``update_lineage`` (identity, not a mutable edge).
     """
-    d = _exp_dir(experiment_id)
-    if d.exists():
+    try:
+        store.replace(config_key(experiment_id), config, expect=Version.ABSENT)
+    except VersionConflict:
         return {"error": f"Experiment already exists: {experiment_id}"}
 
-    d.mkdir(parents=True, exist_ok=True)
-
-    # Config snapshot
-    atomic_write_json(d / "config.json", config)
-
-    # Initial status
     status = {
         "state": "created",
         "created": datetime.now(timezone.utc).isoformat(),
         "started": None,
         "ended": None,
     }
-    atomic_write_json(d / "status.json", status)
+    store.replace(status_key(experiment_id), status, expect=Version.ABSENT)
 
-    # Lineage
     lineage = {
         "data_source": data_source,
         "dataset_id": dataset_id,
@@ -269,14 +332,12 @@ def create_experiment(
         "model_weights": None,
         "predictions": None,
     }
-    atomic_write_json(d / "lineage.json", lineage)
-
-    # Empty artifacts
-    atomic_write_json(d / "artifacts.json", {})
+    store.replace(lineage_key(experiment_id), lineage, expect=Version.ABSENT)
+    store.replace(artifacts_key(experiment_id), {}, expect=Version.ABSENT)
 
     return {
         "experiment_id": experiment_id,
-        "path": str(d),
+        "path": str(experiment_dir(experiment_id)),
         "state": "created",
     }
 
@@ -293,18 +354,16 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     record that already has metrics rows must stay protected too, so this checks the same full
     predicate ``_ensure_experiment`` uses, not just the terminal-state lock alone.
     """
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
-    metrics_path = d / "metrics.jsonl"
-    has_metrics = metrics_path.is_file() and metrics_path.stat().st_size > 0
-    state = _current_state(d)
+    has_metrics = bool(read_metrics(experiment_id))
+    state = _current_state(experiment_id)
     if state != "created" or has_metrics:
         _audit_refused(experiment_id, "overwrite_config_if_pristine",
                        {"state": state, "has_metrics": has_metrics})
         return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
                          f"overwrite its config.json."}
-    atomic_write_json(d / "config.json", config)
+    store.replace(config_key(experiment_id), config)
     return {"experiment_id": experiment_id, "overwritten": True}
 
 
@@ -315,13 +374,12 @@ def update_status(experiment_id: str, state: str, *, error: str | None = None) -
     ``status.json["error"]``, omitted/``None`` never clears a previously-recorded error, only an
     explicit new value overwrites it.
     """
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    status_path = d / "status.json"
-    with file_transaction(status_path):
-        status = json.loads(status_path.read_text())
+    key = status_key(experiment_id)
+    with store.transaction(key) as txn:
+        status = txn.read(key, default={})
         current = status.get("state")
         # Terminal-state lock: a completed/failed run cannot be re-opened to a non-terminal state.
         if current in _TERMINAL_STATES and state != current and state not in _TERMINAL_STATES:
@@ -339,7 +397,7 @@ def update_status(experiment_id: str, state: str, *, error: str | None = None) -
         if state in ("completed", "failed"):
             status["ended"] = now
 
-        atomic_write_json(status_path, status)
+        txn.write(key, status)
     return {"experiment_id": experiment_id, "state": state}
 
 
@@ -354,22 +412,31 @@ def stamp_run_identity(experiment_id: str, run_id: str, output_dir: str) -> None
     path that only coincides with the experiment directory by convention) discoverable from
     ``experiment_id``/``run_id`` alone by a different process.
     """
-    d = _exp_dir(experiment_id)
-    status_path = d / "status.json"
-    if not status_path.is_file():
+    key = status_key(experiment_id)
+    if not store.exists(key):
         return
     try:
-        with file_transaction(status_path):
-            status = json.loads(status_path.read_text())
+        with store.transaction(key) as txn:
+            status = txn.read(key, default={})
             status["run_id"] = run_id
             status["output_dir"] = output_dir
-            atomic_write_json(status_path, status)
+            txn.write(key, status)
     except Exception:
         logger.warning("stamp_run_identity failed for %s/%s", experiment_id, run_id, exc_info=True)
 
 
 def resolve_experiment_dir_for_run(run_id: str) -> Path | None:
-    """Find the experiment directory for ``run_id`` without assuming ``experiment_id == run_id``.
+    """This run's experiment directory, or ``None`` when no record claims the run.
+
+    The identity question is answered by :func:`resolve_experiment_for_run`; this is the form
+    for a caller that then wants the run artifacts beside the record.
+    """
+    experiment_id = resolve_experiment_for_run(run_id)
+    return None if experiment_id is None else experiment_dir(experiment_id)
+
+
+def resolve_experiment_for_run(run_id: str, *, root: Path | str | None = None) -> str | None:
+    """Find the experiment id for ``run_id`` without assuming ``experiment_id == run_id``.
 
     Tries the exact match first (the common case, ``experiment_id == run_id``). Then the
     fresh-id relaunch format (``f"{experiment_id}_{run_id}"``, always suffixed ``_<run_id>``) via a
@@ -385,29 +452,28 @@ def resolve_experiment_dir_for_run(run_id: str) -> Path | None:
     a resolvable run just because the fast path was ambiguous. Returns ``None`` only when no
     directory's stamped identity matches at all, the caller (``cancel_run``'s disk fallback,
     ``reconstruct_run_status``) must then refuse honestly rather than act against an unverified path.
+
+    ``root`` names a platform root other than this process's own, for the web backend serving a
+    run of the project the browser has open.
     """
-    root = experiments_dir()
-    exact = root / run_id
-    if exact.is_dir():
-        return exact
-    if not root.is_dir():
+    store_root = Path(experiments_scope(root))
+    try:
+        if store.exists(status_key(run_id, root=root)):
+            return run_id
+    except BadKey:
         return None
-    matches = [p for p in root.glob(f"*_{run_id}") if p.is_dir()]
+    if not store_root.is_dir():
+        return None
+    matches = [p.name for p in store_root.glob(f"*_{run_id}") if p.is_dir()]
     if len(matches) == 1:
         return matches[0]
 
-    for d in sorted(root.iterdir()):
+    for d in sorted(store_root.iterdir()):
         if not d.is_dir():
             continue
-        status_path = d / "status.json"
-        if not status_path.is_file():
-            continue
-        try:
-            status = json.loads(status_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        if status.get("run_id") == run_id:
-            return d
+        status = _read_member(status_key(d.name, root=root), {})
+        if isinstance(status, dict) and status.get("run_id") == run_id:
+            return d.name
     return None
 
 
@@ -424,15 +490,11 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
     ``stale_seconds`` lets a caller (``routes/training.py``) keep its own configurable heartbeat
     window rather than being pinned to this module's default.
     """
-    d = resolve_experiment_dir_for_run(run_id)
-    if d is None:
+    experiment_id = resolve_experiment_for_run(run_id)
+    if experiment_id is None:
         return None
-    status_path = d / "status.json"
-    if not status_path.is_file():
-        return None
-    try:
-        status = json.loads(status_path.read_text())
-    except (json.JSONDecodeError, OSError):
+    status = _read_member(status_key(experiment_id))
+    if not isinstance(status, dict):
         return None
 
     state = status.get("state", "unknown")
@@ -440,19 +502,12 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
     if state not in _RECORDED_AS_DONE:
         state = "running" if _heartbeat_fresh(heartbeat, stale_seconds) else "interrupted"
 
-    current_epoch = None
-    metrics_path = d / "metrics.jsonl"
-    if metrics_path.is_file():
-        try:
-            lines = [ln for ln in metrics_path.read_text().splitlines() if ln.strip()]
-            if lines:
-                current_epoch = json.loads(lines[-1]).get("epoch")
-        except (json.JSONDecodeError, OSError):
-            pass
+    rows = read_metrics(experiment_id)
+    current_epoch = rows[-1].get("epoch") if rows else None
 
     return {
-        "run_id": status.get("run_id", d.name),
-        "experiment_id": d.name,
+        "run_id": status.get("run_id", experiment_id),
+        "experiment_id": experiment_id,
         "status": state,
         "current_epoch": current_epoch,
         "best_metric": None,
@@ -477,23 +532,36 @@ def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
     return (datetime.now(timezone.utc) - hb).total_seconds() <= stale_seconds
 
 
-def _touch_heartbeat(exp_dir: Path) -> None:
+def _touch_heartbeat(experiment_id: str) -> None:
     """Best-effort: stamp the current time into ``status.json['heartbeat']``.
 
     Called each epoch so a run still training in another process (e.g. the MCP agent) reads
     as live to a web client reconstructing run state, instead of being flagged interrupted.
     Never raises, a heartbeat failure must not break metric logging.
     """
-    status_path = exp_dir / "status.json"
-    if not status_path.is_file():
+    key = status_key(experiment_id)
+    if not store.exists(key):
         return
     try:
-        with file_transaction(status_path):
-            status = json.loads(status_path.read_text())
+        with store.transaction(key) as txn:
+            status = txn.read(key, default={})
             status["heartbeat"] = datetime.now(timezone.utc).isoformat()
-            atomic_write_json(status_path, status)
+            txn.write(key, status)
     except Exception:
         pass
+
+
+def read_metrics(experiment_id: str, *, root: Path | str | None = None) -> list[dict[str, Any]]:
+    """Every epoch row this run has logged, in order, oldest first.
+
+    An entry still being appended when the log is read is left for the next read rather than
+    returned half-formed, so a live run's tail is never served as a truncated row.
+    """
+    page = store.read_log(metrics_key(experiment_id, root=root))
+    if page.corrupt:
+        logger.warning("experiment %s metrics log has %d undecodable entries",
+                       experiment_id, len(page.corrupt))
+    return [dict(record) for record in page.records]
 
 
 def log_metrics(
@@ -501,13 +569,17 @@ def log_metrics(
     epoch: int,
     metrics: dict[str, Any],
 ) -> dict[str, Any]:
-    """Append epoch metrics to metrics.jsonl and refresh the run's liveness heartbeat."""
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    """Append epoch metrics to the run's metrics log and refresh its liveness heartbeat.
+
+    The one writer of that log: a training body routes its rows here rather than opening the
+    file beside it, so the module that declares the record's members is the module that
+    appends to them and the terminal-state lock cannot be written around.
+    """
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     # Terminal-state lock: a completed/failed run's metric history is frozen, no new epochs.
-    if _current_state(d) in _TERMINAL_STATES:
+    if _current_state(experiment_id) in _TERMINAL_STATES:
         _audit_refused(experiment_id, "log_metrics", {"epoch": epoch})
         return {"error": f"Experiment {experiment_id} is terminal; refusing to log a new epoch."}
 
@@ -516,8 +588,8 @@ def log_metrics(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **metrics,
     }
-    append_jsonl(d / "metrics.jsonl", entry)
-    _touch_heartbeat(d)
+    store.append(metrics_key(experiment_id), entry)
+    _touch_heartbeat(experiment_id)
 
     return {"experiment_id": experiment_id, "epoch": epoch, "logged": True}
 
@@ -528,21 +600,21 @@ def record_artifact(
     path: str,
 ) -> dict[str, Any]:
     """Register an artifact (model weights, predictions, etc.)."""
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    artifacts_path = d / "artifacts.json"
-    with file_transaction(artifacts_path):
-        artifacts = json.loads(artifacts_path.read_text())
+    key, state = artifacts_key(experiment_id), status_key(experiment_id)
+    with store.transaction(key, state) as txn:
+        artifacts = txn.read(key, default={})
+        current = (txn.read(state, default={}) or {}).get("state")
         # Terminal-state lock (additive-only): a new artifact name may be recorded post-completion,
         # but an existing one is frozen, no silent overwrite of a delivered pointer.
-        if name in artifacts and _current_state(d) in _TERMINAL_STATES:
+        if name in artifacts and current in _TERMINAL_STATES:
             _audit_refused(experiment_id, "record_artifact", {"artifact": name})
             return {"error": f"Experiment {experiment_id} is terminal; artifact {name!r} already "
                              f"recorded and is immutable.", "artifact": name}
         artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
-        atomic_write_json(artifacts_path, artifacts)
+        txn.write(key, artifacts)
 
     return {"experiment_id": experiment_id, "artifact": name, "path": path}
 
@@ -552,8 +624,7 @@ def update_lineage(
     **updates: Any,
 ) -> dict[str, Any]:
     """Update lineage fields (model_weights, predictions, etc.)."""
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill.
@@ -563,20 +634,20 @@ def update_lineage(
     if identity_updates:
         _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
 
-    lineage_path = d / "lineage.json"
-    with file_transaction(lineage_path):
-        lineage = json.loads(lineage_path.read_text())
+    key, state = lineage_key(experiment_id), status_key(experiment_id)
+    with store.transaction(key, state) as txn:
+        lineage = txn.read(key, default={})
         # Terminal-state lock (additive-only): once terminal, a still-empty field may take its first
         # write (the post-completion predictions link, model_weights on registration), but a
         # populated field is frozen, no overwrite of a recorded lineage edge.
-        if _current_state(d) in _TERMINAL_STATES:
+        if (txn.read(state, default={}) or {}).get("state") in _TERMINAL_STATES:
             refused = {k: v for k, v in updates.items()
                        if lineage.get(k) not in (None, "", [], {}) and lineage.get(k) != v}
             if refused:
                 _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused)})
                 updates = {k: v for k, v in updates.items() if k not in refused}
         lineage.update(updates)
-        atomic_write_json(lineage_path, lineage)
+        txn.write(key, lineage)
 
     return {"experiment_id": experiment_id, "lineage": lineage}
 
@@ -596,11 +667,10 @@ def register_model_from_experiment(
     carries none. Registers with an ``experiment:<id>`` back-reference tag and records it in
     the experiment's lineage (``model_weights``). Metrics are read, never fabricated.
     """
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    config = read_json(d / "config.json", default={})
+    config = _read_member(config_key(experiment_id), {})
 
     # Prefer metrics stored IN the checkpoint (they describe the epoch it was saved at, so a
     # best-checkpoint isn't mislabelled with a later, worse epoch's numbers). Fall back to the
@@ -622,14 +692,9 @@ def register_model_from_experiment(
         except Exception:
             final_metrics = {}
     if not final_metrics:
-        mpath = d / "metrics.jsonl"
-        if mpath.is_file():
-            lines = mpath.read_text(encoding="utf-8").strip().splitlines()
-            if lines:
-                try:
-                    final_metrics = json.loads(lines[-1])
-                except json.JSONDecodeError:
-                    final_metrics = {}
+        rows = read_metrics(experiment_id)
+        if rows:
+            final_metrics = rows[-1]
 
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -655,28 +720,26 @@ def get_experiment(
     """Read full experiment state.
 
     ``metrics`` can be paginated for long runs: ``metrics_offset`` skips epochs and
-    ``metrics_limit`` caps how many are returned (only the requested window is JSON-parsed;
-    ``n_epochs`` is always the true total). Defaults return all metrics (unchanged).
+    ``metrics_limit`` caps how many are returned; ``n_epochs`` is always the true total.
+    Defaults return all metrics.
     """
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     result: dict[str, Any] = {"experiment_id": experiment_id}
 
-    for name in ("config", "status", "artifacts", "lineage"):
-        p = d / f"{name}.json"
-        if p.exists():
-            result[name] = json.loads(p.read_text())
+    members = {"config": config_key, "status": status_key,
+               "artifacts": artifacts_key, "lineage": lineage_key}
+    for name, key_of in members.items():
+        document = _read_member(key_of(experiment_id))
+        if document is not None:
+            result[name] = document
 
-    metrics_path = d / "metrics.jsonl"
-    if metrics_path.exists():
-        lines = metrics_path.read_text().strip().splitlines()
-        result["n_epochs"] = len(lines)
-        end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
-        window = lines[metrics_offset:end]
-        result["metrics"] = [json.loads(line) for line in window]
-        result["metrics_offset"] = metrics_offset
+    rows = read_metrics(experiment_id)
+    end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
+    result["n_epochs"] = len(rows)
+    result["metrics"] = rows[metrics_offset:end]
+    result["metrics_offset"] = metrics_offset
 
     return result
 
@@ -691,9 +754,8 @@ def list_experiments() -> list[dict[str, Any]]:
     for d in sorted(root.iterdir()):
         if not d.is_dir():
             continue
-        status_path = d / "status.json"
-        if status_path.exists():
-            status = json.loads(status_path.read_text())
+        status = _read_member(status_key(d.name))
+        if isinstance(status, dict):
             experiments.append({
                 "experiment_id": d.name,
                 "state": status.get("state", "unknown"),
@@ -730,14 +792,10 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
         summary["model"] = model_source.get("builder", "unknown")
 
         # Dataset identity (the content end of the reproduce-a-number chain), from the immutable lineage.
-        lineage_path = _exp_dir(eid) / "lineage.json"
-        if lineage_path.is_file():
-            try:
-                lin = json.loads(lineage_path.read_text())
-                summary["dataset_id"] = lin.get("dataset_id")
-                summary["dataset_fingerprint"] = lin.get("dataset_fingerprint")
-            except (OSError, ValueError):
-                pass
+        lin = exp.get("lineage")
+        if isinstance(lin, dict):
+            summary["dataset_id"] = lin.get("dataset_id")
+            summary["dataset_fingerprint"] = lin.get("dataset_fingerprint")
 
         comparisons.append(summary)
 
@@ -753,20 +811,15 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
 
 def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
     """Trace the full data → model → predictions chain."""
-    d = _exp_dir(experiment_id)
-    if not d.exists():
+    if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    lineage_path = d / "lineage.json"
-    if not lineage_path.exists():
+    lineage = _read_member(lineage_key(experiment_id))
+    if lineage is None:
         return {"error": "No lineage file found"}
 
-    lineage = json.loads(lineage_path.read_text())
-
-    # Include config data source info
-    config_path = d / "config.json"
-    if config_path.exists():
-        config = json.loads(config_path.read_text())
+    config = _read_member(config_key(experiment_id))
+    if isinstance(config, dict):
         data_cfg = config.get("data", {})
         lineage["data_config"] = {
             "images_dir": data_cfg.get("images_dir"),
@@ -775,3 +828,14 @@ def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
         }
 
     return {"experiment_id": experiment_id, "lineage": lineage}
+
+
+def read_split_manifest(experiment_id: str) -> dict[str, Any]:
+    """The run's persisted split manifest, or ``{}`` when it was never written.
+
+    The one reader of that record: the membership question and the spatial-region questions
+    a calibration path asks are answered from one parse, so a consumer never re-derives the
+    record's location or its key names.
+    """
+    manifest = _read_member(split_key(experiment_id), {})
+    return manifest if isinstance(manifest, dict) else {}

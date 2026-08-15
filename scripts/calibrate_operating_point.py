@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Path to a JSON file mapping stem -> group key, overriding --group-by.")
     args = parser.parse_args(argv)
 
+    # Its own process entry point, so it binds the storage backend the seam has no default for.
+    from tcip_store.file_backend import bind_default
+
+    bind_default()
+
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset

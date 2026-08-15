@@ -111,7 +111,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     # ---- the custom loop completed through the envelope ----
     assert run.status == "completed", run.error
     ckpt = out / "model_best.pt"
-    assert ckpt.is_file() and (out / "metrics.jsonl").is_file()
+    assert ckpt.is_file()
 
     # ---- (a) modifications took effect end to end (rebuilt from the trained checkpoint) ----
     expected_ratios = tuple(gt_aspect_ratios(gt_wh))
@@ -144,7 +144,12 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         e["file"] for e in manifest["files"] if e["src"] == src_file)).is_file()
 
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
-    metric_rows = [json.loads(x) for x in (out / "metrics.jsonl").read_text().splitlines()]
+    # The loop's rows land on the experiment's own metrics log, not beside the weights in a
+    # separately-computed output dir.
+    from tcip_mcp.experiments import read_metrics
+
+    assert not (out / "metrics.jsonl").exists()
+    metric_rows = read_metrics("expBespoke")
     assert metric_rows and all("train_loss" in r for r in metric_rows)
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "completed"]  # opened + closed around the body

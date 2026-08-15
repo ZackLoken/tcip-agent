@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -71,14 +70,13 @@ def test_metrics_route_handles_missing_file(client: TestClient, tmp_path: Path) 
     assert body["metrics"] == []
 
 
-def test_metrics_route_reads_jsonl(client: TestClient, tmp_path: Path) -> None:
+def test_metrics_route_reads_the_rows_the_run_logged(client: TestClient, tmp_path: Path) -> None:
+    from tcip_mcp.experiments import create_experiment, log_metrics
+
     run_id = "exp-abc"
-    metrics_path = tmp_path / ".tcip" / "experiments" / run_id / "metrics.jsonl"
-    metrics_path.parent.mkdir(parents=True)
-    rows = [{"epoch": 1, "loss": 0.9}, {"epoch": 2, "loss": 0.4}]
-    with metrics_path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row) + "\n")
+    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
+    log_metrics(run_id, 1, {"loss": 0.9})
+    log_metrics(run_id, 2, {"loss": 0.4})
 
     resp = client.get(
         f"/api/training/runs/{run_id}/metrics",
@@ -86,52 +84,42 @@ def test_metrics_route_reads_jsonl(client: TestClient, tmp_path: Path) -> None:
     )
     body = resp.json()
     assert body["exists"] is True
-    assert body["metrics"] == rows
+    assert [(r["epoch"], r["loss"]) for r in body["metrics"]] == [(1, 0.9), (2, 0.4)]
 
 
-def test_read_metrics_after_resumes_from_byte_offset(tmp_path: Path) -> None:
-    # The websocket poll must remember a byte offset and seek there, not re-parse the file
-    # from the start every tick: a resumed read only returns rows written since that offset.
-    from tcip_web.routes.training import _read_metrics_after
+def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_path: Path) -> None:
+    """An entry still being appended is held back, never pushed half-formed.
 
-    path = tmp_path / "metrics.jsonl"
-    path.write_text(json.dumps({"epoch": 1}) + "\n", encoding="utf-8")
+    A row's bytes land on disk before its terminator does, so a stream that consumed the
+    fragment would skip the completed row permanently. The stream reads through the log's own
+    cursor, which holds that fragment back until it is whole.
+    """
+    import asyncio
 
-    rows, offset = _read_metrics_after(path, 0)
-    assert rows == [{"epoch": 1}]
-    assert offset == path.stat().st_size
+    from tcip_mcp.experiments import (
+        create_experiment, experiments_dir, log_metrics, update_status,
+    )
+    from tcip_web.routes.training import _stream_metrics
 
-    # Nothing new yet: re-polling from the remembered offset yields no rows.
-    rows2, offset2 = _read_metrics_after(path, offset)
-    assert rows2 == []
-    assert offset2 == offset
+    run_id = "exp-streamed"
+    create_experiment(run_id, {"model_source": {"builder": "m:f"}})
+    log_metrics(run_id, 1, {"loss": 0.9})
+    log_metrics(run_id, 2, {"loss": 0.4})
+    update_status(run_id, "completed")  # a terminal run ends the poll loop after one tick
+    with (experiments_dir() / run_id / "metrics.jsonl").open("ab") as f:
+        f.write(b'{"epoch": 3')
 
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"epoch": 2}) + "\n")
+    sent: list[dict] = []
 
-    rows3, offset3 = _read_metrics_after(path, offset2)
-    assert rows3 == [{"epoch": 2}]
-    assert offset3 == path.stat().st_size
+    class _Socket:
+        async def send_json(self, payload: dict) -> None:
+            sent.append(payload)
 
+    asyncio.run(_stream_metrics(_Socket(), str(tmp_path), run_id, poll_seconds=0.0))
 
-def test_read_metrics_after_defers_partial_trailing_line(tmp_path: Path) -> None:
-    # A writer's line lands on disk before its trailing newline flushes; a seek-based reader
-    # must not consume that partial line, or it would permanently skip the completed row.
-    from tcip_web.routes.training import _read_metrics_after
-
-    path = tmp_path / "metrics.jsonl"
-    path.write_bytes(json.dumps({"epoch": 1}).encode("utf-8") + b"\n" + b'{"epoch": 2')
-
-    rows, offset = _read_metrics_after(path, 0)
-    assert rows == [{"epoch": 1}]
-    assert offset < path.stat().st_size  # the partial line was not consumed
-
-    with path.open("ab") as f:
-        f.write(b', "loss": 0.1}\n')
-
-    rows2, offset2 = _read_metrics_after(path, offset)
-    assert rows2 == [{"epoch": 2, "loss": 0.1}]
-    assert offset2 == path.stat().st_size
+    rows = [msg["row"] for msg in sent if msg["type"] == "metric"]
+    assert [(r["epoch"], r["loss"]) for r in rows] == [(1, 0.9), (2, 0.4)]
+    assert sent[-1]["type"] == "status"
 
 
 def test_compare_route_handles_empty_ids(client: TestClient) -> None:

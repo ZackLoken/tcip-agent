@@ -36,18 +36,19 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
     own ``config.json``, a small patch of the data section, not a rewrite. ``replace`` swaps
     the tiling record wholesale instead of merging: an untiled run's record must not keep a
     stale requested ``tile_size`` a merge would leave behind. ``train_native_size``, when
-    stamped, lands beside it. Never sinks the run if the experiment directory doesn't exist
+    stamped, lands beside it. Never sinks the run if there is no experiment record to patch
     (experiment tracking is best-effort throughout this path, same as every other write in
     it)."""
     try:
-        from tcip_mcp.experiments import experiments_dir
-        from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
+        from tcip_store import store
 
-        exp_config_path = experiments_dir() / experiment_id / "config.json"
-        if not exp_config_path.is_file():
+        from tcip_mcp.experiments import config_key
+
+        key = config_key(experiment_id)
+        if not store.exists(key):
             return
-        with file_transaction(exp_config_path):
-            cfg = json.loads(exp_config_path.read_text())
+        with store.transaction(key) as txn:
+            cfg = txn.read(key, default={})
             data_cfg = cfg.setdefault("data", {})
             if replace:
                 data_cfg["tiling"] = dict(tiling_cfg)
@@ -55,7 +56,7 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
                 data_cfg.setdefault("tiling", {}).update(tiling_cfg)
             if train_native_size is not None:
                 data_cfg["train_native_size"] = list(train_native_size)
-            atomic_write_json(exp_config_path, cfg)
+            txn.write(key, cfg)
     except Exception:
         logger.warning("tiling geometry patch-back failed for %s", experiment_id, exc_info=True)
 
@@ -68,22 +69,23 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
     ``run()`` right after the dataset is built (mirroring where the tiling patch fires), though
     unlike tile geometry this fact is a pure function of ``data_cfg`` and would be resolvable
     before the build too, the call site is chosen for symmetry with the tiling patch, not because
-    the dataset build is a precondition for it. Never sinks the run if the experiment directory
-    doesn't exist."""
+    the dataset build is a precondition for it. Never sinks the run if there is no experiment
+    record to patch."""
     try:
-        from tcip_mcp.experiments import experiments_dir
-        from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
+        from tcip_store import store
 
-        exp_config_path = experiments_dir() / experiment_id / "config.json"
-        if not exp_config_path.is_file():
+        from tcip_mcp.experiments import config_key
+
+        key = config_key(experiment_id)
+        if not store.exists(key):
             return
-        with file_transaction(exp_config_path):
-            cfg = json.loads(exp_config_path.read_text())
+        with store.transaction(key) as txn:
+            cfg = txn.read(key, default={})
             data_cfg = cfg.setdefault("data", {})
             data_cfg["subject"] = subject
             data_cfg["attribute"] = attribute
             data_cfg["id_map"] = dict(id_map)
-            atomic_write_json(exp_config_path, cfg)
+            txn.write(key, cfg)
     except Exception:
         logger.warning("class-id-map patch-back failed for %s", experiment_id, exc_info=True)
 
@@ -145,6 +147,10 @@ def run(run_id: str, experiment_id: str, config_path: str, output_dir: str, resu
     # This is its own process entry point: without this the whole run reads through GDAL's
     # stock cache default instead of the platform budget the server/backend entry points set.
     configure_gdal_cache()
+    # Its own process entry point, so it binds its own storage backend too.
+    from tcip_store.file_backend import bind_default
+
+    bind_default()
 
     config = json.loads(Path(config_path).read_text())
     run_obj = attach_run(run_id, config, output_dir)
