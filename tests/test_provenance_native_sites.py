@@ -15,8 +15,8 @@ from PIL import Image
 
 def test_user_id_prefixes_humans_idempotently():
     from tcip_web.identity import user_id
-    assert user_id("zack") == "user:zack"
-    assert user_id("user:zack") == "user:zack"   # idempotent, never doubles
+    assert user_id("breeder") == "user:breeder"
+    assert user_id("user:breeder") == "user:breeder"   # idempotent, never doubles
     assert user_id("") == "user:gui"             # never bare / empty
 
 
@@ -30,8 +30,8 @@ def test_resolve_user_prefers_explicit(monkeypatch):
 
 def test_current_user_env_override(monkeypatch):
     from tcip_web import identity
-    monkeypatch.setenv("TCIP_USER", "zack")
-    assert identity.current_user() == "zack"
+    monkeypatch.setenv("TCIP_USER", "breeder")
+    assert identity.current_user() == "breeder"
 
 
 # ── MCP save_annotations: optional producer created_by ───────────────────────

@@ -17,7 +17,7 @@ Schema::
           "attributes": {"<attribute>": "<value>"},   # attr name -> value name
           "score": 0.91,                        # predictions only
           "created_by": "sam", "created_at": "...",
-          "accepted_by": "user:zack", "accepted_at": "..." } ] }
+          "accepted_by": "user:breeder", "accepted_at": "..." } ] }
 
 Integer class ids never appear on disk; a name→id assignment is a per-training-run artifact
 (:mod:`tcip_mcp.class_registry`). :func:`to_coco_dataset` takes that run's ``id_map`` (a plain dict,

@@ -112,10 +112,10 @@ def test_coco_roundtrip_preserves_provenance(tmp_path):
     from tcip_annotation.format_io import parse_coco_annotations, write_coco
     import json as _json
 
-    b = Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40), created_by="derived:user:zack",
-                   created_at="2026-02-11T00:00:00+00:00", accepted_by="user:zack")
+    b = Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
+                   created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")
     p = tmp_path / "dataset.json"
     write_coco(str(p), {"IMG_0001.JPG": ([b], 100, 80)})
     anns = parse_coco_annotations(_json.loads(p.read_text()), file_name="IMG_0001.JPG")
-    assert anns[0].created_by == "derived:user:zack"
-    assert anns[0].accepted_by == "user:zack"
+    assert anns[0].created_by == "derived:user:breeder"
+    assert anns[0].accepted_by == "user:breeder"

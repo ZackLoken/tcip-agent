@@ -147,7 +147,7 @@ export function ProjectPicker() {
           <input
             type="text"
             className="tcip-input max-w-xs"
-            placeholder="your name (e.g. zack)"
+            placeholder="your name (e.g. jordan)"
             value={user}
             onChange={(e) => setUser(e.target.value)}
             spellCheck={false}

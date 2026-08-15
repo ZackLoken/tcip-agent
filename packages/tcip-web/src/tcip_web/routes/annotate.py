@@ -61,7 +61,7 @@ class SavePayload(BaseModel):
     # file changed underneath the client (a concurrent agent or second browser tab), so its edits
     # aren't clobbered. Omit to skip the check.
     base_mtime: Optional[str] = None
-    # GUI-set annotator identity (bare name, e.g. "zack"); stamped as created_by ("user:<name>").
+    # GUI-set annotator identity (bare name, e.g. "breeder"); stamped as created_by ("user:<name>").
     # Omitted by non-GUI callers -> backend falls back to the OS/env user.
     user: Optional[str] = None
 

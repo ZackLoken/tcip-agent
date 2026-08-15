@@ -52,7 +52,7 @@ def _push_state(tmp_path: Path, image: str, *, received_at: float,
         "received_at": received_at, "project_root": str(tmp_path), "tab": "annotate",
         "image": Path(image).name, "image_path": image,
         "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
-        "user": "zack", "mode": "polygon",
+        "user": "breeder", "mode": "polygon",
         "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
     }))
     (state_dir / "canvas_shapes.json").write_text(json.dumps({
