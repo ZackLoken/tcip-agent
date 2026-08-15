@@ -147,9 +147,14 @@ def test_no_subject_threaded_carries_no_confirmation(tmp_path: Path):
             if image_status_path(out / name).is_file()] == []
 
 
-def test_carried_registry_is_byte_identical_to_the_source_registry(tmp_path: Path):
-    """The split's registry is the source's own document, not a re-serialization of it: a digest
-    or an id assignment taken against either one has to read the same declared order."""
+def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Path):
+    """The split's registry declares what the source declares: a digest or an id assignment
+    taken against either one has to read the same declared order.
+
+    Every record now shares one spelling, so equal bytes no longer distinguish the carried
+    document from a re-serialization of it; what this pins is that nothing was dropped,
+    re-ordered or respelled on the way into the split.
+    """
     root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
     out = tmp_path / "splits"
     result = make_splits(

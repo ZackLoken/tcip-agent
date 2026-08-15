@@ -28,7 +28,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from tcip_store import Key, StoreDescriptor, json_codec, register_store, replace
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, replace
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_web.paths import assert_path_allowed
@@ -71,7 +71,7 @@ def _register_canvas_store(name: str) -> None:
             name=name,
             kind="record",
             key_fields=("document",),
-            codec=json_codec(),
+            codec=RECORD_JSON,
             concurrency="last_writer_wins",
             durable=False,
             locator=_CANVAS_DOC,

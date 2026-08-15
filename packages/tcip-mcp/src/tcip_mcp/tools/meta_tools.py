@@ -16,9 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tcip_store import (
+    RECORD_JSON,
     Key,
     StoreDescriptor,
-    json_codec,
     register_store,
     replace,
     text_codec,
@@ -41,8 +41,12 @@ REPORT_CATEGORIES = {
 }
 
 
-_REPORT_DOC = RootedFileLocator(prefix=(".tcip", "reports"), suffix=".jsonl")
-"""One friction report per document, under the project."""
+_REPORT_DOC = RootedFileLocator(prefix=(".tcip", "reports"), suffix=".json")
+"""One friction report per document, under the project.
+
+A report is one whole JSON document, not a line of a stream, so it carries the extension
+that says so and every reader parses the file rather than its first line.
+"""
 
 _RETROSPECTIVE_DOC = RootedFileLocator(prefix=(".tcip", "retrospectives"), suffix=".md")
 """One retrospective per project identifier, under the project."""
@@ -55,7 +59,7 @@ register_store(
         name=FRICTION_REPORT_STORE,
         kind="record",
         key_fields=("report",),
-        codec=json_codec(indent=None, default=None, trailing_newline=True),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_REPORT_DOC,
     )
@@ -105,6 +109,22 @@ def _retrospective_path(project_path: str, project_id: str) -> Path:
 def _reports_dir(project_path: str) -> Path:
     """Where the report documents live, without creating anything: the read side scans it."""
     return Path(project_path, *_REPORT_DOC.prefix)
+
+
+def report_documents(project_path: str) -> list[Path]:
+    """Every friction report under a project, most recently written first.
+
+    The one place a reader learns which files are reports, so the extension is stated by the
+    store's locator rather than restated as a glob by each consumer.
+    """
+    reports_dir = _reports_dir(project_path)
+    if not reports_dir.is_dir():
+        return []
+    return sorted(
+        reports_dir.glob(f"*{_REPORT_DOC.suffix}"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
 
 
 def _retrospectives_dir(project_path: str) -> Path:
@@ -233,11 +253,7 @@ def _load_reports(
             "note": f"{reports_dir} does not exist yet, no friction reports.",
         }
 
-    files = sorted(
-        reports_dir.glob(f"*{_REPORT_DOC.suffix}"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    files = report_documents(project_path)
 
     cat = category.strip()
     needle = filter_substring.lower().strip()
@@ -245,8 +261,8 @@ def _load_reports(
     for path in files:
         raw = path.read_text(encoding="utf-8").strip()
         try:
-            entry = json.loads(raw.splitlines()[0]) if raw else {}
-        except (json.JSONDecodeError, IndexError):
+            entry = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
             entry = {"detail": raw, "category": "", "malformed": True}
 
         if cat and entry.get("category") != cat:

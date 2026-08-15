@@ -26,9 +26,10 @@ Concurrency = Literal["cas", "last_writer_wins"]
 class Codec(Protocol):
     """How one store's values become bytes and come back.
 
-    There is no global codec. The platform's current writers genuinely disagree on
-    separators, indentation and trailing newlines, and byte compatibility means preserving
-    that disagreement per store rather than rewriting every file on its next touch.
+    JSON stores do not choose a spelling. Every record encodes through ``RECORD_JSON`` and
+    every log through ``LOG_JSON``, and ``register_store`` refuses anything else unless the
+    descriptor names its exemption, so a bespoke spelling is a decision someone wrote down
+    rather than a knob someone reached for.
     """
 
     def encode(self, value: Any) -> bytes: ...
@@ -56,6 +57,10 @@ class StoreDescriptor:
 
     ``locator`` is the file backend's identity map for this store. Other backends key on
     (store, scope, parts) and ignore it.
+
+    ``codec_exemption`` is why this store does not encode through the canonical JSON codec.
+    It is required of any record or log carrying some other JSON spelling, and reading it is
+    how a reviewer finds every store that opted out.
     """
 
     name: str
@@ -67,6 +72,7 @@ class StoreDescriptor:
     enumerable: bool = False
     path_readable: bool = False
     locator: "Locator | None" = None
+    codec_exemption: str = ""
     declared_in: str = ""
 
 
@@ -79,7 +85,10 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
     Refuses a name that is already registered: two declarations of one name are two stores
     wearing the same identity, and whichever imported second would silently win. Refuses a
     record with no concurrency policy, and a log or blob that declares one, because the
-    policy is a statement about read-modify-write that only a record can make.
+    policy is a statement about read-modify-write that only a record can make. Refuses a
+    JSON spelling that is not the canonical one for the kind, unless the descriptor states
+    why in ``codec_exemption``, so a module nothing has imported cannot quietly hold a
+    bespoke codec that no test enumerating the registry would ever see.
     """
     if descriptor.name in _registry:
         owner = _registry[descriptor.name].declared_in
@@ -108,11 +117,44 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
             f"log store {descriptor.name!r} cannot relax durability: an append returns only "
             "once the entry will survive a crash, so the declaration would be ignored"
         )
+    _check_canonical_codec(descriptor)
 
     frame = sys._getframe(1)
     registered = replace(descriptor, declared_in=str(frame.f_globals.get("__name__", "?")))
     _registry[descriptor.name] = registered
     return registered
+
+
+def _check_canonical_codec(descriptor: StoreDescriptor) -> None:
+    """Refuse a record or log whose codec is neither canonical nor a stated exemption.
+
+    Text stores are exempt by kind rather than by declaration: a text codec has no spelling
+    to choose, since its only knobs are the encoding and a trailing newline, both of which
+    are the stored value itself. Everything else that is not ``RECORD_JSON`` or ``LOG_JSON``
+    must say why in ``codec_exemption``.
+    """
+    if descriptor.kind == "blob":
+        if descriptor.codec_exemption:
+            raise ValueError(
+                f"blob store {descriptor.name!r} declares a codec exemption but has no codec"
+            )
+        return
+    canonical = RECORD_JSON if descriptor.kind == "record" else LOG_JSON
+    exempt_by_kind = isinstance(descriptor.codec, _TextCodec)
+    if descriptor.codec is canonical or exempt_by_kind:
+        if descriptor.codec_exemption:
+            raise ValueError(
+                f"store {descriptor.name!r} declares a codec exemption it does not use: its "
+                "codec is already the one every store of its kind carries"
+            )
+        return
+    if not descriptor.codec_exemption:
+        name = "RECORD_JSON" if descriptor.kind == "record" else "LOG_JSON"
+        raise ValueError(
+            f"{descriptor.kind} store {descriptor.name!r} carries a codec that is not "
+            f"{name}. Encode through {name} so every store of its kind reads the same, or "
+            "state why this one cannot in codec_exemption."
+        )
 
 
 def get_descriptor(store: str) -> StoreDescriptor:
@@ -171,13 +213,13 @@ def _calls_for(kind: Kind) -> str:
 
 @dataclass(frozen=True)
 class _JsonCodec:
-    """A JSON codec whose exact spelling is fixed per store."""
+    """A JSON codec with one fixed spelling, instantiated twice and never per store."""
 
     indent: int | None
     ensure_ascii: bool
     default: Callable[[Any], Any] | None
-    separators: tuple[str, str] | None
     allow_nan: bool
+    sort_keys: bool
     trailing_newline: bool
 
     def encode(self, value: Any) -> bytes:
@@ -186,8 +228,8 @@ class _JsonCodec:
             indent=self.indent,
             ensure_ascii=self.ensure_ascii,
             default=self.default,
-            separators=self.separators,
             allow_nan=self.allow_nan,
+            sort_keys=self.sort_keys,
         )
         if self.trailing_newline:
             text += "\n"
@@ -197,40 +239,60 @@ class _JsonCodec:
         return json.loads(data.decode("utf-8"))
 
 
-def json_codec(
-    *,
-    indent: int | None = 2,
-    ensure_ascii: bool = True,
-    default: Callable[[Any], Any] | None = str,
-    separators: tuple[str, str] | None = None,
-    allow_nan: bool = True,
-    trailing_newline: bool = False,
-) -> Codec:
-    """A JSON codec with every knob the platform's existing writers actually differ on.
+RECORD_JSON = _JsonCodec(
+    indent=2,
+    ensure_ascii=False,
+    default=None,
+    allow_nan=False,
+    sort_keys=False,
+    trailing_newline=True,
+)
+"""Every JSON record's spelling.
 
-    ``trailing_newline`` is a knob rather than a convention because three of today's writers
-    emit one and a codec without it would drop a byte on the first write through the seam.
-    A log's codec must leave ``indent`` at None: an entry is one line.
-    """
-    return _JsonCodec(
-        indent=indent,
-        ensure_ascii=ensure_ascii,
-        default=default,
-        separators=separators,
-        allow_nan=allow_nan,
-        trailing_newline=trailing_newline,
-    )
+``default=None`` rather than ``str``: converting an unserializable object to its ``repr``
+turns a measurement into a string that reads as valid forever after, so the encode raises
+and the writer converts the value explicitly instead. ``allow_nan=False`` because NaN and
+Infinity are not JSON and no strict parser, the breeder's browser included, will read them;
+a non-finite measurement is represented by its producer with a reason attached.
+``sort_keys=False`` because two records carry meaning in their key order: ``classes.json``'s
+subject and attribute sequences are read back as ordered tuples, and re-ordering them would
+be the codec changing content rather than spelling.
+"""
+
+LOG_JSON = _JsonCodec(
+    indent=None,
+    ensure_ascii=False,
+    default=None,
+    allow_nan=False,
+    sort_keys=False,
+    trailing_newline=False,
+)
+"""Every JSON log entry's spelling.
+
+An entry is one line, so ``indent`` stays None and the backend supplies the terminating
+newline. ``sort_keys=False`` keeps the authored field order a human tailing the file reads.
+"""
 
 
 @dataclass(frozen=True)
 class _TextCodec:
-    """A plain-text codec."""
+    """A codec for a store whose value is the text itself.
+
+    ``encode`` refuses anything but ``str``: calling ``str()`` on an arbitrary object here
+    would fabricate a value out of a repr exactly the way a JSON ``default`` does. A caller
+    holding a number formats it before it reaches the store.
+    """
 
     encoding: str
     trailing_newline: bool
 
     def encode(self, value: Any) -> bytes:
-        text = str(value)
+        if not isinstance(value, str):
+            raise TypeError(
+                f"a text store holds text, so it cannot encode {type(value).__name__}; "
+                "format the value into a string before writing it"
+            )
+        text = value
         if self.trailing_newline and not text.endswith("\n"):
             text += "\n"
         return text.encode(self.encoding)

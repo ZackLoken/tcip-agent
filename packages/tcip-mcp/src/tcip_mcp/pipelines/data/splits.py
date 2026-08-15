@@ -35,11 +35,11 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from tcip_store import (
+    RECORD_JSON,
     BadKey,
     DecodeError,
     Key,
     StoreDescriptor,
-    json_codec,
     register_store,
     store,
 )
@@ -664,7 +664,7 @@ register_store(
         name=CAL_HOLDOUT_LOCK_STORE,
         kind="record",
         key_fields=("identity_hash",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_CalHoldoutLockLocator(),
     )

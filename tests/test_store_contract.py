@@ -25,14 +25,35 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 import tcip_store as ts
-from tcip_annotation import json_io, review_engine
-from tcip_annotation.state import Annotation, BBox
-from tcip_mcp import class_registry, dataset_layout, experiments, model_registry, workspace
-from tcip_mcp.tools import project_tools
-from tcip_mcp.utils.atomic_io import atomic_write_json
+from tcip_annotation import format_io, json_io, review_engine
+from tcip_mcp import (
+    audit,
+    dataset_layout,
+    experiments,
+    model_registry,
+    project_status,
+    traits,
+    web_client,
+    workspace,
+)
+from tcip_mcp.pipelines import model_build, resolution
+from tcip_mcp.pipelines.data import band_groups, splits
+from tcip_mcp.pipelines.feedback import materialize
+from tcip_mcp.pipelines.postprocessing import plant_mapping
+from tcip_mcp.pipelines.training import evaluation, generic_trainer, hpo
+from tcip_mcp.tools import (
+    data_tools,
+    inference_tools,
+    meta_tools,
+    project_tools,
+    training_tools,
+    vision_tools,
+)
 from tcip_store.file_backend import FileBackend, RootedFileLocator
+from tcip_web import agent_learning_capture
 from tcip_web import jobstore
-from tcip_web.routes import canvas
+from tcip_web import state as web_state
+from tcip_web.routes import canvas, sessions
 from tests._store_worker import (
     BLOB,
     CAS,
@@ -132,7 +153,7 @@ def test_a_failed_encode_leaves_the_previous_value_and_no_artifact(store):
     key = store.key(STRICT, "encodable")
     ts.replace(key, {"n": 1})
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ts.StoreError):
         ts.replace(key, {"n": float("nan")})
 
     assert ts.read(key) == {"n": 1}
@@ -421,14 +442,14 @@ def test_the_registry_refuses_a_declaration_that_would_be_ignored_or_shadowed():
     with pytest.raises(ValueError) as unpoliced:
         ts.register_store(
             ts.StoreDescriptor(name="contract_unpoliced", kind="record", key_fields=("name",),
-                               codec=ts.json_codec())
+                               codec=ts.RECORD_JSON)
         )
     assert "concurrency=" in str(unpoliced.value)
 
     with pytest.raises(ValueError) as relaxed_log:
         ts.register_store(
             ts.StoreDescriptor(name="contract_relaxed_log", kind="log", key_fields=("name",),
-                               codec=ts.json_codec(indent=None), durable=False)
+                               codec=ts.LOG_JSON, durable=False)
         )
     assert "durability" in str(relaxed_log.value)
 
@@ -437,13 +458,46 @@ def test_the_registry_refuses_a_declaration_that_would_be_ignored_or_shadowed():
             name="contract_late_declaration",
             kind="record",
             key_fields=("name",),
-            codec=ts.json_codec(),
+            codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             locator=RootedFileLocator(prefix=("late",), suffix=".json"),
         )
     )
     assert declared.declared_in == __name__
     assert "contract_late_declaration" in ts.registered_stores()
+
+
+def test_the_registry_refuses_a_bespoke_json_spelling_and_admits_a_stated_exemption():
+    """A store cannot quietly pick its own spelling: the check is in ``register_store``, so a
+    module nothing has imported is caught too, and an exemption is written down where a
+    reader of the declaration finds it."""
+    from tcip_store.registry import _JsonCodec
+
+    bespoke = _JsonCodec(indent=4, ensure_ascii=True, default=str, allow_nan=True,
+                         sort_keys=True, trailing_newline=False)
+
+    with pytest.raises(ValueError) as refused:
+        ts.register_store(
+            ts.StoreDescriptor(name="contract_bespoke_codec", kind="record",
+                               key_fields=("name",), codec=bespoke,
+                               concurrency="last_writer_wins")
+        )
+    assert "RECORD_JSON" in str(refused.value)
+    assert "contract_bespoke_codec" not in ts.registered_stores()
+
+    declared = ts.register_store(
+        ts.StoreDescriptor(
+            name="contract_stated_exemption",
+            kind="record",
+            key_fields=("name",),
+            codec=bespoke,
+            codec_exemption="the scaffolding this store exists for is not JSON",
+            concurrency="last_writer_wins",
+            locator=RootedFileLocator(prefix=("exempt",), suffix=".txt"),
+        )
+    )
+    assert declared.codec_exemption
+    assert ts.get_descriptor("trait_specs").codec_exemption
 
 
 def test_an_operation_refuses_a_store_of_the_wrong_kind(store):
@@ -643,20 +697,14 @@ def test_a_rooted_locator_inverts_its_own_placement(store):
     assert store.path(key) == store.root / "nested" / "2026-03-04" / "img_0001.json"
 
 
-def test_a_codec_writes_the_exact_bytes_its_spelling_declares():
-    payload = {"b": 1, "a": "ü"}
+def test_a_codec_round_trips_the_value_it_encoded():
+    """Decoding what a codec wrote returns what went in, for both JSON kinds and for text."""
+    payload = {"b": 1, "a": "ü", "nested": {"ratio": 0.5}, "absent": None}
 
-    assert ts.json_codec().encode(payload) == json.dumps(payload, indent=2, default=str).encode()
-    assert ts.json_codec(indent=1, ensure_ascii=False, default=None, allow_nan=False).encode(
-        payload
-    ) == json.dumps(payload, ensure_ascii=False, indent=1, allow_nan=False).encode()
-    assert ts.json_codec(indent=None, ensure_ascii=False, separators=(",", ":")).encode(
-        payload
-    ) == json.dumps(payload, separators=(",", ":"), ensure_ascii=False, default=str).encode()
-    assert ts.json_codec(default=None, trailing_newline=True).encode(payload) == (
-        json.dumps(payload, indent=2) + "\n"
-    ).encode()
+    assert ts.RECORD_JSON.decode(ts.RECORD_JSON.encode(payload)) == payload
+    assert ts.LOG_JSON.decode(ts.LOG_JSON.encode(payload)) == payload
     assert ts.text_codec().encode("port 8765") == b"port 8765"
+    assert ts.text_codec(trailing_newline=True).encode("ü") == "ü\n".encode("utf-8")
 
 
 class _RecordingBackend(FileBackend):
@@ -733,141 +781,73 @@ def test_lock_files_and_staged_temp_files_are_never_keys(store):
     assert ts.keys(LWW, str(store.root)) == [key]
 
 
-# ── the platform's own stores: same bytes, same path ────────────────────────────
+# ── the platform's own stores: same codec, same path ────────────────────────────
 
+REPORT_UNDER_TEST = "20260304T120000Z_missing_tool_a1b2"
+RETROSPECTIVE_UNDER_TEST = "project_under_test"
+PROPOSAL_STEM = "a_1"
+TRAIT_UNDER_TEST = "trait_under_test"
+EXPERIMENT = "exp_042"
+STUDY = "hpo_1a2b3c4d"
+TRIAL_DIR = "trial_00000"
+LOCK_IDENTITY = "d41d8cd98f00b204"
+SWEEP_IDENTITY = "7f3a1b9c2d4e5f60"
+SNAPSHOT_CONTENT = "ab12cd34"
+SNAPSHOT_FILENAME = "my_model.py"
+IMAGE_DATE = "2026-03-04"
+IMAGE_STEM = "a_1"
+IMAGE_EXT = ".JPG"
 
-def _write_status(root: Path) -> Path:
-    path = dataset_layout.image_status_path(root)
-    atomic_write_json(path, {"catkin/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}})
-    return path
-
-
-def _write_status_digest(root: Path) -> Path:
-    path = dataset_layout.image_status_digest_path(root)
-    atomic_write_json(path, {"catkin/2026-03-04": {"a_1.jpg": "9f2c"}})
-    return path
-
-
-def _write_view_coverage(root: Path) -> Path:
-    path = dataset_layout.view_coverage_path(root)
-    atomic_write_json(path, {"catkin/2026-03-04": {"a_1.jpg": {
-        "grid": {"rows": 3, "cols": 3}, "cells_served_at_native": ["r1c1"],
-        "cells_swept": ["r1c1"]}}})
-    return path
-
-
-def _write_region_completeness(root: Path) -> Path:
-    path = dataset_layout.region_completeness_path(root)
-    atomic_write_json(path, {"catkin/orthö": {"grid": {"rows": 2, "cols": 2},
-                                              "cells_complete": ["r1c1"], "stem": "orthö"}})
-    return path
-
-
-def _write_region_completeness_digest(root: Path) -> Path:
-    path = dataset_layout.region_completeness_digest_path(root)
-    atomic_write_json(path, {"catkin/orthö": {"r1c1": "3ab9"}})
-    return path
-
-
-def _write_class_registry(root: Path) -> Path:
-    path = dataset_layout.classes_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    registry = class_registry.registry_from_dict({"catkin": {"description": "a männlich flower"}})
-    class_registry.write_registry(path, registry)
-    return path
-
-
-def _write_dataset_identity(root: Path) -> Path:
-    (root / "images").mkdir(parents=True, exist_ok=True)
-    project_tools.register_dataset(str(root), crop="hazelnut")
-    return dataset_layout.dataset_identity_path(root)
-
-
-def _write_labels(root: Path) -> Path:
-    path = dataset_layout.annotation_path(root, "2026-03-04", "a_1")
-    json_io.write_annotations(
-        path, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 3.5, 4.5),
-                          attributes={"elongation": "elongiert"}, created_by="ü")], 640, 480)
-    return path
-
-
-def _write_predictions(root: Path) -> Path:
-    path = dataset_layout.prediction_path(root, "live", "2026-03-04", "a_1")
-    json_io.write_annotations(
-        path, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 3.5, 4.5), score=0.75)],
-        640, 480)
-    return path
+CHECKPOINT_BYTES = b"PK\x03\x04not a real archive, only bytes handed to the store\x00\xff"
+SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
+IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
+LABEL_BYTES = '{"annotations": [{"subject": "catkin", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
+COCO_BYTES = '{"images": [{"file_name": "ü_2.jpg"}], "annotations": []}'.encode("utf-8")
 
 
 def _review_state_dir(root: Path) -> Path:
     return root / ".tcip" / "state"
 
 
-def _write_review_verdict(root: Path) -> Path:
-    engine = review_engine.ReviewEngine(_review_state_dir(root), current_user="ü")
-    engine.mark_image_reviewed("a_1.jpg")
-    return engine._shard_path("a_1.jpg")
+def _generic_label_dir(root: Path) -> Path:
+    """A label tree no layout resolver describes, the shape a materialized split writes."""
+    return root / "labels"
 
 
-def _write_canvas_meta(root: Path) -> Path:
-    path = canvas.meta_path(str(root))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    canvas._write_json_no_fsync(path, {"schema_version": 1, "tab": "annotate", "image": "ü.jpg"})
-    return path
+def _band_group_dir(root: Path) -> Path:
+    return root / "images"
 
 
-def _write_canvas_geometry(root: Path) -> Path:
-    path = canvas.shapes_path(str(root))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    canvas._write_json_no_fsync(path, {"image_path": "ü.jpg", "tab": "annotate", "shapes": []})
-    return path
+def _split_dir(root: Path) -> Path:
+    """A split output directory, the shape a caller asks a partition to be written into."""
+    return root / "splits"
 
 
-def _write_model_registry(root: Path) -> Path:
-    checkpoint = root / "weights.pt"
-    checkpoint.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint.write_bytes(b"stand-in for checkpoint bytes")
-    model_registry.ModelRegistry(str(root)).register_model(
-        "hazelnut_catkin_detector_v1", str(checkpoint), {"epochs": 3}, kind="tcip_module")
-    return model_registry.registry_index_path(root)
+def _curated_dir(root: Path) -> Path:
+    """A curated dataset's output directory, wherever the caller asked it to be materialized."""
+    return root / "curated"
 
 
-def _write_job_registry(root: Path) -> Path:
-    jobstore.persist("inference_jobs", [{"id": "j1", "status": "completed"}])
-    return jobstore._state_path("inference_jobs")
+def _coco_dir(root: Path) -> Path:
+    """A directory holding an assembled COCO view, which no layout resolver describes."""
+    return root / "export"
 
 
-def _write_active_marker(root: Path) -> Path:
-    workspace.set_active_project("hazelnut_catkin_valley")
-    return workspace.active_marker_path()
+def _plant_mapping_dir(root: Path) -> Path:
+    return root / ".tcip" / "state"
 
 
-def _created_experiment(root: Path) -> Path:
-    if not experiments.experiment_exists(EXPERIMENT):
-        experiments.create_experiment(EXPERIMENT, {"model": "faster_rcnn"}, data_source="ds")
-    return experiments.experiment_dir(EXPERIMENT)
+def _stamp_bucket(root: Path) -> Path:
+    """The prediction bucket a run's provenance stamps sit in, from the layout's own resolver."""
+    return dataset_layout.prediction_dir(root, "live", "2026-03-04")
 
 
-def _write_experiment_member(root: Path, member: str) -> Path:
-    return _created_experiment(root) / f"{member}.json"
+def _trait_spec_key(root: Path) -> ts.Key:
+    return traits.trait_spec_key(traits.trait_specs_dir(root), TRAIT_UNDER_TEST)
 
 
-def _write_experiment_env(root: Path) -> Path:
-    path = _created_experiment(root) / "env.json"
-    atomic_write_json(path, {"env": {"python": "3.12"}, "seed": 42})
-    return path
-
-
-def _write_experiment_metrics(root: Path) -> Path:
-    directory = _created_experiment(root)
-    experiments.log_metrics(EXPERIMENT, 1, {"loss": 0.5})
-    return directory / "metrics.jsonl"
-
-
-def _write_experiment_split(root: Path) -> Path:
-    path = _created_experiment(root) / "split.json"
-    atomic_write_json(path, {"train": ["img_001"], "val": ["img_002"], "seed": 42})
-    return path
+def _trait_specs_scope(root: Path) -> Path:
+    return traits.trait_specs_dir(root)
 
 
 def _pin_platform_root(root: Path, monkeypatch) -> None:
@@ -878,110 +858,316 @@ def _pin_workspace(root: Path, monkeypatch) -> None:
     monkeypatch.setenv("TCIP_WORKSPACE", str(root))
 
 
-EXPERIMENT = "exp_042"
-
-
 @dataclass(frozen=True)
 class Registered:
-    """One registered store: how today's writer produces it, and how the seam addresses it.
+    """One registered store: a value of the shape it holds, and how the seam addresses it.
 
-    ``relative`` is the path under the root the writer is given. ``scope_of`` is the root the
+    ``golden`` is written through the seam and the file's bytes are compared against the
+    store's own codec applied to it. That is not a restatement of the codec: it is the proof
+    that nothing between the codec and the disk adds a byte-order mark, translates a newline
+    or wraps an envelope. The canonical spelling itself is pinned once, centrally, by
+    ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out``.
+
+    This suite no longer reproduces each store's pre-seam writer. That equivalence was the
+    instrument for migrating writers behind the seam, and there are no pre-seam writers left
+    to compare against; each owner module's own tests are where its written content is
+    asserted now. What remains here is placement and encoding, for every store at once.
+
+    ``relative`` is the path under the root the store is given. ``scope_of`` is the root the
     store's own keys hang off, which for the review shards and the experiment members is a
-    directory below that.
-
-    ``newline_translated`` marks a writer that opens its file in text mode, so on Windows
-    the bytes it produces carry CRLF where the seam's byte write produces LF. The comparison
-    then holds line for line rather than byte for byte, and says so, rather than a codec
-    emitting different bytes on different platforms.
+    directory below that. ``pin`` sets the environment a store's key constructor resolves
+    against, for the stores addressed relative to the platform root or the workspace.
     """
 
-    write_today: Callable[[Path], Path]
+    golden: object
     key_of: Callable[[Path], ts.Key]
     relative: str
     pin: Callable[[Path, object], None] | None = None
     scope_of: Callable[[Path], Path] = lambda root: root
-    newline_translated: bool = False
 
 
 REGISTERED = {
     "image_status": Registered(
-        _write_status, dataset_layout.image_status_key, ".tcip/state/image_status.json"),
+        {"catkin/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}},
+        dataset_layout.image_status_key, ".tcip/state/image_status.json"),
     "image_status_digest": Registered(
-        _write_status_digest, dataset_layout.image_status_digest_key,
-        ".tcip/state/image_status_digest.json"),
+        {"catkin/2026-03-04": {"a_1.jpg": "9f2c"}},
+        dataset_layout.image_status_digest_key, ".tcip/state/image_status_digest.json"),
     "view_coverage": Registered(
-        _write_view_coverage, dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
+        {"catkin/2026-03-04": {"a_1.jpg": {"grid": {"rows": 3, "cols": 3},
+                                           "cells_served_at_native": ["r1c1"],
+                                           "cells_swept": ["r1c1"]}}},
+        dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
     "region_completeness": Registered(
-        _write_region_completeness, dataset_layout.region_completeness_key,
-        ".tcip/state/region_completeness.json"),
+        {"catkin/orthö": {"grid": {"rows": 2, "cols": 2}, "cells_complete": ["r1c1"],
+                          "stem": "orthö"}},
+        dataset_layout.region_completeness_key, ".tcip/state/region_completeness.json"),
     "region_completeness_digest": Registered(
-        _write_region_completeness_digest, dataset_layout.region_completeness_digest_key,
+        {"catkin/orthö": {"r1c1": "3ab9"}},
+        dataset_layout.region_completeness_digest_key,
         ".tcip/state/region_completeness_digest.json"),
     "class_registry": Registered(
-        _write_class_registry, dataset_layout.class_registry_key, "classes.json"),
+        {"catkin": {"description": "a männlich flower", "attributes": {}}},
+        dataset_layout.class_registry_key, "classes.json"),
     "dataset_identity": Registered(
-        _write_dataset_identity, dataset_layout.dataset_identity_key, "dataset.json",
-        pin=_pin_platform_root),
+        {"dataset_id": "a1", "crop": "hazelnut", "created": "2026-03-04T12:00:00+00:00"},
+        dataset_layout.dataset_identity_key, "dataset.json", pin=_pin_platform_root),
     "labels": Registered(
-        _write_labels, lambda root: dataset_layout.label_key(root, "2026-03-04", "a_1"),
-        "annotations/2026-03-04/a_1.json", newline_translated=True),
+        LABEL_BYTES, lambda root: dataset_layout.label_key(root, "2026-03-04", "a_1"),
+        "annotations/2026-03-04/a_1.json"),
     "predictions": Registered(
-        _write_predictions,
+        LABEL_BYTES,
         lambda root: dataset_layout.prediction_key(root, "live", "2026-03-04", "a_1"),
-        "predictions/live/2026-03-04/a_1.json", newline_translated=True),
+        "predictions/live/2026-03-04/a_1.json"),
     "review_verdicts": Registered(
-        _write_review_verdict,
+        {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
         lambda root: review_engine.review_verdict_key(_review_state_dir(root), "a_1.jpg"),
-        ".tcip/state/review/a_1.jpg.json", scope_of=_review_state_dir,
-        newline_translated=True),
+        ".tcip/state/review/a_1.jpg.json", scope_of=_review_state_dir),
     "canvas_meta": Registered(
-        _write_canvas_meta, lambda root: canvas.canvas_meta_key(str(root)),
-        ".tcip/state/canvas_live.json", newline_translated=True),
+        {"schema_version": 1, "tab": "annotate", "image": "ü.jpg"},
+        lambda root: canvas.canvas_meta_key(str(root)), ".tcip/state/canvas_live.json"),
     "canvas_geometry": Registered(
-        _write_canvas_geometry, lambda root: canvas.canvas_geometry_key(str(root)),
-        ".tcip/state/canvas_shapes.json", newline_translated=True),
+        {"image_path": "ü.jpg", "tab": "annotate", "shapes": []},
+        lambda root: canvas.canvas_geometry_key(str(root)), ".tcip/state/canvas_shapes.json"),
     "model_registry": Registered(
-        _write_model_registry, model_registry.registry_index_key, ".tcip/models/registry.json"),
+        [{"name": "detector_v1", "sha256": "0" * 64, "metrics": {"val_map50": 0.61}}],
+        model_registry.registry_index_key, ".tcip/models/registry.json"),
     "job_registry": Registered(
-        _write_job_registry, lambda root: jobstore.job_registry_key("inference_jobs"),
+        [{"id": "j1", "status": "completed"}],
+        lambda root: jobstore.job_registry_key("inference_jobs"),
         ".tcip/state/inference_jobs.json", pin=_pin_platform_root),
     "workspace_active_project": Registered(
-        _write_active_marker, lambda root: workspace.active_project_key(), ".active",
+        "hazelnut_catkin_valley\n", lambda root: workspace.active_project_key(), ".active",
         pin=_pin_workspace),
+    "gui_snapshot": Registered(
+        {"active_tab": "annotate", "dataset": {"subject": "büsch"}},
+        lambda root: web_state.gui_snapshot_key(root), ".tcip/state/gui.json"),
+    "project_status": Registered(
+        {"last_activity": "2026-03-04T12:00:00+00:00", "reports_since_last_retrospective": 2},
+        lambda root: project_status.project_status_key(root), ".tcip/state/project_status.json"),
+    "friction_reports": Registered(
+        {"timestamp": "2026-03-04T12:00:00+00:00", "category": "missing_tool", "detail": "ü",
+         "context": {}, "user_disagreement": False},
+        lambda root: meta_tools.friction_report_key(str(root), REPORT_UNDER_TEST),
+        f".tcip/reports/{REPORT_UNDER_TEST}.json"),
+    "retrospectives": Registered(
+        f"# {RETROSPECTIVE_UNDER_TEST}\n\n## Retrospective: 2026-03-04T12:00:00+00:00\n\nü\n",
+        lambda root: meta_tools.retrospective_key(str(root), RETROSPECTIVE_UNDER_TEST),
+        f".tcip/retrospectives/{RETROSPECTIVE_UNDER_TEST}.md"),
+    "proposal_staging": Registered(
+        {"engine": "sam", "candidates": [{"candidate_id": 1, "score": 0.9, "note": "ü"}]},
+        lambda root: vision_tools.proposal_staging_key(PROPOSAL_STEM),
+        f".tcip/state/proposals_{PROPOSAL_STEM}.json", pin=_pin_platform_root),
+    "backend_port": Registered(
+        "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
+        pin=_pin_platform_root),
     "experiment_config": Registered(
-        lambda root: _write_experiment_member(root, "config"), lambda root: experiments.config_key(EXPERIMENT),
+        {"model_source": {"builder": "my_module:build"}, "training": {"epochs": 3}},
+        lambda root: experiments.config_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/config.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_status": Registered(
-        lambda root: _write_experiment_member(root, "status"), lambda root: experiments.status_key(EXPERIMENT),
+        {"state": "created", "created": "2026-03-04T12:00:00+00:00"},
+        lambda root: experiments.status_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/status.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_lineage": Registered(
-        lambda root: _write_experiment_member(root, "lineage"), lambda root: experiments.lineage_key(EXPERIMENT),
+        {"data_source": "ds", "model_weights": "model_best.pt"},
+        lambda root: experiments.lineage_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/lineage.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_artifacts": Registered(
-        lambda root: _write_experiment_member(root, "artifacts"), lambda root: experiments.artifacts_key(EXPERIMENT),
+        {"weights": {"path": "model_best.pt", "recorded": "2026-03-04T12:00:00+00:00"}},
+        lambda root: experiments.artifacts_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/artifacts.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_env": Registered(
-        _write_experiment_env, lambda root: experiments.env_key(EXPERIMENT),
+        {"env": {"python": "3.12"}, "seed": 42}, lambda root: experiments.env_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_split": Registered(
-        _write_experiment_split, lambda root: experiments.split_key(EXPERIMENT),
+        {"train": ["img_001"], "val": ["img_002"], "seed": 42},
+        lambda root: experiments.split_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_metrics": Registered(
-        _write_experiment_metrics, lambda root: experiments.metrics_key(EXPERIMENT),
+        {"epoch": 1, "timestamp": "2026-03-04T12:00:00+00:00", "loss": 0.5},
+        lambda root: experiments.metrics_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/metrics.jsonl", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope()), newline_translated=True),
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "operating_point_sidecar": Registered(
+        {"trait": "catkin_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
+         "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
+                                      "validated_against": "held_out_annotations"}},
+         "id_map": {"catkin": 0}, "validated": True, "shippable_issues": [],
+         "checkpoint": "ü_best", "raster_path": None},
+        lambda root: resolution.sidecar_key(_stamp_bucket(root), "operating_point"),
+        "predictions/live/2026-03-04/operating_point.json", scope_of=_stamp_bucket),
+    "classifier_operating_point_sidecar": Registered(
+        {"operating_point": {"classifier": {"validated_against": "held_out_annotations",
+                                            "value": "elongiert"}},
+         "validated": True, "failures": [], "sweep_data": {"kappa": 0.81}},
+        lambda root: resolution.sidecar_key(_stamp_bucket(root), "classifier_operating_point"),
+        "predictions/live/2026-03-04/classifier_operating_point.json", scope_of=_stamp_bucket),
+    "ordinal_operating_point_sidecar": Registered(
+        {"operating_point": {"ordinal": {"validated_against": "held_out_annotations",
+                                         "criterion": "quadratic_weighted_kappa"}},
+         "validated": True, "failures": [], "sweep_data": {"qwk": 0.77},
+         "trait": "ü_ordinal_trait"},
+        lambda root: resolution.sidecar_key(_stamp_bucket(root), "ordinal_operating_point"),
+        "predictions/live/2026-03-04/ordinal_operating_point.json", scope_of=_stamp_bucket),
+    "regression_operating_point_sidecar": Registered(
+        {"operating_point": {"regression": {"validated_against": "held_out_annotations",
+                                            "criterion": "r_squared"}},
+         "validated": False, "failures": ["insufficient_holdout"],
+         "sweep_data": {"score": None, "score_state": "nan"}, "trait": "ü_regression_trait"},
+        lambda root: resolution.sidecar_key(_stamp_bucket(root), "regression_operating_point"),
+        "predictions/live/2026-03-04/regression_operating_point.json", scope_of=_stamp_bucket),
+    "resolve_scale_sidecar": Registered(
+        {"operating_point": {"scale": {"validated_against": "physical_measurement",
+                                       "value": 0.271, "units": "mm/px",
+                                       "capture_id": "2026-03-04_handheld"}},
+         "validated": True},
+        lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
+        "predictions/live/2026-03-04/resolve_scale.json", scope_of=_stamp_bucket),
+    "trait_specs": Registered(
+        {"name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "notes": "ü"},
+        _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.yml",
+        scope_of=_trait_specs_scope),
+    "annotation_records": Registered(
+        LABEL_BYTES, lambda root: json_io.annotation_record_key(_generic_label_dir(root), "a_1"),
+        "labels/a_1.json", scope_of=_generic_label_dir),
+    "label_baselines": Registered(
+        LABEL_BYTES,
+        lambda root: review_engine.label_baseline_key(_generic_label_dir(root), "a_1"),
+        "labels/.original/a_1.json", scope_of=_generic_label_dir),
+    "annotation_stats": Registered(
+        {"sessions": [{"user": "ü", "images_annotated": 1, "total_annotations": 3,
+                       "total_time_seconds": 42.5}],
+         "image_status": {"a_1.jpg": "complete"}},
+        lambda root: sessions.annotation_stats_key(str(root)), ".tcip/state/annotation_stats.json"),
+    "band_group_manifest": Registered(
+        {"bands": {"Green": "cap_ü_G.tif", "Red": "cap_ü_R.tif"},
+         "source": "embedded-metadata",
+         "central_wavelength_nm": {"Green": 560.0, "Red": 650.0}},
+        lambda root: band_groups.band_group_manifest_key(_band_group_dir(root), "cap_ü"),
+        f"images/cap_ü{band_groups.MANIFEST_EXT}", scope_of=_band_group_dir),
+    "run_checkpoint": Registered(
+        CHECKPOINT_BYTES, lambda root: generic_trainer.checkpoint_key(root, "model_best"),
+        "model_best.pt"),
+    "model_snapshot_manifest": Registered(
+        {"builder": "my_module:build",
+         "files": [{"file": f"{SNAPSHOT_CONTENT}/{SNAPSHOT_FILENAME}", "sha256": "0" * 64,
+                    "bytes": 27}],
+         "missing": [], "snapshot_errors": [], "seed": 7, "notes": "ü"},
+        model_build.snapshot_manifest_key, "model_src/manifest.json"),
+    "model_snapshot_file": Registered(
+        SNAPSHOT_BYTES,
+        lambda root: model_build.snapshot_file_key(root, SNAPSHOT_CONTENT, SNAPSHOT_FILENAME),
+        f"model_src/{SNAPSHOT_CONTENT}/{SNAPSHOT_FILENAME}"),
+    "evaluation_results": Registered(
+        {"map50": 0.5, "tp": 3, "eval_regime": "full-frame-single-pass", "trait": "messgröße",
+         "loss": None, "loss_state": "positive_infinity"},
+        evaluation.evaluation_results_key, "test_results.json"),
+    "cal_holdout_split_lock": Registered(
+        {"identity_hash": LOCK_IDENTITY, "calibration": ["a_1"], "holdout": ["b_2"], "seed": 0,
+         "redraw_history": []},
+        lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY),
+        f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json", pin=_pin_platform_root),
+    "hpo_sweep_manifest": Registered(
+        {"study_name": STUDY, "status": "running", "n_trials": 2,
+         "param_space": {"lr": [0.1, 0.01]}},
+        lambda root: training_tools.sweep_manifest_key(STUDY),
+        f".tcip/hpo/{STUDY}/manifest.json", pin=_pin_platform_root,
+        scope_of=lambda root: training_tools.hpo_root()),
+    "hpo_study_result": Registered(
+        {"best_params": {"lr": 0.01}, "best_value": 0.25, "n_trials": 2,
+         "all_trials": [{"params": {"lr": 0.1}, "value": None,
+                         "value_state": "positive_infinity", "state": "ERROR"}]},
+        lambda root: training_tools.study_result_key(STUDY), f".tcip/hpo/{STUDY}.json",
+        pin=_pin_platform_root, scope_of=lambda root: training_tools.hpo_root()),
+    "hpo_trial_config": Registered(
+        {"training": {"batch_size": 4}, "trial_params": {"lr": 0.01}, "unconsumed_params": []},
+        lambda root: training_tools.trial_config_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
+        f".tcip/hpo/{STUDY}/{TRIAL_DIR}/resolved_config.json", pin=_pin_platform_root,
+        scope_of=lambda root: training_tools.sweep_dir(STUDY)),
+    "ray_dashboard": Registered(
+        {"url": "http://127.0.0.1:8265", "pid": 4242, "started_at": "2026-01-01T00:00:00+00:00"},
+        lambda root: hpo.ray_dashboard_key(), ".tcip/state/ray_dashboard.json",
+        pin=_pin_platform_root),
+    "dataset_registry": Registered(
+        [{"id": "a1", "path": "dü", "crop": "hazelnut", "fingerprint": "9f2c"}],
+        project_tools.dataset_registry_key, ".tcip/datasets.json"),
+    "project_config": Registered(
+        '[project]\nname = "project_under_test"\n', project_tools.project_config_key,
+        ".tcip/config.toml"),
+    "split_stem_list": Registered(
+        ["a_1", "ü_2"], lambda root: data_tools.split_stem_list_key(_split_dir(root), "train"),
+        "splits/train.json", scope_of=_split_dir),
+    "split_manifest": Registered(
+        {"seed": 42, "dataset_hash": "9f2c", "group_by": "stem_prefix",
+         "splits": {"train": ["a_1", "ü_2"], "val": [], "test": []}},
+        lambda root: data_tools.split_manifest_key(_split_dir(root)),
+        "splits/split_manifest.json", scope_of=_split_dir),
+    "curated_manifest": Registered(
+        {"created": "2026-03-04T00:00:00+00:00", "subject": "catkin", "subjects": ["catkin"],
+         "images": [{"image": "ü_2.jpg", "status": "hard_negative", "n_boxes": 0,
+                     "rejected_count": 1, "label": "labels/ü_2.json"}]},
+        lambda root: materialize.curated_manifest_key(_curated_dir(root)),
+        "curated/curated_manifest.json", scope_of=_curated_dir),
+    "coco_documents": Registered(
+        COCO_BYTES, lambda root: format_io.coco_document_key(_coco_dir(root), "instances"),
+        "export/instances.json", scope_of=_coco_dir),
+    "audit_log": Registered(
+        {"timestamp": "2026-03-04T12:00:00+00:00", "tool": "gui_save_labels",
+         "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},
+         "status": "ok", "source": "gui"},
+        lambda root: audit.audit_log_key(root), ".tcip/audit.jsonl"),
+    "learning_capture": Registered(
+        {"ts": "2026-03-04T12:00:00+00:00", "session_id": "s_1", "reason": "clear",
+         "active_project": "grüne_reihe", "note": "session ended"},
+        lambda root: agent_learning_capture.learning_capture_key(root),
+        ".tcip/learning_capture.jsonl"),
+    "hpo_trial_metrics": Registered(
+        {"epoch": 1, "val_loss": 0.25, "selection": 0.25},
+        lambda root: training_tools.trial_metrics_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
+        f".tcip/hpo/{STUDY}/{TRIAL_DIR}/metrics.jsonl", pin=_pin_platform_root,
+        scope_of=lambda root: training_tools.sweep_dir(STUDY)),
+    "run_launch_config": Registered(
+        {"model_source": {"builder": "my_module:build"}, "data": {"subject": "büsch"},
+         "device": "cpu"},
+        lambda root: training_tools.launch_config_key(root), "launch_config.json"),
+    "confidence_sweep": Registered(
+        {"trait": "messgröße", "dataset_hash": "d41d8cd98f00b204", "checkpoint_sha256": "0" * 64,
+         "sweep": [{"conf": 0.1, "f1": 0.4}, {"conf": 0.2, "f1": 0.6}]},
+        lambda root: inference_tools.confidence_sweep_key(SWEEP_IDENTITY),
+        f".tcip/artifacts/operating_point_sweep_{SWEEP_IDENTITY}.json", pin=_pin_platform_root),
+    "imagery": Registered(
+        IMAGE_BYTES,
+        lambda root: dataset_layout.image_key(root, IMAGE_DATE, IMAGE_STEM, IMAGE_EXT),
+        f"images/{IMAGE_DATE}/{IMAGE_STEM}{IMAGE_EXT}"),
+    "plant_mapping": Registered(
+        {"2026-03-04": [{"image_path": "images/2026-03-04/a_1.JPG", "stem": "a_1",
+                         "date_folder": "2026-03-04", "plot_name": "plot_ü",
+                         "accession_name": "ü", "source": "sequence", "distance_m": 1.25}]},
+        lambda root: plant_mapping.plant_mapping_key(
+            _plant_mapping_dir(root) / "plant_mapping.json"),
+        ".tcip/state/plant_mapping.json", scope_of=_plant_mapping_dir),
 }
 
+CODEC_EXEMPT = {
+    "trait_specs": "the spec file is YAML a human edits, not JSON",
+    "backend_port": "the value is the port text itself",
+    "project_config": "the value is a TOML document",
+    "retrospectives": "the value is markdown a human wrote",
+    "workspace_active_project": "the value is the active project's name",
+}
+"""Every registered record or log whose codec is deliberately not the canonical constant.
 
-def _line_endings(raw: bytes, case: Registered) -> bytes:
-    """What the seam must produce for bytes today's writer produced."""
-    return raw.replace(b"\r\n", b"\n") if case.newline_translated else raw
+Naming one here is what makes an exemption a decision somebody made rather than a default
+somebody got: a store that picks its own spelling fails the identity check below until its
+reason is written down.
+"""
 
 
 def test_every_registered_store_has_a_byte_and_path_identity_case():
@@ -997,31 +1183,108 @@ def test_every_registered_store_has_a_byte_and_path_identity_case():
     assert declared == set(REGISTERED)
 
 
+def test_every_json_store_encodes_through_the_one_codec_its_kind_declares():
+    """One record spelling and one log spelling across the platform, or a named reason.
+
+    Identity rather than equality: a second instance carrying the same fields is still a
+    second implementation, and it is the one that would drift.
+    """
+    off_canon = {}
+    for name in ts.registered_stores():
+        descriptor = ts.get_descriptor(name)
+        if descriptor.declared_in.startswith(("tests", "test_")) or descriptor.kind == "blob":
+            continue
+        expected = ts.RECORD_JSON if descriptor.kind == "record" else ts.LOG_JSON
+        if descriptor.codec is not expected and name not in CODEC_EXEMPT:
+            off_canon[name] = type(descriptor.codec).__name__
+
+    assert off_canon == {}
+    assert set(CODEC_EXEMPT) <= set(ts.registered_stores())
+
+
+def test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out():
+    """The one place the record spelling is pinned, so changing it shows up in a diff here
+    rather than rippling silently through every store that carries it."""
+    golden = {"b": {"nested": True}, "a": "ü", "ratio": 0.5, "absent": None}
+
+    assert ts.RECORD_JSON.encode(golden) == (
+        b'{\n'
+        b'  "b": {\n'
+        b'    "nested": true\n'
+        b'  },\n'
+        b'  "a": "\xc3\xbc",\n'
+        b'  "ratio": 0.5,\n'
+        b'  "absent": null\n'
+        b'}\n'
+    )
+    assert ts.LOG_JSON.encode({"epoch": 1, "loss": 0.5, "note": "ü"}) == (
+        b'{"epoch": 1, "loss": 0.5, "note": "\xc3\xbc"}'
+    )
+
+
+def test_a_text_store_refuses_a_value_that_is_not_text_and_accepts_one_that_is(store, monkeypatch):
+    """Calling str() on whatever arrived would fabricate a value out of its repr, the way a
+    JSON default does, so a text store takes text and the caller formats the rest."""
+    _pin_platform_root(store.root, monkeypatch)
+    key = web_client.backend_port_key()
+
+    with pytest.raises(ts.StoreError):
+        ts.replace(key, 8765)
+
+    ts.replace(key, "8765")
+    assert ts.read(key) == "8765"
+
+
+def test_a_value_the_codec_cannot_spell_names_the_store_the_key_and_the_type(store):
+    """The refusal has to say which entry and what about it, since json.dumps names neither,
+    and the same store takes the explicitly converted value."""
+    key = store.key(LWW, "convertible")
+
+    with pytest.raises(ts.StoreError) as raised:
+        ts.replace(key, {"where": Path("a/b")})
+    message = str(raised.value)
+    assert LWW in message and "convertible" in message and "PosixPath" in message or "Path" in message
+
+    ts.replace(key, {"where": Path("a/b").as_posix()})
+    assert ts.read(key) == {"where": "a/b"}
+
+
+def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_no_type_for(store):
+    """NaN and Infinity are not JSON and no strict parser reads them, so a producer states
+    the non-finite value instead of the codec inventing a spelling for it."""
+    key = store.key(LWW, "measurement")
+
+    with pytest.raises(ts.StoreError):
+        ts.replace(key, {"score": float("nan")})
+
+    ts.replace(key, ts.stored_number("score", float("nan")))
+    assert ts.read(key) == {"score": None, "score_state": "nan"}
+
+
 @pytest.mark.parametrize("name", sorted(REGISTERED))
-def test_a_registered_store_writes_the_bytes_and_the_path_its_writer_does(
+def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces(
     store, tmp_path, monkeypatch, name
 ):
-    """Today's writer and the seam produce the same file, byte for byte, in the same place."""
+    """Nothing between a store's codec and the disk adds, translates or wraps a byte."""
     case = REGISTERED[name]
     descriptor = ts.get_descriptor(name)
-    today_root, seam_root = tmp_path / "today", tmp_path / "seam"
-
-    if case.pin is not None:
-        case.pin(today_root, monkeypatch)
-    written = case.write_today(today_root)
-    raw = written.read_bytes()
-    assert written.relative_to(today_root).as_posix() == case.relative
+    seam_root = tmp_path / "seam"
 
     if case.pin is not None:
         case.pin(seam_root, monkeypatch)
     key = case.key_of(seam_root)
     if descriptor.kind == "log":
-        ts.append(key, descriptor.codec.decode(raw.rstrip(b"\n")))
+        ts.append(key, case.golden)
+        expected = descriptor.codec.encode(case.golden) + b"\n"
+    elif descriptor.kind == "blob":
+        ts.put_blob(key, case.golden, expect=ts.Version.ABSENT)
+        expected = case.golden
     else:
-        ts.replace(key, descriptor.codec.decode(raw), expect=ts.Version.ABSENT)
+        ts.replace(key, case.golden, expect=ts.Version.ABSENT)
+        expected = descriptor.codec.encode(case.golden)
 
     landed = store.backend.path_for(key)
-    assert landed.read_bytes() == _line_endings(raw, case)
+    assert landed.read_bytes() == expected
     assert landed.relative_to(seam_root).as_posix() == case.relative
     relative_to_scope = landed.relative_to(case.scope_of(seam_root)).as_posix()
     assert descriptor.locator.parts_from(PurePosixPath(relative_to_scope)) == key.parts
@@ -1040,3 +1303,109 @@ def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(t
     recovered = locator.parts_from(placed)
     assert recovered != key.parts
     assert locator.relative_path(str(state_dir), recovered) == placed
+
+
+# ── conditional blob writes ─────────────────────────────────────────────────────
+
+
+def test_a_blob_read_carries_the_token_its_own_bytes_produce(store):
+    key = store.key(BLOB, "tokened")
+    assert ts.read_blob_versioned(key, default=b"").version == ts.Version.ABSENT
+
+    written = ts.put_blob(key, b"first")
+    stored = ts.read_blob_versioned(key)
+    assert stored.value == b"first"
+    assert stored.version == written
+    with pytest.raises(ts.NotFound) as absent:
+        ts.read_blob_versioned(store.key(BLOB, "never-written"))
+    assert "default=" in str(absent.value)
+
+
+def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(store):
+    key = store.key(BLOB, "compare-and-set")
+    held = ts.put_blob(key, b"first", expect=ts.Version.ABSENT)
+    moved = ts.put_blob(key, b"second", expect=held)
+
+    with pytest.raises(ts.VersionConflict) as raised:
+        ts.put_blob(key, b"third", expect=held)
+    assert raised.value.actual == moved
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"second"
+
+    assert ts.put_blob(key, b"fourth", expect=moved) != moved
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"fourth"
+
+
+def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(store):
+    key = store.key(BLOB, "captured-once")
+    ts.put_blob(key, b"pristine", expect=ts.Version.ABSENT)
+
+    with pytest.raises(ts.VersionConflict):
+        ts.put_blob(key, b"overwritten", expect=ts.Version.ABSENT)
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"pristine"
+
+    ts.put_blob(key, b"unconditional")
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"unconditional"
+
+
+def test_a_streamed_blob_write_refuses_a_stale_token_before_the_producer_writes(store):
+    key = store.key(BLOB, "streamed")
+    held = ts.put_blob(key, b"first", expect=ts.Version.ABSENT)
+    ts.put_blob(key, b"second", expect=held)
+
+    with pytest.raises(ts.VersionConflict):
+        with ts.write_blob(key, expect=held) as handle:
+            handle.write(b"never reached")
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"second"
+
+    with ts.write_blob(key, expect=ts.read_blob_versioned(key).version) as handle:
+        handle.write(b"third")
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"third"
+
+
+def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(store):
+    key = store.key(BLOB, "contested")
+    ts.put_blob(key, b"seed", expect=ts.Version.ABSENT)
+    go = store.root / "blob.go"
+    contenders = []
+    for name in ("first", "second"):
+        ready = store.root / f"blob-{name}.ready"
+        result = store.root / f"blob-{name}.json"
+        proc = store.spawn(
+            "write-blob-after", store.root, "contested", "cas", name, ready, go, result
+        )
+        wait_for(ready)
+        contenders.append((proc, result))
+    go.write_text("go", encoding="utf-8")
+
+    outcomes = []
+    for proc, result in contenders:
+        assert proc.wait(timeout=60) == 0
+        outcomes.append(json.loads(result.read_text(encoding="utf-8"))["outcome"])
+    assert sorted(outcomes) == ["VersionConflict", "written"]
+    with ts.open_blob(key) as handle:
+        assert handle.read() in (b"first", b"second")
+
+
+def test_the_layout_key_and_the_generic_key_for_one_document_agree_on_it(store):
+    """A label document addressed by its layout and by its bare directory is one document.
+
+    Both forms are legal inputs to the writer, so they must place the file identically and share
+    the version derived from its bytes, or a create-only write through one would not see what the
+    other already wrote.
+    """
+    layout_key = dataset_layout.label_key(store.root, "2026-03-04", "a_1")
+    generic_key = json_io.annotation_record_key(
+        dataset_layout.annotation_dir(store.root, "2026-03-04"), "a_1"
+    )
+    assert store.backend.path_for(generic_key) == store.backend.path_for(layout_key)
+
+    version = ts.put_blob(layout_key, b"{}", expect=ts.Version.ABSENT)
+    with pytest.raises(ts.VersionConflict):
+        ts.put_blob(generic_key, b"[]", expect=ts.Version.ABSENT)
+    assert ts.read_blob_versioned(generic_key).version == version

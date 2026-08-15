@@ -1,6 +1,6 @@
 """Meta-loop routes: surface Claude's friction reports and retrospectives.
 
-Read-only views over ``<project_root>/.tcip/reports/*.jsonl`` (written by the
+Read-only views over ``<project_root>/.tcip/reports/*.json`` (written by the
 ``claude_reports`` MCP tool) and ``<project_root>/.tcip/retrospectives/*.md``
 (written by ``project_retrospective``). These close the loop on the meta-tools:
 the agent writes friction/retrospectives, the human can read them in the GUI.
@@ -53,11 +53,9 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
     if not reports_dir.exists():
         return {"reports": [], "count": 0, "total_available": 0}
 
-    files = sorted(
-        reports_dir.glob("*.jsonl"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    from tcip_mcp.tools.meta_tools import report_documents
+
+    files = report_documents(project_root)
 
     from tcip_store import DecodeError, read
 

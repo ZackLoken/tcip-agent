@@ -27,7 +27,15 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from tcip_store import Key, StoreDescriptor, json_codec, register_store, store
+from tcip_store import (
+    RECORD_JSON,
+    Key,
+    StoreDescriptor,
+    register_store,
+    store,
+    stored_number,
+    stored_numbers,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
@@ -42,7 +50,7 @@ register_store(
         name=EVALUATION_RESULTS_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(default=None),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_RESULTS_DOC,
     )
@@ -89,6 +97,28 @@ CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset({
     "map50", "map", "map_at_maxdets", "map50_at_maxdets",
     "iou_precision", "iou_recall", "iou_f1",
 })
+
+
+def _rounded(value):
+    """One metric at the reported precision, leaving a non-finite or non-numeric value alone.
+
+    Rounding a value that is not a number raises, and rounding a non-finite one changes
+    nothing, so both are handed on for the caller to represent rather than forced through
+    here.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    return round(value, 6) if math.isfinite(value) else value
+
+
+def _reported_metrics(values: dict) -> dict:
+    """One task's metrics as the result record carries them.
+
+    Scalars are rounded and a non-finite one becomes null beside a field naming its state;
+    the per-class mappings some tasks return, which already carry None for an absent class,
+    pass through untouched.
+    """
+    return stored_numbers({k: _rounded(v) for k, v in values.items()})
 
 
 # ====================================================================
@@ -1145,7 +1175,7 @@ def evaluate(
 
     model.eval()
     loss = total_loss / max(n_loss, 1)
-    result: dict = {"loss": round(loss, 6)}
+    result: dict = stored_number("loss", _rounded(loss))
 
     if is_detection:
         m = coco_detection_metrics(per_image, iou_type=eff_iou_type, iou_threshold=iou_threshold,
@@ -1168,22 +1198,22 @@ def evaluate(
                 "iou_f1": round(m["f1"], 6),
             })
         governing_f1 = result["f1"]
-        result["objective"] = round(compute_composite_objective(loss, governing_f1, m["map50"], score_weights), 6)
+        result.update(stored_number(
+            "objective",
+            _rounded(compute_composite_objective(loss, governing_f1, m["map50"], score_weights)),
+        ))
     elif task == "classification" and cls_p:
         num_classes = getattr(model.heads[0], "num_classes", int(torch.cat(cls_g).max()) + 1)
-        # classification_metrics now also returns per_class/count_bias dicts, round only the scalars.
-        result.update({k: (round(v, 6) if isinstance(v, (int, float)) else v)
-                       for k, v in classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes).items()})
+        result.update(_reported_metrics(
+            classification_metrics(torch.cat(cls_p), torch.cat(cls_g), num_classes)))
     elif task == "ordinal" and ord_p:
-        result.update({k: round(v, 6) for k, v in ordinal_metrics(torch.cat(ord_p), torch.cat(ord_g)).items()})
+        result.update(_reported_metrics(ordinal_metrics(torch.cat(ord_p), torch.cat(ord_g))))
     elif task == "regression" and reg_p:
-        result.update({k: round(v, 6) for k, v in regression_metrics(torch.cat(reg_p), torch.cat(reg_g)).items()})
+        result.update(_reported_metrics(regression_metrics(torch.cat(reg_p), torch.cat(reg_g))))
     elif task == "semantic_seg" and seg_p:
         pred, gt = torch.cat(seg_p), torch.cat(seg_g)
         num_classes = getattr(model.heads[0], "num_classes", int(gt.max()) + 1)
-        m = semantic_seg_metrics(pred, gt, num_classes)
-        # Scalars rounded; per-class dicts (with None for absent classes) passed through.
-        result.update({k: (round(v, 6) if isinstance(v, (int, float)) else v) for k, v in m.items()})
+        result.update(_reported_metrics(semantic_seg_metrics(pred, gt, num_classes)))
 
     return result
 

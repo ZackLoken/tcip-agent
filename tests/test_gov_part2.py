@@ -29,7 +29,7 @@ def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     distill = _load_distill()
     reports = tmp_path / ".tcip" / "reports"
     reports.mkdir(parents=True)
-    (reports / "r.jsonl").write_text(
+    (reports / "r.json").write_text(
         json.dumps({"category": "needs_human_judgment", "detail": "the EXIF orientation thing"}) + "\n",
         encoding="utf-8")
     (tmp_path / ".tcip" / "learning_capture.jsonl").write_text(
@@ -46,10 +46,10 @@ def test_distill_worksheet_surfaces_disagreements(tmp_path):
     distill = _load_distill()
     reports = tmp_path / ".tcip" / "reports"
     reports.mkdir(parents=True)
-    (reports / "r1.jsonl").write_text(
+    (reports / "r1.json").write_text(
         json.dumps({"category": "needs_human_judgment", "detail": "kept the old default",
                     "user_disagreement": False}) + "\n", encoding="utf-8")
-    (reports / "r2.jsonl").write_text(
+    (reports / "r2.json").write_text(
         json.dumps({"category": "needs_human_judgment", "detail": "pushed back on the tiling default",
                     "user_disagreement": True}) + "\n", encoding="utf-8")
 
@@ -111,7 +111,7 @@ def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
                           ("proj_b", "shared friction theme theme")]:
         reports = tmp_path / name / ".tcip" / "reports"
         reports.mkdir(parents=True)
-        (reports / "r.jsonl").write_text(
+        (reports / "r.json").write_text(
             json.dumps({"category": "unexpected_behavior", "detail": detail}) + "\n",
             encoding="utf-8")
 
@@ -136,7 +136,7 @@ def test_workspace_mode_never_writes_anything(tmp_path):
     distill = _load_distill()
     reports_dir = tmp_path / "proj_a" / ".tcip" / "reports"
     reports_dir.mkdir(parents=True)
-    (reports_dir / "r.jsonl").write_text(
+    (reports_dir / "r.json").write_text(
         json.dumps({"category": "missing_tool", "detail": "x"}) + "\n", encoding="utf-8")
 
     before = {

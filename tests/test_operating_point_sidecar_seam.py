@@ -6,8 +6,6 @@ the same locked store, and the delivery gate owns what a deliverable's validatio
 
 from __future__ import annotations
 
-import json
-
 import pytest
 import tcip_store
 
@@ -114,12 +112,52 @@ def test_sidecar_update_can_decline_to_write(tmp_path):
     assert read_operating_point_sidecar(bucket)["validated"] is True
 
 
-def test_sidecar_bytes_match_what_the_bucket_readers_expect(tmp_path):
+def test_a_stamp_field_that_json_cannot_hold_is_refused_at_the_sidecar_writer(tmp_path):
+    """A stamp is assembled by its producer and carries a producer's own extra fields, so the
+    check sits where every sidecar write passes rather than at each producer.
+
+    A stamp is what a reviewer reconstructs an operating point from, so a field that turned
+    into its repr would be provenance that reads as recorded fact.
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    bucket = tmp_path / "bucket"
+
+    with pytest.raises(TypeError) as refused:
+        write_sidecar(bucket, _stamp(produced_at=datetime.now(timezone.utc)))
+    assert "stamp.produced_at" in str(refused.value)
+    assert read_operating_point_sidecar(bucket) is None
+
+    write_sidecar(bucket, _stamp())
+    with pytest.raises(TypeError) as update_refused:
+        update_sidecar(bucket, lambda stored: {**stored, "raster_path": Path("ortho.tif")})
+    assert "stamp.raster_path" in str(update_refused.value)
+    assert read_operating_point_sidecar(bucket)["raster_path"] is None
+
+
+def test_an_ordinary_stamp_is_still_written_and_merged(tmp_path):
+    """The refusal above must not cost a real calibration its stamp or its promotion."""
+    bucket = tmp_path / "bucket"
+
+    write_sidecar(bucket, _stamp())
+    wrote = update_sidecar(bucket, lambda stored: {**stored, "raster_path": "ortho.tif"})
+
+    assert wrote is True
+    stored = read_operating_point_sidecar(bucket)
+    assert stored["raster_path"] == "ortho.tif"
+    assert stored["checkpoint_sha256"] == "f" * 64
+
+
+def test_sidecar_bytes_are_the_canonical_record_spelling(tmp_path):
+    """A stamp is spelled the way every other record is, so a breeder opening one and a
+    reader parsing one meet the same document."""
+    from tcip_store import RECORD_JSON
+
     bucket = tmp_path / "bucket"
     write_sidecar(bucket, _stamp())
 
-    assert (bucket / "operating_point.json").read_bytes() == json.dumps(
-        _stamp(), indent=2, default=str).encode("utf-8")
+    assert (bucket / "operating_point.json").read_bytes() == RECORD_JSON.encode(_stamp())
 
 
 def test_unreadable_stamp_reads_as_absent_rather_than_raising(tmp_path):

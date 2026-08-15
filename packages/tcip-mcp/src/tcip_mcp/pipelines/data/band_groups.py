@@ -38,7 +38,7 @@ from datetime import datetime
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 MANIFEST_EXT = ".bandgroup"
@@ -52,7 +52,7 @@ register_store(
         name=BAND_GROUP_MANIFEST_STORE,
         kind="record",
         key_fields=("stem",),
-        codec=json_codec(default=None),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_MANIFEST_FILE,
     )

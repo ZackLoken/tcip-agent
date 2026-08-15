@@ -23,10 +23,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tcip_store import (
+    RECORD_JSON,
     DecodeError,
     Key,
     StoreDescriptor,
-    json_codec,
     read,
     register_store,
     transaction,
@@ -43,7 +43,7 @@ register_store(
         name=PROJECT_STATUS_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATUS_DOC,
     )

@@ -18,6 +18,8 @@ import math
 import statistics
 from typing import Any, Callable
 
+from tcip_store import non_finite_state, stored_number
+
 from tcip_mcp.pipelines.derivations import derive_cross_tile_nms, derive_localization_tolerance_frac
 from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
@@ -1285,10 +1287,13 @@ def _resolve_scalar_operating_point(
     floor_authored = getattr(trait, floor_field)
     floor = floor_authored if floor_authored is not None else provisional_floor
     floor_source = "trait" if floor_authored is not None else "provisional_default"
+    # A non-finite score compares false against every bound, so it is its own failure.
+    score_state = non_finite_state(score) if isinstance(score, float) else None
+    comparable = score is not None and score_state is None
     # score > 0.0 is the universal, domain-input-free minimum (better than the criterion's own
     # trivial/chance baseline); floor is the trait's own authored bar, or the platform's provisional
     # default, the same two-floor shape resolve_classifier_operating_point's kappa check uses.
-    compensating_error_ok = score is not None and score > 0.0 and score > floor
+    compensating_error_ok = comparable and score > 0.0 and score > floor
 
     failures: list[str] = []
     if not disjoint:
@@ -1301,12 +1306,15 @@ def _resolve_scalar_operating_point(
         failures.append("insufficient_holdout_items")
     if score is None:
         failures.append("criterion_undefined")
-    if not compensating_error_ok:
+    elif score_state is not None:
+        failures.append("criterion_not_finite")
+    elif not compensating_error_ok:
         failures.append("compensating_error_floor_failed")
     passed = not failures
 
     sweep_data = {
-        "criterion": criterion, "score": score, "floor": floor, "floor_source": floor_source,
+        "criterion": criterion, **stored_number("score", score),
+        "floor": floor, "floor_source": floor_source,
         "disjoint": disjoint, "train_disjointness": td,
         "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
     }

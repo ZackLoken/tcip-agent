@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 # Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
@@ -234,7 +234,7 @@ register_store(
         name=CLASS_REGISTRY_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(default=None, trailing_newline=True),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_DATASET_DOC,
     )
@@ -266,7 +266,7 @@ register_store(
         name=DATASET_IDENTITY_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(default=None, trailing_newline=True),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_DATASET_DOC,
     )
@@ -302,7 +302,7 @@ register_store(
         name=IMAGE_STATUS_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
     )
@@ -343,7 +343,7 @@ register_store(
         name=VIEW_COVERAGE_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
     )
@@ -382,7 +382,7 @@ register_store(
         name=IMAGE_STATUS_DIGEST_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
     )
@@ -420,7 +420,7 @@ register_store(
         name=REGION_COMPLETENESS_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
     )
@@ -459,7 +459,7 @@ register_store(
         name=REGION_COMPLETENESS_DIGEST_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
     )

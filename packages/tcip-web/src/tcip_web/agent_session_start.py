@@ -45,7 +45,7 @@ def _count(proj: str, subdir: str, pattern: str) -> int:
 
 
 def _active_context(proj: str) -> str:
-    nrep = _count(proj, "reports", "*.jsonl")
+    nrep = _count(proj, "reports", "*.json")
     nret = _count(proj, "retrospectives", "*.md")
     name = Path(proj).name or proj
     return (

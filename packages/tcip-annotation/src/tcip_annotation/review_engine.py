@@ -27,7 +27,7 @@ from pathlib import Path, PurePosixPath
 from typing import Optional
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, Version, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
@@ -121,7 +121,7 @@ register_store(
         name=REVIEW_VERDICTS_STORE,
         kind="record",
         key_fields=("image",),
-        codec=json_codec(indent=None, ensure_ascii=False, default=None, separators=(",", ":")),
+        codec=RECORD_JSON,
         concurrency="cas",
         enumerable=True,
         locator=_SHARD_LOCATOR,

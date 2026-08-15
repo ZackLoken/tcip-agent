@@ -108,7 +108,7 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
     per_project_report_count: dict[str, int] = {}
     per_project_retro_count: dict[str, int] = {}
     for proj in projects:
-        reports = _read_jsonl_dir(proj / ".tcip" / "reports")
+        reports = _read_reports(proj)
         retros_dir = proj / ".tcip" / "retrospectives"
         retros = sorted(retros_dir.glob("*.md")) if retros_dir.is_dir() else []
         report_text = " ".join(str(r.get("detail", "")) for r in reports)
@@ -148,19 +148,22 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _read_jsonl_dir(d: Path) -> list[dict]:
+def _read_reports(project_root: Path) -> list[dict]:
+    """Every friction report of one project, parsed; an unreadable one is skipped.
+
+    The file list comes from the store's own owner rather than a glob restated here, so the
+    report extension is stated in one place.
+    """
+    from tcip_mcp.tools.meta_tools import report_documents
+
     rows: list[dict] = []
-    if not d.is_dir():
-        return rows
-    for f in sorted(d.glob("*.jsonl")):
-        for line in f.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    for path in report_documents(str(project_root)):
+        try:
+            entry = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(entry, dict):
+            rows.append(entry)
     return rows
 
 
@@ -168,7 +171,7 @@ def build_worksheet(project_root: Path) -> str:
     """Assemble the Markdown distill worksheet (pure: no writes)."""
     lines: list[str] = [f"# Learning-review worksheet: {project_root}", ""]
 
-    reports = _read_jsonl_dir(project_root / ".tcip" / "reports")
+    reports = _read_reports(project_root)
     retros_dir = project_root / ".tcip" / "retrospectives"
     retros = sorted(retros_dir.glob("*.md")) if retros_dir.is_dir() else []
     report_text = " ".join(str(r.get("detail", "")) for r in reports)

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-from tcip_store import Key, StoreDescriptor, StoreError, json_codec, read, register_store, replace
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, StoreError, read, register_store, replace
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ register_store(
         name=GUI_SNAPSHOT_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         durable=False,
         locator=_SNAPSHOT_DOC,

@@ -88,3 +88,46 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
     result = register_model_from_experiment("exp", str(ckpt))
     assert result["metrics"]["val_map50"] == 0.60  # from checkpoint, not 0.40 (last jsonl row)
     assert result["metrics"]["epoch"] == 1
+
+
+def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(tmp_path):
+    """Config and metrics arrive from a caller, an agent's own dict or a checkpoint's stamp,
+    so the field that will not encode is named before anything reaches the registry.
+
+    A stringified measurement is the failure this closes: it reads as a recorded number to
+    every later reader, with nothing marking it as a repr of something else.
+    """
+    from pathlib import Path
+
+    import pytest
+
+    from tcip_mcp.model_registry import ModelRegistry
+
+    reg = ModelRegistry(str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    with pytest.raises(TypeError) as config_refused:
+        reg.register_model("a", str(ckpt), {"weights": Path("model_best.pt")})
+    assert "config.weights" in str(config_refused.value)
+
+    with pytest.raises(ValueError) as metrics_refused:
+        reg.register_model("a", str(ckpt), {}, metrics={"val_map50": float("inf")})
+    assert "metrics.val_map50" in str(metrics_refused.value)
+
+    assert reg.list_models() == []
+
+
+def test_an_ordinary_registry_payload_is_still_registered(tmp_path):
+    """The refusal above must not cost a real deliverable its registry entry."""
+    from tcip_mcp.model_registry import ModelRegistry
+
+    reg = ModelRegistry(str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    entry = reg.register_model("a", str(ckpt), {"epochs": 3}, metrics={"val_map50": 0.70})
+
+    assert entry["name"] == "a"
+    assert [m["name"] for m in reg.list_models()] == ["a"]
+    assert reg.best_model("val_map50")["metrics"]["val_map50"] == 0.70

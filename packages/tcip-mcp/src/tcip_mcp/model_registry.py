@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, check_json_value, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ register_store(
         name=MODEL_REGISTRY_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="cas",
         locator=_INDEX_DOC,
     )
@@ -219,7 +220,12 @@ class ModelRegistry:
         Raises:
             FileNotFoundError: ``checkpoint_path`` does not exist, refuses to register a
                 phantom deliverable rather than silently storing a null-checksum entry.
+            TypeError / ValueError: ``config`` or ``metrics`` holds something JSON cannot
+                carry. Both arrive from a caller (an agent's own dict, or a checkpoint's
+                stamped metrics), so the offending field is named before anything is stored.
         """
+        check_json_value(config, path="config")
+        check_json_value(metrics or {}, path="metrics")
         ckpt = Path(checkpoint_path)
         if not ckpt.is_file():
             raise FileNotFoundError(
@@ -307,7 +313,9 @@ class ModelRegistry:
         """Get the registered model with the best value for ``metric_key``.
 
         Only models that actually carry the metric are considered, a missing metric is
-        skipped, not scored as a sentinel, so ``None`` cleanly means "no model has it".
+        skipped, not scored as a sentinel, so ``None`` cleanly means "no model has it". A
+        value that is not a finite number is skipped for the same reason: it compares false
+        against every candidate, so an incumbent holding one could never be displaced.
         ``higher_is_better`` defaults to a name heuristic: loss/error keys rank ascending,
         everything else (map/f1/accuracy/…) descending.
         """
@@ -319,6 +327,8 @@ class ModelRegistry:
         for m in self._index:
             val = m.get("metrics", {}).get(metric_key)
             if not isinstance(val, (int, float)) or isinstance(val, bool):
+                continue
+            if not math.isfinite(val):
                 continue
             if best_val is None or (val > best_val if higher_is_better else val < best_val):
                 best_val = float(val)

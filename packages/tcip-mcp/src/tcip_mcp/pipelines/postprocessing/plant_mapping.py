@@ -35,7 +35,7 @@ from typing import Iterable, Optional
 
 import tcip_store
 from PIL import ExifTags, Image
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -494,7 +494,7 @@ register_store(
         name=PLANT_MAPPING_STORE,
         kind="record",
         key_fields=("document",),
-        codec=json_codec(),
+        codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_MAPPING_DOC,
     )

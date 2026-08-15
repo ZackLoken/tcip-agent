@@ -40,9 +40,9 @@ def register_contract_stores() -> None:
     """Declare the stores the contract suite addresses, once per process.
 
     Each store isolates one declaration the contract makes: the two concurrency policies,
-    relaxed durability, a two-part key, a store with no enumeration, a codec that refuses
-    some values, a log, and two blob stores that differ only in whether they hand out a
-    path.
+    relaxed durability, a two-part key, a store with no enumeration, a store the encode
+    refusals are exercised against, a log, and two blob stores that differ only in whether
+    they hand out a path.
     """
     global _registered
     if _registered:
@@ -53,7 +53,7 @@ def register_contract_stores() -> None:
             name=CAS,
             kind="record",
             key_fields=("name",),
-            codec=ts.json_codec(),
+            codec=ts.RECORD_JSON,
             concurrency="cas",
             enumerable=True,
             locator=RootedFileLocator(prefix=("cas",), suffix=".json"),
@@ -64,7 +64,7 @@ def register_contract_stores() -> None:
             name=LWW,
             kind="record",
             key_fields=("name",),
-            codec=ts.json_codec(),
+            codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             enumerable=True,
             locator=RootedFileLocator(prefix=("lww",), suffix=".json"),
@@ -75,7 +75,7 @@ def register_contract_stores() -> None:
             name=RELAXED,
             kind="record",
             key_fields=("name",),
-            codec=ts.json_codec(),
+            codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             durable=False,
             locator=RootedFileLocator(prefix=("relaxed",), suffix=".json"),
@@ -86,7 +86,7 @@ def register_contract_stores() -> None:
             name=NESTED,
             kind="record",
             key_fields=("group", "name"),
-            codec=ts.json_codec(),
+            codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             enumerable=True,
             locator=RootedFileLocator(prefix=("nested",), suffix=".json"),
@@ -97,7 +97,7 @@ def register_contract_stores() -> None:
             name=OPAQUE,
             kind="record",
             key_fields=("name",),
-            codec=ts.json_codec(),
+            codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             locator=RootedFileLocator(prefix=("opaque",), suffix=".json"),
         )
@@ -107,7 +107,7 @@ def register_contract_stores() -> None:
             name=STRICT,
             kind="record",
             key_fields=("name",),
-            codec=ts.json_codec(allow_nan=False, default=None),
+            codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             enumerable=True,
             locator=RootedFileLocator(prefix=("strict",), suffix=".json"),
@@ -118,7 +118,7 @@ def register_contract_stores() -> None:
             name=LOG,
             kind="log",
             key_fields=("name",),
-            codec=ts.json_codec(indent=None),
+            codec=ts.LOG_JSON,
             locator=RootedFileLocator(prefix=("logs",), suffix=".jsonl"),
         )
     )

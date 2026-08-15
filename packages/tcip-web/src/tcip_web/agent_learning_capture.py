@@ -20,7 +20,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tcip_store import Key, StoreDescriptor, append, json_codec, register_store
+from tcip_store import LOG_JSON, Key, StoreDescriptor, append, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 _CAPTURE_LOG = RootedFileLocator(prefix=(".tcip",), suffix=".jsonl")
@@ -33,7 +33,7 @@ register_store(
         name=LEARNING_CAPTURE_STORE,
         kind="log",
         key_fields=("document",),
-        codec=json_codec(indent=None, default=None),
+        codec=LOG_JSON,
         locator=_CAPTURE_LOG,
     )
 )

@@ -31,10 +31,11 @@ from tcip_store.model import (
     Versioned,
 )
 from tcip_store.registry import (
+    LOG_JSON,
+    RECORD_JSON,
     Codec,
     StoreDescriptor,
     get_descriptor,
-    json_codec,
     register_store,
     registered_stores,
     text_codec,
@@ -60,8 +61,17 @@ from tcip_store.store import (
     unbind,
     write_blob,
 )
+from tcip_store.values import (
+    check_json_value,
+    finite_or_none,
+    non_finite_state,
+    stored_number,
+    stored_numbers,
+)
 
 __all__ = [
+    "LOG_JSON",
+    "RECORD_JSON",
     "REQUIRED",
     "BackendUnavailable",
     "BadKey",
@@ -90,11 +100,13 @@ __all__ = [
     "bind",
     "blob_path",
     "capabilities",
+    "check_json_value",
     "delete",
     "exists",
+    "finite_or_none",
     "get_descriptor",
-    "json_codec",
     "keys",
+    "non_finite_state",
     "open_blob",
     "put_blob",
     "read",
@@ -104,6 +116,8 @@ __all__ = [
     "register_store",
     "registered_stores",
     "replace",
+    "stored_number",
+    "stored_numbers",
     "text_codec",
     "transaction",
     "unbind",

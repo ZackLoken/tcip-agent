@@ -404,3 +404,66 @@ class TestWholeFrameDefaultIsUnaffected:
         state_file = resolve_state(Path(".tcip") / "state" / "proposals_no_region.json")
         envelope = json.loads(state_file.read_text(encoding="utf-8"))
         assert set(envelope) == {"engine", "candidates"}
+
+    def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A bespoke engine returns its own dicts, so what a segmenter hands back natively
+        (an array, a numpy scalar) is named instead of being staged as a repr of itself.
+
+        The staged envelope is what ``accept_proposals`` turns into real annotations, so a
+        candidate that reached it as a string would become a label nobody could trace back.
+        """
+        import numpy as np
+
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.project_paths import resolve_state
+        from tcip_mcp.tools import vision_tools
+
+        class ArrayBoxProposer:
+            def propose(self, image_path, **params):
+                return [{
+                    "candidate_id": 0, "bbox": np.array([1.0, 1.0, 2.0, 2.0]), "area": 1,
+                    "score": 0.5, "engine": "sam", "engine_meta": {}, "rings": [],
+                }]
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: ArrayBoxProposer())
+
+        img_path = tmp_path / "unstorable.jpg"
+        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+
+        result = vision_tools.propose_annotations(image_path=str(img_path))
+
+        assert "candidates[0].bbox" in result["error"]
+        assert not resolve_state(
+            Path(".tcip") / "state" / "proposals_unstorable.json").exists()
+
+    def test_an_ordinary_candidate_is_still_staged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The refusal above must not cost a working engine its staged proposals."""
+        import json as json_mod
+
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.project_paths import resolve_state
+        from tcip_mcp.tools import vision_tools
+
+        class OneBoxProposer:
+            def propose(self, image_path, **params):
+                return [{
+                    "candidate_id": 0, "bbox": [1.0, 1.0, 2.0, 2.0], "area": 1,
+                    "score": 0.5, "engine": "sam", "engine_meta": {},
+                    "rings": [[(1, 1), (2, 1), (2, 2)]],
+                }]
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
+
+        img_path = tmp_path / "storable.jpg"
+        Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
+
+        result = vision_tools.propose_annotations(image_path=str(img_path))
+
+        assert "error" not in result, result
+        state_file = resolve_state(Path(".tcip") / "state" / "proposals_storable.json")
+        envelope = json_mod.loads(state_file.read_text(encoding="utf-8"))
+        assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]
