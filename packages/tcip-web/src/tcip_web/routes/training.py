@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from tcip_store.errors import BadKey
+
 if TYPE_CHECKING:
     from tcip_store import Key
 
@@ -115,11 +117,16 @@ def _metrics_key(project_root: str, run_id: str) -> "Key | None":
     ``None`` when no record claims the run: the experiment may not exist yet on a run just
     launched, and the caller then has nothing to serve rather than an empty log to assert.
     A relaunch mints an experiment id that is not the run id, so the id is resolved from the
-    records themselves rather than assumed; ``run_id`` never becomes a path component here,
-    and the key constructor refuses one that carries a separator.
+    records themselves rather than assumed; ``run_id`` never becomes a path component here.
+    An id no record could ever carry (a path separator, an empty or dot name) raises
+    ``BadKey`` instead of resolving to "no record": absence is an answer, malformedness is a
+    refusal.
     """
-    from tcip_mcp.experiments import metrics_key, resolve_experiment_for_run
+    from tcip_mcp.experiments import metrics_key, resolve_experiment_for_run, status_key
 
+    # Shape check through the key constructor, the one place the id rule lives; the key is
+    # discarded because resolution below decides which record actually claims the run.
+    status_key(run_id, root=project_root)
     experiment_id = resolve_experiment_for_run(run_id, root=project_root)
     if experiment_id is None:
         return None
@@ -231,7 +238,10 @@ def get_run_metrics(project_root: str, run_id: str) -> dict:
         assert_project_root_allowed(project_root)
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
-    key = _metrics_key(project_root, run_id)
+    try:
+        key = _metrics_key(project_root, run_id)
+    except BadKey as exc:
+        raise HTTPException(400, str(exc)) from exc
     if key is None:
         return metrics_response([], exists=False)
     page = read_log(key)
@@ -310,6 +320,8 @@ async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: st
     await websocket.accept()
     try:
         await _stream_metrics(websocket, project_root, run_id)
+    except BadKey as exc:
+        await websocket.close(code=1008, reason=str(exc))
     except WebSocketDisconnect:
         pass
     except Exception:
