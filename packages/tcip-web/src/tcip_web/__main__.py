@@ -12,42 +12,16 @@ import os
 import socket
 
 import uvicorn
-from tcip_store import Key, StoreDescriptor, register_store, replace, text_codec
-from tcip_store.file_backend import RootedFileLocator, bind_default
+from tcip_store import replace
+from tcip_store.file_backend import bind_default
 
-from tcip_mcp.project_paths import project_root
+from tcip_mcp.web_client import backend_port_key
 from tcip_web.paths import is_loopback_host
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-
-_PORT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
-"""The backend's port handoff, one document under the platform state root."""
-
-BACKEND_PORT_STORE = "backend_port"
-_PORT_PARTS = ("web_port",)
-register_store(
-    StoreDescriptor(
-        name=BACKEND_PORT_STORE,
-        kind="record",
-        key_fields=("document",),
-        codec=text_codec(),
-        concurrency="last_writer_wins",
-        locator=_PORT_DOC,
-    )
-)
-
-
-def backend_port_key() -> Key:
-    """Where this backend publishes the port it bound, for MCP tools in other processes.
-
-    ``last_writer_wins``: one backend writes the whole value once per start and reads nothing
-    first. Anchored to the platform state root so a process launched from another directory
-    reads the same handoff rather than a cwd-local one.
-    """
-    return Key(BACKEND_PORT_STORE, str(project_root().resolve()), _PORT_PARTS)
 
 
 def _pick_port(host: str, requested: int) -> int:

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import threading
 import uuid
 from collections.abc import Iterable
@@ -26,8 +25,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import tcip_store
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from tcip_store import Version
 
 from tcip_annotation import (
     BBox,
@@ -40,6 +41,7 @@ from tcip_annotation import (
     compute_matches,
 )
 from tcip_annotation.json_io import annotation_from_payload, read_annotations
+from tcip_annotation.review_engine import label_baseline_key
 from tcip_annotation.state import Annotation
 from tcip_mcp.dataset_layout import derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
@@ -186,22 +188,25 @@ def _guard_path(path: Optional[str]) -> None:
 
 
 def _ensure_original_backup(label_path: Optional[str]) -> None:
-    """Snapshot a label file to ``<dir>/.original/<name>`` before its first mutation, if no baseline
-    exists yet: a per-file, O(1) safety net so a verdict never overwrites the pristine original
-    without a copy, independent of (and closing any gap in) the client's dir-level backup. New GT
-    files a verdict is creating have no original to preserve, so they're skipped. Best-effort."""
+    """Capture one label file's pristine bytes before its first mutation, if none is held yet.
+
+    The per-file, O(1) counterpart of :meth:`ReviewEngine.backup_original_labels`'s directory
+    sweep: same baseline record, same create-only capture, so a verdict never overwrites a
+    pristine original without a copy no matter which of the two ran first. New GT files a verdict
+    is creating have no original to preserve, so they are skipped, and an already-held baseline is
+    kept rather than replaced by this call's read of a file the platform may already have edited.
+    """
     if not label_path:
         return
     src = Path(label_path)
     if not src.is_file():
         return
-    dst = src.parent / ".original" / src.name
-    if dst.exists():
-        return
     try:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-    except OSError:
+        tcip_store.put_blob(
+            label_baseline_key(src.parent, src.stem), src.read_bytes(),
+            expect=Version.ABSENT,
+        )
+    except tcip_store.VersionConflict:
         pass
 
 

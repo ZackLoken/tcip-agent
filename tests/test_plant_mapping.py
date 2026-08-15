@@ -225,3 +225,72 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
 def test_build_mapping_empty_dir(tmp_path: Path) -> None:
     mapping = build_mapping(tmp_path / "nope", [])
     assert mapping == {}
+
+
+def _one_assignment() -> dict[str, list[Assignment]]:
+    return {
+        "2-11-26": [
+            Assignment(
+                image_path="/data/IMG.JPG",
+                stem="IMG",
+                date_folder="2-11-26",
+                plot_name="PLOT1",
+                accession_name="A",
+                source="sequence",
+                distance_m=1.2,
+            )
+        ]
+    }
+
+
+def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(
+    tmp_path: Path
+) -> None:
+    """A caller names where the mapping goes, and the chain to it is created for them.
+
+    The state directory of a fresh project has nothing in it, so a persist that required the
+    directory to exist would refuse the very first build.
+    """
+    out = tmp_path / "state" / "runs" / "mapping.json"
+    persist_mapping(_one_assignment(), out)
+
+    assert out.is_file()
+    assert load_mapping(out)["2-11-26"][0].plot_name == "PLOT1"
+
+
+def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
+    tmp_path: Path
+) -> None:
+    """The write takes the mapping record's own lock, and reports the contention rather than
+    writing past it.
+
+    Two processes can be handed the same mapping path, and an unguarded write would interleave
+    with the other's bytes and leave a document that parses as a mapping while holding neither
+    build's assignments.
+    """
+    import threading
+
+    import tcip_store
+    from tcip_store import StoreBusy
+    from tcip_store.file_backend import FileBackend, path_lock
+
+    out = tmp_path / "mapping.json"
+    tcip_store.bind(FileBackend(lock_timeout_s=0.2))
+
+    holding, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with path_lock(out, timeout_s=30):
+            holding.set()
+            release.wait(30)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert holding.wait(30)
+        with pytest.raises(StoreBusy):
+            persist_mapping(_one_assignment(), out)
+        assert not out.exists()
+    finally:
+        release.set()
+        holder.join(30)
