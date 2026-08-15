@@ -1045,15 +1045,15 @@ Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:394`;
 `packages/tcip-web/src/tcip_web/routes/sessions.py`'s `_status_bucket_for`, line 238.
 
-`VALID_STATUSES = ("complete", "partial", "negative", "unannotated")`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:208`.
+`IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:501`, imported by the web route module.
 
 Seam S22 ("image_status.json confirmed-negative store"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_classes_routes.py:132,149`,
 `tests/test_confirmations_travel_with_dataset.py:65,95`, `tests/test_doctor.py:48`. Gap: no test
 writes a status through the real `/api/classes/image_status` route and reads it back through the
-real `confirmed_negative_names` or `doctor.py`; MCP-side readers hardcode the literal `"negative"`
-string rather than referencing `VALID_STATUSES`, which is declared only in the web route module.
+real `confirmed_negative_names` or `doctor.py`; MCP-side readers test membership through
+`dataset_layout.is_confirmed_negative` against the vocabulary declared beside the resolver.
 
 ## 6. `image_status_digest.json`, attribute-schema staleness stamp
 
@@ -1429,19 +1429,19 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:68` (`def audited(fn: Callable)
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:72` (`def _audit(project_root: str, tool: str, arguments: dict) -> None:`).
 Phase 3 verdict: duplicated.
 
-## S07. Experiment record .tcip/experiments/<id>/  <!-- queued: P5-309 unify -->
+## S07. Experiment record .tcip/experiments/<id>/
 
 Must agree: three processes agree on the experiment directory layout and immutability rules for each file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:77` (`def create_experiment(`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:32` (`def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,`, patches `config.json` in place outside `experiments.py`'s own mutators).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:53` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py` (config patch goes through `store.transaction(config_key(...))`; every member writer takes its target from the experiments module's accessors).
+Phase 3 verdict: single.
 
-## S08. metrics.jsonl row format  <!-- queued: P5-273 unify -->
+## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:346` (`def log_metrics(`).
-Side B: `packages/tcip-web/src/tcip_web/routes/_metrics_common.py:13` (`def read_metrics_file(path: Path) -> dict:`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:567` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side B: `packages/tcip-web/src/tcip_web/routes/_metrics_common.py` (`read_metrics_file`, the one parse; the training route's incremental tail reads through the store's log cursor).
+Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
 
@@ -1472,27 +1472,26 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:39` (`def _reports_d
 Side B: `packages/tcip-web/src/tcip_web/routes/meta.py:37` (`def _reports_dir(project_root: str) -> Path:`).
 Phase 3 verdict: duplicated.
 
-## S13. image_status carried in annotation_stats.json  <!-- queued: P5-285 unify -->
+## S13. image_status carried in annotation_stats.json
 
 Must agree: the annotation-stats file's image_status block and the canonical image_status.json do not disagree.
-Side A: `packages/tcip-web/src/tcip_web/routes/sessions.py:242` (`from tcip_mcp.dataset_layout import image_status_path, normalize_status_store, status_bucket`, inside `_status_bucket_for`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:313` (`@router.post("/image_status")`, `set_image_status`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:523` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
+Phase 3 verdict: single. One membership restatement survives outside the resolver at `packages/tcip-web/src/tcip_web/routes/sessions.py:272` (session time classification), recorded as remaining work.
 
 ## S14. dataset_layout.py as the on-disk path resolver
 
 Must agree: agent writes and GUI reads resolve to the same files.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:88` (`def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:`).
-Side B: `packages/tcip-web/src/tcip_web/routes/dataset.py:26` (`from tcip_mcp.dataset_layout import (`, `select_dataset`).
-Phase 3 verdict: duplicated.
-Note: phase0's structural "Implementation" field recorded this seam as "once, shared" (one path-resolver module imported by both packages and scripts); the Phase 3 semantic adjudication still classified the agreement itself as `duplicated`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:102` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date` at line 475 as the published inverse of `status_bucket`).
+Side B: `packages/tcip-web/src/tcip_web/routes/dataset.py` (`select_dataset` resolves every directory through the resolver; `scripts/doctor.py`, `data_tools`, `project_tools` and `annotation_tools` no longer re-spell the tree).
+Phase 3 verdict: single.
 
-## S15. Per-image label filename convention  <!-- queued: P5-292 unify -->
+## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:285` (`def annotation_path(`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:743` (`` const label = dataset.annotations_dir ? `${dataset.annotations_dir}/${stem}.json` : null; ``).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:602` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
+Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
 ## S16. ReviewEngine shard-store directory  <!-- queued: P5-276 unify -->
 
@@ -1538,19 +1537,19 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:190` (`def assign_clas
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:37` (`def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:`).
 Phase 3 verdict: duplicated.
 
-## S22. image_status.json confirmed-negative store  <!-- queued: P5-277 unify -->
+## S22. image_status.json confirmed-negative store
 
 Must agree: a negative is empty labels plus an explicit human Complete, and every consumer applies the same bucket keying and status vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:153` (`def image_status_path(dataset_root: str | Path) -> Path:`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:313` (`@router.post("/image_status")`, `set_image_status`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:510` (`def derive_status(`, with `IMAGE_STATUSES` at line 501 as the one vocabulary and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` and `routes/review.py` call `derive_status`; the browser imports one `ImageStatus` type from `api/classes.ts`, pinned against the Python vocabulary by a gate test.
+Phase 3 verdict: single.
 
-## S23. image_status_digest.json attribute-schema stamp  <!-- queued: P5-278 unify -->
+## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-web/src/tcip_web/routes/classes.py:254` (`def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:157` (`def attribute_schema_digest(registry: ClassRegistry, subject: str) -> str | None:`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:569` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer and the split tools).
+Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:157` (`attribute_schema_digest`, the one digest computation).
+Phase 3 verdict: single.
 
 ## S24. view_coverage.json advisory coverage record  <!-- queued: P5-279 unify -->
 
@@ -1595,19 +1594,19 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:74` (`def resolve_
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:842` (`from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes`).
 Phase 3 verdict: duplicated.
 
-## S30. split.json train/val manifest  <!-- queued: P5-313 unify -->
+## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:1083` (`def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict, *,`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:447` (`split_path = project_root() / ".tcip" / "experiments" / experiment_id / "split.json"`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:833` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
+Phase 3 verdict: single.
 
-## S31. Checkpoint payload structural markers  <!-- queued: P5-314 unify -->
+## S31. Checkpoint payload structural markers
 
 Must agree: a checkpoint written by the training envelope is kind-routable and rebuildable by the predictor that later loads it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:259` (`def stamp_model_ref(payload: dict, config: dict, *, experiment_id: str | None = None) -> dict:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/inference/predictor.py:73` (`def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:25` (`MODEL_SOURCE_KEY` and `STATE_DICT_KEY`, the one key vocabulary).
+Side B: the three checkpoint writers in `pipelines/training/generic_trainer.py` and the readers (`generic_predictor.py`, `inference/predictor.py`, `training/evaluation.py`) all bind through the constants.
+Phase 3 verdict: single.
 
 ## S32. Single operating-point resolution for all consumers
 
@@ -1664,12 +1663,12 @@ Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:324` (`def write_trait_spec_fi
 Phase 3 verdict: duplicated.
 Differs from phase0 record: phase0 cited lines 275 and 320 respectively; the two functions are defined at 278 and 324.
 
-## S39. Phenology CSV column vocabulary  <!-- queued: P5-295 unify -->
+## S39. Phenology CSV column vocabulary
 
 Must agree: the delivered CSV's column names derive from the trait spec on every path that writes them.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py:815` (`stamp[f"{spec.phenology_prefix}_{spec.majority_label}_provisional"] = (`).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:418` (`stamp[f"{measurement.spec.phenology_prefix}_{measurement.spec.majority_label}_provisional"] = (`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:78` (`def majority_provisional_column(spec) -> str | None:`, the one owner; `phenology_csv_columns` builds the schema through it).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py:811` and `packages/tcip-web/src/tcip_web/routes/results.py:417` (both call `phenology.majority_provisional_column(...)` instead of assembling the name).
+Phase 3 verdict: single.
 
 ## S40. Per-band normalization stats for a non-3-channel detector
 
