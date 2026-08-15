@@ -2,10 +2,18 @@
   "mcpServers": {
     "tcip": {
       "command": "conda",
-      "args": ["run", "-n", "tcip-agent", "--no-capture-output", "python", "-m", "tcip_mcp"]
+      "args": [
+        "run",
+        "-n",
+        "tcip-agent",
+        "--no-capture-output",
+        "python",
+        "-m",
+        "tcip_mcp"
+      ]
     },
     "claude-context": {
-      "command": "C:\\Users\\zack\\Documents\\GitHub\\tcip-agent\\.claude\\hooks\\claude_context_launch.cmd",
+      "command": ".claude\\hooks\\claude_context_launch.cmd",
       "env": {
         "EMBEDDING_PROVIDER": "Ollama",
         "OLLAMA_HOST": "http://127.0.0.1:11434",
