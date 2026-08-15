@@ -104,7 +104,7 @@ describe("buildAnnotateShapes", () => {
         ] as [number, number][][],
         subject: "subject_a",
         attributes: {},
-        created_by: "user:zack",
+        created_by: "user:breeder",
       },
       {
         rings: [
@@ -134,7 +134,7 @@ describe("buildAnnotateShapes", () => {
       color: "#FF0000",
       label: "subject_a",
       tag: "gt",
-      created_by: "user:zack",
+      created_by: "user:breeder",
     });
   });
 
@@ -244,7 +244,7 @@ describe("buildAnnotateShapes", () => {
       ] as [number, number][][],
       subject: "subject_a",
       attributes: {},
-      created_by: "user:zack",
+      created_by: "user:breeder",
     };
     const shapes = buildAnnotateShapes({ ...base, polygons: [multi] });
     expect(shapes).toHaveLength(2);
@@ -285,7 +285,7 @@ describe("buildAnnotateShapes", () => {
       mode: "point",
       polygons: [],
       points: [
-        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {}, created_by: "user:zack" },
+        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {}, created_by: "user:breeder" },
         { x: 50, y: 60, subject: "other", attributes: {} },
       ],
     });
@@ -296,7 +296,7 @@ describe("buildAnnotateShapes", () => {
       color: "#FF0000",
       label: "subject_a",
       tag: "gt",
-      created_by: "user:zack",
+      created_by: "user:breeder",
     });
     expect(shapes[0].xyxy).toBeUndefined();
   });

@@ -110,7 +110,7 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
 
     bucket = status_bucket("catkin", "IMG_A")
     (state_dir / "region_completeness.json").write_text(json.dumps({
-        bucket: {"grid": grid, "cells_complete": ["A1"], "attested_by": "user:zack",
+        bucket: {"grid": grid, "cells_complete": ["A1"], "attested_by": "user:breeder",
                 "attested_at": "t", "stem": "IMG_A", "date": "2026-02-11", "subject": "catkin"},
     }))
     (state_dir / "region_completeness_digest.json").write_text(
@@ -139,7 +139,7 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:zack")], 32, 32)
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
 
     manifest_dir = root / ".tcip" / "experiments" / "exp1" / "model_src"
     manifest_dir.mkdir(parents=True)
@@ -162,7 +162,7 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     Image.new("RGB", (32, 32)).save(root / "images" / "d" / "IMG_A.JPG")
     json_io.write_annotations(
         ann / "IMG_A.json",
-        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:zack")], 32, 32)
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
     res = _run(root)
     assert res.returncode == 0, res.stdout
 
@@ -328,10 +328,10 @@ def test_review_baselines_are_not_counted_as_label_records(tmp_path):
         Image.new("RGB", size).save(imgs / f"{name}.JPG")
     json_io.write_annotations(
         annotation_path(root, date, "IMG_A"),
-        [Annotation(subject="catkin", geometry=BBox(2, 3, 18, 9), created_by="user:zack")], 48, 32)
+        [Annotation(subject="catkin", geometry=BBox(2, 3, 18, 9), created_by="user:breeder")], 48, 32)
     json_io.write_annotations(
         annotation_path(root, date, "IMG_B"),
-        [Annotation(subject="leaf", geometry=BBox(5, 1, 44, 12), created_by="user:zack")], 48, 32)
+        [Annotation(subject="leaf", geometry=BBox(5, 1, 44, 12), created_by="user:breeder")], 48, 32)
     baselines = annotation_dir(root, date) / ".original"
     baselines.mkdir()
     json_io.write_annotations(baselines / "IMG_B.json", [], 48, 32, keep_empty=True)

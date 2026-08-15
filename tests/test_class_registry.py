@@ -29,11 +29,11 @@ from tcip_mcp.class_registry import (
 
 def _catkin_bush() -> ClassRegistry:
     return ClassRegistry(subjects=(
-        Subject(name="bush", description="one hazelnut bush crown", defined_by="user:zack"),
+        Subject(name="bush", description="one hazelnut bush crown", defined_by="user:breeder"),
         Subject(
             name="catkin",
             description="a hazelnut catkin",
-            defined_by="user:zack",
+            defined_by="user:breeder",
             attributes=(Attribute(name="elongation", type="categorical", values=("dormant", "elongated")),),
         ),
     ))

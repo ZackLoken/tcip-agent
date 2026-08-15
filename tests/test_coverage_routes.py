@@ -383,7 +383,7 @@ def test_view_coverage_path_locator(tmp_path):
 class TestCompletenessRoute:
     def _toggle(self, client, path, grid, cell, subject="catkin", **overrides):
         body = {"image_path": path, "subject": subject, "grid": grid, "cell": cell,
-               "user": "zack"}
+               "user": "breeder"}
         body.update(overrides)
         return client.post("/api/coverage/completeness", json=body)
 
@@ -421,7 +421,7 @@ class TestCompletenessRoute:
         assert got.status_code == 200, got.text
         record = got.json()["by_subject"]["catkin"]
         assert record["cells_complete"] == ["A1", "B2"]
-        assert record["attested_by"] == "user:zack"
+        assert record["attested_by"] == "user:breeder"
         assert record["stale_cells"] == []
         assert record["subject"] == "catkin"
         assert record["stem"] == Path(path).stem

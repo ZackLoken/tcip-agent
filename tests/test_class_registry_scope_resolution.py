@@ -88,7 +88,7 @@ def test_digest_ignores_free_text_provenance():
     assert leaf is not None
     reworded = ClassRegistry(subjects=(
         Subject(name="bush", description="a bush crown, reworded"),
-        Subject(name="leaf", description="one hazelnut leaf, reworded", defined_by="user:zack",
+        Subject(name="leaf", description="one hazelnut leaf, reworded", defined_by="user:breeder",
                 defined_at="2026-01-02", attributes=leaf.attributes),
     ))
     assert attribute_schema_digest(reworded, "leaf") == attribute_schema_digest(base, "leaf")

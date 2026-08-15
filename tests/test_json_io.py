@@ -216,7 +216,7 @@ def test_polygon_pred_round_trip_confidence_via_score(tmp_path: Path) -> None:
 PROV = {
     "created_by": "sam",
     "created_at": "2026-07-15T10:00:00Z",
-    "accepted_by": "user:zack",
+    "accepted_by": "user:breeder",
     "accepted_at": "2026-07-15T11:00:00Z",
 }
 

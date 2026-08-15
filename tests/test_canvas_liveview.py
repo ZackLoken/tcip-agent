@@ -36,7 +36,7 @@ def _payload(root: Path, image_path: str, shapes=None, **over) -> dict:
         "img_height": 100,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100, "scale": 1.0},
         "mode": "polygon",
-        "user": "zack",
+        "user": "breeder",
         "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
         "counts": {"boxes": 0, "polygons": 1, "drawing_points": 0},
         "shapes": shapes,
@@ -55,9 +55,9 @@ def _shapes_doc(root: Path) -> dict:
 
 SHAPES = [
     {"kind": "polygon", "points": [[10, 10], [60, 10], [60, 60]], "color": "#00FF00",
-     "fill": True, "tag": "gt", "created_by": "user:zack"},
+     "fill": True, "tag": "gt", "created_by": "user:breeder"},
     {"kind": "box", "xyxy": [80, 20, 140, 70], "color": "#FF0000", "tag": "gt",
-     "created_by": "derived:user:zack"},
+     "created_by": "derived:user:breeder"},
     {"kind": "polyline", "points": [[5, 90], [30, 85], [55, 92]], "color": "#FFE7B1",
      "dashed": True, "tag": "in_progress", "label": "drawing"},
 ]
@@ -240,7 +240,7 @@ def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str |
     (sd / "canvas_live.json").write_text(json.dumps({
         "received_at": time.time(), "project_root": str(tmp_path), "tab": tab,
         "image": Path(img).name, "image_path": img,
-        "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "zack", "mode": "polygon",
+        "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "breeder", "mode": "polygon",
         "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
     }))
     if shapes is not None:
@@ -268,7 +268,7 @@ def test_capture_live_canvas_renders_pushed_state(tmp_path, monkeypatch):
     assert Path(res["image_path"]).is_file()
     assert res["classes"][0]["name"] == "catkin"
     assert res["shape_counts_by_tag"] == {"gt": 2, "in_progress": 1}
-    assert res["shape_counts_by_creator"] == {"user:zack": 1, "derived:user:zack": 1}
+    assert res["shape_counts_by_creator"] == {"user:breeder": 1, "derived:user:breeder": 1}
     assert res["state_age_seconds"] >= 0
     assert res["shapes_missing"] is False
     assert res["project_root"] == str(tmp_path)

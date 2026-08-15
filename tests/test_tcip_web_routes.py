@@ -1023,11 +1023,11 @@ def test_annotate_save_stamps_created_by(client, dataset_root, tmp_path) -> None
     resp = client.post("/api/annotate/labels", json={
         "image_path": str(img_path), "label_path": str(label_path),
         "annotations": [{"subject": "catkin", "bbox": [50, 40, 70, 60]}],
-        "user": "zack",
+        "user": "breeder",
     })
     assert resp.status_code == 200
     obj = json.loads(label_path.read_text())["annotations"][0]
-    assert obj["created_by"] == "user:zack"
+    assert obj["created_by"] == "user:breeder"
     assert obj["created_at"]
 
 
@@ -1072,12 +1072,12 @@ def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, data
 
     resp = _review_action(
         client, img_path, gt, project_root,
-        pred_path=str(pred), det_type="fp", action="accepted", user="zack",
+        pred_path=str(pred), det_type="fp", action="accepted", user="breeder",
     )
     assert resp.status_code == 200
     obj = json.loads(gt.read_text())["annotations"][0]
     assert obj["created_by"] == "sam"          # prediction origin carried into GT
-    assert obj["accepted_by"] == "user:zack"   # reviewer stamped
+    assert obj["accepted_by"] == "user:breeder"   # reviewer stamped
     assert obj["accepted_at"]
 
 
@@ -1091,11 +1091,11 @@ def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
 
     resp = _review_action(
         client, img_path, gt, project_root,
-        det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0], user="zack",
+        det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0], user="breeder",
     )
     assert resp.status_code == 200
     obj = json.loads(gt.read_text())["annotations"][0]
-    assert obj["created_by"] == "user:zack"
+    assert obj["created_by"] == "user:breeder"
 
 
 # ── Provenance round-trip fidelity (load → edit → save keeps the original creator) ──
@@ -1105,17 +1105,17 @@ def test_annotate_load_returns_provenance(client, dataset_root, tmp_path) -> Non
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "det.json"
     write_annotations(str(label_path), [Annotation(
-        subject="catkin", geometry=BBox(10, 10, 40, 40), created_by="derived:user:zack",
-        created_at="2026-02-11T00:00:00+00:00", accepted_by="user:zack")], 100, 80)
+        subject="catkin", geometry=BBox(10, 10, 40, 40), created_by="derived:user:breeder",
+        created_at="2026-02-11T00:00:00+00:00", accepted_by="user:breeder")], 100, 80)
     resp = client.get(
         "/api/annotate/labels",
         params={"image_path": str(img_path), "label_path": str(label_path)},
     )
     assert resp.status_code == 200
     a = resp.json()["annotations"][0]
-    assert a["created_by"] == "derived:user:zack"
+    assert a["created_by"] == "derived:user:breeder"
     assert a["created_at"] == "2026-02-11T00:00:00+00:00"
-    assert a["accepted_by"] == "user:zack"
+    assert a["accepted_by"] == "user:breeder"
 
 
 def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_path) -> None:
@@ -1127,17 +1127,17 @@ def test_annotate_resave_preserves_original_creator(client, dataset_root, tmp_pa
         "image_path": str(img_path), "label_path": str(label_path),
         "annotations": [
             {"subject": "catkin", "bbox": [10, 10, 40, 40],
-             "created_by": "derived:user:zack", "created_at": "2026-02-11T00:00:00+00:00",
-             "accepted_by": "user:zack"},
+             "created_by": "derived:user:breeder", "created_at": "2026-02-11T00:00:00+00:00",
+             "accepted_by": "user:breeder"},
             {"subject": "catkin", "bbox": [50, 50, 70, 70]},
         ],
         "user": "emily",
     })
     assert resp.status_code == 200
     objs = json.loads(label_path.read_text())["annotations"]
-    assert objs[0]["created_by"] == "derived:user:zack"          # original creator kept
+    assert objs[0]["created_by"] == "derived:user:breeder"          # original creator kept
     assert objs[0]["created_at"] == "2026-02-11T00:00:00+00:00"  # original timestamp kept
-    assert objs[0]["accepted_by"] == "user:zack"                 # acceptance carried
+    assert objs[0]["accepted_by"] == "user:breeder"                 # acceptance carried
     assert objs[1]["created_by"] == "user:emily"                 # only the new shape is Emily's
 
 
@@ -1151,12 +1151,12 @@ def test_annotate_polygons_keep_and_stamp_provenance(client, dataset_root, tmp_p
              "created_by": "user:emily", "created_at": "2026-03-02T00:00:00+00:00"},
             {"subject": "catkin", "points": [[50, 50], [70, 50], [70, 70]]},
         ],
-        "user": "zack",
+        "user": "breeder",
     })
     assert resp.status_code == 200
     objs = json.loads(label_path.read_text())["annotations"]
     assert objs[0]["created_by"] == "user:emily"   # round-tripped shape keeps its author
-    assert objs[1]["created_by"] == "user:zack"    # new polygon -> stamped to the current annotator
+    assert objs[1]["created_by"] == "user:breeder"    # new polygon -> stamped to the current annotator
 
 
 def test_review_subject_names_flow_from_annotations(

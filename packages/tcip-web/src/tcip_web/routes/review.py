@@ -385,7 +385,7 @@ class ActionPayload(BaseModel):
     action: str  # "accepted" | "rejected" | "edited" | "swept" (an explicit "checked this image
     # for missed objects, found none" attestation: no geometry, never mutates GT, see
     # _apply_gt_mutation)
-    # GUI-set reviewer identity (bare name, e.g. "zack"); stamped as accepted_by/created_by
+    # GUI-set reviewer identity (bare name, e.g. "breeder"); stamped as accepted_by/created_by
     # ("user:<name>"). Omitted by non-GUI callers -> backend falls back to the OS/env user.
     user: Optional[str] = None
     # Edited shape committed from the Review canvas (only for action="edited"): a box, or a

@@ -32,7 +32,7 @@ describe("labelSerde round-trip", () => {
         attributes: {},
       },
       { subject: "tip", point: [7, 9], attributes: {} },
-      { subject: "efb", attributes: { severity: "moderate" }, created_by: "user:zack" },
+      { subject: "efb", attributes: { severity: "moderate" }, created_by: "user:breeder" },
     ];
 
     const canvas = annotationsToCanvas(annotations);
@@ -66,7 +66,7 @@ describe("labelSerde round-trip", () => {
     });
     expect(rating).toMatchObject({ subject: "efb", attributes: { severity: "moderate" } });
     // Provenance travels through the round-trip.
-    expect(rating?.created_by).toBe("user:zack");
+    expect(rating?.created_by).toBe("user:breeder");
   });
 
   it("preserves a geometry-less rating across a load->save->load cycle (never silently dropped)", () => {
@@ -187,13 +187,13 @@ describe("labelSerde multi-ring polygons", () => {
 
   it("round-trips a multi-ring shape unchanged through save -> load (points bucket empty)", () => {
     const original: Annotation[] = [
-      { subject: "subject_a", rings: twoRings, attributes: {}, created_by: "user:zack" },
+      { subject: "subject_a", rings: twoRings, attributes: {}, created_by: "user:breeder" },
     ];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
     const reloaded = annotationsToCanvas(asLoaded(saved));
     expect(reloaded.polygons).toHaveLength(1);
     expect(reloaded.polygons[0].rings).toEqual(twoRings);
-    expect(reloaded.polygons[0].created_by).toBe("user:zack");
+    expect(reloaded.polygons[0].created_by).toBe("user:breeder");
     expect(reloaded.points).toHaveLength(0);
   });
 });
@@ -203,7 +203,12 @@ describe("labelSerde points", () => {
     // A point has no extent: bucketing it as a box would hand a fabricated zero-area target to
     // every downstream consumer that reads canvas.boxes.
     const canvas = annotationsToCanvas([
-      { subject: "tip", point: [12.5, 40], attributes: { stage: "open" }, created_by: "user:zack" },
+      {
+        subject: "tip",
+        point: [12.5, 40],
+        attributes: { stage: "open" },
+        created_by: "user:breeder",
+      },
     ]);
     expect(canvas.points).toEqual([
       {
@@ -211,7 +216,7 @@ describe("labelSerde points", () => {
         y: 40,
         subject: "tip",
         attributes: { stage: "open" },
-        created_by: "user:zack",
+        created_by: "user:breeder",
         created_at: null,
         accepted_by: null,
         accepted_at: null,
@@ -242,7 +247,7 @@ describe("labelSerde points", () => {
         subject: "tip",
         point: [101.5, 202.25],
         attributes: { stage: "open" },
-        created_by: "user:zack",
+        created_by: "user:breeder",
       },
     ];
     const reloaded = annotationsToCanvas(
@@ -254,7 +259,7 @@ describe("labelSerde points", () => {
       y: 202.25,
       subject: "tip",
       attributes: { stage: "open" },
-      created_by: "user:zack",
+      created_by: "user:breeder",
     });
     // A round-trip must not multiply the annotation into a second geometry kind.
     expect(reloaded.boxes).toHaveLength(0);

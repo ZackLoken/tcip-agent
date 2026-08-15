@@ -854,7 +854,7 @@ def _attest_regions_complete_through_the_coverage_route(
     for name in covered:
         resp = client.post("/api/coverage/completeness", json={
             "image_path": image_path, "subject": subject, "grid": grid, "cell": name,
-            "user": "zack"})
+            "user": "breeder"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["complete"] is True
     return covered
