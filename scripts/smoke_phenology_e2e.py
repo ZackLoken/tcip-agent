@@ -147,6 +147,11 @@ def _author_catkin_trait_spec(root: Path) -> None:
 
 
 def main() -> int:
+    # Its own process entry point, so it binds the storage backend the seam has no default for.
+    from tcip_store.file_backend import bind_default
+
+    bind_default()
+
     print("Phenology e2e smoke: build_plant_mapping -> compute_phenology\n")
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)

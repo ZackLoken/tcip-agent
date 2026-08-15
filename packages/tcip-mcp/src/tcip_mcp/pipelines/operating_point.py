@@ -69,6 +69,14 @@ assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES, (
     "COUNT_OBJECTIVE_PICKERS and traits.COUNT_OBJECTIVES must name the same currently-implemented "
     "objectives, two lists of the same capability set, kept in sync deliberately")
 
+REVIEW_VERDICT_LABEL_SUFFIX = " over review verdicts"
+"""What a picker's label gains when that picker swept confirmed review verdicts instead of GT.
+
+Stated once, beside the labels it extends: the label a run stamps and the entries
+``derivations.DERIVATION_IMPLEMENTATIONS`` holds for it are built from the same two pieces, so
+registering a picker registers its label, and its review-reference variant, with it.
+"""
+
 # The one-sided confidence multiplier for the mean+SE equivalence criterion (~95%) is a stated
 # CV-derivation convention, not a breeder-semantics decision, so it lives here as a named constant
 # rather than buried in a formula.
@@ -671,7 +679,7 @@ def resolve_operating_point(
             "(a new picker function + a new entry in this dict) before calibrating this trait."
         )
     picker, base_label = COUNT_OBJECTIVE_PICKERS[count_objective]
-    conf_derived_from = base_label + (" over review verdicts" if review else "")
+    conf_derived_from = base_label + (REVIEW_VERDICT_LABEL_SUFFIX if review else "")
     params: dict[str, ResolvedParam] = {}
     if count_objective_explicit:
         params["count_objective"] = default("count_objective", count_objective,

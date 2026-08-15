@@ -34,6 +34,11 @@ import dataclasses
 import logging
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
+
+import tcip_store as ts
+from tcip_store import DecodeError, Key, NotFound, StoreDescriptor, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
 
@@ -207,17 +212,27 @@ _TRAIT_SPECS_RELPATH = Path(".tcip") / "state" / "trait_specs"
 _SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
 _TUPLE_FIELDS = {"milestone_fractions", "delivers", "provenance"}
 
+SPEC_SUFFIX = ".yml"
+"""The canonical spec-file suffix, and the only one the store's locator addresses."""
+
+_STRAY_SUFFIX = ".yaml"
+
+
+def crops_yml_path() -> Path:
+    """Where the crops.yml controlled vocabulary lives, stated once for every reader of it."""
+    from tcip_mcp.project_paths import repo_root_from_here
+
+    return repo_root_from_here() / ".github" / "skills" / "crops" / "crops.yml"
+
 
 def _crops_traits() -> list[dict]:
     """The raw crops.yml trait records, or [] if it can't be read, the one YAML load every
-    crops.yml-derived reader (vocab, units) shares, never re-parsed per reader."""
-    from tcip_mcp.project_paths import repo_root_from_here
-
-    crops_yml = repo_root_from_here() / ".github" / "skills" / "crops" / "crops.yml"
+    crops.yml-derived reader (vocab, units, the skill guardrail) shares, never re-parsed per
+    reader. A caller that cannot act on an empty vocabulary checks for one and refuses."""
     try:
         import yaml
 
-        data = yaml.safe_load(crops_yml.read_text(encoding="utf-8"))
+        data = yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))
         return [t for t in data.get("traits", []) if isinstance(t, dict) and "name" in t]
     except (OSError, ValueError, KeyError, ImportError):
         return []
@@ -275,55 +290,177 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
         return None, str(e)
 
 
-def load_trait_specs_with_errors(specs_dir: Path | None = None) -> tuple[list[TraitSpec], list[dict]]:
+# ── the trait-spec store ─────────────────────────────────────────────────────
+
+
+def trait_specs_dir(project_root: str | Path | None = None) -> Path:
+    """Where a project's trait specs live: ``<root>/.tcip/state/trait_specs``.
+
+    The one implementation of that placement. ``project_root`` names the project explicitly, for a
+    caller (the web backend, ``scripts/doctor.py``) that serves more than one project per process;
+    omitting it resolves against this process's pinned platform root.
+    """
+    if project_root is not None:
+        return Path(project_root) / _TRAIT_SPECS_RELPATH
+    from tcip_mcp.project_paths import resolve_state
+
+    return resolve_state(_TRAIT_SPECS_RELPATH)
+
+
+def _resolve_specs_dir(specs_dir: Path | None, project_root: str | Path | None) -> Path:
+    if specs_dir is not None and project_root is not None:
+        raise ValueError(
+            "name either the project root or the spec directory, not both: they can disagree "
+            "and nothing here can tell which one the caller meant"
+        )
+    return Path(specs_dir) if specs_dir is not None else trait_specs_dir(project_root)
+
+
+@dataclass(frozen=True)
+class _YamlCodec:
+    """The spec files' bytes: what ``yaml.safe_dump`` writes and ``yaml.safe_load`` reads back."""
+
+    def encode(self, value: Any) -> bytes:
+        import yaml
+
+        return yaml.safe_dump(value).encode("utf-8")
+
+    def decode(self, data: bytes) -> Any:
+        import yaml
+
+        return yaml.safe_load(data.decode("utf-8"))
+
+
+TRAIT_SPECS_STORE = "trait_specs"
+_SPEC_FILE = RootedFileLocator(suffix=SPEC_SUFFIX)
+register_store(
+    StoreDescriptor(
+        name=TRAIT_SPECS_STORE,
+        kind="record",
+        key_fields=("trait",),
+        codec=_YamlCodec(),
+        concurrency="cas",
+        enumerable=True,
+        locator=_SPEC_FILE,
+    )
+)
+
+
+def trait_spec_key(specs_dir: str | Path, trait_name: str) -> Key:
+    """One trait's spec file under a spec directory.
+
+    ``cas``: a spec is read, merged into and written back (a derived localization kind, a recorded
+    count objective, a breeder correction), from the MCP server and the web backend alike, so an
+    unconditional write drops whichever field the other writer had just recorded.
+    """
+    return Key(TRAIT_SPECS_STORE, str(specs_dir), (trait_name,))
+
+
+def _spec_filename(specs_dir: Path, trait_name: str) -> str:
+    """The spec's file name, taken from the store's own locator rather than spelled again."""
+    return _SPEC_FILE.relative_path(str(specs_dir), (trait_name,)).name
+
+
+def _reconcile_spec_suffixes(directory: Path, *, adopt: bool) -> list[dict]:
+    """Account for a spec authored with the ``.yaml`` spelling, and with ``adopt``, rename it.
+
+    The store addresses spec files through one locator, so ``.yml`` is the only spelling it can
+    reach; a scan is where a differently-spelled file is found, and adopting the canonical name is
+    what keeps a hand-authored spec from disappearing from the registry. A stray beside an existing
+    canonical file is never renamed, since that would overwrite the file the registry already
+    serves; it is reported instead.
+
+    ``adopt=False`` reports every stray and renames nothing, for a caller that reads a breeder's
+    project to diagnose it: a diagnostic run must leave the project exactly as it found it, so it
+    names the file and the spelling it should carry rather than changing it.
+    """
+    errors: list[dict] = []
+    for stray in sorted(directory.glob(f"*{_STRAY_SUFFIX}")):
+        canonical = stray.with_suffix(SPEC_SUFFIX)
+        if canonical.exists():
+            reason = (
+                f"{canonical.name} holds this trait's spec, so {stray.name} cannot take the "
+                f"canonical {SPEC_SUFFIX} name; delete or merge it by hand"
+            )
+            logger.warning("trait spec %s skipped: %s", stray.name, reason)
+            errors.append({"file": stray.name, "reason": reason})
+            continue
+        if not adopt:
+            reason = (
+                f"{stray.name} does not carry the canonical {SPEC_SUFFIX} spelling, so the "
+                f"registry does not read it; rename it to {canonical.name}"
+            )
+            logger.warning("trait spec %s skipped: %s", stray.name, reason)
+            errors.append({"file": stray.name, "reason": reason})
+            continue
+        try:
+            stray.rename(canonical)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            logger.warning("trait spec %s skipped: %s", stray.name, e)
+            errors.append({"file": stray.name, "reason": str(e)})
+    return errors
+
+
+def load_trait_specs_with_errors(
+    specs_dir: Path | None = None, *, project_root: str | Path | None = None,
+    adopt_canonical_suffix: bool = True,
+) -> tuple[list[TraitSpec], list[dict]]:
     """Same scan as :func:`load_trait_specs`, plus the file/reason for every spec skipped.
 
     This is the one place that detail exists; a caller that needs to tell a breeder or the agent
     which spec is broken and why (the Results API, ``scripts/doctor.py``) reads it from here
-    rather than re-deriving its own explanation or grepping logs.
+    rather than re-deriving its own explanation or grepping logs. Either name the project whose
+    registry to read (``project_root``) or the directory itself; the placement is resolved here.
+
+    ``adopt_canonical_suffix=False`` leaves every file exactly as it found it and reports a
+    differently-spelled spec instead of renaming it, for a caller diagnosing a breeder's project
+    rather than running it.
     """
-    import yaml
-
-    from tcip_mcp.project_paths import resolve_state
-
-    directory = specs_dir or resolve_state(_TRAIT_SPECS_RELPATH)
+    directory = _resolve_specs_dir(specs_dir, project_root)
     if not directory.is_dir():
         return [], []
+    errors = _reconcile_spec_suffixes(directory, adopt=adopt_canonical_suffix)
     vocab = _crops_vocab()
     specs: list[TraitSpec] = []
-    errors: list[dict] = []
-    for path in sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")]):
+    for key in ts.keys(TRAIT_SPECS_STORE, str(directory)):
+        filename = _spec_filename(directory, key.parts[0])
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, yaml.YAMLError) as e:
-            logger.warning("trait spec %s skipped: %s", path.name, e)
-            errors.append({"file": path.name, "reason": str(e)})
+            data = ts.read(key)
+        except NotFound:
+            continue
+        except DecodeError as e:
+            logger.warning("trait spec %s skipped: %s", filename, e)
+            errors.append({"file": filename, "reason": str(e)})
             continue
         if not isinstance(data, dict):
             reason = "not a mapping"
-            logger.warning("trait spec %s skipped: %s", path.name, reason)
-            errors.append({"file": path.name, "reason": reason})
+            logger.warning("trait spec %s skipped: %s", filename, reason)
+            errors.append({"file": filename, "reason": reason})
             continue
         spec, reason = _spec_from_config(data, vocab)
         if spec is not None:
             specs.append(spec)
         else:
-            errors.append({"file": path.name, "reason": reason})
+            errors.append({"file": filename, "reason": reason})
     return specs, errors
 
 
-def load_trait_specs(specs_dir: Path | None = None) -> list[TraitSpec]:
+def load_trait_specs(
+    specs_dir: Path | None = None, *, project_root: str | Path | None = None
+) -> list[TraitSpec]:
     """Breeder-authored per-trait spec files (``<root>/.tcip/state/trait_specs/*.yml``), each
     cross-checked against the crops.yml controlled vocab. A missing directory yields none; an invalid
     or fabricated spec is skipped (so ``get_trait`` later hard-fails honestly rather than serving it).
     See :func:`load_trait_specs_with_errors` for why each skipped spec was skipped."""
-    specs, _errors = load_trait_specs_with_errors(specs_dir)
+    specs, _errors = load_trait_specs_with_errors(specs_dir, project_root=project_root)
     return specs
 
 
 def write_trait_spec_fields(
     trait_name: str, fields_: dict, provenance_entries: list[str] | tuple[str, ...],
-    specs_dir: Path | None = None,
+    specs_dir: Path | None = None, *, project_root: str | Path | None = None,
 ) -> TraitSpec:
     """Update one or more fields on an already-registered trait spec, appending provenance
     entries recording who asserted the change and how firmly.
@@ -333,7 +470,9 @@ def write_trait_spec_fields(
     through ``_spec_from_config``, the same crops.yml cross-check and field validation every
     config-authored spec already goes through, reused rather than a second implementation, and
     refuses to write anything that would silently fail to load or fall out of
-    ``registered_traits()`` afterward. Writes atomically.
+    ``registered_traits()`` afterward. The read, the merge and the write are one transaction over
+    the spec's own key, so a second writer recording a different field cannot be overwritten by
+    whatever this caller had read before it landed.
 
     This is the only write path for updating a trait spec anywhere in the platform: initial
     authoring is still hand-written YAML with no ``@audited`` record (a separate, still-manual
@@ -341,42 +480,44 @@ def write_trait_spec_fields(
     MCP tool calls, and what the derived localization kind and the recorded count-objective
     decision both use to persist themselves; neither gets its own write implementation.
     """
-    from tcip_mcp.project_paths import resolve_state
-    from tcip_mcp.utils.atomic_io import atomic_write_text
+    directory = _resolve_specs_dir(specs_dir, project_root)
+    if not directory.is_dir():
+        raise _no_spec_error(trait_name, directory)
+    _reconcile_spec_suffixes(directory, adopt=True)
 
-    import yaml
+    key = trait_spec_key(directory, trait_name)
+    with ts.transaction(key) as txn:
+        data = txn.read(key, default=None)
+        if data is None:
+            raise _no_spec_error(trait_name, directory)
+        if not isinstance(data, dict):
+            filename = _spec_filename(directory, trait_name)
+            raise ValueError(f"{directory / filename} is not a valid trait spec (not a mapping)")
 
-    directory = specs_dir or resolve_state(_TRAIT_SPECS_RELPATH)
-    path = next(
-        (p for p in (directory / f"{trait_name}.yml", directory / f"{trait_name}.yaml") if p.is_file()),
-        None,
-    )
-    if path is None:
-        raise ValueError(
-            f"no existing trait spec file for {trait_name!r} under {directory}, "
-            "write_trait_spec_fields only updates an already-registered trait; author the "
-            "initial spec file first."
-        )
+        merged = dict(data)
+        merged.update(fields_)
+        merged["provenance"] = tuple(data.get("provenance") or ()) + tuple(provenance_entries)
 
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"{path} is not a valid trait spec (not a mapping)")
+        spec, reason = _spec_from_config(merged, _crops_vocab())
+        if spec is None:
+            raise ValueError(
+                f"update to trait spec {trait_name!r} would produce an invalid spec: {reason}. "
+                "Refusing to write."
+            )
 
-    merged = dict(data)
-    merged.update(fields_)
-    merged["provenance"] = tuple(data.get("provenance") or ()) + tuple(provenance_entries)
-
-    spec, reason = _spec_from_config(merged, _crops_vocab())
-    if spec is None:
-        raise ValueError(
-            f"update to trait spec {trait_name!r} would produce an invalid spec: {reason}. Refusing to write."
-        )
-
-    write_data = {
-        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
-    }
-    atomic_write_text(path, yaml.safe_dump(write_data), encoding="utf-8")
+        txn.write(key, {
+            k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in dataclasses.asdict(spec).items()
+        })
     return spec
+
+
+def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
+    return ValueError(
+        f"no existing trait spec file for {trait_name!r} under {directory}, "
+        "write_trait_spec_fields only updates an already-registered trait; author the "
+        "initial spec file first."
+    )
 
 
 def _all_traits() -> dict[str, TraitSpec]:
@@ -404,5 +545,4 @@ def registered_traits_for(project_root: str | Path) -> list[str]:
     rely on ``resolve_state``'s single ``$TCIP_PROJECT_ROOT`` pin; ``registered_traits()`` stays
     the MCP-server-side entry point for the one pinned project.
     """
-    specs_dir = Path(project_root) / _TRAIT_SPECS_RELPATH
-    return sorted(spec.name for spec in load_trait_specs(specs_dir=specs_dir))
+    return sorted(spec.name for spec in load_trait_specs(project_root=project_root))
