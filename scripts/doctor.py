@@ -103,7 +103,16 @@ def check_negatives(root: Path, findings: list) -> None:
 
 
 def check_registry(root: Path, findings: list) -> None:
-    entries = _load(root / ".tcip" / "models" / "registry.json") or []
+    from tcip_store import DecodeError
+
+    from tcip_mcp.model_registry import read_registry_index
+
+    try:
+        entries = read_registry_index(root)
+    except DecodeError as exc:
+        findings.append(("error", "the model registry index will not decode, so this project's "
+                        f"registered models cannot be read at all: {exc}"))
+        return
     for m in entries if isinstance(entries, list) else []:
         ckpt = m.get("checkpoint_path", "")
         if "pytest-of-" in ckpt or "\\Temp\\" in ckpt or "/Temp/" in ckpt:

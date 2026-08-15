@@ -3,6 +3,14 @@
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 
+/**
+ * One entry from the project's trained-model registry, as the browser reads it.
+ *
+ * The backend's model_registry owns the entry and writes every key on it; the fields below are
+ * the ones this UI uses, and tests/test_registry_entry_shape_agreement.py holds each of them
+ * against an entry the real registry wrote, so a renamed or dropped key fails there instead of
+ * arriving here as undefined.
+ */
 export interface RegisteredModel {
   name: string;
   checkpoint_path: string;
