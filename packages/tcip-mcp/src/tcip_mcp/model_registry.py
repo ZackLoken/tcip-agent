@@ -8,9 +8,45 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
 
 logger = logging.getLogger(__name__)
+
+# ── the registry store ───────────────────────────────────────────────────────
+
+_INDEX_DOC = RootedFileLocator(prefix=(".tcip", "models"), suffix=".json")
+"""The registry index, one per project."""
+
+MODEL_REGISTRY_STORE = "model_registry"
+_INDEX_PARTS = ("registry",)
+register_store(
+    StoreDescriptor(
+        name=MODEL_REGISTRY_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_INDEX_DOC,
+    )
+)
+
+
+def registry_index_key(project_path: str | Path) -> Key:
+    """The project's registered-model index.
+
+    ``cas``: ``register_model`` re-reads the index under a lock, replaces one entry by name
+    and writes the whole list back, so an unconditional write drops every model another
+    writer registered in between.
+    """
+    return Key(MODEL_REGISTRY_STORE, str(project_path), _INDEX_PARTS)
+
+
+def registry_index_path(project_path: str | Path) -> Path:
+    """Where the project's registry index lives on disk."""
+    return Path(project_path, *_INDEX_DOC.relative_path(str(project_path), _INDEX_PARTS).parts)
 
 
 def _compute_sha256(filepath: str | Path) -> str:
@@ -141,9 +177,9 @@ class ModelRegistry:
     """Simple file-based model registry in .tcip/models/."""
 
     def __init__(self, project_path: str) -> None:
-        self.root = Path(project_path) / ".tcip" / "models"
+        self._index_path = registry_index_path(project_path)
+        self.root = self._index_path.parent
         self.root.mkdir(parents=True, exist_ok=True)
-        self._index_path = self.root / "registry.json"
         self._index: list[dict] = self._load_index()
 
     def _load_index(self) -> list[dict]:

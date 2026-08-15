@@ -26,8 +26,10 @@ import shutil
 import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
+
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, Point, bbox_of
@@ -76,6 +78,66 @@ class ReviewContext:
 REVIEW_SHARD_DIRNAME = "review"
 _LOOKUP_QUANT = 500
 _LOOKUP_TOLERANCE = 0.002
+_SHARD_SUFFIX = ".json"
+
+
+def shard_filename(img_name: str) -> str:
+    """The single filename an image key is stored under.
+
+    Sanitizing separators can collide distinct keys ('a/b.jpg' vs 'a_b.jpg'); a short stable
+    hash of the true key keeps their shard files distinct. The key itself lives in the payload.
+    """
+    safe = img_name.replace("\\", "_").replace("/", "_")
+    if safe != img_name:
+        safe = f"{safe}.{hashlib.sha1(img_name.encode('utf-8')).hexdigest()[:8]}"
+    return f"{safe}{_SHARD_SUFFIX}"
+
+
+@dataclass(frozen=True)
+class _ShardLocator:
+    """Places one image's verdict shard, carrying the filename sanitizing the layout needs.
+
+    The recoverable key from a path is the sanitized filename, which places that same file.
+    An image key that had to be sanitized is not recoverable from the path and does not need
+    to be: the true key is stored inside the payload, which is what reload reads it from.
+    """
+
+    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
+        (img_name,) = parts
+        return PurePosixPath(REVIEW_SHARD_DIRNAME, shard_filename(img_name))
+
+    def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
+        segments = relative_path.parts
+        if len(segments) != 2 or segments[0] != REVIEW_SHARD_DIRNAME:
+            return None
+        if not segments[1].endswith(_SHARD_SUFFIX):
+            return None
+        return (segments[1][: -len(_SHARD_SUFFIX)],)
+
+
+REVIEW_VERDICTS_STORE = "review_verdicts"
+_SHARD_LOCATOR = _ShardLocator()
+register_store(
+    StoreDescriptor(
+        name=REVIEW_VERDICTS_STORE,
+        kind="record",
+        key_fields=("image",),
+        codec=json_codec(indent=None, ensure_ascii=False, default=None, separators=(",", ":")),
+        concurrency="cas",
+        enumerable=True,
+        locator=_SHARD_LOCATOR,
+    )
+)
+
+
+def review_verdict_key(state_dir: str | Path, img_name: str) -> Key:
+    """One image's review verdicts.
+
+    ``cas``: a shard is rewritten from an engine's cached aggregate state, and a second
+    engine on the same state dir holds its own copy, so an unconditional write drops the
+    verdicts the other one recorded.
+    """
+    return Key(REVIEW_VERDICTS_STORE, str(state_dir), (img_name,))
 
 
 # ── Engine ────────────────────────────────────────────────────────────────
@@ -113,12 +175,8 @@ class ReviewEngine:
         return self.state_dir / REVIEW_SHARD_DIRNAME
 
     def _shard_path(self, img_name: str) -> Path:
-        safe = img_name.replace("\\", "_").replace("/", "_")
-        if safe != img_name:
-            # Sanitizing separators can collide distinct keys ('a/b.jpg' vs 'a_b.jpg'); a short stable
-            # hash of the true key keeps their shard files distinct. The key itself lives in the payload.
-            safe = f"{safe}.{hashlib.sha1(img_name.encode('utf-8')).hexdigest()[:8]}"
-        return self.shard_dir / f"{safe}.json"
+        relative = _SHARD_LOCATOR.relative_path(str(self.state_dir), (img_name,))
+        return Path(self.state_dir, *relative.parts)
 
     def load_review_state(self) -> None:
         shards = sorted(self.shard_dir.glob("*.json")) if self.shard_dir.is_dir() else []

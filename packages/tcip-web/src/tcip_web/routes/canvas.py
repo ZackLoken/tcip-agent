@@ -30,6 +30,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_web.paths import assert_path_allowed
 
@@ -56,12 +58,61 @@ class CanvasStatePayload(BaseModel):
     shapes: Optional[list[dict]] = None
 
 
+_CANVAS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The live-canvas documents, one pair per project."""
+
+CANVAS_META_STORE = "canvas_meta"
+CANVAS_GEOMETRY_STORE = "canvas_geometry"
+_META_PARTS = ("canvas_live",)
+_GEOMETRY_PARTS = ("canvas_shapes",)
+
+def _register_canvas_store(name: str) -> None:
+    """Declare one of the pair: same codec, same relaxed durability, same policy."""
+    register_store(
+        StoreDescriptor(
+            name=name,
+            kind="record",
+            key_fields=("document",),
+            codec=json_codec(),
+            concurrency="last_writer_wins",
+            durable=False,
+            locator=_CANVAS_DOC,
+        )
+    )
+
+
+_register_canvas_store(CANVAS_META_STORE)
+_register_canvas_store(CANVAS_GEOMETRY_STORE)
+
+
+def _canvas_path(project_root: str, parts: tuple[str, ...]) -> Path:
+    return Path(project_root, *_CANVAS_DOC.relative_path(project_root, parts).parts)
+
+
 def meta_path(project_root: str) -> Path:
-    return Path(project_root) / ".tcip" / "state" / "canvas_live.json"
+    return _canvas_path(project_root, _META_PARTS)
 
 
 def shapes_path(project_root: str) -> Path:
-    return Path(project_root) / ".tcip" / "state" / "canvas_shapes.json"
+    return _canvas_path(project_root, _GEOMETRY_PARTS)
+
+
+def canvas_meta_key(project_root: str) -> Key:
+    """The small meta document every push overwrites.
+
+    ``last_writer_wins``: each push writes the document whole from the payload it was given
+    and reads nothing first; the reader pairs meta with geometry by identity rather than by
+    mutual exclusion. ``durable=False`` carries this module's own stated property, that a
+    crash losing the last push costs nothing because the next push repaints it.
+    """
+    return Key(CANVAS_META_STORE, project_root, _META_PARTS)
+
+
+def canvas_geometry_key(project_root: str) -> Key:
+    """The display-resolved geometry a full push writes, on the same terms as the meta
+    document, and written before it so a reader pairing new meta with old geometry sees an
+    identity mismatch rather than a false match."""
+    return Key(CANVAS_GEOMETRY_STORE, project_root, _GEOMETRY_PARTS)
 
 
 def _guard_project_root(project_root: str) -> None:

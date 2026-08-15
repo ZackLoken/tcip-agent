@@ -3,12 +3,55 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
+import tcip_store as ts
 from tcip_mcp.utils.atomic_io import (
     append_jsonl,
     atomic_write_json,
     file_transaction,
     read_json,
 )
+from tcip_store.file_backend import FileBackend, RootedFileLocator
+
+_LOCK_DOMAIN_STORE = "lock_domain_probe"
+
+ts.register_store(
+    ts.StoreDescriptor(
+        name=_LOCK_DOMAIN_STORE,
+        kind="record",
+        key_fields=("name",),
+        codec=ts.json_codec(),
+        concurrency="last_writer_wins",
+        locator=RootedFileLocator(suffix=".json"),
+    )
+)
+
+
+@pytest.fixture
+def bound_store():
+    # A short budget so a lock that is not shared is observed blocking in seconds, not in the
+    # backend's full default wait.
+    ts.bind(FileBackend(lock_timeout_s=2.0))
+    try:
+        yield
+    finally:
+        ts.unbind()
+
+
+def test_a_record_write_inside_an_open_file_transaction_on_its_path_does_not_wait(
+    tmp_path, bound_store
+):
+    """One path, one lock: a transaction here and a record write through the storage layer
+    hold the same lock object, so the inner write proceeds instead of waiting out its budget
+    against a second lock on the same file."""
+    key = ts.Key(_LOCK_DOMAIN_STORE, str(tmp_path), ("guarded",))
+    path = tmp_path / "guarded.json"
+
+    with file_transaction(path):
+        ts.replace(key, {"n": 1})
+
+    assert read_json(path) == {"n": 1}
 
 
 def test_atomic_write_json_roundtrip_and_no_temp_leftovers(tmp_path):

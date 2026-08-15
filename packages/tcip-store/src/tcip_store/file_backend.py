@@ -17,7 +17,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Protocol
@@ -107,12 +107,27 @@ class RootedFileLocator:
         return (*rest[:-1], last)
 
 
+DEFAULT_LOCK_TIMEOUT_S = 30.0
+
 _registry_guard = threading.Lock()
 _thread_locks: dict[str, threading.RLock] = {}
 _file_locks: dict[str, Any] = {}
 
 
-def _locks_for(canonical: str, lock_path: str, file_lock_cls: Any) -> tuple[threading.RLock, Any]:
+def _filelock_classes() -> tuple[Any, Any]:
+    """The lock class and its timeout error, or a refusal naming what is missing."""
+    try:
+        from filelock import FileLock, Timeout
+    except ImportError as exc:
+        raise BackendUnavailable(
+            "the file backend needs the filelock package for cross-process exclusion and "
+            "will not run without it: in-process locking alone would leave the platform's "
+            "processes free to clobber each other's writes"
+        ) from exc
+    return FileLock, Timeout
+
+
+def _locks_for(canonical: str, lock_path: str) -> tuple[threading.RLock, Any]:
     """The one lock pair for a canonical path in this process.
 
     One ``FileLock`` instance per path is a hard requirement, not an optimization: two
@@ -121,6 +136,7 @@ def _locks_for(canonical: str, lock_path: str, file_lock_cls: Any) -> tuple[thre
     itself. One instance with the library's default thread-local counting gives counted
     same-thread re-entry and blocks a second thread.
     """
+    file_lock_cls, _ = _filelock_classes()
     with _registry_guard:
         thread_lock = _thread_locks.get(canonical)
         if thread_lock is None:
@@ -131,6 +147,34 @@ def _locks_for(canonical: str, lock_path: str, file_lock_cls: Any) -> tuple[thre
             file_lock = file_lock_cls(lock_path)
             _file_locks[canonical] = file_lock
         return thread_lock, file_lock
+
+
+@contextmanager
+def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
+    """Hold this process's one lock pair for a filesystem path, across threads and processes.
+
+    Anything that guards the same path this backend guards has to acquire through here, or
+    the two hold separately constructed ``FileLock`` instances that do not exclude each
+    other's re-entry and block until the timeout. The parent directory must already exist:
+    the lock file lands beside the data file.
+
+    Raises ``filelock``'s own ``Timeout`` when the wait runs out, which is what the backend
+    turns into ``StoreBusy`` once it knows which key was contended.
+    """
+    _, timeout_error = _filelock_classes()
+    target = Path(path)
+    lock_file = str(target) + _LOCK_SUFFIX
+    thread_lock, file_lock = _locks_for(_canonical(target), lock_file)
+    if not thread_lock.acquire(timeout=max(0.0, timeout_s)):
+        raise timeout_error(lock_file)
+    try:
+        file_lock.acquire(timeout=max(0.0, timeout_s))
+        try:
+            yield
+        finally:
+            file_lock.release()
+    finally:
+        thread_lock.release()
 
 
 def _canonical(path: Path) -> str:
@@ -159,18 +203,10 @@ class FileBackend:
     a prefix guarantee across a crash and not atomicity; ``capabilities()`` says so.
     """
 
-    def __init__(self, *, lock_timeout_s: float = 30.0) -> None:
-        try:
-            from filelock import FileLock, Timeout
-        except ImportError as exc:
-            raise BackendUnavailable(
-                "the file backend needs the filelock package for cross-process exclusion and "
-                "will not run without it: in-process locking alone would leave the platform's "
-                "processes free to clobber each other's writes"
-            ) from exc
+    def __init__(self, *, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> None:
+        _, timeout_error = _filelock_classes()
         self.lock_timeout_s = lock_timeout_s
-        self._file_lock_cls = FileLock
-        self._timeout_error = Timeout
+        self._timeout_error = timeout_error
 
     def capabilities(self) -> Capabilities:
         """What this backend guarantees on the platform it is running on.
@@ -227,25 +263,15 @@ class FileBackend:
             self._ensure_parent(path, durable=get_descriptor(key.store).durable)
             items.append((key, path, canonical))
         deadline = time.monotonic() + timeout
-        held: list[tuple[threading.RLock, Any]] = []
-        try:
-            for key, path, canonical in items:
-                thread_lock, file_lock = _locks_for(
-                    canonical, str(path) + _LOCK_SUFFIX, self._file_lock_cls
-                )
-                if not thread_lock.acquire(timeout=max(0.0, deadline - time.monotonic())):
-                    raise StoreBusy(requested, key, timeout)
+        with ExitStack() as held:
+            for key, path, _ in items:
                 try:
-                    file_lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+                    held.enter_context(
+                        path_lock(path, timeout_s=deadline - time.monotonic())
+                    )
                 except self._timeout_error:
-                    thread_lock.release()
                     raise StoreBusy(requested, key, timeout) from None
-                held.append((thread_lock, file_lock))
             yield
-        finally:
-            for thread_lock, file_lock in reversed(held):
-                file_lock.release()
-                thread_lock.release()
 
     # ── durability primitives ───────────────────────────────────────────────────
 

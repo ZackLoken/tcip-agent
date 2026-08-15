@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.project_paths import project_root, resolve_state
 from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, file_transaction, read_json
 
@@ -34,6 +37,156 @@ def experiments_dir() -> Path:
 
 def _exp_dir(experiment_id: str) -> Path:
     return experiments_dir() / experiment_id
+
+
+# ── the experiment stores ────────────────────────────────────────────────────
+
+_MEMBER_DOC = RootedFileLocator(suffix=".json")
+"""One member document inside its experiment's directory."""
+
+_MEMBER_LOG = RootedFileLocator(suffix=".jsonl")
+"""One append-only member log inside its experiment's directory."""
+
+
+def experiments_scope() -> str:
+    """The root every experiment key hangs off: the experiment store, made absolute.
+
+    Absolute because a key names a root rather than a process's current directory, and
+    resolved per call because ``EXPERIMENTS_DIR`` is relative until a platform root is
+    pinned, and a pin can land mid-process.
+    """
+    return str(experiments_dir().resolve())
+
+
+def _member_key(store: str, experiment_id: str, document: str) -> Key:
+    return Key(store, experiments_scope(), (experiment_id, document))
+
+
+EXPERIMENT_CONFIG_STORE = "experiment_config"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_CONFIG_STORE,
+        kind="record",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_MEMBER_DOC,
+    )
+)
+
+
+def config_key(experiment_id: str) -> Key:
+    """The config snapshot a run trained under.
+
+    ``last_writer_wins``: it is written whole at creation and replaced only while the record
+    is still pristine, never merged into.
+    """
+    return _member_key(EXPERIMENT_CONFIG_STORE, experiment_id, "config")
+
+
+EXPERIMENT_STATUS_STORE = "experiment_status"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_STATUS_STORE,
+        kind="record",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_MEMBER_DOC,
+    )
+)
+
+
+def status_key(experiment_id: str) -> Key:
+    """The run's state, timestamps and liveness heartbeat.
+
+    ``cas``: every writer here reads the document and updates fields inside it, from the
+    training subprocess and the tool process at once, so an unconditional write drops the
+    heartbeat or the run identity another writer just stamped.
+    """
+    return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, "status")
+
+
+EXPERIMENT_LINEAGE_STORE = "experiment_lineage"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_LINEAGE_STORE,
+        kind="record",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_MEMBER_DOC,
+    )
+)
+
+
+def lineage_key(experiment_id: str) -> Key:
+    """The data to model to predictions chain.
+
+    ``cas``: ``update_lineage`` merges fields into the stored document under a lock, so an
+    unconditional write erases an edge another writer recorded.
+    """
+    return _member_key(EXPERIMENT_LINEAGE_STORE, experiment_id, "lineage")
+
+
+EXPERIMENT_ARTIFACTS_STORE = "experiment_artifacts"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_ARTIFACTS_STORE,
+        kind="record",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_MEMBER_DOC,
+    )
+)
+
+
+def artifacts_key(experiment_id: str) -> Key:
+    """The run's artifact pointers.
+
+    ``cas``: ``record_artifact`` adds one name to the stored mapping under a lock, so an
+    unconditional write drops the pointers already recorded.
+    """
+    return _member_key(EXPERIMENT_ARTIFACTS_STORE, experiment_id, "artifacts")
+
+
+EXPERIMENT_ENV_STORE = "experiment_env"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_ENV_STORE,
+        kind="record",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_MEMBER_DOC,
+    )
+)
+
+
+def env_key(experiment_id: str) -> Key:
+    """The environment capture behind a reproducible run.
+
+    ``last_writer_wins``: the envelope writes it whole, once, from state it already holds.
+    """
+    return _member_key(EXPERIMENT_ENV_STORE, experiment_id, "env")
+
+
+EXPERIMENT_METRICS_STORE = "experiment_metrics"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_METRICS_STORE,
+        kind="log",
+        key_fields=("experiment_id", "document"),
+        codec=json_codec(indent=None),
+        locator=_MEMBER_LOG,
+    )
+)
+
+
+def metrics_key(experiment_id: str) -> Key:
+    """The run's epoch-by-epoch metrics, one entry per row, append only."""
+    return _member_key(EXPERIMENT_METRICS_STORE, experiment_id, "metrics")
 
 
 # Once a run reaches a terminal state its record is immutable (experiments are immutable). The lock

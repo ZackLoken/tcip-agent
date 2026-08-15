@@ -18,13 +18,21 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 import tcip_store as ts
+from tcip_annotation import json_io, review_engine
+from tcip_annotation.state import Annotation, BBox
+from tcip_mcp import class_registry, dataset_layout, experiments, model_registry, workspace
+from tcip_mcp.tools import project_tools
+from tcip_mcp.utils.atomic_io import atomic_write_json
 from tcip_store.file_backend import FileBackend, RootedFileLocator
+from tcip_web import jobstore
+from tcip_web.routes import canvas
 from tests._store_worker import (
     BLOB,
     CAS,
@@ -723,3 +731,302 @@ def test_lock_files_and_staged_temp_files_are_never_keys(store):
     (directory / "tmpabc123.tmp").write_bytes(b"{}")
 
     assert ts.keys(LWW, str(store.root)) == [key]
+
+
+# ── the platform's own stores: same bytes, same path ────────────────────────────
+
+
+def _write_status(root: Path) -> Path:
+    path = dataset_layout.image_status_path(root)
+    atomic_write_json(path, {"catkin/2026-03-04": {"a_1.jpg": "negative", "ü_2.jpg": "complete"}})
+    return path
+
+
+def _write_status_digest(root: Path) -> Path:
+    path = dataset_layout.image_status_digest_path(root)
+    atomic_write_json(path, {"catkin/2026-03-04": {"a_1.jpg": "9f2c"}})
+    return path
+
+
+def _write_view_coverage(root: Path) -> Path:
+    path = dataset_layout.view_coverage_path(root)
+    atomic_write_json(path, {"catkin/2026-03-04": {"a_1.jpg": {
+        "grid": {"rows": 3, "cols": 3}, "cells_served_at_native": ["r1c1"],
+        "cells_swept": ["r1c1"]}}})
+    return path
+
+
+def _write_region_completeness(root: Path) -> Path:
+    path = dataset_layout.region_completeness_path(root)
+    atomic_write_json(path, {"catkin/orthö": {"grid": {"rows": 2, "cols": 2},
+                                              "cells_complete": ["r1c1"], "stem": "orthö"}})
+    return path
+
+
+def _write_region_completeness_digest(root: Path) -> Path:
+    path = dataset_layout.region_completeness_digest_path(root)
+    atomic_write_json(path, {"catkin/orthö": {"r1c1": "3ab9"}})
+    return path
+
+
+def _write_class_registry(root: Path) -> Path:
+    path = dataset_layout.classes_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    registry = class_registry.registry_from_dict({"catkin": {"description": "a männlich flower"}})
+    class_registry.write_registry(path, registry)
+    return path
+
+
+def _write_dataset_identity(root: Path) -> Path:
+    (root / "images").mkdir(parents=True, exist_ok=True)
+    project_tools.register_dataset(str(root), crop="hazelnut")
+    return dataset_layout.dataset_identity_path(root)
+
+
+def _write_labels(root: Path) -> Path:
+    path = dataset_layout.annotation_path(root, "2026-03-04", "a_1")
+    json_io.write_annotations(
+        path, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 3.5, 4.5),
+                          attributes={"elongation": "elongiert"}, created_by="ü")], 640, 480)
+    return path
+
+
+def _write_predictions(root: Path) -> Path:
+    path = dataset_layout.prediction_path(root, "live", "2026-03-04", "a_1")
+    json_io.write_annotations(
+        path, [Annotation(subject="catkin", geometry=BBox(1.0, 2.0, 3.5, 4.5), score=0.75)],
+        640, 480)
+    return path
+
+
+def _review_state_dir(root: Path) -> Path:
+    return root / ".tcip" / "state"
+
+
+def _write_review_verdict(root: Path) -> Path:
+    engine = review_engine.ReviewEngine(_review_state_dir(root), current_user="ü")
+    engine.mark_image_reviewed("a_1.jpg")
+    return engine._shard_path("a_1.jpg")
+
+
+def _write_canvas_meta(root: Path) -> Path:
+    path = canvas.meta_path(str(root))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas._write_json_no_fsync(path, {"schema_version": 1, "tab": "annotate", "image": "ü.jpg"})
+    return path
+
+
+def _write_canvas_geometry(root: Path) -> Path:
+    path = canvas.shapes_path(str(root))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas._write_json_no_fsync(path, {"image_path": "ü.jpg", "tab": "annotate", "shapes": []})
+    return path
+
+
+def _write_model_registry(root: Path) -> Path:
+    checkpoint = root / "weights.pt"
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint.write_bytes(b"stand-in for checkpoint bytes")
+    model_registry.ModelRegistry(str(root)).register_model(
+        "hazelnut_catkin_detector_v1", str(checkpoint), {"epochs": 3}, kind="tcip_module")
+    return model_registry.registry_index_path(root)
+
+
+def _write_job_registry(root: Path) -> Path:
+    jobstore.persist("inference_jobs", [{"id": "j1", "status": "completed"}])
+    return jobstore._state_path("inference_jobs")
+
+
+def _write_active_marker(root: Path) -> Path:
+    workspace.set_active_project("hazelnut_catkin_valley")
+    return workspace.active_marker_path()
+
+
+def _created_experiment(root: Path) -> Path:
+    if not experiments._exp_dir(EXPERIMENT).exists():
+        experiments.create_experiment(EXPERIMENT, {"model": "faster_rcnn"}, data_source="ds")
+    return experiments._exp_dir(EXPERIMENT)
+
+
+def _write_experiment_member(root: Path, member: str) -> Path:
+    return _created_experiment(root) / f"{member}.json"
+
+
+def _write_experiment_env(root: Path) -> Path:
+    path = _created_experiment(root) / "env.json"
+    atomic_write_json(path, {"env": {"python": "3.12"}, "seed": 42})
+    return path
+
+
+def _write_experiment_metrics(root: Path) -> Path:
+    directory = _created_experiment(root)
+    experiments.log_metrics(EXPERIMENT, 1, {"loss": 0.5})
+    return directory / "metrics.jsonl"
+
+
+def _pin_platform_root(root: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
+
+
+def _pin_workspace(root: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TCIP_WORKSPACE", str(root))
+
+
+EXPERIMENT = "exp_042"
+
+
+@dataclass(frozen=True)
+class Registered:
+    """One registered store: how today's writer produces it, and how the seam addresses it.
+
+    ``relative`` is the path under the root the writer is given. ``scope_of`` is the root the
+    store's own keys hang off, which for the review shards and the experiment members is a
+    directory below that.
+
+    ``newline_translated`` marks a writer that opens its file in text mode, so on Windows
+    the bytes it produces carry CRLF where the seam's byte write produces LF. The comparison
+    then holds line for line rather than byte for byte, and says so, rather than a codec
+    emitting different bytes on different platforms.
+    """
+
+    write_today: Callable[[Path], Path]
+    key_of: Callable[[Path], ts.Key]
+    relative: str
+    pin: Callable[[Path, object], None] | None = None
+    scope_of: Callable[[Path], Path] = lambda root: root
+    newline_translated: bool = False
+
+
+REGISTERED = {
+    "image_status": Registered(
+        _write_status, dataset_layout.image_status_key, ".tcip/state/image_status.json"),
+    "image_status_digest": Registered(
+        _write_status_digest, dataset_layout.image_status_digest_key,
+        ".tcip/state/image_status_digest.json"),
+    "view_coverage": Registered(
+        _write_view_coverage, dataset_layout.view_coverage_key, ".tcip/state/view_coverage.json"),
+    "region_completeness": Registered(
+        _write_region_completeness, dataset_layout.region_completeness_key,
+        ".tcip/state/region_completeness.json"),
+    "region_completeness_digest": Registered(
+        _write_region_completeness_digest, dataset_layout.region_completeness_digest_key,
+        ".tcip/state/region_completeness_digest.json"),
+    "class_registry": Registered(
+        _write_class_registry, dataset_layout.class_registry_key, "classes.json"),
+    "dataset_identity": Registered(
+        _write_dataset_identity, dataset_layout.dataset_identity_key, "dataset.json",
+        pin=_pin_platform_root),
+    "labels": Registered(
+        _write_labels, lambda root: dataset_layout.label_key(root, "2026-03-04", "a_1"),
+        "annotations/2026-03-04/a_1.json", newline_translated=True),
+    "predictions": Registered(
+        _write_predictions,
+        lambda root: dataset_layout.prediction_key(root, "live", "2026-03-04", "a_1"),
+        "predictions/live/2026-03-04/a_1.json", newline_translated=True),
+    "review_verdicts": Registered(
+        _write_review_verdict,
+        lambda root: review_engine.review_verdict_key(_review_state_dir(root), "a_1.jpg"),
+        ".tcip/state/review/a_1.jpg.json", scope_of=_review_state_dir,
+        newline_translated=True),
+    "canvas_meta": Registered(
+        _write_canvas_meta, lambda root: canvas.canvas_meta_key(str(root)),
+        ".tcip/state/canvas_live.json", newline_translated=True),
+    "canvas_geometry": Registered(
+        _write_canvas_geometry, lambda root: canvas.canvas_geometry_key(str(root)),
+        ".tcip/state/canvas_shapes.json", newline_translated=True),
+    "model_registry": Registered(
+        _write_model_registry, model_registry.registry_index_key, ".tcip/models/registry.json"),
+    "job_registry": Registered(
+        _write_job_registry, lambda root: jobstore.job_registry_key("inference_jobs"),
+        ".tcip/state/inference_jobs.json", pin=_pin_platform_root),
+    "workspace_active_project": Registered(
+        _write_active_marker, lambda root: workspace.active_project_key(), ".active",
+        pin=_pin_workspace),
+    "experiment_config": Registered(
+        lambda root: _write_experiment_member(root, "config"), lambda root: experiments.config_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/config.json", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "experiment_status": Registered(
+        lambda root: _write_experiment_member(root, "status"), lambda root: experiments.status_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/status.json", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "experiment_lineage": Registered(
+        lambda root: _write_experiment_member(root, "lineage"), lambda root: experiments.lineage_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/lineage.json", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "experiment_artifacts": Registered(
+        lambda root: _write_experiment_member(root, "artifacts"), lambda root: experiments.artifacts_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/artifacts.json", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "experiment_env": Registered(
+        _write_experiment_env, lambda root: experiments.env_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "experiment_metrics": Registered(
+        _write_experiment_metrics, lambda root: experiments.metrics_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/metrics.jsonl", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope()), newline_translated=True),
+}
+
+
+def _line_endings(raw: bytes, case: Registered) -> bytes:
+    """What the seam must produce for bytes today's writer produced."""
+    return raw.replace(b"\r\n", b"\n") if case.newline_translated else raw
+
+
+def test_every_registered_store_has_a_byte_and_path_identity_case():
+    """A store registered without one would be a placement nothing has checked.
+
+    Stores a test declares for its own scaffolding are not the platform's, and are told
+    apart by the module that declared them rather than by a naming convention.
+    """
+    declared = {
+        name for name in ts.registered_stores()
+        if not ts.get_descriptor(name).declared_in.startswith(("tests", "test_"))
+    }
+    assert declared == set(REGISTERED)
+
+
+@pytest.mark.parametrize("name", sorted(REGISTERED))
+def test_a_registered_store_writes_the_bytes_and_the_path_its_writer_does(
+    store, tmp_path, monkeypatch, name
+):
+    """Today's writer and the seam produce the same file, byte for byte, in the same place."""
+    case = REGISTERED[name]
+    descriptor = ts.get_descriptor(name)
+    today_root, seam_root = tmp_path / "today", tmp_path / "seam"
+
+    if case.pin is not None:
+        case.pin(today_root, monkeypatch)
+    written = case.write_today(today_root)
+    raw = written.read_bytes()
+    assert written.relative_to(today_root).as_posix() == case.relative
+
+    if case.pin is not None:
+        case.pin(seam_root, monkeypatch)
+    key = case.key_of(seam_root)
+    if descriptor.kind == "log":
+        ts.append(key, descriptor.codec.decode(raw.rstrip(b"\n")))
+    else:
+        ts.replace(key, descriptor.codec.decode(raw), expect=ts.Version.ABSENT)
+
+    landed = store.backend.path_for(key)
+    assert landed.read_bytes() == _line_endings(raw, case)
+    assert landed.relative_to(seam_root).as_posix() == case.relative
+    relative_to_scope = landed.relative_to(case.scope_of(seam_root)).as_posix()
+    assert descriptor.locator.parts_from(PurePosixPath(relative_to_scope)) == key.parts
+
+
+def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(tmp_path):
+    """An image key carrying a separator is one filename, and the key recoverable from that
+    filename places the very same file."""
+    state_dir = _review_state_dir(tmp_path)
+    engine = review_engine.ReviewEngine(state_dir, current_user="ü")
+    key = review_engine.review_verdict_key(state_dir, "a/b.jpg")
+    locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
+
+    placed = locator.relative_path(str(state_dir), key.parts)
+    assert Path(state_dir, *placed.parts) == engine._shard_path("a/b.jpg")
+    recovered = locator.parts_from(placed)
+    assert recovered != key.parts
+    assert locator.relative_path(str(state_dir), recovered) == placed

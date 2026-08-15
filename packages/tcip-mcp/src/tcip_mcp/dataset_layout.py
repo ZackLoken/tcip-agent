@@ -26,6 +26,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 # Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
 LABEL_EXT = {"json": ".json", "coco": ".json"}
 _ANY_EXTS = (".json",)
@@ -40,6 +43,31 @@ CLASSES_FILENAME = "classes.json"
 def label_ext(fmt: Optional[str]) -> str:
     """File extension for a label format: always ``.json``; both formats are JSON on disk."""
     return LABEL_EXT.get((fmt or "json").lower(), ".json")
+
+
+# ── the dataset-root stores ──────────────────────────────────────────────────
+
+_STATE_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""A dataset's own private state documents, one of each per dataset."""
+
+_DATASET_DOC = RootedFileLocator(suffix=".json")
+"""The documents that travel with the image set, at the dataset root itself."""
+
+_LABEL_TREE = RootedFileLocator(prefix=("annotations",), suffix=LABEL_EXT["json"])
+"""Ground truth, one file per image under its capture date."""
+
+_PREDICTION_TREE = RootedFileLocator(prefix=("predictions",), suffix=LABEL_EXT["json"])
+"""Model outputs, one file per image under a model bucket and capture date."""
+
+
+def _entry_path(locator: RootedFileLocator, scope: str | Path, parts: tuple[str, ...]) -> Path:
+    """The absolute path a locator places an entry at under ``scope``."""
+    return Path(scope, *locator.relative_path(str(scope), parts).parts)
+
+
+def _document_of(filename: str) -> tuple[str, ...]:
+    """The key parts addressing a store that holds exactly one document per scope."""
+    return (Path(filename).stem,)
 
 
 def parse_image_path(image_path: str | Path) -> tuple[Path, Optional[str], str]:
@@ -87,7 +115,7 @@ def list_dates(dataset_root: str | Path) -> list[str]:
 
 def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
     """``<dataset_root>/annotations/[<date>/]`` (ground truth, one file per image, all subjects)."""
-    return Path(dataset_root, "annotations", *_date_seg(date))
+    return Path(dataset_root, *_LABEL_TREE.prefix, *_date_seg(date))
 
 
 def annotation_date(path: str | Path) -> Optional[str]:
@@ -138,7 +166,30 @@ def classes_path(dataset_root: str | Path) -> Path:
     In the dataset (not a project's private state) and shared across every subject, so it travels
     with the image set. A name-based label means nothing without it, so it is part of the data.
     """
-    return Path(dataset_root, CLASSES_FILENAME)
+    return _entry_path(_DATASET_DOC, dataset_root, _CLASS_REGISTRY_PARTS)
+
+
+CLASS_REGISTRY_STORE = "class_registry"
+_CLASS_REGISTRY_PARTS = _document_of(CLASSES_FILENAME)
+register_store(
+    StoreDescriptor(
+        name=CLASS_REGISTRY_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(default=None, trailing_newline=True),
+        concurrency="last_writer_wins",
+        locator=_DATASET_DOC,
+    )
+)
+
+
+def class_registry_key(dataset_root: str | Path) -> Key:
+    """The dataset's class registry.
+
+    ``last_writer_wins``: ``class_registry.write_registry`` replaces the whole registry from a
+    value its caller already holds, and no writer merges into the stored document.
+    """
+    return Key(CLASS_REGISTRY_STORE, str(dataset_root), _CLASS_REGISTRY_PARTS)
 
 
 def dataset_identity_path(dataset_root: str | Path) -> Path:
@@ -147,7 +198,31 @@ def dataset_identity_path(dataset_root: str | Path) -> Path:
     Sibling of ``classes.json``: identity is part of the data, so it travels with the image set. The
     stored fingerprint is a cache; recompute-on-read (``resolution.dataset_fingerprint``) is authority.
     """
-    return Path(dataset_root, "dataset.json")
+    return _entry_path(_DATASET_DOC, dataset_root, _DATASET_IDENTITY_PARTS)
+
+
+DATASET_IDENTITY_STORE = "dataset_identity"
+_DATASET_IDENTITY_PARTS = _document_of("dataset.json")
+register_store(
+    StoreDescriptor(
+        name=DATASET_IDENTITY_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(default=None, trailing_newline=True),
+        concurrency="last_writer_wins",
+        locator=_DATASET_DOC,
+    )
+)
+
+
+def dataset_identity_key(dataset_root: str | Path) -> Key:
+    """The dataset's identity document.
+
+    ``last_writer_wins``: ``register_dataset`` reads the existing document only to keep the
+    id it minted once, and every other field it writes is derived from the dataset's own
+    content, so two writers racing produce the same document rather than losing an edit.
+    """
+    return Key(DATASET_IDENTITY_STORE, str(dataset_root), _DATASET_IDENTITY_PARTS)
 
 
 def image_status_path(dataset_root: str | Path) -> Path:
@@ -159,7 +234,31 @@ def image_status_path(dataset_root: str | Path) -> Path:
     (the GUI's review flow, ``materialize_dataset``, ``make_splits``) and every reader
     (``confirmed_negative_names``, ``doctor.py``) must call; never reconstruct this path locally.
     """
-    return Path(dataset_root, ".tcip", "state", "image_status.json")
+    return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_PARTS)
+
+
+IMAGE_STATUS_STORE = "image_status"
+_IMAGE_STATUS_PARTS = _document_of("image_status.json")
+register_store(
+    StoreDescriptor(
+        name=IMAGE_STATUS_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_STATE_DOC,
+    )
+)
+
+
+def image_status_key(dataset_root: str | Path) -> Key:
+    """The dataset's confirmed-negative store.
+
+    ``cas``: the GUI's confirmation routes read the whole document, set one image's status
+    under one bucket and write it back, from a different process than the agent's own
+    writers, so an unconditional write drops confirmations nobody re-reviewed.
+    """
+    return Key(IMAGE_STATUS_STORE, str(dataset_root), _IMAGE_STATUS_PARTS)
 
 
 def view_coverage_path(dataset_root: str | Path) -> Path:
@@ -176,7 +275,30 @@ def view_coverage_path(dataset_root: str | Path) -> Path:
     in the GUI rather than blocks. The negative definition (:func:`image_status_path`) is
     untouched by anything recorded here.
     """
-    return Path(dataset_root, ".tcip", "state", "view_coverage.json")
+    return _entry_path(_STATE_DOC, dataset_root, _VIEW_COVERAGE_PARTS)
+
+
+VIEW_COVERAGE_STORE = "view_coverage"
+_VIEW_COVERAGE_PARTS = _document_of("view_coverage.json")
+register_store(
+    StoreDescriptor(
+        name=VIEW_COVERAGE_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_STATE_DOC,
+    )
+)
+
+
+def view_coverage_key(dataset_root: str | Path) -> Key:
+    """The dataset's per-image view-coverage record.
+
+    ``cas``: the coverage route accumulates cells into an existing record under a lock, so
+    an unconditional write would drop the cells another writer had just added.
+    """
+    return Key(VIEW_COVERAGE_STORE, str(dataset_root), _VIEW_COVERAGE_PARTS)
 
 
 def image_status_digest_path(dataset_root: str | Path) -> Path:
@@ -192,7 +314,30 @@ def image_status_digest_path(dataset_root: str | Path) -> Path:
     (a rail must admit valid work, not only reject it): only a stamp that positively disagrees with
     the current schema is grounds to quarantine that one image.
     """
-    return Path(dataset_root, ".tcip", "state", "image_status_digest.json")
+    return _entry_path(_STATE_DOC, dataset_root, _IMAGE_STATUS_DIGEST_PARTS)
+
+
+IMAGE_STATUS_DIGEST_STORE = "image_status_digest"
+_IMAGE_STATUS_DIGEST_PARTS = _document_of("image_status_digest.json")
+register_store(
+    StoreDescriptor(
+        name=IMAGE_STATUS_DIGEST_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_STATE_DOC,
+    )
+)
+
+
+def image_status_digest_key(dataset_root: str | Path) -> Key:
+    """The schema stamps beside the confirmed-negative store.
+
+    ``cas``: each stamp is merged into the existing document under a lock, one image at a
+    time, so an unconditional write un-quarantines stamps another writer had just set.
+    """
+    return Key(IMAGE_STATUS_DIGEST_STORE, str(dataset_root), _IMAGE_STATUS_DIGEST_PARTS)
 
 
 def region_completeness_path(dataset_root: str | Path) -> Path:
@@ -207,7 +352,30 @@ def region_completeness_path(dataset_root: str | Path) -> Path:
     completeness is one record per bucket, not one per image name, since the stem already
     identifies exactly one raster and a date directory can hold many.
     """
-    return Path(dataset_root, ".tcip", "state", "region_completeness.json")
+    return _entry_path(_STATE_DOC, dataset_root, _REGION_COMPLETENESS_PARTS)
+
+
+REGION_COMPLETENESS_STORE = "region_completeness"
+_REGION_COMPLETENESS_PARTS = _document_of("region_completeness.json")
+register_store(
+    StoreDescriptor(
+        name=REGION_COMPLETENESS_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_STATE_DOC,
+    )
+)
+
+
+def region_completeness_key(dataset_root: str | Path) -> Key:
+    """The dataset's region-completeness attestations.
+
+    ``cas``: the coverage route adds or removes one cell inside an existing bucket's record
+    under a lock, so an unconditional write drops the cells another writer just attested.
+    """
+    return Key(REGION_COMPLETENESS_STORE, str(dataset_root), _REGION_COMPLETENESS_PARTS)
 
 
 def region_completeness_digest_path(dataset_root: str | Path) -> Path:
@@ -223,7 +391,31 @@ def region_completeness_digest_path(dataset_root: str | Path) -> Path:
     :func:`image_status_digest_path` states for its own per-image stamping). Lets a reader tell an
     attestation whose cell content has since been edited or deleted from one still valid.
     """
-    return Path(dataset_root, ".tcip", "state", "region_completeness_digest.json")
+    return _entry_path(_STATE_DOC, dataset_root, _REGION_COMPLETENESS_DIGEST_PARTS)
+
+
+REGION_COMPLETENESS_DIGEST_STORE = "region_completeness_digest"
+_REGION_COMPLETENESS_DIGEST_PARTS = _document_of("region_completeness_digest.json")
+register_store(
+    StoreDescriptor(
+        name=REGION_COMPLETENESS_DIGEST_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_STATE_DOC,
+    )
+)
+
+
+def region_completeness_digest_key(dataset_root: str | Path) -> Key:
+    """The content stamps beside the region-completeness attestations.
+
+    ``cas``: each cell's stamp is merged into the existing document under a lock, so an
+    unconditional write revives an earlier cell's stale stamp.
+    """
+    return Key(REGION_COMPLETENESS_DIGEST_STORE, str(dataset_root),
+               _REGION_COMPLETENESS_DIGEST_PARTS)
 
 
 def normalize_region_completeness_store(raw: object) -> dict[str, dict]:
@@ -279,7 +471,7 @@ def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
 
 def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str]) -> Path:
     """``<dataset_root>/predictions/<model>/[<date>/]`` (model outputs, one file per image)."""
-    return Path(dataset_root, "predictions", model or DEFAULT_MODEL, *_date_seg(date))
+    return Path(dataset_root, *_PREDICTION_TREE.prefix, model or DEFAULT_MODEL, *_date_seg(date))
 
 
 def annotation_path(
@@ -289,6 +481,39 @@ def annotation_path(
     fmt: str = "json",
 ) -> Path:
     return annotation_dir(dataset_root, date) / f"{stem}{label_ext(fmt)}"
+
+
+LABELS_STORE = "labels"
+register_store(
+    StoreDescriptor(
+        name=LABELS_STORE,
+        kind="record",
+        key_fields=("date", "stem"),
+        codec=json_codec(indent=1, ensure_ascii=False, default=None, allow_nan=False),
+        concurrency="cas",
+        enumerable=True,
+        locator=_LABEL_TREE,
+    )
+)
+
+
+def label_key(dataset_root: str | Path, date: str, stem: str) -> Key:
+    """One image's ground-truth labels, every subject's records in one document.
+
+    ``cas``: a label file is loaded, edited and saved by the GUI while the agent's own save
+    path writes the same file, which is the platform's measurement data and the one place a
+    silent last write is least acceptable.
+
+    ``date`` is required. A dataset whose images are not date-nested has labels this key
+    cannot address, and which layout segment stands in for the date there is a question the
+    storage design does not answer.
+    """
+    if not date:
+        raise ValueError(
+            f"label_key needs a capture date for {stem!r}: the undated dataset layout "
+            f"({annotation_dir(dataset_root, None)}) has no key shape yet"
+        )
+    return Key(LABELS_STORE, str(dataset_root), (date, stem))
 
 
 def annotation_path_for_image(
@@ -310,6 +535,37 @@ def prediction_path(
     fmt: str = "json",
 ) -> Path:
     return prediction_dir(dataset_root, model, date) / f"{stem}{label_ext(fmt)}"
+
+
+PREDICTIONS_STORE = "predictions"
+register_store(
+    StoreDescriptor(
+        name=PREDICTIONS_STORE,
+        kind="record",
+        key_fields=("model", "date", "stem"),
+        codec=json_codec(indent=1, ensure_ascii=False, default=None, allow_nan=False),
+        concurrency="last_writer_wins",
+        enumerable=True,
+        locator=_PREDICTION_TREE,
+    )
+)
+
+
+def prediction_key(dataset_root: str | Path, model: Optional[str], date: str, stem: str) -> Key:
+    """One image's predictions inside one model bucket.
+
+    ``last_writer_wins``: a prediction file is written whole from a run's own output and no
+    writer merges into the stored document; a bucket a human has reviewed is protected by
+    ``prediction_buckets``, which redirects the run rather than replacing the file.
+
+    ``date`` is required, on the same terms as :func:`label_key`.
+    """
+    if not date:
+        raise ValueError(
+            f"prediction_key needs a capture date for {stem!r}: the undated dataset layout "
+            f"({prediction_dir(dataset_root, model, None)}) has no key shape yet"
+        )
+    return Key(PREDICTIONS_STORE, str(dataset_root), (model or DEFAULT_MODEL, date, stem))
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
