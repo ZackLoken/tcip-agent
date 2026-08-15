@@ -45,8 +45,24 @@ class TCIPModel(Protocol):
 
 
 def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, device: Any):
-    """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``."""
+    """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``.
+
+    Synthesizes per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, then
+    collates them with the trainer's own ``task_collate``. The batch a model is smoked against is
+    therefore assembled by the same function the DataLoader assembles the training batch with, and
+    it carries the per-sample target keys the datasets emit rather than a separate list of them.
+    """
     import torch
+
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+
+    if task not in _SYNTHESIZABLE_TASKS:
+        raise ValueError(
+            f"no synthetic batch schema for task {task!r}. Pass sample_batch= (an (images, "
+            f"targets) pair from this run's dataset) to check_model_contract, overfit_check, or "
+            f"ctx.check_contract. Schemas exist for {sorted(_SYNTHESIZABLE_TASKS)}."
+        )
+    collate = task_collate(task)
 
     if task in _DETECTION_TASKS:
         img = torch.rand(in_chans, img_size, img_size, device=device)
@@ -54,30 +70,31 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
         target = {
             "boxes": torch.tensor([box], device=device),
             "labels": torch.ones((1,), dtype=torch.long, device=device),  # 1-indexed foreground
+            "image_id": 0,
         }
         if task == "instance_seg":
             mask = torch.zeros((1, img_size, img_size), dtype=torch.uint8, device=device)
             lo, hi = int(img_size * 0.2), int(img_size * 0.7)
             mask[0, lo:hi, lo:hi] = 1
             target["masks"] = mask
-        return [img], [target]
+        return collate([(img, target)])
 
-    images = torch.rand(2, in_chans, img_size, img_size, device=device)
-    if task == "ordinal":
-        targets = {"ranks": torch.randint(0, max(num_classes, 2), (2,), device=device)}
-    elif task == "regression":
-        targets = {"values": torch.rand(2, device=device)}
-    elif task == "semantic_seg":
-        targets = {"masks": torch.randint(0, max(num_classes, 2), (2, img_size, img_size), device=device)}
-    elif task == "classification":
-        targets = {"labels": torch.randint(0, max(num_classes, 2), (2,), device=device)}
-    else:
-        raise ValueError(
-            f"no synthetic batch schema for task {task!r}. Pass sample_batch= (an (images, "
-            f"targets) pair from this run's dataset) to check_model_contract, overfit_check, or "
-            f"ctx.check_contract. Schemas exist for {sorted(_SYNTHESIZABLE_TASKS)}."
-        )
-    return images, targets
+    ranks = max(num_classes, 2)
+    items = []
+    for _ in range(2):
+        img = torch.rand(in_chans, img_size, img_size, device=device)
+        if task == "ordinal":
+            # 0-dim tensors, not python scalars: the stacking collate rebuilds a scalar on the cpu.
+            target = {"ranks": torch.randint(0, ranks, (), device=device),
+                      "num_ranks": torch.tensor(ranks, device=device)}
+        elif task == "regression":
+            target = {"values": torch.rand((), device=device)}
+        elif task == "semantic_seg":
+            target = {"masks": torch.randint(0, ranks, (img_size, img_size), device=device)}
+        else:
+            target = {"labels": torch.randint(0, ranks, (), device=device)}
+        items.append((img, target))
+    return collate(items)
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
