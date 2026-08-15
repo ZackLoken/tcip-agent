@@ -19,9 +19,9 @@ describe("labelSerde round-trip", () => {
   it("splits a unified list by each annotation's own geometry, then reassembles it symmetrically", () => {
     // One of each kind in one file, including a geometry-less rating that must not be dropped.
     const annotations: Annotation[] = [
-      { subject: "catkin", bbox: [10, 20, 30, 40], attributes: { elongation: "elongated" } },
+      { subject: "subject_a", bbox: [10, 20, 30, 40], attributes: { growth_stage: "extended" } },
       {
-        subject: "catkin",
+        subject: "subject_a",
         rings: [
           [
             [0, 0],
@@ -40,7 +40,7 @@ describe("labelSerde round-trip", () => {
     expect(canvas.polygons).toHaveLength(1);
     expect(canvas.points).toHaveLength(1);
     expect(canvas.imageAnnotations).toHaveLength(1); // the geometry-less rating survives the split
-    expect(canvas.boxes[0].subject).toBe("catkin");
+    expect(canvas.boxes[0].subject).toBe("subject_a");
     expect(canvas.imageAnnotations[0].subject).toBe("efb");
 
     // Save reassembles every bucket: a box stays a box, a polygon a polygon, a point a point.
@@ -52,12 +52,12 @@ describe("labelSerde round-trip", () => {
     const rating = back.find((a) => !a.bbox && !a.points && !a.rings && !a.point);
     expect(pt).toMatchObject({ subject: "tip", point: [7, 9] });
     expect(box).toMatchObject({
-      subject: "catkin",
+      subject: "subject_a",
       bbox: [10, 20, 30, 40],
-      attributes: { elongation: "elongated" },
+      attributes: { growth_stage: "extended" },
     });
     expect(poly).toMatchObject({
-      subject: "catkin",
+      subject: "subject_a",
       points: [
         [0, 0],
         [10, 0],
@@ -86,10 +86,10 @@ describe("labelSerde round-trip", () => {
   it("buckets a both-geometry annotation (rings and bbox) to one polygon, zero boxes", () => {
     // Measurement-critical: a polygon record carries its derived bbox on disk. The split is
     // rings-first (if/else-if), so it must produce exactly one polygon and no box: a two-ifs
-    // regression would emit both and double-count the catkin.
+    // regression would emit both and double-count the subject_a.
     const annotations: Annotation[] = [
       {
-        subject: "catkin",
+        subject: "subject_a",
         rings: [
           [
             [0, 0],
@@ -109,7 +109,7 @@ describe("labelSerde round-trip", () => {
   it("a polygon-with-bbox stays one polygon and emits no bbox/second record across load->save->load", () => {
     const original: Annotation[] = [
       {
-        subject: "catkin",
+        subject: "subject_a",
         rings: [
           [
             [0, 0],
@@ -134,7 +134,7 @@ describe("labelSerde round-trip", () => {
 });
 
 describe("labelSerde multi-ring polygons", () => {
-  // An occlusion-split instance_seg shape (a catkin behind a branch): two disjoint regions, one
+  // An occlusion-split instance_seg shape (a subject_a behind a branch): two disjoint regions, one
   // annotation. Both routes' load side always sends every ring.
   const twoRings: [number, number][][] = [
     [
@@ -150,13 +150,13 @@ describe("labelSerde multi-ring polygons", () => {
   ];
 
   it("loads every ring into one canvas polygon (no ring dropped, no shape split in two)", () => {
-    const canvas = annotationsToCanvas([{ subject: "catkin", rings: twoRings, attributes: {} }]);
+    const canvas = annotationsToCanvas([{ subject: "subject_a", rings: twoRings, attributes: {} }]);
     expect(canvas.polygons).toHaveLength(1);
     expect(canvas.polygons[0].rings).toEqual(twoRings);
   });
 
   it("deep-copies the rings so canvas edits never mutate the loaded response", () => {
-    const loaded: Annotation[] = [{ subject: "catkin", rings: twoRings, attributes: {} }];
+    const loaded: Annotation[] = [{ subject: "subject_a", rings: twoRings, attributes: {} }];
     const canvas = annotationsToCanvas(loaded);
     canvas.polygons[0].rings[1][0] = [999, 999];
     expect(twoRings[1][0]).toEqual([40, 40]);
@@ -165,7 +165,7 @@ describe("labelSerde multi-ring polygons", () => {
   it("saves a multi-ring shape as `rings` (all of them) and never as `points`", () => {
     const saved = canvasToAnnotations({
       boxes: [],
-      polygons: [{ rings: twoRings, subject: "catkin", attributes: {} }],
+      polygons: [{ rings: twoRings, subject: "subject_a", attributes: {} }],
       points: [],
       imageAnnotations: [],
     });
@@ -177,7 +177,7 @@ describe("labelSerde multi-ring polygons", () => {
   it("saves a one-ring shape as `points`, the field a hand-drawn/edited contour belongs in", () => {
     const saved = canvasToAnnotations({
       boxes: [],
-      polygons: [{ rings: [twoRings[0]], subject: "catkin", attributes: {} }],
+      polygons: [{ rings: [twoRings[0]], subject: "subject_a", attributes: {} }],
       points: [],
       imageAnnotations: [],
     });
@@ -187,7 +187,7 @@ describe("labelSerde multi-ring polygons", () => {
 
   it("round-trips a multi-ring shape unchanged through save -> load (points bucket empty)", () => {
     const original: Annotation[] = [
-      { subject: "catkin", rings: twoRings, attributes: {}, created_by: "user:zack" },
+      { subject: "subject_a", rings: twoRings, attributes: {}, created_by: "user:zack" },
     ];
     const saved = canvasToAnnotations(annotationsToCanvas(original));
     const reloaded = annotationsToCanvas(asLoaded(saved));

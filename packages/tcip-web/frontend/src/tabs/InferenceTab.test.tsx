@@ -41,7 +41,7 @@ function mockTree(dates: string[]) {
   vi.spyOn(api.dataset, "tree").mockResolvedValue({
     dataset_root: "C:/data",
     dates_with_images: dates,
-    subjects: ["catkin"],
+    subjects: ["subject_a"],
     model_names: [],
     subjects_by_date: {},
     models_by_date: {},

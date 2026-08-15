@@ -83,7 +83,7 @@ function setupDataset(opts: { predDir?: string | null } = {}) {
         ...s.gui.dataset,
         project_root: "C:/proj",
         dataset_root: "C:/data",
-        subject: "catkin",
+        subject: "subject_a",
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
@@ -97,7 +97,7 @@ function setupDataset(opts: { predDir?: string | null } = {}) {
 function det(over: Partial<Detection> = {}): Detection {
   return {
     det_type: "tp",
-    class_name: "catkin",
+    class_name: "subject_a",
     conf: 0.9,
     iou: 0.8,
     gt_idx: 0,
@@ -149,8 +149,8 @@ beforeEach(() => {
   // The validation-reference promotion resolves its trait from the project's own registered
   // traits (mirrors ResultsTab); one registered trait auto-selects with no picker shown.
   vi.spyOn(resultsApi, "traits").mockResolvedValue({
-    traits: ["catkin"],
-    milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+    traits: ["subject_a"],
+    milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
     invalid_specs: [],
   });
   // Default: a standard 3-band RGB image; the band picker's own describe block overrides this
@@ -231,7 +231,7 @@ describe("ReviewTab validation-reference affordance", () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith({
         project_root: "C:/proj",
-        trait: "catkin",
+        trait: "subject_a",
         pred_dir: PRED_DIR_A,
       }),
     );
@@ -329,7 +329,7 @@ describe("ReviewTab detection nav bounds", () => {
 });
 
 describe("ReviewTab in-place edit", () => {
-  const gtAnn: Annotation = { subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} };
+  const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
 
   function seedEditableMatches() {
     matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
@@ -380,7 +380,7 @@ describe("ReviewTab in-place edit", () => {
       edited_box: [10, 10, 50, 50],
       edited_points: null,
       det_type: "tp",
-      class_name: "catkin",
+      class_name: "subject_a",
       gt_idx: 0,
     });
     // The verdict bar returns once the edit is committed.
@@ -394,7 +394,7 @@ describe("ReviewTab in-place edit", () => {
   it("an FP edit commits the prediction shape (added to GT, not replacing)", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0 })], {
-        preds: [{ subject: "catkin", bbox: [100, 100, 140, 150], attributes: {}, score: 0.7 }],
+        preds: [{ subject: "subject_a", bbox: [100, 100, 140, 150], attributes: {}, score: 0.7 }],
       }),
     );
     render(<ReviewTab />);
@@ -553,7 +553,7 @@ describe("ReviewTab mark-missed-object affordance", () => {
     expect(actionSpy.mock.calls[0][0]).toMatchObject({
       det_type: "fn",
       action: "edited",
-      class_name: "catkin",
+      class_name: "subject_a",
       gt_idx: null,
       pred_idx: null,
       conf: null,
@@ -646,7 +646,7 @@ describe("ReviewTab class filter", () => {
   it("offers every subject present on the image, from the unfiltered gt/pred lists", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det()], {
-        gt: [{ subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} }],
+        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} }],
         preds: [{ subject: "leaf", bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 }],
       }),
     );
@@ -656,13 +656,13 @@ describe("ReviewTab class filter", () => {
 
     const select = screen.getByLabelText("Class filter") as HTMLSelectElement;
     const values = Array.from(select.options).map((o) => o.value);
-    expect(values).toEqual(["all", "catkin", "leaf"]);
+    expect(values).toEqual(["all", "leaf", "subject_a"]);
   });
 
   it("re-fetches matches scoped to the picked class", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det()], {
-        gt: [{ subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} }],
+        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} }],
         preds: [{ subject: "leaf", bbox: [60, 60, 90, 90], attributes: {}, score: 0.5 }],
       }),
     );
@@ -710,7 +710,7 @@ describe("ReviewTab matches-recompute effect", () => {
     await act(async () => {
       await applyReviewFocus({
         dataset_root: "C:/data",
-        subject: "catkin",
+        subject: "subject_a",
         date: "2026-01-01",
         image_index: 0,
       });
@@ -807,7 +807,7 @@ describe("ReviewTab symbology", () => {
   it("draws the focused FN as a dashed under-review box, not a solid one", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fn", pred_idx: null, gt_idx: 0 })], {
-        gt: [{ subject: "catkin", bbox: [10, 10, 50, 50], attributes: {} }],
+        gt: [{ subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} }],
       }),
     );
     render(<ReviewTab />);
@@ -869,7 +869,7 @@ describe("ReviewTab symbology", () => {
         ],
         {
           gt: [
-            { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
+            { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {} },
             {
               subject: "leaf",
               rings: [
@@ -920,7 +920,7 @@ describe("ReviewTab symbology", () => {
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 60, 60] })], {
         preds: [
           {
-            subject: "catkin",
+            subject: "subject_a",
             rings: [
               [
                 [0, 0],
@@ -955,7 +955,7 @@ describe("ReviewTab symbology", () => {
 
 describe("ReviewTab in-place edit scope", () => {
   const multiRingPred: Annotation = {
-    subject: "catkin",
+    subject: "subject_a",
     rings: [
       [
         [0, 0],
@@ -1007,7 +1007,7 @@ describe("ReviewTab in-place edit scope", () => {
   it("still opens the editor for a box detection (the point refusal is scoped, not blanket)", async () => {
     matchesSpy.mockResolvedValue(
       matchesRes([det({ det_type: "fp", gt_idx: null, pred_idx: 0, bbox: [0, 0, 10, 10] })], {
-        preds: [{ subject: "catkin", bbox: [0, 0, 10, 10], attributes: {}, score: 0.9 }],
+        preds: [{ subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {}, score: 0.9 }],
       }),
     );
     render(<ReviewTab />);

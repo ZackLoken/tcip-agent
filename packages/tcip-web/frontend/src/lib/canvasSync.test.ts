@@ -102,7 +102,7 @@ describe("buildAnnotateShapes", () => {
             [10, 10],
           ],
         ] as [number, number][][],
-        subject: "catkin",
+        subject: "subject_a",
         attributes: {},
         created_by: "user:zack",
       },
@@ -121,9 +121,9 @@ describe("buildAnnotateShapes", () => {
     currentPolygon: [] as [number, number][],
     selectedPolygonIdx: null,
     mode: "polygon",
-    activeSubject: "catkin",
+    activeSubject: "subject_a",
     visible: true,
-    colorFor: (subject: string) => (subject === "catkin" ? "#FF0000" : "#00FF00"),
+    colorFor: (subject: string) => (subject === "subject_a" ? "#FF0000" : "#00FF00"),
   };
 
   it("filters polygon mode to the active subject, keeps provenance, colors from the GUI", () => {
@@ -132,7 +132,7 @@ describe("buildAnnotateShapes", () => {
     expect(shapes[0]).toMatchObject({
       kind: "polygon",
       color: "#FF0000",
-      label: "catkin",
+      label: "subject_a",
       tag: "gt",
       created_by: "user:zack",
     });
@@ -160,7 +160,7 @@ describe("buildAnnotateShapes", () => {
       kind: "polyline",
       tag: "in_progress",
       dashed: true,
-      color: "#FF0000", // base.colorFor("catkin"), base.activeSubject
+      color: "#FF0000", // base.colorFor("subject_a"), base.activeSubject
     });
   });
 
@@ -220,14 +220,14 @@ describe("buildAnnotateShapes", () => {
     // (solid), the same convention in-progress/under-review shapes already use.
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [] });
     const derived = shapes.filter((s) => s.kind === "box");
-    expect(derived).toHaveLength(1); // only the active "catkin" polygon; "other" is filtered out
+    expect(derived).toHaveLength(1); // only the active "subject_a" polygon; "other" is filtered out
     expect(derived[0].xyxy).toEqual(ringsBbox(base.polygons[0].rings));
-    expect(derived[0].label).toBe("catkin");
+    expect(derived[0].label).toBe("subject_a");
     expect(derived[0].dashed).toBe(true); // dashed = derived/read-only, not a real editable box
   });
 
   it("pushes every ring of a multi-ring polygon, sharing its colour, labelled once", () => {
-    // The agent's view of the canvas must not drop a region either: an occlusion-split catkin is one
+    // The agent's view of the canvas must not drop a region either: an occlusion-split subject_a is one
     // annotation drawn as two paths (render_canvas_state draws one path per shape entry).
     const multi = {
       rings: [
@@ -242,7 +242,7 @@ describe("buildAnnotateShapes", () => {
           [60, 60],
         ],
       ] as [number, number][][],
-      subject: "catkin",
+      subject: "subject_a",
       attributes: {},
       created_by: "user:zack",
     };
@@ -250,8 +250,8 @@ describe("buildAnnotateShapes", () => {
     expect(shapes).toHaveLength(2);
     expect(shapes.map((s) => s.points)).toEqual(multi.rings);
     expect(shapes.every((s) => s.color === "#FF0000" && s.tag === "gt")).toBe(true);
-    // Labelled once: a two-part catkin is one catkin, not two.
-    expect(shapes.filter((s) => s.label === "catkin")).toHaveLength(1);
+    // Labelled once: a two-part subject_a is one subject_a, not two.
+    expect(shapes.filter((s) => s.label === "subject_a")).toHaveLength(1);
   });
 
   it("box mode derives one box spanning every ring of a multi-ring polygon", () => {
@@ -268,7 +268,7 @@ describe("buildAnnotateShapes", () => {
           [60, 60],
         ],
       ] as [number, number][][],
-      subject: "catkin",
+      subject: "subject_a",
       attributes: {},
     };
     const shapes = buildAnnotateShapes({ ...base, mode: "box", boxes: [], polygons: [multi] });
@@ -285,7 +285,7 @@ describe("buildAnnotateShapes", () => {
       mode: "point",
       polygons: [],
       points: [
-        { x: 5.06, y: 7.04, subject: "catkin", attributes: {}, created_by: "user:zack" },
+        { x: 5.06, y: 7.04, subject: "subject_a", attributes: {}, created_by: "user:zack" },
         { x: 50, y: 60, subject: "other", attributes: {} },
       ],
     });
@@ -294,7 +294,7 @@ describe("buildAnnotateShapes", () => {
       kind: "point",
       points: [[5.1, 7]], // rounded like every other pushed coordinate
       color: "#FF0000",
-      label: "catkin",
+      label: "subject_a",
       tag: "gt",
       created_by: "user:zack",
     });
@@ -319,7 +319,7 @@ describe("buildAnnotateShapes", () => {
       mode: "box",
       boxes: [],
       polygons: [],
-      points: [...points, { x: 9, y: 9, subject: "catkin", attributes: {} }],
+      points: [...points, { x: 9, y: 9, subject: "subject_a", attributes: {} }],
       selectedPointIdx: 0,
     });
     expect(inBoxMode.filter((s) => s.kind === "point")).toHaveLength(1);
@@ -330,8 +330,8 @@ describe("buildAnnotateShapes", () => {
     const shapes = buildAnnotateShapes({
       ...base,
       mode: "point",
-      boxes: [{ x1: 0, y1: 0, x2: 5, y2: 5, subject: "catkin", attributes: {} }],
-      points: [{ x: 1, y: 1, subject: "catkin", attributes: {} }],
+      boxes: [{ x1: 0, y1: 0, x2: 5, y2: 5, subject: "subject_a", attributes: {} }],
+      points: [{ x: 1, y: 1, subject: "subject_a", attributes: {} }],
     });
     expect(shapes.filter((s) => s.kind === "box")).toHaveLength(0);
     expect(shapes.filter((s) => s.kind === "point")).toHaveLength(1);
@@ -343,7 +343,7 @@ describe("buildAnnotateShapes", () => {
         ...base,
         mode: "point",
         visible: false,
-        points: [{ x: 1, y: 1, subject: "catkin", attributes: {} }],
+        points: [{ x: 1, y: 1, subject: "subject_a", attributes: {} }],
       }),
     ).toEqual([]);
   });
@@ -372,7 +372,7 @@ describe("buildReviewShapes", () => {
     detections: [
       {
         det_type: "tp",
-        class_name: "catkin",
+        class_name: "subject_a",
         conf: 0.9,
         iou: 0.8,
         gt_idx: 0,
@@ -383,7 +383,7 @@ describe("buildReviewShapes", () => {
       },
       {
         det_type: "fp",
-        class_name: "catkin",
+        class_name: "subject_a",
         conf: 0.7,
         iou: null,
         gt_idx: null,
@@ -394,7 +394,7 @@ describe("buildReviewShapes", () => {
       },
       {
         det_type: "fn",
-        class_name: "catkin",
+        class_name: "subject_a",
         conf: null,
         iou: null,
         gt_idx: 1,
@@ -405,12 +405,12 @@ describe("buildReviewShapes", () => {
       },
     ],
     gt: [
-      { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
-      { subject: "catkin", bbox: [40, 40, 50, 50], attributes: {} },
+      { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {} },
+      { subject: "subject_a", bbox: [40, 40, 50, 50], attributes: {} },
     ],
     preds: [
-      { subject: "catkin", bbox: [1, 1, 11, 11], attributes: {}, score: 0.9 },
-      { subject: "catkin", bbox: [20, 20, 30, 30], attributes: {}, score: 0.7 },
+      { subject: "subject_a", bbox: [1, 1, 11, 11], attributes: {}, score: 0.9 },
+      { subject: "subject_a", bbox: [20, 20, 30, 30], attributes: {}, score: 0.7 },
     ],
     image_status: "started",
   } as unknown as MatchesResponse;
@@ -421,7 +421,7 @@ describe("buildReviewShapes", () => {
     const fp = shapes.find((s) => s.tag === "fp")!;
     const fn = shapes.find((s) => s.tag === "fn")!;
     expect(tp).toMatchObject({ color: COLORS.tp, fill: true }); // reviewed → washed
-    expect(fp).toMatchObject({ color: COLORS.active, dashed: true, label: "catkin 0.70" });
+    expect(fp).toMatchObject({ color: COLORS.active, dashed: true, label: "subject_a 0.70" });
     expect(fn).toMatchObject({ color: COLORS.fn });
   });
 
@@ -456,7 +456,7 @@ describe("buildReviewShapes", () => {
       detections: [
         {
           det_type: "fn",
-          class_name: "catkin",
+          class_name: "subject_a",
           conf: null,
           iou: null,
           gt_idx: 0,
@@ -478,7 +478,7 @@ describe("buildReviewShapes", () => {
         },
       ],
       gt: [
-        { subject: "catkin", bbox: [0, 0, 10, 10], attributes: {} },
+        { subject: "subject_a", bbox: [0, 0, 10, 10], attributes: {} },
         {
           subject: "leaf",
           rings: [
@@ -511,7 +511,7 @@ describe("buildReviewShapes", () => {
       detections: [
         {
           det_type: "fp",
-          class_name: "catkin",
+          class_name: "subject_a",
           conf: 0.7,
           iou: null,
           gt_idx: null,
@@ -524,7 +524,7 @@ describe("buildReviewShapes", () => {
       gt: [],
       preds: [
         {
-          subject: "catkin",
+          subject: "subject_a",
           rings: [
             [
               [0, 0],
@@ -607,8 +607,8 @@ describe("pointShapeVisible", () => {
     expect(
       pointShapeVisible({
         mode: "point",
-        subject: "catkin",
-        activeSubject: "catkin",
+        subject: "subject_a",
+        activeSubject: "subject_a",
         selected: false,
       }),
     ).toBe(true);
@@ -616,15 +616,15 @@ describe("pointShapeVisible", () => {
       pointShapeVisible({
         mode: "point",
         subject: "other",
-        activeSubject: "catkin",
+        activeSubject: "subject_a",
         selected: false,
       }),
     ).toBe(false);
     expect(
       pointShapeVisible({
         mode: "box",
-        subject: "catkin",
-        activeSubject: "catkin",
+        subject: "subject_a",
+        activeSubject: "subject_a",
         selected: false,
       }),
     ).toBe(false);
@@ -633,7 +633,7 @@ describe("pointShapeVisible", () => {
   it("always shows the selected point, whatever the mode or subject", () => {
     for (const mode of ["box", "polygon", "point"]) {
       expect(
-        pointShapeVisible({ mode, subject: "other", activeSubject: "catkin", selected: true }),
+        pointShapeVisible({ mode, subject: "other", activeSubject: "subject_a", selected: true }),
       ).toBe(true);
     }
   });

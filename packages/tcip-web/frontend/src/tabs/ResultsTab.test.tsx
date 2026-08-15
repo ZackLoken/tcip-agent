@@ -37,8 +37,8 @@ beforeEach(() => {
   // compute anything; every test fixture here is written against a single-trait project whose
   // spec declares milestone fractions, which is what the curve/milestone panels render for.
   vi.spyOn(resultsApi, "traits").mockResolvedValue({
-    traits: ["catkin"],
-    milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+    traits: ["subject_a"],
+    milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
     invalid_specs: [],
   });
 });
@@ -53,7 +53,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
       dates_with_images: ["2026-01-01", "2026-01-08"],
-      subjects: ["catkin"],
+      subjects: ["subject_a"],
       model_names: ["baseline", "v2"],
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline", "v2"], "2026-01-08": [] },
@@ -105,7 +105,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
       dates_with_images: ["2026-01-01"],
-      subjects: ["catkin"],
+      subjects: ["subject_a"],
       model_names: ["baseline"],
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
@@ -137,8 +137,8 @@ describe("ResultsTab structured predictions-by-date picker", () => {
 describe("ResultsTab broken trait spec visibility", () => {
   it("names a broken spec file and its reason, not just a blank/empty tab", async () => {
     vi.spyOn(resultsApi, "traits").mockResolvedValue({
-      traits: ["catkin"],
-      milestone_fractions_by_trait: { catkin: [0.5, 0.95] },
+      traits: ["subject_a"],
+      milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
       invalid_specs: [
         {
           file: "leaf_area.yml",
@@ -275,7 +275,7 @@ describe("ResultsTab onset table validity marker", () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
       dates_with_images: ["2026-01-01"],
-      subjects: ["catkin"],
+      subjects: ["subject_a"],
       model_names: ["baseline"],
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
@@ -319,7 +319,7 @@ describe("ResultsTab onset table validity marker", () => {
         n_dates_unclassified: 0,
         n_dates_missing_images: 0,
         n_observed_dates: 1,
-        catkin_50per_date: "2026-02-01",
+        subject_a_50per_date: "2026-02-01",
       },
     ]);
     expect(screen.getByText("valid")).toBeInTheDocument();
@@ -336,7 +336,7 @@ describe("ResultsTab onset table validity marker", () => {
         n_dates_unclassified: 1,
         n_dates_missing_images: 0,
         n_observed_dates: 0,
-        catkin_50per_date: null,
+        subject_a_50per_date: null,
       },
     ]);
     expect(screen.getByText("incomplete")).toBeInTheDocument();
@@ -353,7 +353,7 @@ describe("ResultsTab onset table validity marker", () => {
         n_dates_unclassified: 0,
         n_dates_missing_images: 0,
         n_observed_dates: 0,
-        catkin_50per_date: null,
+        subject_a_50per_date: null,
       },
     ]);
     expect(screen.getByText("no observations")).toBeInTheDocument();
@@ -370,8 +370,8 @@ describe("ResultsTab onset table validity marker", () => {
         n_dates_unclassified: 0,
         n_dates_missing_images: 0,
         n_observed_dates: 1,
-        catkin_95per_date: "2026-03-12",
-        catkin_95per_date_bound: "right_censored",
+        subject_a_95per_date: "2026-03-12",
+        subject_a_95per_date_bound: "right_censored",
       },
     ]);
     expect(screen.getByText("2026-03-12")).toBeInTheDocument();

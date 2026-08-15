@@ -10,7 +10,7 @@ function dataset(over: Partial<DatasetSelection> = {}): DatasetSelection {
   return {
     project_root: "/proj",
     dataset_root: "/proj/ds",
-    subject: "catkin",
+    subject: "subject_a",
     date: "2-11-26",
     image_list: ["a.jpg", "b.jpg", "c.jpg"],
     current_image_index: 0,
@@ -26,7 +26,7 @@ function snapshot(over: Partial<GuiState> = {}): GuiState {
     dataset: dataset(),
     view: { scale: 1, offset_x: 0, offset_y: 0 },
     mode: "box",
-    active_subject: "catkin",
+    active_subject: "subject_a",
     review: {
       iou_threshold: 0.5,
       conf_threshold: 0.25,
@@ -59,7 +59,7 @@ describe("mergeSnapshot ownership model", () => {
       snapshot({
         active_tab: "annotate",
         mode: "box",
-        active_subject: "catkin",
+        active_subject: "subject_a",
         dataset: dataset({ current_image_index: 0 }),
       }),
       6,

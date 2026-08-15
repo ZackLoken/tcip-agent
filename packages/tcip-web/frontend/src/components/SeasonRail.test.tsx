@@ -31,7 +31,7 @@ describe("SeasonRail", () => {
   });
 
   it("orders a season that crosses a year boundary chronologically", () => {
-    // Winter catkins: Dec 2025 → Feb 2026. The December tick must sit left of February.
+    // The winter window: Dec 2025 → Feb 2026. The December tick must sit left of February.
     render(<SeasonRail dates={["2025-12-20", "2026-01-15", "2026-02-11"]} />);
     const ticks = screen.getAllByTestId("season-tick");
     const left = (el: Element) =>

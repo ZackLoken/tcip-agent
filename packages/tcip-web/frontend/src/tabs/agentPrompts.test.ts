@@ -4,15 +4,17 @@ import { defaultSweepRequest, defaultTrainingRequest } from "@/tabs/agentPrompts
 
 describe("defaultTrainingRequest", () => {
   it("names the dataset and the subject when both are selected", () => {
-    const text = defaultTrainingRequest("/data/valley", "catkin");
-    expect(text).toContain("for the dataset at /data/valley, subject catkin");
+    const text = defaultTrainingRequest("/data/valley", "subject_a");
+    expect(text).toContain("for the dataset at /data/valley, subject subject_a");
   });
 
   it("drops each part of the scope that is not selected", () => {
     expect(defaultTrainingRequest("/data/valley", null)).toContain(
       "training run for the dataset at /data/valley.",
     );
-    expect(defaultTrainingRequest(null, "catkin")).toContain("training run for subject catkin.");
+    expect(defaultTrainingRequest(null, "subject_a")).toContain(
+      "training run for subject subject_a.",
+    );
     expect(defaultTrainingRequest(null, null)).toContain("training run.");
   });
 

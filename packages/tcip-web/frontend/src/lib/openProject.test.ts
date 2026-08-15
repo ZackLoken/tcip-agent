@@ -40,9 +40,9 @@ describe("openProjectByName", () => {
       name: "hz",
       // Agent just ingested a still-unlabelled 2026-03-24; labels live on 2026-02-11.
       dates: ["2026-02-11", "2026-03-24"],
-      subjects: ["bush", "catkin"], // flat list would pick "bush"
+      subjects: ["bush", "subject_a"], // flat list would pick "bush"
       models: ["baseline"],
-      subjects_by_date: { "2026-02-11": ["catkin"], "2026-03-24": [] },
+      subjects_by_date: { "2026-02-11": ["subject_a"], "2026-03-24": [] },
       models_by_date: { "2026-02-11": ["baseline"], "2026-03-24": [] },
     });
     vi.mocked(api.projects.list).mockResolvedValue({
@@ -56,7 +56,7 @@ describe("openProjectByName", () => {
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
     // Lands on 2026-02-11 (newest date with labels) + its subject, not the empty newest date.
     expect(arg.date).toBe("2026-02-11");
-    expect(arg.subject).toBe("catkin");
+    expect(arg.subject).toBe("subject_a");
     expect(arg.model_name).toBe("baseline");
   });
 
@@ -86,9 +86,9 @@ describe("openProjectByName", () => {
     const p = project({
       name: "hz2",
       dates: ["2026-02-11"],
-      subjects: ["catkin"],
+      subjects: ["subject_a"],
       models: ["baseline"],
-      subjects_by_date: { "2026-02-11": ["catkin"] },
+      subjects_by_date: { "2026-02-11": ["subject_a"] },
       models_by_date: { "2026-02-11": ["baseline"] },
     });
     vi.mocked(api.projects.list).mockResolvedValue({
@@ -100,7 +100,7 @@ describe("openProjectByName", () => {
     await openProjectByName("hz2");
 
     const arg = vi.mocked(api.dataset.select).mock.calls[0][0];
-    expect(arg.subject).toBe("catkin");
+    expect(arg.subject).toBe("subject_a");
     expect(arg.model_name).toBe("baseline");
   });
 

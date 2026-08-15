@@ -18,7 +18,7 @@ function seedDataset(partial: Record<string, unknown>) {
 const SELECTION = {
   project_root: "/ws/proj",
   dataset_root: "/ws/proj",
-  subject: "catkin",
+  subject: "subject_a",
   date: "2026-02-11",
   image_list: [],
   current_image_index: 0, // backend resets to 0
@@ -34,14 +34,14 @@ afterEach(() => vi.clearAllMocks());
 
 describe("applyReviewFocus", () => {
   it("switches the dataset with the model, then applies filters + index + review tab locally", async () => {
-    seedDataset({ dataset_root: "/ws/proj", subject: "catkin", date: "2026-01-01" });
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(api.dataset.select).mockResolvedValue({ status: "ok", selection: SELECTION } as any);
 
     await applyReviewFocus({
       project_root: "/ws/proj",
       dataset_root: "/ws/proj",
-      subject: "catkin",
+      subject: "subject_a",
       date: "2026-02-11",
       model_name: "baseline",
       image_index: 12,
@@ -54,7 +54,7 @@ describe("applyReviewFocus", () => {
     expect(api.dataset.select).toHaveBeenCalledTimes(1);
     expect(vi.mocked(api.dataset.select).mock.calls[0][0]).toMatchObject({
       dataset_root: "/ws/proj",
-      subject: "catkin",
+      subject: "subject_a",
       date: "2026-02-11",
       model_name: "baseline",
     });
@@ -71,14 +71,14 @@ describe("applyReviewFocus", () => {
   it("does not re-select when identity and model already match, but still applies filters", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
-      subject: "catkin",
+      subject: "subject_a",
       date: "2026-02-11",
       predictions_dir: "/ws/proj/predictions/baseline/2026-02-11",
     });
 
     await applyReviewFocus({
       dataset_root: "/ws/proj",
-      subject: "catkin",
+      subject: "subject_a",
       date: "2026-02-11",
       model_name: "baseline",
       image_index: 7,
@@ -97,7 +97,7 @@ describe("applyReviewFocus", () => {
   it("re-selects when the model differs even though the dataset identity matches", async () => {
     seedDataset({
       dataset_root: "/ws/proj",
-      subject: "catkin",
+      subject: "subject_a",
       date: "2026-02-11",
       predictions_dir: "/ws/proj/predictions/OTHER/2026-02-11",
     });
@@ -106,7 +106,7 @@ describe("applyReviewFocus", () => {
 
     await applyReviewFocus({
       dataset_root: "/ws/proj",
-      subject: "catkin",
+      subject: "subject_a",
       date: "2026-02-11",
       model_name: "baseline", // different model than the loaded predictions dir
     });
