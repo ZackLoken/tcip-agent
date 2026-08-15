@@ -267,15 +267,17 @@ def resolve_block_calibration_records(
             "file lives under."
         )
 
-    from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
+    from tcip_mcp.pipelines.data.datasets import _json_det_targets
     from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.tools.inference_tools import resolve_decode_id_map
 
-    data_cfg_pred = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    recorded_map = data_cfg_pred.get("id_map")
-    id_map = ({str(k): int(v) for k, v in recorded_map.items()}
-              if isinstance(recorded_map, dict) and recorded_map else None)
+    id_map = resolve_decode_id_map(predictor, labels_dir, scope=(subject, attribute))
     if id_map is None:
-        _reg, id_map = _resolve_registry_id_map(labels_dir, subject, attribute)
+        raise BlockCalibrationRefused(
+            "block calibration refused: this checkpoint records no name->id map and none could be "
+            f"derived from a registry for {labels_dir!r}; the mosaic's ground truth is decoded "
+            "through that map, so there is nothing to read it with."
+        )
 
     gt_path = str(Path(labels_dir) / f"{stem}.json")
     gt_boxes, gt_labels, n_unlabeled = _json_det_targets(gt_path, subject, attribute, id_map)

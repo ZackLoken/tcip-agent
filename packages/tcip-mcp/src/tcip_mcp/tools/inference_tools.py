@@ -34,7 +34,8 @@ def _recorded_training_id_map(predictor) -> dict | None:
     return None
 
 
-def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
+def resolve_decode_id_map(predictor, images_dir: str | None, *,
+                          scope: tuple[str | None, str | None] | None = None) -> dict | None:
     """This run's name->id map for recording + decoding predictions.
 
     The one resolution every door that writes predictions to disk calls, this tool's own
@@ -57,13 +58,18 @@ def resolve_decode_id_map(predictor, images_dir: str | None) -> dict | None:
     (``routes/inference.py``) wraps this whole call in a broad except and degrades to ``id_map=None``
     on any failure; the two doors share this one resolution but choose different failure postures on
     top of it, not two different resolutions.
+
+    ``scope`` is the ``(subject, attribute)`` the registry fallback derives against, defaulting to
+    the predictor's own recorded training scope. A caller holding the run's scope from elsewhere
+    (block calibration reads it from the training experiment's ``config.json``, and refuses without
+    it) passes it here rather than restating the prefer-recorded-else-derive rule around its own.
     """
     recorded = _recorded_training_id_map(predictor)
     if recorded is not None:
         return recorded
     data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
-    subject = data_cfg.get("subject")
-    attribute = data_cfg.get("attribute")
+    subject, attribute = scope if scope is not None else (
+        data_cfg.get("subject"), data_cfg.get("attribute"))
     if not (subject and images_dir):
         return None
 
@@ -1164,14 +1170,14 @@ def export_predictions(
         BucketHasVerdicts,
         resolve_prediction_bucket,
         resolve_writable_bucket,
+        review_state_dir_of,
     )
-    from tcip_mcp.project_paths import resolve_output_path, resolve_state
+    from tcip_mcp.project_paths import project_root, resolve_output_path
 
     # Resolve the writable bucket before the (expensive) inference so a verdict-blocked overwrite
-    # fails fast; verdicts live under the pinned project's ``.tcip/state``.
+    # fails fast.
     out_path = resolve_output_path(output_dir)
     parent, base_name = out_path.parent, out_path.name
-    review_state_dir = resolve_state(Path(".tcip") / "state")
 
     # A canonical predictions/<model>/<date> output_dir redirects by varying the model segment.
     # A bespoke path keeps the old last-segment redirect.
@@ -1180,6 +1186,11 @@ def export_predictions(
         candidate_root = parent.parent.parent
         if Path(prediction_dir(candidate_root, parent.name, base_name)).resolve() == out_path.resolve():
             canonical_dataset_root = candidate_root
+
+    # A dataset's own bucket is guarded against that dataset's verdict store, the one the staging
+    # writer records into; a bucket under no dataset falls to the root resolve_output_path anchors it to.
+    review_state_dir = review_state_dir_of(
+        canonical_dataset_root if canonical_dataset_root is not None else project_root())
 
     try:
         if canonical_dataset_root is not None:

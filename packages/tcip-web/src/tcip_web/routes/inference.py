@@ -430,10 +430,13 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         raise HTTPException(404, f"images_dir not found: {images_dir}")
 
     # Prediction-bucket immutability: never silently overwrite a bucket with review verdicts.
-    from tcip_mcp.prediction_buckets import BucketHasVerdicts, resolve_prediction_bucket
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.prediction_buckets import (
+        BucketHasVerdicts,
+        resolve_prediction_bucket,
+        review_state_dir_of,
+    )
 
-    review_state_dir = resolve_state(Path(".tcip") / "state")
+    review_state_dir = review_state_dir_of(payload.dataset_root)
     try:
         bucket_dir, resolution = resolve_prediction_bucket(
             payload.dataset_root,

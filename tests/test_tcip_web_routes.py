@@ -924,15 +924,18 @@ def test_review_action_records_subject_name_and_reviewer(
     assert entry["reviewed_by"]  # non-empty reviewer
 
 
-def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
-    client: TestClient, tmp_path: Path, monkeypatch
-) -> None:
+def _verdicted_launch_dataset(tmp_path: Path, monkeypatch) -> tuple[Path, Path, str]:
+    """A dataset with one image, one canonical bucket and one verdict in its own verdict store.
+
+    The platform root is pinned to a different, empty root, so a launch door counting verdicts
+    there rather than in the dataset's own store would find none.
+    """
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
 
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project_root))
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
 
     dataset_root = tmp_path / "data"
     date = "2026-02-11"
@@ -947,13 +950,22 @@ def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
     (out / "img.json").write_text(
         json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []})
     )
-    engine = ReviewEngine(project_root / ".tcip" / "state")
+    engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
                         preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
                                           score=0.9)])
     det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
     engine.record_detection_action(det, ctx, action="accepted")
+    return dataset_root, ckpt, date
+
+
+def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    """The launch door counts a bucket's verdicts in the store belonging to the dataset it is
+    writing into, so the breeder's recorded verdicts are the ones that freeze it."""
+    dataset_root, ckpt, date = _verdicted_launch_dataset(tmp_path, monkeypatch)
 
     # overwrite=True into a bucket that has a verdict is a 409 (no job is launched).
     resp = client.post("/api/inference/launch", json={
@@ -962,6 +974,39 @@ def test_inference_launch_refuses_overwrite_into_verdicted_bucket(
     })
     assert resp.status_code == 409
     assert "verdict" in resp.json()["detail"].lower()
+
+
+def test_inference_launch_writes_an_unreviewed_bucket_in_place(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    """The same dataset-scoped guard still admits the ordinary re-run into an unreviewed bucket."""
+    from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_web.routes import inference as inference_routes
+
+    # The bucket resolution under test is the route's own synchronous step; the prediction pass
+    # behind it is not what this pins.
+    monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
+
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+
+    dataset_root = tmp_path / "data"
+    date = "2026-02-11"
+    images = image_dir(dataset_root, date)
+    images.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": str(ckpt), "dataset_root": str(dataset_root),
+        "model_name": "baseline", "date": date, "overwrite": True,
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["bucket_redirected"] is False
+    assert Path(body["output_dir"]) == prediction_dir(dataset_root, "baseline", date)
 
 
 # ── /api/state ───────────────────────────────────────────────────────────

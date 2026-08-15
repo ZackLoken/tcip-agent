@@ -30,13 +30,26 @@ def bucket_stems(*dirs: Path | str) -> set[str]:
     return stems
 
 
+def review_state_dir_of(root: str | Path) -> Path:
+    """``<root>/.tcip/state``: the review-verdict store for the dataset (or project) at ``root``.
+
+    The one derivation of where verdicts live, so the immutability guard that counts them and the
+    :class:`~tcip_annotation.ReviewEngine` that records them address the same store instead of each
+    composing a state dir from whichever root it happens to hold. ``ReviewEngine`` still owns the
+    shard layout inside it; this only says which store root it is opened on.
+    """
+    return Path(root, ".tcip", "state")
+
+
 def verdict_count(review_state_dir: Path | str, names: Iterable[str]) -> int:
-    """Review verdicts recorded against ``names`` (image stems). 0 when no review state
-    exists yet: no engine is created for a never-reviewed project."""
-    from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME, ReviewEngine
+    """Review verdicts recorded against ``names`` (image stems). 0 when the store holds no
+    verdicts at all: no engine is created for a never-reviewed dataset."""
+    import tcip_store
+
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE, ReviewEngine
 
     d = Path(review_state_dir)
-    if not (d / REVIEW_SHARD_DIRNAME).is_dir():
+    if not tcip_store.keys(REVIEW_VERDICTS_STORE, str(d)):
         return 0
     return ReviewEngine(d).verdict_count_for_images(names)
 
@@ -159,7 +172,7 @@ def stage_prediction_shapes(
         dataset_root,
         model_name,
         date,
-        review_state_dir=Path(dataset_root) / ".tcip" / "state",
+        review_state_dir=review_state_dir_of(dataset_root),
         overwrite=overwrite,
     )
 
