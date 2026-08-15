@@ -110,6 +110,7 @@ function setupDataset() {
         date: "2026-01-01",
         image_list: ["img1.jpg", "img2.jpg"],
         current_image_index: 0,
+        images_dir: "C:/data/images/2026-01-01",
         annotations_dir: "C:/data/annotations/2026-01-01",
         predictions_dir: null,
       },

@@ -42,6 +42,7 @@ const DEFAULT_DATASET: DatasetSelection = {
   date: null,
   image_list: [],
   current_image_index: 0,
+  images_dir: null,
   annotations_dir: null,
   predictions_dir: null,
 };

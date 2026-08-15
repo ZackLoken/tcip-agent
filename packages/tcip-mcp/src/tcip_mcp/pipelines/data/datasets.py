@@ -425,7 +425,7 @@ def confirmed_negative_names(
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
         annotation_date, classes_path, dataset_root_of, image_status_digest_path,
-        image_status_path, status_bucket,
+        image_status_path, is_confirmed_negative, normalize_status_store, status_bucket,
     )
 
     if date is None:
@@ -437,17 +437,15 @@ def confirmed_negative_names(
     if not status_file.is_file():
         return set()
     try:
-        statuses = json.loads(status_file.read_text(encoding="utf-8"))
+        raw = json.loads(status_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return set()
-    if not isinstance(statuses, dict):
-        return set()
+    statuses = normalize_status_store(raw)
     if not subject:
         # Refuse only when there is something to lose: a store with confirmed negatives this
         # run might be entitled to. Silently returning none would drop the human's work.
         has_negatives = any(
-            s == "negative" for b in statuses.values() if isinstance(b, dict)
-            for s in b.values()
+            is_confirmed_negative(s) for b in statuses.values() for s in b.values()
         )
         if not has_negatives:
             return set()
@@ -458,9 +456,9 @@ def confirmed_negative_names(
         )
     bucket_key = status_bucket(subject, date)
     bucket = statuses.get(bucket_key)
-    if not isinstance(bucket, dict):
+    if not bucket:
         return set()  # this subject has no confirmations yet
-    negatives = {name for name, s in bucket.items() if s == "negative"}
+    negatives = {name for name, s in bucket.items() if is_confirmed_negative(s)}
     if not negatives:
         return negatives
 

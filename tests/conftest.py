@@ -24,6 +24,20 @@ def _pin_torch_single_thread():
     torch.set_num_threads(1)
 
 
+@pytest.fixture(autouse=True)
+def _bind_storage_backend():
+    """Bind the storage backend before every test, the way a process entry point does.
+
+    Every code path that reaches a store needs one bound; a suite that left it unbound would
+    report the absence of a backend where the behavior under test is what the store does. Per
+    test rather than per session, so a test that binds its own backend and drops it on the way
+    out leaves the next one a bound process rather than an unbound one.
+    """
+    from tcip_store.file_backend import bind_default
+
+    bind_default()
+
+
 def pytest_collection_modifyitems(config, items):
     """Guardrail: fail loudly when far fewer tests collect than expected.
 

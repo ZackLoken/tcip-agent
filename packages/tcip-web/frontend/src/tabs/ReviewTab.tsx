@@ -42,6 +42,7 @@ import {
 } from "@/lib/canvasSync";
 import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
 import type { LoadedImage } from "@/lib/imageLoader";
+import { currentImage, labelPath, predictionPath } from "@/lib/paths";
 import { zoomToRect } from "@/lib/viewGeometry";
 import {
   compositeParams,
@@ -58,12 +59,7 @@ import {
   type ReviewGeom,
 } from "@/lib/reviewGeometry";
 import { useStore } from "@/store";
-import type {
-  DatasetSelection,
-  MatchesResponse,
-  ReviewImageStatus,
-  ReviewStatusFilter,
-} from "@/store/types";
+import type { MatchesResponse, ReviewImageStatus, ReviewStatusFilter } from "@/store/types";
 
 // Plain-language labels for a breeder audience: the TP/FP/FN tag stays as a short code next
 // to it, not as the primary label a non-CV user has to decode.
@@ -85,22 +81,6 @@ const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 function seedEditShape(geom: Exclude<ReviewGeom, { kind: "point" }>): EditShape {
   if (geom.kind === "box") return { kind: "box", box: geom.box };
   return { kind: "polygon", points: geom.rings[0].map((p): [number, number] => [p[0], p[1]]) };
-}
-
-function currentImagePath(dataset: DatasetSelection): { path: string | null; name: string | null } {
-  if (!dataset.dataset_root || !dataset.date) return { path: null, name: null };
-  const name = dataset.image_list[dataset.current_image_index];
-  if (!name) return { path: null, name: null };
-  return { path: `${dataset.dataset_root}/images/${dataset.date}/${name}`, name };
-}
-
-function labelPaths(dataset: DatasetSelection, name: string | null) {
-  if (!name) return { gt: null, pred: null };
-  const stem = name.replace(/\.[^.]+$/, "");
-  return {
-    gt: dataset.annotations_dir ? `${dataset.annotations_dir}/${stem}.json` : null,
-    pred: dataset.predictions_dir ? `${dataset.predictions_dir}/${stem}.json` : null,
-  };
 }
 
 const TYPE_ORDER: ("tp" | "fp" | "fn")[] = ["tp", "fp", "fn"];
@@ -144,8 +124,11 @@ export function ReviewTab() {
   const setReviewStatusFilter = useStore((s) => s.setReviewStatusFilter);
 
   const detectionIdx = filters.detection_idx;
-  const { path: imgPath, name: imgName } = currentImagePath(dataset);
-  const paths = useMemo(() => labelPaths(dataset, imgName), [dataset, imgName]);
+  const { path: imgPath, name: imgName } = currentImage(dataset);
+  const paths = useMemo(
+    () => ({ gt: labelPath(dataset, imgName), pred: predictionPath(dataset, imgName) }),
+    [dataset, imgName],
+  );
 
   // Band-composite picker (multispectral only). bandsInfo drives conditional visibility
   // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
@@ -349,7 +332,7 @@ export function ReviewTab() {
   }, [pqJobId, pqStatus]);
 
   async function computePriorityQueue() {
-    if (!dataset.project_root || !dataset.dataset_root || !dataset.date || !pqModelPath) return;
+    if (!dataset.project_root || !dataset.images_dir || !pqModelPath) return;
     setPqStatus("running");
     setPqError(null);
     setPqQueue(null);
@@ -357,7 +340,7 @@ export function ReviewTab() {
       const res = await api.review.launchPriorityQueue({
         project_root: dataset.project_root,
         checkpoint_path: pqModelPath,
-        images_dir: `${dataset.dataset_root}/images/${dataset.date}`,
+        images_dir: dataset.images_dir,
       });
       setPqJobId(res.job_id);
     } catch (e) {

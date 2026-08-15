@@ -84,8 +84,9 @@ def count_label_lines(labels_dir: str | Path, stem: str) -> int:
     stem whose labels cannot be read scores 0 foreground.
     """
     from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import label_filename
 
-    jp = Path(labels_dir) / f"{stem}.json"
+    jp = Path(labels_dir) / label_filename(stem)
     if not jp.is_file():
         return 0
     return len(json_io.read_annotations(str(jp)))
@@ -102,7 +103,9 @@ def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, in
     its own authored-vs-decoded frame check, so a split derived from this extent and a tiled
     dataset later built over the same stem agree on the frame by construction.
     """
-    p = Path(labels_dir) / f"{stem}.json"
+    from tcip_mcp.dataset_layout import label_filename
+
+    p = Path(labels_dir) / label_filename(stem)
     if not p.is_file():
         return None
     try:

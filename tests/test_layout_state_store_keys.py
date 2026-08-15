@@ -1,5 +1,5 @@
-"""The dataset-native state stores: the bucket key both the writer and the doctor's inverse must
-read the same way, and the separation between the advisory view-coverage store and the
+"""The dataset-native state stores: the bucket key the writer composes and the published inverse
+takes apart, and the separation between the advisory view-coverage store and the
 confirmed-negatives store that decides what trains as empty."""
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_mcp.dataset_layout import (
+    bucket_subject_date,
     image_status_path,
     normalize_status_store,
     status_bucket,
@@ -37,13 +38,16 @@ def _doctor():
     ("subject", "date"),
     [("catkin", "2026-02-11"), ("bush", "2026-03-02"), ("leaf", None)],
 )
-def test_status_bucket_round_trips_through_the_doctors_inverse(
+def test_the_doctor_reads_a_bucket_key_through_the_published_inverse(
     subject: str, date: str | None
 ) -> None:
-    """The doctor splits a bucket key back into subject and date by hand, so its inverse and the
-    composer must agree; a disagreement attributes one subject's confirmations to another."""
-    subj, bdate = _doctor()._bucket_subject_date(status_bucket(subject, date))
-    assert (subj, bdate) == (subject, date)
+    """The doctor takes a bucket key apart with the inverse published beside the composer, so the
+    two cannot disagree; a disagreement attributes one subject's confirmations to another."""
+    assert not hasattr(_doctor(), "_bucket_subject_date"), (
+        "the doctor is splitting a bucket key itself again instead of calling the published inverse"
+    )
+    assert "bucket_subject_date" in DOCTOR_PATH.read_text(encoding="utf-8")
+    assert bucket_subject_date(status_bucket(subject, date)) == (subject, date)
 
 
 @pytest.fixture

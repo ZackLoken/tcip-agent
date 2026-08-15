@@ -28,19 +28,15 @@ def _load(path: Path):
 
 def _image_stems(root: Path) -> dict[str, str]:
     """stem -> file name for every image under images/ (any date bucket)."""
+    from tcip_mcp.dataset_layout import image_root
+
     out: dict[str, str] = {}
-    images = root / "images"
+    images = image_root(root)
     if images.is_dir():
         for p in images.rglob("*"):
             if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
                 out[p.stem] = p.name
     return out
-
-
-def _bucket_subject_date(key: str) -> tuple[str, str | None]:
-    """Split a ``status_bucket(subject, date)`` key back into ``(subject, date)`` (date after '/')."""
-    subject, _, date = key.partition("/")
-    return subject, (date or None)
 
 
 def check_negatives(root: Path, findings: list) -> None:
@@ -50,15 +46,16 @@ def check_negatives(root: Path, findings: list) -> None:
     subject and date, so the disagreement is checked per subject present in the file.
     """
     from tcip_annotation import json_io
-    from tcip_mcp.dataset_layout import annotation_date, image_status_path, normalize_status_store
+    from tcip_mcp.dataset_layout import (
+        annotation_date, annotation_root, bucket_subject_date, image_status_path,
+        is_confirmed_negative, normalize_status_store,
+    )
 
-    # Through the same normalizer the web layer reads with, so the two can never disagree about
-    # what the store says. Confirmations are dataset-native; this check already assumes
-    # root == dataset_root (it reads root/images and root/annotations directly).
+    # Confirmations are dataset-native, and this check already assumes root == dataset_root.
     by_bucket = normalize_status_store(_load(image_status_path(root)))
     stems = _image_stems(root)
-    ann_root = root / "annotations"
-    neg_names = {n for b in by_bucket.values() for n, s in b.items() if s == "negative"}
+    ann_root = annotation_root(root)
+    neg_names = {n for b in by_bucket.values() for n, s in b.items() if is_confirmed_negative(s)}
 
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if ".original" in label.parts:
@@ -68,9 +65,9 @@ def check_negatives(root: Path, findings: list) -> None:
         date = annotation_date(label)
         subjects_here = {a.subject for a in anns if a.geometry is not None}
         for key, bucket in by_bucket.items():
-            if bucket.get(name) != "negative":
+            if not is_confirmed_negative(bucket.get(name)):
                 continue
-            subj, bdate = _bucket_subject_date(key)
+            subj, bdate = bucket_subject_date(key)
             if bdate != date:
                 continue
             if subj in subjects_here:
@@ -95,9 +92,11 @@ def check_negatives(root: Path, findings: list) -> None:
                         f"record and are excluded from training ({shown}). Annotate them, or mark "
                         "the genuinely-empty ones Complete to train them as negatives."))
 
+    from tcip_mcp.dataset_layout import label_filename
+
     for name in neg_names:
         stem = Path(name).stem
-        det = list(ann_root.rglob(f"{stem}.json")) if ann_root.is_dir() else []
+        det = list(ann_root.rglob(label_filename(stem))) if ann_root.is_dir() else []
         if not det:
             findings.append(("warn", f"status says {name} is negative but no label file exists "
                             "(a confirmed negative should have an empty label file)"))
@@ -116,9 +115,11 @@ def check_registry(root: Path, findings: list) -> None:
 
 def check_provenance(root: Path, findings: list) -> None:
     from tcip_annotation.json_io import ANNOTATIONS_KEY
+    from tcip_mcp.dataset_layout import annotation_root
 
+    ann_root = annotation_root(root)
     unstamped = 0
-    for label in (root / "annotations").rglob("*.json") if (root / "annotations").is_dir() else []:
+    for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if ".original" in label.parts:
             continue
         data = _load(label)
@@ -170,8 +171,8 @@ def check_region_completeness(root: Path, findings: list) -> None:
     stale claim block calibration could otherwise trust silently; flag every disagreement between
     an attested cell's stamped digest and its current annotation content."""
     from tcip_mcp.dataset_layout import (
-        normalize_region_completeness_store, region_completeness_digest_path,
-        region_completeness_path,
+        bucket_subject_date, normalize_region_completeness_store,
+        region_completeness_digest_path, region_completeness_path,
     )
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
@@ -184,7 +185,7 @@ def check_region_completeness(root: Path, findings: list) -> None:
     for bucket, record in store.items():
         subject = record.get("subject")
         if not isinstance(subject, str) or not subject:
-            subject, _ = _bucket_subject_date(bucket)
+            subject, _ = bucket_subject_date(bucket)
         stamped = digests.get(bucket)
         stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
         if stale:

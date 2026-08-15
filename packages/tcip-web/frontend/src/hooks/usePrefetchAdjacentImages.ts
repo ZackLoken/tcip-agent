@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { api } from "@/api/client";
 import { useImageNav } from "@/hooks/useImageNav";
+import { inImagesDir } from "@/lib/paths";
 import { useStore } from "@/store";
 
 /**
@@ -14,15 +15,14 @@ import { useStore } from "@/store";
  * other render of the image warms a cache entry the canvas will never ask for.
  */
 export function usePrefetchAdjacentImages(bands?: string, stretch?: string): void {
-  const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
-  const date = useStore((s) => s.gui.dataset.date);
+  const imagesDir = useStore((s) => s.gui.dataset.images_dir);
   const imageList = useStore((s) => s.gui.dataset.image_list);
   const currentIndex = useStore((s) => s.gui.dataset.current_image_index);
   const nav = useImageNav();
   const { filteredIndices } = nav;
 
   useEffect(() => {
-    if (!datasetRoot || !date) return;
+    if (!imagesDir) return;
     const pos = filteredIndices.indexOf(currentIndex);
     if (pos < 0) return;
     // Forward-biased lookahead: the user mostly steps forward, so warm the next few frames in the
@@ -38,9 +38,9 @@ export function usePrefetchAdjacentImages(bands?: string, stretch?: string): voi
     const t = setTimeout(() => {
       for (const name of targets) {
         const img = new Image();
-        img.src = api.images.url(`${datasetRoot}/images/${date}/${name}`, { bands, stretch });
+        img.src = api.images.url(inImagesDir(imagesDir, name), { bands, stretch });
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [datasetRoot, date, imageList, currentIndex, filteredIndices, bands, stretch]);
+  }, [imagesDir, imageList, currentIndex, filteredIndices, bands, stretch]);
 }

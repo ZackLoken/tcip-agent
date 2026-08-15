@@ -533,21 +533,22 @@ def _confirmations_term(dataset_root: Path) -> str:
     ``_registry_term``'s "optional, additive" convention so a dataset with zero confirmed negatives
     still gets a valid non-None fingerprint.
     """
-    from tcip_mcp.dataset_layout import image_status_path
+    from tcip_mcp.dataset_layout import (
+        image_status_path, is_confirmed_negative, normalize_status_store,
+    )
 
     p = image_status_path(dataset_root)
     if not p.is_file():
         return ""
     try:
-        statuses = json.loads(p.read_text(encoding="utf-8"))
+        raw = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return ""
-    if not isinstance(statuses, dict):
-        return ""
+    statuses = normalize_status_store(raw)
     h = hashlib.sha256()
     any_negatives = False
-    for bucket in sorted(k for k in statuses if isinstance(statuses[k], dict)):
-        names = sorted(n for n, s in statuses[bucket].items() if s == "negative")
+    for bucket in sorted(statuses):
+        names = sorted(n for n, s in statuses[bucket].items() if is_confirmed_negative(s))
         if not names:
             continue
         any_negatives = True
@@ -576,9 +577,11 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     changed even with identical on-disk content. That is expected, not corruption, experiments are
     immutable, so old lineage records keep their old fingerprint value rather than being rewritten.
     """
+    from tcip_mcp.dataset_layout import annotation_root, image_root
+
     root = Path(dataset_root)
-    labels = _labels_term(root / "annotations")
-    images = _images_term(root / "images", root / ".tcip" / "state" / "image_hash_cache.json")
+    labels = _labels_term(annotation_root(root))
+    images = _images_term(image_root(root), root / ".tcip" / "state" / "image_hash_cache.json")
     if labels is None or images is None:
         return None
     h = hashlib.sha256()

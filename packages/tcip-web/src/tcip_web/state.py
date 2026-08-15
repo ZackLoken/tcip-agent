@@ -38,9 +38,9 @@ class DatasetSelection(BaseModel):
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
 
-    # Label/prediction dirs resolved relative to dataset_root. One file per image now holds
-    # every subject, so the path carries no subject or task segment (see dataset_layout):
-    #   annotations_dir = annotations/<date>/;  predictions_dir = predictions/<model>/<date>/
+    # Image/label/prediction dirs resolved through dataset_layout, never composed by the browser.
+    # One file per image holds every subject, so no path carries a subject or task segment.
+    images_dir: Optional[str] = None
     annotations_dir: Optional[str] = None
     predictions_dir: Optional[str] = None
 

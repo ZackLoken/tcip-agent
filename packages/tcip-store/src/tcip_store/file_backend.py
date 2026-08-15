@@ -551,6 +551,19 @@ class FileBackend:
         return self.path_for(key)
 
 
+def bind_default(*, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> None:
+    """Bind a file backend for this process, at its entry point.
+
+    What every entry point calls while the file backend is the only backend: the MCP server, the
+    web backend, a training subprocess, a test fixture. Constructing the backend is what refuses
+    with ``BackendUnavailable`` when cross-process exclusion is unavailable, so a process that
+    cannot lock stops here rather than writing without one.
+    """
+    from tcip_store.store import bind
+
+    bind(FileBackend(lock_timeout_s=lock_timeout_s))
+
+
 class _FileTxn:
     """The file backend's transaction handle: reads under the lock, writes staged until exit."""
 

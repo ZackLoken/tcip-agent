@@ -110,3 +110,54 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
     assert read("catkin", None) == on_disk["catkin"]
     assert read("bush", None) == on_disk["bush"]
     assert read("catkin", "2026-03-09") == on_disk["catkin/2026-03-09"]
+
+
+def test_a_status_the_readers_do_not_understand_is_refused_before_it_reaches_the_store(
+    tmp_path: Path,
+) -> None:
+    """A token outside the store's vocabulary never lands, and every token inside it does.
+
+    A recorded status nothing can interpret is neither a confirmation nor a negative, so it is
+    refused; the four the readers do understand still write, which is what keeps the refusal from
+    standing between the breeder and an ordinary confirmation.
+    """
+    from tcip_mcp.dataset_layout import IMAGE_STATUSES, record_image_statuses
+
+    with pytest.raises(ValueError, match="reviewed"):
+        record_image_statuses(tmp_path, "catkin", {"A.JPG": "reviewed"})
+    assert not image_status_path(tmp_path).exists()
+
+    record_image_statuses(tmp_path, "catkin", {f"{s}.JPG": s for s in IMAGE_STATUSES})
+    assert _on_disk(tmp_path)["catkin"] == {f"{s}.JPG": s for s in IMAGE_STATUSES}
+
+
+def test_a_materialized_output_carries_only_the_negatives_that_run_derived(tmp_path: Path) -> None:
+    """A dataset written out by a materializer holds exactly the confirmations that run produced.
+
+    Writing into a directory an earlier run already used replaces its store rather than folding
+    into it: a leftover name nobody re-derived would otherwise keep training as an empty image.
+    """
+    from tcip_mcp.dataset_layout import replace_image_status_store
+
+    replace_image_status_store(tmp_path, {"catkin": {"OLD.JPG": "negative"}})
+    replace_image_status_store(tmp_path, {"catkin": {"NEW.JPG": "negative"}})
+
+    assert _on_disk(tmp_path) == {"catkin": {"NEW.JPG": "negative"}}
+
+
+def test_a_schema_stamp_leaves_every_other_image_stamp_in_place(tmp_path: Path) -> None:
+    """Stamping one image merges into the sidecar, per image and per bucket.
+
+    A whole-document write would drop a stamp another image's confirmation was quarantined by,
+    which un-quarantines a confirmation made under a schema that has since changed.
+    """
+    from tcip_mcp.dataset_layout import image_status_digest_path, stamp_image_status_digests
+
+    stamp_image_status_digests(tmp_path, "catkin", ["A.JPG", "B.JPG"], "digest-one")
+    stamp_image_status_digests(tmp_path, "bush", ["C.JPG"], "digest-two")
+    stamp_image_status_digests(tmp_path, "catkin", ["B.JPG"], "digest-three")
+
+    assert json.loads(image_status_digest_path(tmp_path).read_text(encoding="utf-8")) == {
+        "bush": {"C.JPG": "digest-two"},
+        "catkin": {"A.JPG": "digest-one", "B.JPG": "digest-three"},
+    }

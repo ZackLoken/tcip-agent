@@ -29,7 +29,10 @@ from typing import Iterable, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction, read_json
+from tcip_store import StoreError
+
+from tcip_mcp.dataset_layout import IMAGE_STATUSES
+from tcip_mcp.utils.atomic_io import read_json
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +208,6 @@ def save_classes(payload: SaveClassesPayload) -> dict:
 # ── Per-image status (used by Complete checkbox + status filter) ─────────
 
 
-VALID_STATUSES = ("complete", "partial", "negative", "unannotated")
-
-
 class ImageStatusPayload(BaseModel):
     project_root: str
     image_name: str
@@ -255,15 +255,14 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
                   image_names: Iterable[str]) -> None:
     """Best-effort: record the subject's current attribute-schema digest against each of
     ``image_names``, so a later read can tell a confirmation made under a since-changed schema from
-    one still valid. Stamped per image, not per bucket: a bucket holds every image ever touched
-    under this subject/date, so a bucket-wide stamp would be silently overwritten by the next
-    unrelated write to the bucket, un-quarantining a different image's stale confirmation nobody
-    re-reviewed. Never blocks the status write: an unreadable/absent registry just leaves these
-    images unstamped (admitted, not quarantined, on read; see ``confirmed_negative_names``)."""
+    one still valid. Never blocks the status write: an unreadable registry, an absent one, or a
+    failure writing the sidecar itself just leaves these images unstamped (admitted, not
+    quarantined, on read; see ``confirmed_negative_names``), because the status the human recorded
+    is already committed by the time this runs."""
     if not subject:
         return
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
-    from tcip_mcp.dataset_layout import classes_path, image_status_digest_path
+    from tcip_mcp.dataset_layout import classes_path, stamp_image_status_digests
 
     cp = classes_path(dataset_root)
     if not cp.is_file():
@@ -271,28 +270,14 @@ def _stamp_digest(dataset_root: str, bucket: str, subject: str | None,
     try:
         digest = attribute_schema_digest(read_registry(cp), subject)
     except (OSError, ValueError):
-        # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass),
-        # a malformed/unreadable registry must never turn a status write into a 500.
+        # ValueError covers json.JSONDecodeError and class_registry.RegistryError (its subclass).
         return
     if digest is None:
         return
-    path = image_status_digest_path(dataset_root)
     try:
-        with file_transaction(path):
-            stamps = read_json(path, default={})
-            if not isinstance(stamps, dict):
-                stamps = {}
-            bucket_stamps = stamps.get(bucket)
-            if not isinstance(bucket_stamps, dict):
-                bucket_stamps = {}
-            for name in image_names:
-                bucket_stamps[name] = digest
-            stamps[bucket] = dict(sorted(bucket_stamps.items()))
-            atomic_write_json(path, dict(sorted(stamps.items())))
-    except OSError:
-        # Best-effort, like the registry read above: a failure writing the sidecar itself (disk
-        # full, permissions) must not turn an already-successful status write into a 500.
-        pass
+        stamp_image_status_digests(dataset_root, bucket, image_names, digest)
+    except (OSError, StoreError):
+        logger.warning("could not stamp the attribute-schema digest for %s", bucket, exc_info=True)
 
 
 @router.get("/image_status")
@@ -312,17 +297,13 @@ def get_image_status(project_root: str, subject: str | None = None, date: str | 
 
 @router.post("/image_status")
 def set_image_status(payload: ImageStatusPayload) -> dict:
-    if payload.status not in VALID_STATUSES:
+    if payload.status not in IMAGE_STATUSES:
         raise HTTPException(400, f"invalid status: {payload.status}")
-    from tcip_mcp.dataset_layout import image_status_path
+    from tcip_mcp.dataset_layout import record_image_statuses
 
     root = _require_dataset_root(payload.dataset_root, payload.annotations_dir)
-    path = image_status_path(root)
     bucket = _require_bucket(payload.subject, payload.date)
-    with file_transaction(path):
-        store = _load_status_store(path)
-        store.setdefault(bucket, {})[payload.image_name] = payload.status
-        atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
+    record_image_statuses(root, bucket, {payload.image_name: payload.status})
     _stamp_digest(root, bucket, payload.subject, [payload.image_name])
     _audit_dataset_write(
         root,
@@ -344,30 +325,21 @@ class ImageStatusBulkPayload(BaseModel):
 
 @router.post("/image_status/bulk")
 def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
-    from tcip_mcp.dataset_layout import image_status_path
+    from tcip_mcp.dataset_layout import record_image_statuses
 
     root = _require_dataset_root(payload.dataset_root, payload.annotations_dir)
-    path = image_status_path(root)
     bucket = _require_bucket(payload.subject, payload.date)
-    applied: list[str] = []
-    with file_transaction(path):
-        store = _load_status_store(path)
-        target = store.setdefault(bucket, {})
-        for name, st in payload.statuses.items():
-            if st in VALID_STATUSES:
-                target[name] = st
-                applied.append(name)
-        atomic_write_json(path, {k: dict(sorted(store[k].items())) for k in sorted(store)})
+    applied = {name: st for name, st in payload.statuses.items() if st in IMAGE_STATUSES}
+    if applied:
+        record_image_statuses(root, bucket, applied)
     _stamp_digest(root, bucket, payload.subject, applied)
-    # Record what was actually written, not the raw payload: an entry with a name whose status
-    # was skipped (not in VALID_STATUSES) would overstate the change. No entry at all when nothing
-    # was applied: a no-op write logged as a mutation is noise, not signal.
+    # Record what was actually written, not the raw payload: an entry whose status was skipped
+    # would overstate the change, and a no-op write logged as a mutation is noise.
     if applied:
         _audit_dataset_write(
             root,
             "gui_set_image_status_bulk",
-            {"statuses": {name: payload.statuses[name] for name in applied},
-             "subject": payload.subject, "date": payload.date},
+            {"statuses": applied, "subject": payload.subject, "date": payload.date},
         )
     return {"status": "ok", "n": len(payload.statuses)}
 
@@ -384,11 +356,12 @@ class DerivePayload(BaseModel):
 def derive_image_status(payload: DerivePayload) -> dict:
     """Compute initial per-image status from the per-image label files.
 
-    A negative is intentional, not a side effect of an empty file: an image is a confirmed negative
-    only when explicitly completed with no annotations. Mapping: completed+objects -> complete;
-    completed+empty -> negative; objects (not completed) -> partial; empty-or-missing -> unannotated.
-    When a ``subject`` is given, only annotations of that subject count (per-subject scoping).
+    The mapping itself is ``dataset_layout.derive_status``, the same one the review tab's Complete
+    goes through, so the two cannot disagree about what a Complete on an empty image means. When a
+    ``subject`` is given, only annotations of that subject count (per-subject scoping).
     """
+    from tcip_mcp.dataset_layout import derive_status
+
     # Reads label files directly rather than through _resolve_dataset_root, so it needs its own
     # confinement call (no-op unless TCIP_IMAGE_ROOTS is set): an absolute-path read is exactly
     # what that lockdown governs.
@@ -411,11 +384,6 @@ def derive_image_status(payload: DerivePayload) -> dict:
                     )
                 else:
                     has_any = bool(anns)
-        if name in complete_set:
-            statuses[name] = "complete" if has_any else "negative"
-        elif has_any:
-            statuses[name] = "partial"
-        else:
-            statuses[name] = "unannotated"
+        statuses[name] = derive_status(completed=name in complete_set, has_content=has_any)
 
     return {"statuses": statuses}

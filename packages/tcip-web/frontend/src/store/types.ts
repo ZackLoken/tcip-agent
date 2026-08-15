@@ -15,8 +15,9 @@ export interface DatasetSelection {
   date: string | null;
   image_list: string[];
   current_image_index: number;
-  // One file per image now holds every subject, so the label/prediction dirs carry no subject
-  // or task segment: annotations/<date>/ and predictions/<model>/<date>/.
+  // Resolved by the backend, never composed here: images/<date>/, annotations/<date>/ and
+  // predictions/<model>/<date>/. One file per image holds every subject, so none carries one.
+  images_dir: string | null;
   annotations_dir: string | null;
   predictions_dir: string | null;
 }

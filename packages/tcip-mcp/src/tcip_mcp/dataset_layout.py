@@ -14,8 +14,10 @@ inside the file, resolved through the dataset's single class registry::
 
 The class registry lives in the dataset and travels with the labels: a name-based label
 (``subject``, attribute value) is undecodable without it. A second project opening the same image
-set reads the same names. This module is a pure *locator*: it never parses ``classes.json`` (its
-contents belong to :mod:`tcip_mcp.class_registry`); it only delegates to that module to list subjects.
+set reads the same names. This module never parses ``classes.json`` (its contents belong to
+:mod:`tcip_mcp.class_registry`); it only delegates to that module to list subjects. It does own the
+dataset-root stores it registers below, so their status vocabulary, their derivation and their
+writers live here beside the locators rather than in each caller.
 
 ``<date>`` of ``None`` (non-dated datasets) simply omits that segment. This is the single source of
 truth for label/prediction locations: every producer and consumer resolves paths through here.
@@ -23,9 +25,11 @@ truth for label/prediction locations: every producer and consumer resolves paths
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Optional
 
+import tcip_store
 from tcip_store import Key, StoreDescriptor, json_codec, register_store
 from tcip_store.file_backend import RootedFileLocator
 
@@ -95,9 +99,18 @@ def _date_seg(date: Optional[str]) -> tuple[str, ...]:
     return (date,) if date else ()
 
 
+def image_root(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/images/``: the whole image tree, every capture date under it.
+
+    The top-level call a consumer that walks or stats the tree needs, so an archiver, a scanner
+    or a cache signature asks this module where the tree is instead of spelling the segment again.
+    """
+    return Path(dataset_root, "images")
+
+
 def image_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
     """``<dataset_root>/images/[<date>/]``: where an image's bytes live."""
-    return Path(dataset_root, "images", *_date_seg(date))
+    return image_root(dataset_root).joinpath(*_date_seg(date))
 
 
 def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: str) -> Path:
@@ -107,15 +120,20 @@ def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: st
 
 def list_dates(dataset_root: str | Path) -> list[str]:
     """Sorted capture-date bucket names under ``images/`` (ISO ``YYYY-MM-DD``)."""
-    imgs = Path(dataset_root) / "images"
+    imgs = image_root(dataset_root)
     if not imgs.is_dir():
         return []
     return sorted(p.name for p in imgs.iterdir() if p.is_dir())
 
 
+def annotation_root(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/annotations/``: the whole ground-truth tree, every capture date under it."""
+    return Path(dataset_root, *_LABEL_TREE.prefix)
+
+
 def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
     """``<dataset_root>/annotations/[<date>/]`` (ground truth, one file per image, all subjects)."""
-    return Path(dataset_root, *_LABEL_TREE.prefix, *_date_seg(date))
+    return annotation_root(dataset_root).joinpath(*_date_seg(date))
 
 
 def annotation_date(path: str | Path) -> Optional[str]:
@@ -454,6 +472,14 @@ def status_bucket(subject: str, date: Optional[str]) -> str:
     return f"{subject}/{date}" if date else subject
 
 
+def bucket_subject_date(bucket: str) -> tuple[str, Optional[str]]:
+    """The ``(subject, date)`` a bucket key was built from: the declared inverse of
+    :func:`status_bucket`, so a reader that has to take a key apart never re-derives the
+    separator the writer used."""
+    subject, _, date = bucket.partition("/")
+    return subject, (date or None)
+
+
 def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
     """``{bucket: {image_name: status}}``: a shape guard, shared by every reader.
 
@@ -469,9 +495,118 @@ def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
     }
 
 
+CONFIRMED_NEGATIVE = "negative"
+"""The status token for an image a human marked done with none of the subject on it."""
+
+IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")
+"""Every status the store holds, and the only values a write may record.
+
+``"complete"`` and ``"negative"`` are opposites, not degrees: both mean the human finished the
+image, and they differ on whether anything of the subject is on it. Anything reading ``"complete"``
+as a confirmed negative trains populated images as empty.
+"""
+
+
+def derive_status(*, completed: bool, has_content: bool) -> str:
+    """The status one image holds for one subject, from the human's Complete and what is labeled.
+
+    ``has_content`` is whether the image carries any annotation of the subject in question; the
+    caller scopes it, since only the caller knows which subject it is asking about. A negative is
+    intentional, never a side effect of an empty file: it takes the Complete, which is why an
+    uncompleted empty image is ``"unannotated"`` rather than a negative.
+    """
+    if completed:
+        return "complete" if has_content else CONFIRMED_NEGATIVE
+    return "partial" if has_content else "unannotated"
+
+
+def is_confirmed_negative(status: object) -> bool:
+    """Whether a stored status is a human's confirmation that the image holds none of the subject.
+
+    One predicate, so no reader can widen it to include ``"complete"``, which is its opposite.
+    """
+    return status == CONFIRMED_NEGATIVE
+
+
+def record_image_statuses(
+    dataset_root: str | Path, bucket: str, statuses: Mapping[str, str]
+) -> None:
+    """Merge one bucket's per-image statuses into the dataset's confirmed-negative store.
+
+    Merged, never replaced: a bucket is one subject on one date, and a write for one of them must
+    leave every other subject's and date's confirmations exactly as they were. Refuses a status
+    outside :data:`IMAGE_STATUSES` rather than recording a token no reader understands.
+    """
+    unknown = sorted(set(statuses.values()) - set(IMAGE_STATUSES))
+    if unknown:
+        raise ValueError(
+            f"image status must be one of {IMAGE_STATUSES}; refusing to record {unknown} for "
+            f"{bucket!r}: a token no reader understands is neither a confirmation nor a negative"
+        )
+    key = image_status_key(dataset_root)
+    with tcip_store.transaction(key) as txn:
+        store = normalize_status_store(txn.read(key, default={}))
+        store.setdefault(bucket, {}).update(statuses)
+        txn.write(key, {k: dict(sorted(store[k].items())) for k in sorted(store)})
+
+
+def replace_image_status_store(
+    dataset_root: str | Path, statuses_by_bucket: Mapping[str, Mapping[str, str]]
+) -> None:
+    """Write the whole confirmed-negative store for a dataset this call is producing.
+
+    For a materializer that is authoring an output dataset's negatives outright (a split tree, a
+    curated review dataset): what it writes is the complete set for that output, so a leftover
+    entry from an earlier materialization into the same directory must not survive as a negative
+    nobody re-derived.
+    """
+    key = image_status_key(dataset_root)
+    with tcip_store.transaction(key) as txn:
+        txn.write(key, {k: dict(sorted(statuses_by_bucket[k].items()))
+                        for k in sorted(statuses_by_bucket)})
+
+
+def stamp_image_status_digests(
+    dataset_root: str | Path, bucket: str, image_names: Iterable[str], digest: str
+) -> None:
+    """Record ``digest`` against each of ``image_names`` in ``bucket``, merging into what is there.
+
+    Stamped per image and merged, for the reason :func:`image_status_digest_path` states: a
+    bucket-wide or whole-document write would drop another image's stamp and un-quarantine a
+    confirmation made under a since-changed schema that nobody re-reviewed.
+    """
+    key = image_status_digest_key(dataset_root)
+    with tcip_store.transaction(key) as txn:
+        stamps = txn.read(key, default={})
+        if not isinstance(stamps, dict):
+            stamps = {}
+        bucket_stamps = stamps.get(bucket)
+        if not isinstance(bucket_stamps, dict):
+            bucket_stamps = {}
+        for name in image_names:
+            bucket_stamps[name] = digest
+        stamps[bucket] = dict(sorted(bucket_stamps.items()))
+        txn.write(key, dict(sorted(stamps.items())))
+
+
+def prediction_root(dataset_root: str | Path) -> Path:
+    """``<dataset_root>/predictions/``: the whole prediction tree, every model bucket under it."""
+    return Path(dataset_root, *_PREDICTION_TREE.prefix)
+
+
 def prediction_dir(dataset_root: str | Path, model: Optional[str], date: Optional[str]) -> Path:
     """``<dataset_root>/predictions/<model>/[<date>/]`` (model outputs, one file per image)."""
-    return Path(dataset_root, *_PREDICTION_TREE.prefix, model or DEFAULT_MODEL, *_date_seg(date))
+    return prediction_root(dataset_root).joinpath(model or DEFAULT_MODEL, *_date_seg(date))
+
+
+def label_filename(stem: str, fmt: str = "json") -> str:
+    """The file name one image's label or prediction record is written under.
+
+    The rule an image stem becomes a record name by, stated once: a consumer holding a directory
+    this module did not hand it (a materialized split's ``labels/``) still asks here for the name
+    rather than re-asserting the extension.
+    """
+    return f"{stem}{label_ext(fmt)}"
 
 
 def annotation_path(
@@ -480,7 +615,7 @@ def annotation_path(
     stem: str,
     fmt: str = "json",
 ) -> Path:
-    return annotation_dir(dataset_root, date) / f"{stem}{label_ext(fmt)}"
+    return annotation_dir(dataset_root, date) / label_filename(stem, fmt)
 
 
 LABELS_STORE = "labels"
@@ -534,7 +669,7 @@ def prediction_path(
     stem: str,
     fmt: str = "json",
 ) -> Path:
-    return prediction_dir(dataset_root, model, date) / f"{stem}{label_ext(fmt)}"
+    return prediction_dir(dataset_root, model, date) / label_filename(stem, fmt)
 
 
 PREDICTIONS_STORE = "predictions"
@@ -611,7 +746,7 @@ def subjects_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[
 
 
 def list_models(dataset_root: str | Path) -> list[str]:
-    preds = Path(dataset_root) / "predictions"
+    preds = prediction_root(dataset_root)
     if not preds.is_dir():
         return []
     return sorted(p.name for p in preds.iterdir() if p.is_dir())
