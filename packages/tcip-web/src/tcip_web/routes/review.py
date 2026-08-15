@@ -42,7 +42,7 @@ from tcip_annotation.json_io import read_annotations
 from tcip_annotation.state import Annotation
 from tcip_mcp.dataset_layout import derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, read_json
+from tcip_mcp.utils.atomic_io import append_jsonl, read_json
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 
@@ -810,7 +810,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     # back to "default" regardless of what the buckets actually carry. A single bucket's own
     # stamp is used; a mixed set of sources across buckets is not resolvable to one fact, so it
     # falls back to the honest default.
-    from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY, VALIDATED_PERSISTED_GEOMETRY
+    from tcip_mcp.pipelines.resolution import tile_size_source_of
 
     tile_sizes = {((sc.get("operating_point") or {}).get("tile_size") or {}).get("value")
                   for sc in sidecars.values()}
@@ -827,14 +827,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     review_tile_size_valid_ref = (
         next(iter(tile_size_valid_refs)) if len(tile_size_valid_refs) == 1
         and review_tile_size is not None else None)
-    if review_tile_size_valid_ref == VALIDATED_PERSISTED_GEOMETRY:
-        review_tile_size_source = "derived"
-    elif review_tile_size_valid_ref == VALIDATED_EXPLICIT_GEOMETRY:
-        review_tile_size_source = "explicit"
-    elif review_tile_size is not None:
-        review_tile_size_source = "native_ratio"
-    else:
-        review_tile_size_source = "default"
+    review_tile_size_source = tile_size_source_of(
+        review_tile_size_valid_ref, tile_size=review_tile_size)
     review_tiled = next(iter(tiled_vals)) if len(tiled_vals) == 1 else None
     review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
                            and review_tiled is not None else "default")
@@ -861,16 +855,24 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     # Stamp each bucket's provenance sidecar (operating_point.json is not a label, so this never
     # touches the reviewed per-image predictions or the verdict-immutability guard).
+    from tcip_mcp.pipelines.resolution import update_sidecar
+
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
         review_to_records(review_state, bucket_identities=bucket_identities))
     now_iso = datetime.now(timezone.utc).isoformat()
-    stamped: list[str] = []
-    for d in bucket_dirs:
-        if sidecars[d].get("validated"):
-            continue  # a mixed set: leave an already-validated bucket untouched (no downgrade)
-        sidecar = dict(sidecars[d])
-        sidecar.update({
+
+    def _promote(stored: dict) -> dict | None:
+        """Merge this promotion into whatever the producing run left, inside the stamp's lock.
+
+        The no-downgrade decision is made against the stored stamp, not the copy read before the
+        lock: predictions validated some other way (held-out GT) stay validated, and a producer
+        that stamped the bucket while this review was being reconciled is not overwritten.
+        """
+        if stored.get("validated"):
+            return None
+        merged = dict(stored)
+        merged.update({
             "operating_point": op_prov,
             "validated": result["validated"],
             "validated_reference": result["reference"],
@@ -880,10 +882,16 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             "shippable_issues": bundle.shippable_issues(),
             "validated_at": now_iso,
         })
-        sidecar.setdefault("produced_at", now_iso)
+        merged.setdefault("produced_at", now_iso)
+        return merged
+
+    stamped: list[str] = []
+    for d in bucket_dirs:
+        if sidecars[d].get("validated"):
+            continue  # a mixed set: leave an already-validated bucket untouched (no downgrade)
         Path(d).mkdir(parents=True, exist_ok=True)
-        atomic_write_json(Path(d) / "operating_point.json", sidecar)
-        stamped.append(d)
+        if update_sidecar(d, _promote):
+            stamped.append(d)
 
     _audit(req.project_root, "gui_review_validate_reference", {
         "trait": req.trait,

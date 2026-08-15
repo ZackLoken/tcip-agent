@@ -186,7 +186,6 @@ def export_detection_csv(
         Path to the written CSV file.
     """
     from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
         check_delivery_gate,
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
@@ -210,9 +209,7 @@ def export_detection_csv(
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
-    # The column must reflect the floor across every gated dimension: with acknowledge_unvalidated
-    # an ungrounded tile scale can still reach here, misreporting a partial delivery as validated.
-    stamp["measurement_validated"] = VALIDATED_FALSE if gate.unvalidated else gate.stamp["measurement"]
+    stamp["measurement_validated"] = gate.column_stamp("measurement")
     fieldnames = ["image", "detection_count", "avg_confidence"] + _PROVENANCE_COLUMNS
 
     with open(output_path, "w", newline="") as f:

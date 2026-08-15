@@ -89,6 +89,7 @@ def deliver_orthomosaic_plant_counts(
             is unvalidated, stamping the un-validated dimension ``false`` so the
             un-trustworthiness travels downstream.
     """
+    from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
     from tcip_mcp.project_paths import resolve_output_path
 
     output_csv_path = str(resolve_output_path(output_csv_path))
@@ -101,7 +102,8 @@ def deliver_orthomosaic_plant_counts(
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
 
-    pred_files = sorted(f for f in pred_dir.glob("*.json") if f.name != "operating_point.json")
+    pred_files = sorted(f for f in pred_dir.glob("*.json")
+                        if f.name not in SIDECAR_FILENAMES)
     if not pred_files:
         return {"error": f"no prediction file(s) found in {predictions_dir}"}
 

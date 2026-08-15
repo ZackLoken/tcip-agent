@@ -411,20 +411,17 @@ def resolve_block_calibration_records(
     from tcip_mcp.pipelines.operating_point import (
         attach_spatial_split_kind_provenance, resolve_operating_point,
     )
-    from tcip_mcp.pipelines.resolution import dataset_hash, derived
+    from tcip_mcp.pipelines.resolution import dataset_hash
 
     dh = dataset_hash(labels_dir)
     bundle = resolve_operating_point(
         trait_name, dataset_hash=dh, calibration_records=cal_records, holdout_records=test_records,
         tiled=True, tiled_source="default", cross_tile_nms=None, max_dets=density_cap,
+        max_dets_derived_from=(
+            "~1.5x p99 GT objects/image, pooled across all calibration+test bands"),
         experiment_id=experiment_id, staged_conf_floor=applied.get("score_thresh"),
         cal_rects=cal_rects, hold_rects=test_rects,
     )
-    # resolve_operating_point's own generic label doesn't say the count was pooled across both
-    # reserved regions' bands; restamp with the real provenance so a reviewer can reconstruct it.
-    bundle.params["max_dets"] = derived(
-        "max_dets", density_cap,
-        derived_from="~1.5x p99 GT objects/image, pooled across all calibration+test bands")
     attach_spatial_split_kind_provenance(bundle, spatial)
 
     provenance = {
