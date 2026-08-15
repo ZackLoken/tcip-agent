@@ -19,6 +19,9 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from tcip_store import Key, StoreDescriptor, register_store, text_codec
+from tcip_store.file_backend import RootedFileLocator
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORKSPACE = Path.home() / "tcip-projects"
@@ -64,7 +67,36 @@ def project_path(name: str) -> Path:
 
 def active_marker_path() -> Path:
     """Path of the active-project marker file under the workspace."""
-    return workspace_root() / ACTIVE_MARKER
+    root = workspace_root()
+    return Path(root, *_MARKER_DOC.relative_path(str(root), _MARKER_PARTS).parts)
+
+
+# ── the active-project marker store ──────────────────────────────────────────
+
+_MARKER_DOC = RootedFileLocator()
+"""The marker file, at the workspace root itself."""
+
+ACTIVE_PROJECT_STORE = "workspace_active_project"
+_MARKER_PARTS = (ACTIVE_MARKER,)
+register_store(
+    StoreDescriptor(
+        name=ACTIVE_PROJECT_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=text_codec(trailing_newline=True),
+        concurrency="last_writer_wins",
+        locator=_MARKER_DOC,
+    )
+)
+
+
+def active_project_key() -> Key:
+    """The workspace's active-project marker.
+
+    ``last_writer_wins``: ``set_active_project`` writes the name it was given and reads
+    nothing first, so adopting a project is a whole replacement rather than an edit.
+    """
+    return Key(ACTIVE_PROJECT_STORE, str(workspace_root()), _MARKER_PARTS)
 
 
 def read_active_project() -> Optional[str]:

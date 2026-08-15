@@ -5,13 +5,13 @@ Generalizes the ``tempfile.mkstemp`` + ``os.replace`` pattern already used in
 reader never observes a half-written file (no more corrupt JSON on crash / torn read).
 
 For read-modify-write sequences (lineage / artifacts / registry index) wrap the whole
-read→modify→write in :func:`file_transaction` to also prevent lost updates:
-
-  - within a process: a per-path ``threading.RLock`` serializes threads (parallel HPO
-    trials, web request handlers);
-  - across processes: a ``filelock.FileLock`` advisory lock serializes the MCP server
-    and the web backend. If ``filelock`` is unavailable the cross-process layer is
-    skipped and only in-process safety is provided.
+read→modify→write in :func:`file_transaction` to also prevent lost updates. It holds the
+storage layer's own lock pair for the path (``tcip_store.file_backend.path_lock``): a
+per-path ``threading.RLock`` for the threads of one process (parallel HPO trials, web
+request handlers) and one ``filelock.FileLock`` instance for the MCP server, the web
+backend and the training subprocess. Going through that registry rather than building a
+second ``FileLock`` is what keeps a path guarded here and a record written through the
+storage layer in one lock domain instead of two that ignore each other.
 
 Example::
 
@@ -26,34 +26,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-try:  # filelock ships with torch; treated as optional for cross-process locking.
-    from filelock import FileLock
-
-    _HAS_FILELOCK = True
-except Exception:  # pragma: no cover - exercised only in stripped environments
-    _HAS_FILELOCK = False
-
-# Per-path in-process locks (reentrant so accidental re-entry can't self-deadlock).
-_locks_guard = threading.Lock()
-_path_locks: dict[str, threading.RLock] = {}
+from tcip_store.file_backend import path_lock
 
 _LOCK_TIMEOUT_S = 30.0
-
-
-def _lock_for(path: Path) -> threading.RLock:
-    key = str(path.resolve())
-    with _locks_guard:
-        lk = _path_locks.get(key)
-        if lk is None:
-            lk = threading.RLock()
-            _path_locks[key] = lk
-        return lk
 
 
 def atomic_write_bytes(path: str | os.PathLike, data: bytes) -> None:
@@ -117,24 +97,16 @@ def read_json(path: str | os.PathLike, default: Any = None) -> Any:
 
 @contextmanager
 def file_transaction(path: str | os.PathLike) -> Iterator[None]:
-    """Serialize a read-modify-write on ``path`` across threads and processes."""
+    """Serialize a read-modify-write on ``path`` across threads and processes.
+
+    The lock comes from the storage layer's per-path registry, so a record written through
+    that layer while this transaction is open waits for it instead of taking a second lock
+    on the same file and blocking until the timeout.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    in_proc = _lock_for(path)
-    in_proc.acquire()
-    cross = None
-    try:
-        if _HAS_FILELOCK:
-            cross = FileLock(str(path) + ".lock")
-            cross.acquire(timeout=_LOCK_TIMEOUT_S)
+    with path_lock(path, timeout_s=_LOCK_TIMEOUT_S):
         yield
-    finally:
-        if cross is not None:
-            try:
-                cross.release()
-            except Exception:  # pragma: no cover
-                pass
-        in_proc.release()
 
 
 def append_jsonl(path: str | os.PathLike, obj: Any) -> None:

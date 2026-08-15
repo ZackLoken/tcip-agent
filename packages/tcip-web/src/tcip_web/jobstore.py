@@ -11,14 +11,42 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.project_paths import resolve_state
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
+from tcip_mcp.project_paths import project_root, resolve_state
 from tcip_mcp.utils.atomic_io import atomic_write_json, read_json
+
+_REGISTRY_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""One registry document per job kind, under the platform state root."""
+
+JOB_REGISTRY_STORE = "job_registry"
+register_store(
+    StoreDescriptor(
+        name=JOB_REGISTRY_STORE,
+        kind="record",
+        key_fields=("registry",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_REGISTRY_DOC,
+    )
+)
+
+
+def job_registry_key(name: str) -> Key:
+    """One job registry's persisted summaries.
+
+    ``last_writer_wins``: the route owns the live registry in memory and persists the whole
+    list from it, so the file is a snapshot of one process's state rather than a document
+    writers merge into.
+    """
+    return Key(JOB_REGISTRY_STORE, str(project_root().resolve()), (name,))
 
 
 def _state_path(name: str) -> Path:
     # Resolved at use time against the pinned platform root: a bare CWD-relative path would
     # scatter job records by launch dir (and let tests pollute the repo's real .tcip/).
-    return resolve_state(Path(".tcip") / "state" / f"{name}.json")
+    return resolve_state(Path(*_REGISTRY_DOC.relative_path("", (name,)).parts))
 
 
 MAX_JOBS = 100
