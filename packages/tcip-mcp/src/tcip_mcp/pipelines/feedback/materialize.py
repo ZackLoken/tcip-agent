@@ -26,11 +26,10 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
     CONFIRMED_NEGATIVE, annotation_root, image_root, label_filename,
 )
+from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-
-_POSITIVE_ACTIONS = {"accepted", "edited"}
 
 
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
@@ -48,13 +47,11 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
         positives: list[tuple] = []
         rejected = 0
         for entry in img_data.get("detections", []):
-            action = entry.get("action")
-            if action in _POSITIVE_ACTIONS:
-                box = entry.get("gt_bbox_norm") or entry.get("pred_bbox_norm")
-                if box and len(box) == 4:
-                    cx, cy, w, h = (float(v) for v in box)
-                    positives.append((str(entry.get("class_name", "")), cx, cy, w, h))
-            elif action == "rejected":
+            verdict = decode_verdict(entry)
+            if verdict.is_positive:
+                if verdict.affirmed_box is not None:
+                    positives.append((verdict.class_name, *verdict.affirmed_box))
+            elif verdict.is_rejection:
                 rejected += 1
         status = "positive" if positives else ("hard_negative" if rejected else "skip")
         result[img_name] = {"positives": positives, "rejected_count": rejected, "status": status}

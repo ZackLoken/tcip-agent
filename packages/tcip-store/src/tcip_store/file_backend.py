@@ -328,9 +328,15 @@ class FileBackend:
 
         The parent directory is flushed immediately after this rename, before the next one,
         so a crash mid-apply leaves a prefix of the applied order durable rather than an
-        arbitrary subset of it.
+        arbitrary subset of it. A rename that fails takes its staging file with it: the
+        directories this backend writes into are enumerated by their own readers, and a
+        stranded temp file accumulates there for every failed write.
         """
-        _retry_while_denied(lambda: os.replace(temp, path), self.lock_timeout_s)
+        try:
+            _retry_while_denied(lambda: os.replace(temp, path), self.lock_timeout_s)
+        except BaseException:
+            _remove_quietly(temp)
+            raise
         if durable:
             self._fsync_dir(path.parent)
 
@@ -507,19 +513,35 @@ class FileBackend:
 
     # ── blobs ───────────────────────────────────────────────────────────────────
 
-    def put_blob(self, key: Key, data: bytes) -> Version:
+    def read_blob_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
+        path = self.path_for(key)
+        data = self._read_bytes(path)
+        if data is None:
+            if default is REQUIRED:
+                raise NotFound(
+                    f"{key.store}{list(key.parts)} has no blob under {key.scope}. Pass "
+                    "default= if absence is meaningful to this caller"
+                )
+            return Versioned(default, Version.ABSENT)
+        return Versioned(data, _version_of(data))
+
+    def put_blob(self, key: Key, data: bytes, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
         with self._locked([key]):
+            if expect is not None:
+                self._require_version(key, path, expect)
             temp = self._stage_bytes(path, data, durable=descriptor.durable)
             self._apply_staged(temp, path, durable=descriptor.durable)
         return _version_of(data)
 
     @contextmanager
-    def write_blob(self, key: Key) -> Iterator[BinaryIO]:
+    def write_blob(self, key: Key, *, expect: Version | None = None) -> Iterator[BinaryIO]:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
         with self._locked([key]):
+            if expect is not None:
+                self._require_version(key, path, expect)
             fd, temp = tempfile.mkstemp(
                 dir=str(path.parent), prefix=f".{path.name}.", suffix=_TEMP_SUFFIX
             )

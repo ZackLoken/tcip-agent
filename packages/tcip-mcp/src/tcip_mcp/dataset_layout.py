@@ -622,11 +622,10 @@ LABELS_STORE = "labels"
 register_store(
     StoreDescriptor(
         name=LABELS_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("date", "stem"),
-        codec=json_codec(indent=1, ensure_ascii=False, default=None, allow_nan=False),
-        concurrency="cas",
         enumerable=True,
+        path_readable=True,
         locator=_LABEL_TREE,
     )
 )
@@ -635,9 +634,9 @@ register_store(
 def label_key(dataset_root: str | Path, date: str, stem: str) -> Key:
     """One image's ground-truth labels, every subject's records in one document.
 
-    ``cas``: a label file is loaded, edited and saved by the GUI while the agent's own save
-    path writes the same file, which is the platform's measurement data and the one place a
-    silent last write is least acceptable.
+    A blob: the labels are the breeder's own data and travel with the image set under any
+    backend, and their version is the hash of the document ``json_io`` encodes, which is what
+    lets the GUI's load-edit-save pair compare and set instead of checking and hoping.
 
     ``date`` is required. A dataset whose images are not date-nested has labels this key
     cannot address, and which layout segment stands in for the date there is a question the
@@ -676,11 +675,10 @@ PREDICTIONS_STORE = "predictions"
 register_store(
     StoreDescriptor(
         name=PREDICTIONS_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("model", "date", "stem"),
-        codec=json_codec(indent=1, ensure_ascii=False, default=None, allow_nan=False),
-        concurrency="last_writer_wins",
         enumerable=True,
+        path_readable=True,
         locator=_PREDICTION_TREE,
     )
 )
@@ -689,8 +687,8 @@ register_store(
 def prediction_key(dataset_root: str | Path, model: Optional[str], date: str, stem: str) -> Key:
     """One image's predictions inside one model bucket.
 
-    ``last_writer_wins``: a prediction file is written whole from a run's own output and no
-    writer merges into the stored document; a bucket a human has reviewed is protected by
+    A blob, on the same terms as :func:`label_key`: it is written whole from a run's own output
+    and travels with the dataset. A bucket a human has reviewed is protected by
     ``prediction_buckets``, which redirects the run rather than replacing the file.
 
     ``date`` is required, on the same terms as :func:`label_key`.

@@ -351,19 +351,15 @@ def _save_box(client: TestClient, img_path, label_path, **extra) -> dict:
     return resp
 
 
-def test_annotate_save_stale_mtime_conflicts(
+def test_annotate_save_refuses_a_token_the_document_has_moved_past(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    import os
-
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     base = _save_box(client, img_path, label_path).json()["base_mtime"]
 
-    # A concurrent writer changes the file after our client loaded it.
+    # A concurrent writer changes the document after our client loaded it.
     label_path.write_text('{"image": "IMG_0000", "width": 100, "height": 80, "annotations": []}')
-    bumped = int(base) + 1_000_000
-    os.utime(label_path, ns=(bumped, bumped))
 
     resp = client.post(
         "/api/annotate/labels",
@@ -377,22 +373,55 @@ def test_annotate_save_stale_mtime_conflicts(
     assert resp.status_code == 409
 
 
-def test_annotate_save_matching_mtime_ok(
+def test_annotate_save_with_the_current_token_is_accepted(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_path = tmp_path / "labels" / "IMG_0000.json"
     base = _save_box(client, img_path, label_path).json()["base_mtime"]
 
-    # No external change → the current mtime still matches → the save is accepted and returns a
-    # fresh version token.
+    # No external change → the token still names the stored document → the save is accepted and
+    # returns a fresh one.
     resp = _save_box(client, img_path, label_path, base_mtime=base)
     assert resp.status_code == 200
     token = resp.json()["base_mtime"]
     assert token is not None
-    # Tokens must be strings: the ns value exceeds JavaScript's 2**53 exact-integer range, so a
-    # numeric token gets rounded by the browser and every save 409s.
+    # A string, not a number: the client only ever echoes it back, and a numeric token would be
+    # rounded by the browser's JSON parse and mismatch on every save.
     assert isinstance(token, str)
+
+
+def test_annotate_load_hands_back_a_token_its_own_save_accepts(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """The load and save pair is one compare-and-set over what the client was actually shown."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    params = {"image_path": str(img_path), "label_path": str(label_path)}
+
+    loaded = client.get("/api/annotate/labels", params=params).json()
+    assert loaded["annotations"] == []
+    assert _save_box(client, img_path, label_path,
+                     base_mtime=loaded["base_mtime"]).status_code == 200
+
+    # That token said the document did not exist, so replaying it cannot overwrite what the first
+    # save created; the token from a fresh load can.
+    assert _save_box(client, img_path, label_path,
+                     base_mtime=loaded["base_mtime"]).status_code == 409
+    reloaded = client.get("/api/annotate/labels", params=params).json()
+    assert _save_box(client, img_path, label_path,
+                     base_mtime=reloaded["base_mtime"]).status_code == 200
+
+
+def test_annotate_save_without_a_token_still_writes(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """A caller that supplies no token skips the comparison, exactly as before."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    assert _save_box(client, img_path, label_path).status_code == 200
+    assert _save_box(client, img_path, label_path).status_code == 200
+    assert label_path.is_file()
 
 
 def test_annotate_save_persists_polygon_as_polygon(client, dataset_root, tmp_path) -> None:

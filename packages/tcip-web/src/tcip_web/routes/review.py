@@ -38,7 +38,7 @@ from tcip_annotation import (
     compute_classified_trait_matches,
     compute_matches,
 )
-from tcip_annotation.json_io import read_annotations
+from tcip_annotation.json_io import annotation_from_payload, read_annotations
 from tcip_annotation.state import Annotation
 from tcip_mcp.dataset_layout import derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
@@ -654,31 +654,9 @@ def save_gt(payload: SaveGtPayload) -> dict:
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    def _to_annotation(d: dict) -> Annotation:
-        geom: BBox | Polygon | Point | None = None
-        if d.get("rings"):
-            geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ring] for ring in d["rings"]])
-        elif d.get("bbox") is not None:
-            geom = BBox(*d["bbox"])
-        elif d.get("point") is not None:
-            # The canvas round-trips a Point GT annotation under this key (``_ann_dict``); dropping it
-            # here would silently strip an existing annotation's location on the next GT save.
-            geom = Point(float(d["point"][0]), float(d["point"][1]))
-        round_tripped = bool(d.get("created_by"))
-        return Annotation(
-            subject=d["subject"],
-            geometry=geom,
-            attributes=dict(d.get("attributes") or {}),
-            created_by=d.get("created_by") or author,
-            created_at=d.get("created_at") or now_iso,
-            # accepted_* only on round-tripped shapes: a new shape must not mint sign-off.
-            accepted_by=d.get("accepted_by") if round_tripped else None,
-            accepted_at=d.get("accepted_at") if round_tripped else None,
-        )
-
     ctx = ReviewContext(
         img_name=payload.image_name, img_width=w, img_height=h,
-        gt=[_to_annotation(d) for d in payload.annotations],
+        gt=[annotation_from_payload(d, author=author, now=now_iso) for d in payload.annotations],
     )
     ok = engine.save_gt(ctx, path=payload.label_path)
     _audit(payload.project_root, "gui_review_save_gt", {

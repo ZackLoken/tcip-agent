@@ -14,6 +14,7 @@ from tcip_annotation import (
     load_annotations_any,
     save_annotations_any,
 )
+from tcip_annotation.json_io import annotation_from_payload
 from tcip_annotation.json_io import read_annotations as read_labels
 
 from tcip_mcp.dataset_layout import (
@@ -55,15 +56,6 @@ def _logical_image_names(images_dir) -> list[str]:
         src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
         for src in list_logical_images(images_dir).values()
     ]
-
-
-def _coerce_xy(pt) -> tuple[float, float]:
-    """A ring vertex as ``[x, y]`` (``_ann_dict``'s read-side shape) or ``{"x": x, "y": y}``
-    (``segment_prompt``'s shape, matching its point/box prompt inputs), the two real producers
-    of ring data in this module disagree on point shape, so the write door has to take either."""
-    if isinstance(pt, dict):
-        return float(pt["x"]), float(pt["y"])
-    return float(pt[0]), float(pt[1])
 
 
 def _ann_dict(a: Annotation) -> dict:
@@ -184,39 +176,7 @@ def save_annotations(
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc).isoformat()
 
-    typed: list[Annotation] = []
-    for a in anns_in:
-        geometry: BBox | Polygon | Point | None = None
-        # Non-empty points first, matching the web converters (labelSerde `a.points && a.points.length`,
-        # routes/annotate `if ap.points`): a payload carrying both never drops the polygon (bbox winning
-        # would collapse a polygon to a box-only record, the polygon is the source of truth, its box is
-        # derived on write). An empty points list falls through to bbox, so a box payload is not silently
-        # lost to a degenerate Polygon([]).
-        if a.get("rings"):
-            # Multi-ring polygon (an occlusion-split mask reviewed and accepted from segment_prompt,
-            # or a re-save of an annotation read back via _ann_dict's own "rings" key), checked
-            # before "points" since a rings-carrying payload is never less complete than a
-            # single-ring one.
-            geometry = Polygon(rings=[[_coerce_xy(pt) for pt in ring] for ring in a["rings"]])
-        elif a.get("points"):
-            # save_annotations' own single-ring input contract ("points": [[x,y],...]), an
-            # agent/human authors one contour per call this way. A caller with more than one ring
-            # (occlusion-split) uses "rings" above instead.
-            geometry = Polygon(rings=[[_coerce_xy(pt) for pt in a["points"]]])
-        elif a.get("bbox") is not None:
-            x1, y1, x2, y2 = (float(v) for v in a["bbox"])
-            geometry = BBox(x1, y1, x2, y2)
-        elif a.get("point") is not None:
-            # A single [x, y], a placed prompt or a keypoint. Singular key, deliberately distinct
-            # from `points` (a polygon's contour): the two are different geometries, and letting one
-            # spelling serve both would make a one-vertex polygon and a point indistinguishable.
-            px, py = (float(v) for v in a["point"])
-            geometry = Point(px, py)
-        cb = a.get("created_by", created_by)
-        typed.append(Annotation(
-            subject=str(a["subject"]), geometry=geometry,
-            attributes={str(k): str(v) for k, v in (a.get("attributes") or {}).items()},
-            created_by=cb, created_at=(_now if cb else None)))
+    typed = [annotation_from_payload(a, author=created_by, now=_now) for a in anns_in]
 
     out_path = Path(path) if path else annotation_path_for_image(image_path, fmt, date=date)
     out_path.parent.mkdir(parents=True, exist_ok=True)

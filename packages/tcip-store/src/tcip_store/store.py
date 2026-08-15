@@ -67,9 +67,13 @@ class Store(Protocol):
 
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage: ...
 
-    def put_blob(self, key: Key, data: bytes) -> Version: ...
+    def read_blob_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned: ...
 
-    def write_blob(self, key: Key) -> AbstractContextManager[BinaryIO]: ...
+    def put_blob(self, key: Key, data: bytes, *, expect: Version | None = None) -> Version: ...
+
+    def write_blob(
+        self, key: Key, *, expect: Version | None = None
+    ) -> AbstractContextManager[BinaryIO]: ...
 
     def open_blob(self, key: Key) -> AbstractContextManager[BinaryIO]: ...
 
@@ -197,13 +201,13 @@ def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
 
 
 def delete(key: Key, *, expect: Version | None = None) -> None:
-    """Remove the record. Absence is not an error.
+    """Remove the record or blob. Absence is not an error.
 
     Same locking, ``expect``, concurrency-policy and transaction-misuse rules as
-    ``replace``: dropping a record another writer just changed is a lost update too.
+    ``replace``: dropping an entry another writer just changed is a lost update too.
     """
     backend = _backend()
-    validate_key(key, expect_kind="record", operation="delete")
+    validate_key(key, expect_kind=("record", "blob"), operation="delete")
     _refuse_inside_transaction("delete")
     _check_policy(key, expect, "delete")
     backend.delete(key, expect=expect)
@@ -296,24 +300,47 @@ def read_log(key: Key, *, after: str | None = None) -> LogPage:
     return backend.read_log(key, after=after)
 
 
-def put_blob(key: Key, data: bytes) -> Version:
-    """Write a blob whole, atomically, and return the version derived from its bytes."""
+def read_blob_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
+    """A blob's bytes and its version token, read together so the pair cannot straddle a write.
+
+    The token is the input to ``put_blob(expect=...)`` and ``write_blob(expect=...)``, which is
+    how a caller that loads a blob, edits it and writes it back gets a compare-and-set instead
+    of a check-then-act. ``default`` answers absence the way ``read_versioned`` does, paired
+    with ``Version.ABSENT`` so a caller can write create-only against what it read. A blob too
+    large to hold in memory is read with ``open_blob`` instead, which carries no token.
+    """
+    backend = _backend()
+    validate_key(key, expect_kind="blob", operation="read_blob_versioned")
+    return backend.read_blob_versioned(key, default=default)
+
+
+def put_blob(key: Key, data: bytes, *, expect: Version | None = None) -> Version:
+    """Write a blob whole, atomically, and return the version derived from its bytes.
+
+    ``expect`` compares against the stored version re-read under the same lock the write
+    takes: a mismatch raises ``VersionConflict`` with nothing written, and the prior bytes
+    stay readable. ``Version.ABSENT`` writes only if no blob exists, which is how a
+    capture-once artifact is expressed in one call rather than an existence check with a
+    window after it. ``None`` is an unconditional write under the lock.
+    """
     backend = _backend()
     validate_key(key, expect_kind="blob", operation="put_blob")
     _refuse_inside_transaction("put_blob")
-    return backend.put_blob(key, data)
+    return backend.put_blob(key, data, expect=expect)
 
 
-def write_blob(key: Key) -> AbstractContextManager[BinaryIO]:
+def write_blob(key: Key, *, expect: Version | None = None) -> AbstractContextManager[BinaryIO]:
     """A writable binary stream that becomes the blob only on a clean exit.
 
     For a producer that writes through a library rather than handing over bytes. An
-    exception inside the block leaves the existing blob byte-identical.
+    exception inside the block leaves the existing blob byte-identical. ``expect`` carries
+    the same meaning it does on ``put_blob`` and is compared before the stream opens, so a
+    conflict costs nothing the producer has written.
     """
     backend = _backend()
     validate_key(key, expect_kind="blob", operation="write_blob")
     _refuse_inside_transaction("write_blob")
-    return backend.write_blob(key)
+    return backend.write_blob(key, expect=expect)
 
 
 def open_blob(key: Key) -> AbstractContextManager[BinaryIO]:
@@ -360,6 +387,7 @@ __all__ = [
     "open_blob",
     "put_blob",
     "read",
+    "read_blob_versioned",
     "read_log",
     "read_versioned",
     "replace",
