@@ -7,8 +7,11 @@ import logging
 import subprocess
 import sys
 import threading
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
+
+from tcip_store import BadKey, Key, StoreDescriptor, StoreError, json_codec, register_store, store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.server import mcp
 from tcip_mcp.audit import audited
@@ -681,6 +684,90 @@ def sweep_dir(study_name: str, output_dir: str = "") -> Path:
     return hpo_root(output_dir) / study_name
 
 
+SWEEP_MANIFEST_STORE = "hpo_sweep_manifest"
+register_store(
+    StoreDescriptor(
+        name=SWEEP_MANIFEST_STORE,
+        kind="record",
+        key_fields=("study_name", "document"),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=RootedFileLocator(suffix=".json"),
+    )
+)
+
+STUDY_RESULT_STORE = "hpo_study_result"
+register_store(
+    StoreDescriptor(
+        name=STUDY_RESULT_STORE,
+        kind="record",
+        key_fields=("study_name",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=RootedFileLocator(suffix=".json"),
+    )
+)
+
+TRIAL_CONFIG_STORE = "hpo_trial_config"
+register_store(
+    StoreDescriptor(
+        name=TRIAL_CONFIG_STORE,
+        kind="record",
+        key_fields=("trial", "document"),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=RootedFileLocator(suffix=".json"),
+    )
+)
+
+
+def _sweep_name(study_name: str) -> str:
+    """``study_name`` once it is known to name one sweep and not a path through the store.
+
+    A sweep name reaches this from an HTTP path segment, so a separator, a drive letter or a
+    parent reference is refused here rather than resolved into a record somewhere else.
+    """
+    if PureWindowsPath(study_name).name != study_name or study_name == "..":
+        raise BadKey(
+            f"sweep name {study_name!r} is not a single name: a name carrying a path "
+            "separator, a drive or a parent reference would address a record outside the "
+            "HPO store"
+        )
+    return study_name
+
+
+def sweep_manifest_key(study_name: str, output_dir: str = "") -> Key:
+    """The manifest a sweep is listed and read back from.
+
+    Keyed off the HPO root, the scope every sweep-level record hangs off, and declared here
+    because ``hpo_root``/``sweep_dir`` already answer where a sweep lives.
+    ``last_writer_wins``: ``run_hpo`` holds the manifest in memory for the whole sweep and
+    writes the whole document at each state change, so nothing merges into what is on disk.
+    """
+    return Key(SWEEP_MANIFEST_STORE, str(hpo_root(output_dir).resolve()),
+               (_sweep_name(study_name), "manifest"))
+
+
+def study_result_key(study_name: str, output_dir: str = "") -> Key:
+    """A finished sweep's result document, beside the sweep's own directory.
+
+    ``last_writer_wins``: written once, when the sweep ends, from the result it returns.
+    """
+    return Key(STUDY_RESULT_STORE, str(hpo_root(output_dir).resolve()),
+               (_sweep_name(study_name),))
+
+
+def trial_config_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
+    """The point one trial actually trained at: its merged config plus the sampled params.
+
+    Scoped to the sweep rather than to the HPO root, because a trial belongs to its sweep and
+    not to the store the sweeps sit in. ``last_writer_wins``: one trial process writes its own
+    document once, when the trial finishes.
+    """
+    return Key(TRIAL_CONFIG_STORE, str(Path(sweep_root).resolve()),
+               (trial_dir_name, "resolved_config"))
+
+
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
     """Train one HPO trial and ``report`` its composite objective (lower=better).
 
@@ -778,16 +865,14 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
         # Surface any swept param no consumer touched. Warn-only, never gates the trial.
         unconsumed = sorted((set(config.keys()) - _HPO_KNOWN_KEYS) - tracked_config.accessed)
         try:
-            from tcip_mcp.utils.atomic_io import atomic_write_json
-            Path(trial_dir).mkdir(parents=True, exist_ok=True)
             # trial_params is the sampled point itself, the only record of which axes this
-            # sweep actually varied (the merged config can't say which of its values came
-            # from the search space).
-            atomic_write_json(Path(trial_dir) / "resolved_config.json",
-                              {**merged, "trial_params": dict(config),
-                               "unconsumed_params": unconsumed})
-        except Exception:
-            logger.warning("could not persist resolved_config.json for %s", trial_dir, exc_info=True)
+            # sweep actually varied (the merged config cannot say that).
+            trial_path = Path(trial_dir)
+            store.replace(trial_config_key(trial_path.parent, trial_path.name),
+                          {**merged, "trial_params": dict(config),
+                           "unconsumed_params": unconsumed})
+        except (OSError, StoreError):
+            logger.warning("could not persist the resolved config for %s", trial_dir, exc_info=True)
         if unconsumed:
             logger.warning(
                 "HPO trial %s: swept params %s were never read by the training body, check "
@@ -858,8 +943,6 @@ def run_hpo(
     import uuid
     from datetime import datetime, timezone
 
-    from tcip_mcp.utils.atomic_io import atomic_write_json
-
     hpo_dir = hpo_root(output_dir)
     hpo_dir.mkdir(parents=True, exist_ok=True)
     study_name = f"hpo_{uuid.uuid4().hex[:8]}"
@@ -876,8 +959,8 @@ def run_hpo(
         "param_space": param_space,
         "sweep_dir": str(sweep_root),
     }
-    manifest_path = sweep_root / "manifest.json"
-    atomic_write_json(manifest_path, manifest)
+    manifest_key = sweep_manifest_key(study_name, output_dir)
+    store.replace(manifest_key, manifest)
 
     def objective_fn(config: dict, report) -> None:
         try:
@@ -908,7 +991,7 @@ def run_hpo(
     except Exception as exc:
         manifest.update(status="failed", error=str(exc),
                         finished_at=datetime.now(timezone.utc).isoformat())
-        atomic_write_json(manifest_path, manifest)
+        store.replace(manifest_key, manifest)
         raise
 
     # Auto-launch TensorBoard on the sweep root: Ray's per-trial event files and each
@@ -928,12 +1011,12 @@ def run_hpo(
         finished_at=datetime.now(timezone.utc).isoformat(),
         result={k: result.get(k) for k in ("best_params", "best_value", "n_trials")},
     )
-    # Durable result files (best-effort, a write hiccup must not sink a completed sweep).
+    # Durable result records (best-effort, a write hiccup must not sink a completed sweep).
     try:
-        atomic_write_json(manifest_path, manifest)
-        atomic_write_json(hpo_dir / f"{study_name}.json", result)
-    except Exception:
-        logger.warning("could not persist hpo result json for %s", study_name, exc_info=True)
+        store.replace(manifest_key, manifest)
+        store.replace(study_result_key(study_name, output_dir), result)
+    except (OSError, StoreError):
+        logger.warning("could not persist the hpo result for %s", study_name, exc_info=True)
     return result
 
 

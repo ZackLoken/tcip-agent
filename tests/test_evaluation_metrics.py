@@ -520,6 +520,34 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
 
+def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch):
+    """A result document holds the same bytes wherever it was produced.
+
+    A text-mode writer emits CRLF on one platform and LF on another, so the same measurement
+    hashes differently depending on the machine that scored it.
+    """
+    import tcip_mcp.pipelines.model_build as model_build
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+
+    class _DummyModel:
+        def load_state_dict(self, state_dict):
+            pass
+
+        def to(self, device):
+            pass
+
+    ckpt_path = tmp_path / "model_best.pt"
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
+    monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
+
+    r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(tmp_path / "out"))
+
+    raw = Path(r["results_path"]).read_bytes()
+    assert b"\r\n" not in raw
+    assert b"\n" in raw
+
+
 def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch):
     """``results_path`` names the readable test_results.json under the caller's output_dir, and its
     contents are the same result the call returned. This is the only handle a caller keeps on a

@@ -195,7 +195,9 @@ def test_a_cluster_this_process_did_not_start_is_never_shut_down(monkeypatch):
 
 
 def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(monkeypatch):
-    from tcip_mcp.pipelines.training.hpo import ray_dashboard_state_path, read_ray_dashboard
+    from tcip_store import store
+
+    from tcip_mcp.pipelines.training.hpo import ray_dashboard_key, read_ray_dashboard
 
     _patch_aiohttp_availability(monkeypatch, True)
     entered = [threading.Event()]
@@ -220,24 +222,25 @@ def test_the_dashboard_url_is_readable_while_the_cluster_is_up_and_gone_after(mo
     sweep.join(timeout=30)
     assert not sweep.is_alive()
 
-    assert not ray_dashboard_state_path().exists()
+    assert not store.exists(ray_dashboard_key())
     assert read_ray_dashboard() is None
 
 
 def test_a_dashboard_recorded_by_a_process_that_is_gone_is_not_served(monkeypatch):
     """A URL outlives the process that wrote it; the cluster it names does not."""
-    from tcip_mcp.pipelines.training.hpo import ray_dashboard_state_path, read_ray_dashboard
-    from tcip_mcp.utils.atomic_io import atomic_write_json
+    from tcip_store import store
+
+    from tcip_mcp.pipelines.training.hpo import ray_dashboard_key, read_ray_dashboard
 
     dead = subprocess.Popen([sys.executable, "-c", ""])
     dead.wait(timeout=60)
 
     state = {"url": f"http://{DASHBOARD_HOST_PORT}", "pid": dead.pid,
              "started_at": "2026-01-01T00:00:00+00:00"}
-    atomic_write_json(ray_dashboard_state_path(), state)
+    store.replace(ray_dashboard_key(), state)
     assert read_ray_dashboard() is None
 
-    atomic_write_json(ray_dashboard_state_path(), {**state, "pid": os.getpid()})
+    store.replace(ray_dashboard_key(), {**state, "pid": os.getpid()})
     assert read_ray_dashboard() == {**state, "pid": os.getpid()}
 
 

@@ -291,15 +291,12 @@ class TrainContext:
         non-conventional tag to become the deliverable.
         """
         from tcip_mcp.pipelines.model_build import stamp_model_ref
-        from tcip_mcp.pipelines.training.generic_trainer import _atomic_torch_save
+        from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, write_checkpoint
 
         payload = dict(state)
         payload.setdefault("config", self.config)
         stamp_model_ref(payload, self.config, experiment_id=self.experiment_id)
-        out = Path(self.run.output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        path = out / f"{tag}.pt"
-        _atomic_torch_save(payload, path)
+        path = write_checkpoint(payload, checkpoint_key(self.run.output_dir, tag))
         return str(path)
 
     def record_artifact(self, name: str, path: str) -> None:
