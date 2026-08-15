@@ -442,16 +442,9 @@ def _train_disjointness(
     if experiment_id is None:
         return {"checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                 "group_check": None}
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.experiments import read_split_manifest
 
-    split_path = project_root() / ".tcip" / "experiments" / experiment_id / "split.json"
-    if not split_path.is_file():
-        return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
-    try:
-        split = json.loads(split_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
-
+    split = read_split_manifest(experiment_id)
     train_stems = split.get("train") or []
     if not train_stems:
         # Nothing recorded to check against at all, not even the stem-overlap fallback has

@@ -124,8 +124,8 @@ def test_ws_training_stream_rejects_cross_site_origin(client: TestClient) -> Non
 def test_ws_training_stream_confines_project_root_to_allowed_roots(
     client: TestClient, tmp_path, monkeypatch
 ) -> None:
-    # training_stream_ws takes project_root as a query param and passes it straight to
-    # _metrics_path; it must be confined the same way get_run_metrics' identical parameter is.
+    # training_stream_ws takes project_root as a query param and resolves the run's record
+    # under it; it must be confined the same way get_run_metrics' identical parameter is.
     allowed = tmp_path / "allowed"
     allowed.mkdir()
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))

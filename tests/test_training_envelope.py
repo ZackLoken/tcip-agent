@@ -55,9 +55,13 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
                        experiment_id="expE")
     run_training_envelope(ctx)
 
-    # Custom loop ran via ctx: metrics.jsonl written, checkpoint stamped as a bespoke module.
+    # Custom loop ran via ctx: its rows land on the experiment's own metrics log (the record
+    # that tracks the run), not beside the weights in a separately-computed output dir.
     assert run.status == "completed"
-    assert (out / "metrics.jsonl").is_file()
+    assert not (out / "metrics.jsonl").exists()
+    from tcip_mcp.experiments import read_metrics
+
+    assert [row["epoch"] for row in read_metrics("expE")] == [1]
     best = torch.load(out / "model_best.pt", weights_only=False)
     assert best["kind"] == KIND_TCIP_MODULE
     assert best["model_source"] == config["model_source"]

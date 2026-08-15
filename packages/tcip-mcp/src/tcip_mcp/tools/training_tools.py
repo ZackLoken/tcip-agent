@@ -322,10 +322,9 @@ def launch_training(
     run = create_run(config, output_dir)
     # Nest each run's artifacts under its run_id. The GUI (and typical callers) pass a
     # shared base such as ``<project>/.tcip/experiments``; without nesting, sequential
-    # runs write ``metrics.jsonl`` / ``model_best.pt`` to the *same* flat directory and
-    # clobber each other, violating experiment immutability. Nesting also makes the
-    # trainer write exactly where the web metrics stream reads (``<base>/<run_id>/``), and gives
-    # the subprocess a single directory to write into and the cancel sentinel to live in.
+    # runs write ``model_best.pt`` / TensorBoard events to the *same* flat directory and
+    # clobber each other, violating experiment immutability. Nesting also gives the subprocess
+    # a single directory to write into and the cancel sentinel to live in.
     run.output_dir = str(Path(output_dir) / run.run_id)
 
     # Auto-create experiment if not already tracked. Experiments are immutable:
@@ -358,8 +357,6 @@ def launch_training(
     # because this file is written before config["experiment_id"] is guaranteed resolved in the
     # fresh-id-relaunch branch.
     from tcip_mcp.utils.atomic_io import atomic_write_json
-    # Created only after the experiment resolution above: under the default base this is the
-    # experiment record's own dir, and pre-creating it reads as an existing experiment there.
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     launch_config_path = Path(run.output_dir) / "launch_config.json"
     atomic_write_json(launch_config_path, config)
@@ -1090,6 +1087,9 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
     (+ id) records the content identity too, so this artifact is literally "fingerprint + split",
     content identity + membership + seed in one immutable record. Best-effort, a provenance write must
     never sink a launch.
+
+    The one writer of that member; :func:`~tcip_mcp.experiments.read_split_manifest` is the one
+    reader every consumer of the membership goes through.
     """
     def _stems(ds) -> list[str]:
         # set(): a tiled dataset's ``stems`` repeats one entry per tile, and a manifest member
@@ -1097,9 +1097,10 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         return sorted(set(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or []))
 
     try:
-        from tcip_mcp.experiments import experiments_dir, record_artifact
+        from tcip_store import store
+
+        from tcip_mcp.experiments import experiment_exists, split_key
         from tcip_mcp.pipelines.resolution import dataset_hash
-        from tcip_mcp.utils.atomic_io import atomic_write_json
 
         labels_dir = data_cfg.get("labels_dir", "")
         dh = None
@@ -1130,11 +1131,8 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             manifest["group_key_map"] = split["group_key_map"]
         if spatial:
             manifest["spatial"] = spatial
-        exp_dir = experiments_dir() / experiment_id
-        if exp_dir.is_dir():
-            path = exp_dir / "split.json"
-            atomic_write_json(path, manifest)
-            record_artifact(experiment_id, "split", str(path))
+        if experiment_exists(experiment_id):
+            store.replace(split_key(experiment_id), manifest)
     except Exception as exc:  # noqa: BLE001
         logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
 

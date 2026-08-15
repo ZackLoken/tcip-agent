@@ -6,7 +6,6 @@ Uses synthetic data for classification and real sample data for detection.
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -105,7 +104,9 @@ class TestFullClassificationPipeline:
         }
         run = create_run(config, output_dir)
 
-        completed_run = train(run, loader, val_loader=val_loader, task="classification")
+        rows: list[dict] = []
+        completed_run = train(run, loader, val_loader=val_loader, task="classification",
+                              epoch_callback=lambda epoch, metrics: rows.append(dict(metrics)))
 
         assert completed_run.status == "completed"
         assert completed_run.current_epoch == 2
@@ -117,15 +118,10 @@ class TestFullClassificationPipeline:
         out = Path(output_dir)
         assert (out / "model_best.pt").is_file()
         assert (out / "model_final.pt").is_file()
-        assert (out / "metrics.jsonl").is_file()
-
-        # Verify metrics JSONL is valid
-        with open(out / "metrics.jsonl") as f:
-            lines = f.readlines()
-        assert len(lines) == 2
-        m = json.loads(lines[0])
-        assert "epoch" in m
-        assert "train_loss" in m
+        # Every epoch's row reached the log through the run's own sink.
+        assert len(rows) == 2
+        assert "epoch" in rows[0]
+        assert "train_loss" in rows[0]
 
         # Verify checkpoint has required keys
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
@@ -283,7 +279,6 @@ class TestDetectionPipelineRealData:
 
         out = Path(detection_output_dir)
         assert (out / "model_best.pt").is_file()
-        assert (out / "metrics.jsonl").is_file()
 
         # Verify checkpoint format
         ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)

@@ -843,9 +843,9 @@ def _write_active_marker(root: Path) -> Path:
 
 
 def _created_experiment(root: Path) -> Path:
-    if not experiments._exp_dir(EXPERIMENT).exists():
+    if not experiments.experiment_exists(EXPERIMENT):
         experiments.create_experiment(EXPERIMENT, {"model": "faster_rcnn"}, data_source="ds")
-    return experiments._exp_dir(EXPERIMENT)
+    return experiments.experiment_dir(EXPERIMENT)
 
 
 def _write_experiment_member(root: Path, member: str) -> Path:
@@ -862,6 +862,12 @@ def _write_experiment_metrics(root: Path) -> Path:
     directory = _created_experiment(root)
     experiments.log_metrics(EXPERIMENT, 1, {"loss": 0.5})
     return directory / "metrics.jsonl"
+
+
+def _write_experiment_split(root: Path) -> Path:
+    path = _created_experiment(root) / "split.json"
+    atomic_write_json(path, {"train": ["img_001"], "val": ["img_002"], "seed": 42})
+    return path
 
 
 def _pin_platform_root(root: Path, monkeypatch) -> None:
@@ -961,6 +967,10 @@ REGISTERED = {
     "experiment_env": Registered(
         _write_experiment_env, lambda root: experiments.env_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
+    "experiment_split": Registered(
+        _write_experiment_split, lambda root: experiments.split_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_metrics": Registered(
         _write_experiment_metrics, lambda root: experiments.metrics_key(EXPERIMENT),

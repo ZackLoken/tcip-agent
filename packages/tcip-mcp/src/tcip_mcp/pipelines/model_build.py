@@ -23,6 +23,11 @@ from __future__ import annotations
 from typing import Any
 
 MODEL_SOURCE_KEY = "model_source"
+STATE_DICT_KEY = "model_state_dict"
+"""The checkpoint keys this platform's own payloads carry: the importable model reference
+that rebuilds the module, and the weights that go into it. Both ends of a checkpoint, the
+writer and the reader, import these rather than spelling them, so the payload's vocabulary
+is stated once."""
 
 
 def _import_dotted(target: str) -> Any:

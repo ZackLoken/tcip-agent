@@ -28,7 +28,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.model_contract import TCIPModel
-from tcip_mcp.pipelines.model_build import build_model, stamp_model_ref
+from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model, stamp_model_ref
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.optimizer_factory import (
@@ -381,10 +381,10 @@ def _save_checkpoint(
     """Write a resumable periodic checkpoint.
 
     Superset of the previous payload, ``GenericPredictor`` reads only the model reference
-    (``model_source``) + ``model_state_dict`` and stays compatible.
+    (``model_source``) + the weights and stays compatible.
     """
     _atomic_torch_save(stamp_model_ref({
-        "model_state_dict": model.state_dict(),
+        STATE_DICT_KEY: model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
         "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
@@ -610,9 +610,10 @@ def train(
     """Execute a task-agnostic training run.
 
     The model is built from run.config["model_source"] via build_model().
-    ``epoch_callback(epoch:int, epoch_metrics:dict)`` (optional) is invoked after
-    each epoch's metrics are recorded, used by HPO to report intermediate values
-    for pruning. It may raise to abort the run (e.g. ``optuna.TrialPruned``).
+    ``epoch_callback(epoch:int, epoch_metrics:dict)`` is how each epoch's row reaches the
+    run's metrics log and, under HPO, the pruner: this loop composes the row and hands it over
+    rather than writing a log of its own, so one sink decides where a row lands. It may raise
+    to abort the run (e.g. ``optuna.TrialPruned``).
 
     This is the canonical, ground-truth list of every ``run.config`` key this function reads
     (every other surface, e.g. ``preflight_config``'s docstring and the training skill's
@@ -672,8 +673,6 @@ def train(
         if SummaryWriter is not None:
             tb_writer = SummaryWriter(log_dir=str(out_dir / "tensorboard"))
 
-        metrics_path = out_dir / "metrics.jsonl"
-
         device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
 
         # Seed before model build so pretrained=False init + shuffle are reproducible.
@@ -715,7 +714,7 @@ def train(
         ckpt = None
         if resume_from:
             ckpt = torch.load(resume_from, map_location=device, weights_only=False)
-            missing = [k for k in ("model_state_dict", "optimizer_state_dict") if k not in ckpt]
+            missing = [k for k in (STATE_DICT_KEY, "optimizer_state_dict") if k not in ckpt]
             if missing:
                 # Fail loudly instead of silently restarting from scratch.
                 raise ValueError(
@@ -724,7 +723,7 @@ def train(
                     "state). Resume "
                     "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
                 )
-            model.load_state_dict(ckpt["model_state_dict"])
+            model.load_state_dict(ckpt[STATE_DICT_KEY])
             resume_stage = ckpt.get("stage", 0)
             resume_stage_epoch = ckpt.get("stage_epoch", 0)
             run.current_epoch = ckpt.get("epoch", 0)
@@ -930,9 +929,6 @@ def train(
                             tb_writer.add_scalar(f"val/{k}", v, run.current_epoch)
                     tb_writer.flush()
 
-                with open(metrics_path, "a") as f:
-                    f.write(json.dumps(epoch_metrics) + "\n")
-
                 if epoch_callback is not None:
                     epoch_callback(run.current_epoch, epoch_metrics)
 
@@ -944,7 +940,7 @@ def train(
                     run.best_metric = sel
                     try:
                         _atomic_torch_save(stamp_model_ref({
-                            "model_state_dict": model.state_dict(),
+                            STATE_DICT_KEY: model.state_dict(),
                             "config": config,
                             "metrics": epoch_metrics,
                             "stage": stage_idx, "epoch": run.current_epoch,
@@ -991,7 +987,7 @@ def train(
 
         # Final checkpoint (saved even on cancellation so partial progress is recoverable).
         _atomic_torch_save(stamp_model_ref({
-            "model_state_dict": model.state_dict(),
+            STATE_DICT_KEY: model.state_dict(),
             "config": config,
             "metrics": run.metrics_history,
         }, config), out_dir / "model_final.pt")

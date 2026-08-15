@@ -8,7 +8,6 @@ selection objective, so a record carrying the training loss under that key is vi
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -54,12 +53,21 @@ def _config(evaluation: dict | None = None) -> dict:
 def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_path):
     """The chosen epoch's recorded ``selection``, the copy embedded in ``model_best.pt``, the
     ``metrics.jsonl`` line and the callback payload all carry ``run.best_metric``."""
+    from tcip_mcp.experiments import create_experiment, read_metrics
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+
     train_loader, val_loader = _loaders()
     out_dir = tmp_path / "out"
     callbacks: list[dict] = []
-    run = create_run(_config(), str(out_dir))
-    run = train(run, train_loader, val_loader=val_loader, task="regression",
-                epoch_callback=lambda epoch, metrics: callbacks.append(dict(metrics)))
+    config = _config()
+    create_experiment("exp-selection", config)
+    run = create_run(config, str(out_dir))
+    # The production wiring: the trainer hands each row to the envelope's sink, which logs it
+    # to the experiment's own record and fires the hook a trial prunes on.
+    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
+                       task="regression", experiment_id="exp-selection",
+                       epoch_hook=lambda epoch, metrics: callbacks.append(dict(metrics)))
+    run = ctx.default_train()
 
     assert run.status == "completed", run.error
     history = run.metrics_history
@@ -77,8 +85,7 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_pa
     assert chosen_record["selection"] == pytest.approx(chosen_record["val_loss"], abs=1e-6)
     assert chosen_record["selection"] != pytest.approx(chosen_record["train_loss"], rel=0.2)
 
-    persisted = [json.loads(line) for line in
-                 (out_dir / "metrics.jsonl").read_text().splitlines() if line.strip()]
+    persisted = read_metrics("exp-selection")
     assert [r["selection"] for r in persisted] == [r["selection"] for r in history]
     assert [r["selection"] for r in callbacks] == [r["selection"] for r in history]
     assert run.best_metric == pytest.approx(min(r["selection"] for r in history), abs=1e-6)
