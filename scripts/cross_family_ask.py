@@ -203,11 +203,11 @@ def build_agy(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Pat
 
     MCP servers come from `~/.gemini/config/mcp_config.json` and are global, so the
     no-tools condition cannot be expressed per run the way it can for the others.
-    Headless mode also cannot prompt for tool permission and auto-denies, so an
-    allow-rule under `permissions.allow` in the CLI settings file is required before
-    any MCP tool will run. The rule granted there is coarse, so a run can reach
-    mutating TCIP tools as well as read-only ones; keep prompts read-only and point
-    runs at scratch project state.
+    Headless mode also cannot prompt for tool permission and auto-denies, so each
+    tool must be named under `permissions.allow` in the CLI settings before it will
+    run. That allow-list names individual read-only TCIP tools and everything
+    unlisted stays auto-denied; if it is ever widened toward mutating tools, point
+    runs at scratch project state only.
     """
     argv = [
         str(AGY),
