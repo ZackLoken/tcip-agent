@@ -1,6 +1,7 @@
 /** Training-tab specific REST + WebSocket helpers. */
 
-import { getJson, postJson } from "@/api/http";
+import { getJson, postJson, wsUrl } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 
 export interface TrainingRunSummary {
   run_id: string;
@@ -41,30 +42,29 @@ export interface MetricRow {
 
 export const trainingApi = {
   validate: (config: unknown) =>
-    postJson<{ valid: boolean; issues: string[] }>("/api/training/validate", { config }),
+    postJson<{ valid: boolean; issues: string[] }>(ROUTES.postTrainingValidate, { config }),
 
   launch: (config: unknown, output_dir: string) =>
-    postJson<{ run_id?: string; [k: string]: unknown }>("/api/training/launch", {
+    postJson<{ run_id?: string; [k: string]: unknown }>(ROUTES.postTrainingLaunch, {
       config,
       output_dir,
     }),
 
-  listRuns: () => getJson<{ runs: TrainingRunSummary[] }>("/api/training/runs"),
+  listRuns: () => getJson<{ runs: TrainingRunSummary[] }>(ROUTES.getTrainingRuns),
 
-  getRun: (run_id: string) =>
-    getJson<TrainingRunDetail>(`/api/training/runs/${encodeURIComponent(run_id)}`),
+  getRun: (run_id: string) => getJson<TrainingRunDetail>(ROUTES.getTrainingRunsByRunId(run_id)),
 
   launchTensorboard: (run_id: string) =>
-    postJson<TensorboardLaunch>(`/api/training/runs/${encodeURIComponent(run_id)}/tensorboard`, {}),
+    postJson<TensorboardLaunch>(ROUTES.postTrainingRunsByRunIdTensorboard(run_id), {}),
 
   getMetrics: (project_root: string, run_id: string) =>
     getJson<{ metrics: MetricRow[]; exists: boolean }>(
-      `/api/training/runs/${run_id}/metrics?project_root=${encodeURIComponent(project_root)}`,
+      `${ROUTES.getTrainingRunsByRunIdMetrics(run_id)}?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   cancel: (run_id: string) =>
     postJson<{ run_id: string; status: string; cancel_requested: boolean }>(
-      `/api/training/runs/${encodeURIComponent(run_id)}/cancel`,
+      ROUTES.postTrainingRunsByRunIdCancel(run_id),
       {},
     ),
 };
@@ -88,10 +88,9 @@ export function openTrainingStream(
   run_id: string,
   onMessage: (msg: TrainingStreamMsg) => void,
 ): () => void {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${proto}//${window.location.host}/api/training/runs/${encodeURIComponent(
-    run_id,
-  )}/stream?project_root=${encodeURIComponent(project_root)}`;
+  const url = wsUrl(
+    `${ROUTES.socketTrainingRunsByRunIdStream(run_id)}?project_root=${encodeURIComponent(project_root)}`,
+  );
   let ws: WebSocket | null = null;
   let closedByClient = false;
   let terminated = false;

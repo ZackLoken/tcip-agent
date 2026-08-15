@@ -1,7 +1,10 @@
 /**
  * REST client for the embedded agent terminal (the real Claude Code CLI in a PTY).
- * The byte stream itself flows over /api/terminal/ws/{id}; see TerminalRail.
+ * The byte stream itself flows over the session socket; see TerminalRail.
  */
+
+import { wsUrl } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, {
@@ -16,22 +19,24 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const terminalApi = {
-  status: () => json<{ available: boolean; reason?: string }>("/api/terminal/status"),
+  status: () => json<{ available: boolean; reason?: string }>(ROUTES.getTerminalStatus),
 
   createSession: (rows: number, cols: number) =>
-    json<{ session_id: string; existing: boolean }>("/api/terminal/sessions", {
+    json<{ session_id: string; existing: boolean }>(ROUTES.postTerminalSessions, {
       method: "POST",
       body: JSON.stringify({ rows, cols }),
     }),
 
   restart: (id: string, rows: number, cols: number) =>
-    json<{ session_id: string; alive: boolean }>(`/api/terminal/sessions/${id}/restart`, {
-      method: "POST",
-      body: JSON.stringify({ rows, cols }),
-    }),
+    json<{ session_id: string; alive: boolean }>(
+      ROUTES.postTerminalSessionsBySessionIdRestart(id),
+      {
+        method: "POST",
+        body: JSON.stringify({ rows, cols }),
+      },
+    ),
 };
 
 export function terminalWsUrl(sessionId: string): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/api/terminal/ws/${sessionId}`;
+  return wsUrl(ROUTES.socketTerminalWsBySessionId(sessionId));
 }

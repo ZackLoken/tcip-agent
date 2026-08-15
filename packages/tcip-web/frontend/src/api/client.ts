@@ -4,6 +4,7 @@
  */
 
 import { asJson } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
   CompletenessRecord,
@@ -133,11 +134,11 @@ export const api = {
   projects: {
     list: () =>
       call<{ workspace: string; active: string | null; projects: ProjectSummary[] }>(
-        "/api/projects",
+        ROUTES.getProjects,
       ),
-    getActive: () => call<{ name: string | null; path: string | null }>("/api/projects/active"),
+    getActive: () => call<{ name: string | null; path: string | null }>(ROUTES.getProjectsActive),
     setActive: (name: string) =>
-      call<{ name: string; path: string }>("/api/projects/active", {
+      call<{ name: string; path: string }>(ROUTES.postProjectsActive, {
         method: "POST",
         body: JSON.stringify({ name }),
       }),
@@ -155,11 +156,11 @@ export const api = {
         // date -> model -> the dir that model's predictions for that date live in, resolved by
         // the backend's own layout resolver. Index it; never reassemble the path here.
         prediction_dirs: Record<string, Record<string, string>>;
-      }>(`/api/dataset/tree?${q({ dataset_root })}`),
+      }>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
     listImages: (dataset_root: string, date: string) =>
       call<{ images: string[]; count: number; dataset_root: string; date: string }>(
-        `/api/dataset/images?${q({ dataset_root, date })}`,
+        `${ROUTES.getDatasetImages}?${q({ dataset_root, date })}`,
       ),
 
     select: (body: {
@@ -176,7 +177,7 @@ export const api = {
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
         predictions_present?: boolean;
-      }>("/api/dataset/select", {
+      }>(ROUTES.postDatasetSelect, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -184,7 +185,7 @@ export const api = {
     // Persist the current image position so the agent (view_gui_state) sees the last
     // image the human looked at. Debounced by the caller; fire-and-forget on the FE side.
     nav: (current_image_index: number) =>
-      call<{ status: string; current_image_index: number }>("/api/dataset/nav", {
+      call<{ status: string; current_image_index: number }>(ROUTES.postDatasetNav, {
         method: "POST",
         body: JSON.stringify({ current_image_index }),
       }),
@@ -192,13 +193,13 @@ export const api = {
 
   fs: {
     // List sub-directories of `path` (omit for the top-level drives/roots view).
-    list: (path?: string) => call<FsListing>(`/api/fs/list?${q({ path })}`),
+    list: (path?: string) => call<FsListing>(`${ROUTES.getFsList}?${q({ path })}`),
   },
 
   canvas: {
     // Live canvas-state push (heartbeat or full geometry): fire-and-forget from the tabs.
     pushState: (body: CanvasStateBody) =>
-      call<{ status: string; shapes_stored: boolean }>("/api/canvas/state", {
+      call<{ status: string; shapes_stored: boolean }>(ROUTES.postCanvasState, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -220,52 +221,52 @@ export const api = {
         x1?: number;
         y1?: number;
       } = {},
-    ) => `/api/images?${q({ path, ...opts })}`,
+    ) => `${ROUTES.getImages}?${q({ path, ...opts })}`,
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
     // (band_count > 3), never shown for a standard RGB dataset.
-    bands: (path: string) => call<ImageBandsResponse>(`/api/images/bands?${q({ path })}`),
+    bands: (path: string) => call<ImageBandsResponse>(`${ROUTES.getImagesBands}?${q({ path })}`),
 
     // Build the reduced-resolution pyramid a whole view of an oversized raster is served from.
     // One build per raster: a request for one already running joins it.
     buildOverviews: (path: string) =>
-      call<OverviewJob>("/api/images/overviews", {
+      call<OverviewJob>(ROUTES.postImagesOverviews, {
         method: "POST",
         body: JSON.stringify({ path }),
       }),
 
     overviewJob: (job_id: string) =>
-      call<OverviewJob>(`/api/images/overviews/status?${q({ job_id })}`),
+      call<OverviewJob>(`${ROUTES.getImagesOverviewsStatus}?${q({ job_id })}`),
   },
 
   coverage: {
     // The coverage lattice for one raster, cells included. The one geometry implementation lives
     // server-side: clients index the served cells and never re-derive them.
-    grid: (path: string) => call<CoverageGridResponse>(`/api/coverage/grid?${q({ path })}`),
+    grid: (path: string) => call<CoverageGridResponse>(`${ROUTES.getCoverageGrid}?${q({ path })}`),
 
     // The stored per-image record for a (subject, date) bucket; date omitted = dateless bucket.
     // The route wraps the record as {coverage}; unwrapped here so consumers get the bare record.
     get: (path: string, subject: string, date: string | null) =>
-      call<{ coverage: CoverageRecord | null }>(`/api/coverage?${q({ path, subject, date })}`).then(
-        (body) => body.coverage,
-      ),
+      call<{ coverage: CoverageRecord | null }>(
+        `${ROUTES.getCoverage}?${q({ path, subject, date })}`,
+      ).then((body) => body.coverage),
 
     // Union-merged server-side on a matching grid; a mismatched grid replaces the record.
     push: (body: CoveragePostBody) =>
-      call<{ status: string }>("/api/coverage", { method: "POST", body: JSON.stringify(body) }),
+      call<{ status: string }>(ROUTES.postCoverage, { method: "POST", body: JSON.stringify(body) }),
 
     // Every subject's region-completeness record for the raster at `path`, so the minimap can
     // tell the active subject's attestations apart from another subject's.
     completeness: (path: string, dataset_root: string | null) =>
       call<{ by_subject: Record<string, CompletenessRecord> }>(
-        `/api/coverage/completeness?${q({ path, dataset_root })}`,
+        `${ROUTES.getCoverageCompleteness}?${q({ path, dataset_root })}`,
       ),
 
     // Toggles one cell's completeness for a subject; the server stamps or clears its content
     // digest so a later edit inside the cell is told apart from an unedited attestation.
     toggleCompleteness: (body: CompletenessTogglePostBody) =>
       call<{ status: string; complete: boolean; cells_complete: string[] }>(
-        "/api/coverage/completeness",
+        ROUTES.postCoverageCompleteness,
         { method: "POST", body: JSON.stringify(body) },
       ),
   },
@@ -274,7 +275,7 @@ export const api = {
     // Mirror the active tab into the backend GUI state (debounced by the caller) so
     // view_gui_state reports the tab the human actually sees.
     tab: (active_tab: TabName) =>
-      call<{ status: string }>("/api/state/tab", {
+      call<{ status: string }>(ROUTES.postStateTab, {
         method: "POST",
         body: JSON.stringify({ active_tab }),
       }),
@@ -290,7 +291,7 @@ export const api = {
         img_height: number;
         annotations: Annotation[];
         base_mtime: string | null;
-      }>(`/api/annotate/labels?${q({ image_path, label_path })}`);
+      }>(`${ROUTES.getAnnotateLabels}?${q({ image_path, label_path })}`);
       const { boxes, polygons, points, imageAnnotations } = annotationsToCanvas(
         raw.annotations ?? [],
       );
@@ -309,7 +310,7 @@ export const api = {
     // Not routed through call(): a 409 (the label file changed underneath the
     // client) is an expected outcome the caller resolves by reloading, not an error.
     save: async (body: SaveLabelsBody): Promise<SaveResult> => {
-      const resp = await fetch("/api/annotate/labels", {
+      const resp = await fetch(ROUTES.postAnnotateLabels, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -332,7 +333,7 @@ export const api = {
       mode?: string;
       pred_reference?: PredictionReference | null;
     }) =>
-      call<{ status: string; image_path: string }>("/api/annotate/open", {
+      call<{ status: string; image_path: string }>(ROUTES.postAnnotateOpen, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -355,7 +356,7 @@ export const api = {
       },
       signal?: AbortSignal,
     ) =>
-      call<MatchesResponse>("/api/review/matches", {
+      call<MatchesResponse>(ROUTES.postReviewMatches, {
         method: "POST",
         body: JSON.stringify(body),
         signal,
@@ -396,7 +397,7 @@ export const api = {
         annotation_status: "complete" | "partial" | "negative" | "unannotated" | null;
         // Fresh matches recomputed against the written GT; install these instead of re-fetching.
         matches: MatchesResponse;
-      }>("/api/review/action", {
+      }>(ROUTES.postReviewAction, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -415,13 +416,13 @@ export const api = {
         image_status: MatchesResponse["image_status"];
         // Derived server-side from the GT file, never from a stale client snapshot.
         annotation_status: "complete" | "partial" | "negative" | "unannotated";
-      }>("/api/review/mark_complete", {
+      }>(ROUTES.postReviewMarkComplete, {
         method: "POST",
         body: JSON.stringify(body),
       }),
 
     backupLabels: (project_root: string, label_dirs: string[]) =>
-      call<{ status: string; files_backed_up: number }>("/api/review/backup_labels", {
+      call<{ status: string; files_backed_up: number }>(ROUTES.postReviewBackupLabels, {
         method: "POST",
         body: JSON.stringify({ project_root, label_dirs }),
       }),
@@ -436,7 +437,7 @@ export const api = {
         conf: number | null;
         reason: string;
         buckets_stamped: string[];
-      }>("/api/review/validate_reference", {
+      }>(ROUTES.postReviewValidateReference, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -446,7 +447,7 @@ export const api = {
     // only after clicking "Use review as validation reference".
     generationConf: (pred_dir: string) =>
       call<{ generation_conf: number | null }>(
-        `/api/review/generation_conf?${new URLSearchParams({ pred_dir }).toString()}`,
+        `${ROUTES.getReviewGenerationConf}?${new URLSearchParams({ pred_dir }).toString()}`,
       ),
 
     // Batch review status + detection presence for a whole (subject, date): drives the image-level
@@ -460,7 +461,7 @@ export const api = {
       if (params.gt_dir) qs.set("gt_dir", params.gt_dir);
       if (params.pred_dir) qs.set("pred_dir", params.pred_dir);
       return call<{ statuses: Record<string, ReviewImageStatus>; detection_stems: string[] }>(
-        `/api/review/image_statuses?${qs.toString()}`,
+        `${ROUTES.getReviewImageStatuses}?${qs.toString()}`,
       );
     },
 
@@ -474,7 +475,7 @@ export const api = {
       method?: string;
       budget?: number;
     }) =>
-      call<{ status: string; job_id: string }>("/api/review/queue/launch", {
+      call<{ status: string; job_id: string }>(ROUTES.postReviewQueueLaunch, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -487,7 +488,7 @@ export const api = {
         queue: { image: string; score: number }[];
         total_candidates: number;
         reviewed_skipped: number;
-      }>(`/api/review/queue/${jobId}`),
+      }>(ROUTES.getReviewQueueByJobId(jobId)),
   },
 };
 

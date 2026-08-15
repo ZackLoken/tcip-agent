@@ -7,6 +7,7 @@
  */
 
 import { getJson, postJson } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 
 /** One attribute of a subject: categorical (unordered) or ordinal (ranked). ``values`` are the
  *  declared value names, in order (the rank order for an ordinal). */
@@ -40,7 +41,7 @@ export const classesApi = {
     const params = new URLSearchParams({ project_root });
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
-    return getJson<{ subjects: Registry }>(`/api/classes/load?${params.toString()}`);
+    return getJson<{ subjects: Registry }>(`${ROUTES.getClassesLoad}?${params.toString()}`);
   },
 
   save: (
@@ -49,7 +50,7 @@ export const classesApi = {
     dataset_root?: string | null,
     annotations_dir?: string | null,
   ) =>
-    postJson<{ status: string; n_subjects: number; classes_path: string }>("/api/classes/save", {
+    postJson<{ status: string; n_subjects: number; classes_path: string }>(ROUTES.postClassesSave, {
       project_root,
       subjects,
       dataset_root,
@@ -74,7 +75,7 @@ export const classesApi = {
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
     return getJson<{ statuses: Record<string, ImageStatus> }>(
-      `/api/classes/image_status?${params.toString()}`,
+      `${ROUTES.getClassesImageStatus}?${params.toString()}`,
     );
   },
 
@@ -87,7 +88,7 @@ export const classesApi = {
     dataset_root?: string | null,
     annotations_dir?: string | null,
   ) =>
-    postJson<unknown>("/api/classes/image_status", {
+    postJson<unknown>(ROUTES.postClassesImageStatus, {
       project_root,
       image_name,
       status,
@@ -105,7 +106,7 @@ export const classesApi = {
     dataset_root?: string | null,
     annotations_dir?: string | null,
   ) =>
-    postJson<unknown>("/api/classes/image_status/bulk", {
+    postJson<unknown>(ROUTES.postClassesImageStatusBulk, {
       project_root,
       statuses,
       subject,
@@ -121,7 +122,7 @@ export const classesApi = {
     image_list: string[];
     complete_override?: string[];
   }) =>
-    postJson<{ statuses: Record<string, ImageStatus> }>("/api/classes/image_status/derive", body),
+    postJson<{ statuses: Record<string, ImageStatus> }>(ROUTES.postClassesImageStatusDerive, body),
 };
 
 // High-contrast palette the GUI derives subject/value colours from. Colour is GUI-local (the

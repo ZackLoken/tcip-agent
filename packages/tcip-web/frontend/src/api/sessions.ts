@@ -1,6 +1,7 @@
 /** Session-tracking API helpers (annotation_stats.json on disk). */
 
 import { getJson, postJson } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 
 export interface SessionEntry {
   user: string;
@@ -30,11 +31,11 @@ export interface SessionEntry {
 
 export const sessionsApi = {
   start: (project_root: string, user: string) =>
-    postJson<unknown>("/api/sessions/start", { project_root, user }),
+    postJson<unknown>(ROUTES.postSessionsStart, { project_root, user }),
 
   load: (project_root: string) =>
     getJson<{ sessions: SessionEntry[]; image_status: Record<string, string> }>(
-      `/api/sessions/load?project_root=${encodeURIComponent(project_root)}`,
+      `${ROUTES.getSessionsLoad}?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   imageEvent: (body: {
@@ -49,5 +50,5 @@ export const sessionsApi = {
     dataset_root?: string | null;
     subject?: string | null;
     date?: string | null;
-  }) => postJson<unknown>("/api/sessions/image_event", body),
+  }) => postJson<unknown>(ROUTES.postSessionsImageEvent, body),
 };

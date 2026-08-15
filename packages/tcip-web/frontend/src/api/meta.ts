@@ -1,6 +1,7 @@
 /** Meta-loop API helpers: Claude's friction reports and retrospectives. */
 
 import { getJson } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 
 export interface FrictionReport {
   file: string;
@@ -19,11 +20,11 @@ export interface Retrospective {
 export const metaApi = {
   reports: (project_root: string) =>
     getJson<{ reports: FrictionReport[]; count: number; total_available: number }>(
-      `/api/meta/reports?project_root=${encodeURIComponent(project_root)}`,
+      `${ROUTES.getMetaReports}?project_root=${encodeURIComponent(project_root)}`,
     ),
 
   retrospectives: (project_root: string) =>
     getJson<{ retrospectives: Retrospective[]; count: number; total_available: number }>(
-      `/api/meta/retrospectives?project_root=${encodeURIComponent(project_root)}`,
+      `${ROUTES.getMetaRetrospectives}?project_root=${encodeURIComponent(project_root)}`,
     ),
 };

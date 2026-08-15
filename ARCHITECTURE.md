@@ -200,22 +200,23 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-web/frontend/src/App.tsx | (none found) | 26 | 1 |
-| packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 1 | 7 |
+| packages/tcip-web/frontend/src/App.tsx | (none found) | 27 | 1 |
+| packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 2 | 7 |
 | packages/tcip-web/frontend/src/api/client.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/client.ts | Typed REST client for the tcip-web backend. | 5 | 39 |
+| packages/tcip-web/frontend/src/api/client.ts | Typed REST client for the tcip-web backend. | 6 | 39 |
 | packages/tcip-web/frontend/src/api/http.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 8 |
+| packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 10 |
 | packages/tcip-web/frontend/src/api/inference.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/inference.ts | Inference + Results API helpers for the Inference and Results tabs. | 1 | 5 |
-| packages/tcip-web/frontend/src/api/meta.ts | Meta-loop API helpers: Claude's friction reports and retrospectives. | 1 | 1 |
-| packages/tcip-web/frontend/src/api/sessions.ts | Session-tracking API helpers (annotation_stats.json on disk). | 1 | 4 |
-| packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal (the real Claude Code CLI in a PTY). | 0 | 2 |
+| packages/tcip-web/frontend/src/api/inference.ts | Inference + Results API helpers for the Inference and Results tabs. | 2 | 5 |
+| packages/tcip-web/frontend/src/api/meta.ts | Meta-loop API helpers: Claude's friction reports and retrospectives. | 2 | 1 |
+| packages/tcip-web/frontend/src/api/routes.ts | Every backend path the browser calls, generated from the routes the FastAPI app registers. | 0 | 10 |
+| packages/tcip-web/frontend/src/api/sessions.ts | Session-tracking API helpers (annotation_stats.json on disk). | 2 | 4 |
+| packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal (the real Claude Code CLI in a PTY). | 2 | 2 |
 | packages/tcip-web/frontend/src/api/training.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/training.ts | Training-tab specific REST + WebSocket helpers. | 1 | 5 |
-| packages/tcip-web/frontend/src/api/tuning.ts | Tuning (HPO) API helpers for the Tuning tab. | 2 | 1 |
+| packages/tcip-web/frontend/src/api/training.ts | Training-tab specific REST + WebSocket helpers. | 2 | 5 |
+| packages/tcip-web/frontend/src/api/tuning.ts | Tuning (HPO) API helpers for the Tuning tab. | 3 | 1 |
 | packages/tcip-web/frontend/src/api/ws.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/ws.ts | WebSocket client that subscribes to GuiState snapshots + panel events. | 2 | 2 |
+| packages/tcip-web/frontend/src/api/ws.ts | WebSocket client that subscribes to GuiState snapshots + panel events. | 4 | 2 |
 | packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/components/AnnotateToolbar.tsx | Annotate-tab context toolbar. | 8 | 2 |
 | packages/tcip-web/frontend/src/components/BandPicker.test.tsx | (none found) | 2 | 0 |
@@ -337,6 +338,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 4 | 0 |
 | scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 1 | 0 |
 | scripts/gate_baseline.py | Run the full quality gate and record per-stage duration and output. | 0 | 0 |
+| scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
@@ -462,6 +464,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/doctor.py |
 | scripts | scripts/foreground_fn_candidates.py |
 | scripts | scripts/gate_baseline.py |
+| scripts | scripts/generate_frontend_routes.py |
 | scripts | scripts/inspect_baseline_weights.py |
 | scripts | scripts/inspect_gps_exif.py |
 | scripts | scripts/list_tools.py |
@@ -1711,12 +1714,12 @@ Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:479` (`de
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/review_calibration.py:376` (`def resolve_operating_point_from_review(`).
 Phase 3 verdict: duplicated.
 
-## S46. Frontend api/ layer against backend route paths  <!-- queued: P5-300 unify -->
+## S46. Frontend api/ layer against backend route paths
 
 Must agree: every URL the browser builds matches a registered FastAPI route path and method.
-Side A: `packages/tcip-web/frontend/src/api/client.ts` (31 functions across 9 namespaces).
+Side A: `packages/tcip-web/frontend/src/api/routes.ts` (generated: the browser's only copy of the paths, each named for its method).
 Side B: `packages/tcip-web/src/tcip_web/routes/__init__.py` (`register_all` mounts 16 routers with fixed prefixes).
-Phase 3 verdict: duplicated.
+Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and reference a generated name; `scripts/generate_frontend_routes.py` projects the registered routes into that module, and `tests/test_frontend_route_paths.py` fails when the projection is stale or a call site writes a path of its own.
 
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
@@ -1779,7 +1782,7 @@ Phase 3 verdict: duplicated.
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:16` (`proxy: {`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:144` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
-Phase 3 verdict: duplicated.
+Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 

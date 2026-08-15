@@ -18,6 +18,12 @@ export async function asJson<T>(r: Response): Promise<T> {
   return (await r.json()) as T;
 }
 
+/** Absolute ws:// or wss:// URL for a backend socket path, matching the page's own scheme. */
+export function wsUrl(path: string): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}${path}`;
+}
+
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export function getJson<T>(url: string): Promise<T> {
