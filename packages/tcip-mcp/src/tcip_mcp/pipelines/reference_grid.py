@@ -9,7 +9,9 @@ geometry dict (:func:`grid_geometry`) and recompute cells deterministically from
 Cell names are spreadsheet-style: a bijective base-26 column letter plus a 1-based row
 number ("B3"). The letter scheme is ``tcip_annotation.sam_wrapper``'s ``column_label`` /
 ``column_index``, imported rather than duplicated (tcip-mcp may depend on
-tcip-annotation, never the reverse).
+tcip-annotation, never the reverse). Resolving a name back against a cell list is that
+module's ``grid_to_rect`` (``grid_to_pixel`` for the cell's center): this module builds
+the cells, that one lookup reads them, and every consumer of a cell name goes through it.
 """
 
 from __future__ import annotations

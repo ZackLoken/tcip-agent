@@ -209,6 +209,140 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
     assert after - before == set(), "temp region crop leaked after the engine raised"
 
 
+def _region_cells() -> list:
+    """The fixture frame's cells at ``TILE_SIZE``: columns A-D, rows 1-2."""
+    from tcip_mcp.pipelines.reference_grid import reference_cells
+
+    return reference_cells(UPRIGHT_W, UPRIGHT_H, TILE_SIZE, 0.0, clamp=True)
+
+
+class TestRegionCellNamesResolveThroughTheOneLookup:
+    """A region's cell names resolve through the lookup a point prompt's names resolve through
+    (``sam_wrapper.grid_to_rect``): the same cell shapes accepted, the same references refused, so
+    naming a region and naming a prompt cannot disagree about which cell a name is."""
+
+    def test_named_cells_bound_their_combined_rect(self) -> None:
+        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+
+        rect = _region_rect_from_cells(_region_cells(), ["B1", "C1"])
+        assert (rect.x0, rect.y0, rect.x1, rect.y1) == (60, 0, 180, 60)
+
+    def test_names_are_case_insensitive_and_whitespace_stripped(self) -> None:
+        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+
+        cells = _region_cells()
+        assert _region_rect_from_cells(cells, [" b1 ", "c1"]) == \
+            _region_rect_from_cells(cells, ["B1", "C1"])
+
+    def test_cell_dicts_are_accepted(self) -> None:
+        """The plain dicts a JSON route serves are a cell list too, not only cell objects."""
+        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+
+        cells = [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
+                 for c in _region_cells()]
+        rect = _region_rect_from_cells(cells, ["B1", "C1"])
+        assert (rect.x0, rect.y0, rect.x1, rect.y1) == (60, 0, 180, 60)
+
+    def test_a_reference_that_is_not_a_cell_name_is_refused(self) -> None:
+        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+
+        with pytest.raises(ValueError, match="Invalid cell reference"):
+            _region_rect_from_cells(_region_cells(), ["3B"])
+
+    def test_a_name_outside_the_grid_names_the_valid_range(self) -> None:
+        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+
+        with pytest.raises(ValueError, match="Use A1 through D2"):
+            _region_rect_from_cells(_region_cells(), ["Z9"])
+
+
+def _write_rgb_band_group(images_dir: Path, stem: str, frame: np.ndarray) -> Path:
+    """A ``.bandgroup`` capture whose three sibling single-band TIFFs hold ``frame``'s R, G and B
+    planes, the manifest declaring them in that order."""
+    import tifffile
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    bands = {}
+    for i, name in enumerate(("Red", "Green", "Blue")):
+        band_path = images_dir / f"{stem}_{name}.tif"
+        tifffile.imwrite(str(band_path), frame[:, :, i])
+        bands[name] = band_path
+    return write_band_group_manifest(images_dir, stem, bands)
+
+
+class TestRegionFrameIsTheResolvedImageSources:
+    """The region path measures and crops the logical image the enumeration primitive resolves,
+    the one every other reference-grid consumer measures."""
+
+    def test_a_grouped_capture_crops_its_own_stacked_frame(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A ``.bandgroup`` manifest names a capture whose pixels live in sibling files, so the
+        region's cells and its crop both come from the stacked frame, never from the manifest file
+        read as if it were a photograph."""
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.tools.vision_tools import propose_annotations
+
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        frame = np.full((UPRIGHT_H, UPRIGHT_W, 3), 20, dtype=np.uint8)
+        x1, y1, x2, y2 = PATCH_BOX
+        frame[y1:y2, x1:x2] = (255, 0, 0)
+        manifest = _write_rgb_band_group(images_dir, "capture_001", frame)
+
+        class PatchProposer:
+            """Reports the red patch in whatever pixels it is handed, so the crop is what decides
+            the answer."""
+
+            def propose(self, image_path, **params):
+                arr = np.asarray(Image.open(image_path).convert("RGB"))
+                mask = (arr[:, :, 0] > 200) & (arr[:, :, 1] < 50) & (arr[:, :, 2] < 50)
+                ys, xs = np.nonzero(mask)
+                bx1, by1 = float(xs.min()), float(ys.min())
+                bx2, by2 = float(xs.max() + 1), float(ys.max() + 1)
+                return [{"candidate_id": 0, "bbox": [bx1, by1, bx2, by2], "area": int(mask.sum()),
+                         "score": 0.9, "engine": "patch", "engine_meta": {},
+                         "rings": [[(bx1, by1), (bx2, by1), (bx2, by2), (bx1, by2)]]}]
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: PatchProposer())
+
+        result = propose_annotations(image_path=str(manifest), engine="patch",
+                                     grid_cells=["B1", "C1"], tile_size=TILE_SIZE)
+        assert "error" not in result, result
+        assert result["candidates"][0]["bbox"] == [float(v) for v in PATCH_BOX]
+
+    def test_a_source_with_no_rgb_frame_is_refused_before_the_engine_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A crop reaches the engine as an RGB image file, so a source that has no such frame is
+        told what it reads as instead of reaching the writer as an unwritable array."""
+        import tifffile
+
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+        from tcip_mcp.tools.vision_tools import propose_annotations
+
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        bands = {}
+        for name, fill in (("Green", 111), ("Red", 222)):
+            band_path = images_dir / f"cap_{name}.tif"
+            tifffile.imwrite(str(band_path), np.full((UPRIGHT_H, UPRIGHT_W), fill, dtype=np.uint16))
+            bands[name] = band_path
+        manifest = write_band_group_manifest(images_dir, "cap", bands)
+
+        class NeverProposer:
+            def propose(self, image_path, **params):
+                raise AssertionError("the engine ran on a source with no RGB frame")
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: NeverProposer())
+
+        result = propose_annotations(image_path=str(manifest), engine="patch",
+                                     grid_cells=["B1"], tile_size=TILE_SIZE)
+        assert "2 band(s) of uint16" in result.get("error", "")
+
+
 class TestWholeFrameDefaultIsUnaffected:
     """``grid_cells=None`` (the default) must take the exact whole-frame path this tool has
     always taken: the offset step must never even run."""
