@@ -38,34 +38,51 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction, read_json
+import tcip_store
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
+from tcip_mcp.utils.atomic_io import read_json
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-STATS_FILENAME = "annotation_stats.json"
+ANNOTATION_STATS_STORE = "annotation_stats"
+_ANNOTATION_STATS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+_ANNOTATION_STATS_PARTS = ("annotation_stats",)
+
+register_store(
+    StoreDescriptor(
+        name=ANNOTATION_STATS_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="cas",
+        locator=_ANNOTATION_STATS_DOC,
+    )
+)
 
 
-def _stats_path(project_root: str) -> Path:
-    return Path(project_root) / ".tcip" / "state" / STATS_FILENAME
+def annotation_stats_key(project_root: str) -> Key:
+    """The project's per-image annotation timings and session rollups.
+
+    ``cas``: every route here reads the document, edits one session row or one image entry
+    inside it, and writes the whole thing back, so an unconditional write would drop a slice
+    another request had just recorded.
+    """
+    return Key(ANNOTATION_STATS_STORE, project_root, _ANNOTATION_STATS_PARTS)
 
 
-def _read(path: Path) -> dict[str, Any]:
-    data = read_json(path, default=None)
+def _normalized(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         return {"sessions": [], "image_status": {}}
     return data
-
-
-def _write(path: Path, data: dict[str, Any]) -> None:
-    atomic_write_json(path, data)
 
 
 # ── Per-image session telemetry ─────────────────────────────────────────
@@ -92,9 +109,9 @@ def image_event(payload: ImageEventPayload) -> dict:
 
     Called by the GUI on image-leave (Prev/Next/tab-switch/save).
     """
-    path = _stats_path(payload.project_root)
-    with file_transaction(path):
-        data = _read(path)
+    key = annotation_stats_key(payload.project_root)
+    with tcip_store.transaction(key) as txn:
+        data = _normalized(txn.read(key, default=None))
         sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
         if not sessions:
             sessions.insert(0, _new_session_entry())
@@ -144,7 +161,7 @@ def image_event(payload: ImageEventPayload) -> dict:
             images.pop(payload.image_name, None)
 
         _refresh_session_aggregate(s)
-        _write(path, data)
+        txn.write(key, data)
     return {"status": "ok"}
 
 
@@ -160,16 +177,16 @@ class StartSessionPayload(BaseModel):
 def start_session(payload: StartSessionPayload) -> dict:
     """Insert a new session row. The GUI calls this when the user opens a
     project (or on load if no session is currently open)."""
-    path = _stats_path(payload.project_root)
-    with file_transaction(path):
-        data = _read(path)
+    key = annotation_stats_key(payload.project_root)
+    with tcip_store.transaction(key) as txn:
+        data = _normalized(txn.read(key, default=None))
         sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
         if sessions and not sessions[0].get("ended"):
             # Already an open session, keep it.
             return {"status": "ok", "session": sessions[0]}
         entry = _new_session_entry(user=payload.user)
         sessions.insert(0, entry)
-        _write(path, data)
+        txn.write(key, data)
     return {"status": "ok", "session": entry}
 
 
@@ -180,22 +197,22 @@ class EndSessionPayload(BaseModel):
 @router.post("/end")
 def end_session(payload: EndSessionPayload) -> dict:
     """Mark the latest session as ended and roll up totals."""
-    path = _stats_path(payload.project_root)
-    with file_transaction(path):
-        data = _read(path)
+    key = annotation_stats_key(payload.project_root)
+    with tcip_store.transaction(key) as txn:
+        data = _normalized(txn.read(key, default=None))
         sessions = data.setdefault("sessions", [])
         if not sessions:
             return {"status": "noop"}
         s = sessions[0]
         s["ended"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         _refresh_session_aggregate(s)
-        _write(path, data)
+        txn.write(key, data)
     return {"status": "ok", "session": s}
 
 
 @router.get("/load")
 def load_sessions(project_root: str) -> dict:
-    data = _read(_stats_path(project_root))
+    data = _normalized(tcip_store.read(annotation_stats_key(project_root), default=None))
     for s in data.get("sessions", []):
         s.update(_classify_session_seconds(s))
     return data
@@ -256,6 +273,8 @@ def _classify_session_seconds(s: dict[str, Any]) -> dict[str, float]:
     fired. An image with no dataset_root recorded (an older entry, or a caller with none to give)
     falls back to review time, unclassifiable further.
     """
+    from tcip_mcp.dataset_layout import is_confirmed_negative
+
     images = s.get("images", {})
     cache: dict[str, dict[str, str]] = {}
     negative_seconds = review_seconds = annotation_seconds = 0.0
@@ -269,7 +288,7 @@ def _classify_session_seconds(s: dict[str, Any]) -> dict[str, float]:
             _status_bucket_for(cache, dataset_root, img.get("subject"), img.get("date")).get(name)
             if dataset_root else None
         )
-        if status == "negative":
+        if is_confirmed_negative(status):
             negative_seconds += seconds
         else:
             review_seconds += seconds

@@ -27,7 +27,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction, read_json
+import tcip_store
+
 from tcip_web.routes.classes import _audit_dataset_write, _guard_dataset_root
 from tcip_web.routes.images import _checked
 
@@ -152,11 +153,11 @@ def get_coverage(
 ) -> dict:
     """The stored coverage record for one image under one subject/date bucket, or
     ``{"coverage": null}`` when nothing has been recorded."""
-    from tcip_mcp.dataset_layout import status_bucket, view_coverage_path
+    from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
 
     _require_subject(subject)
     root = _resolve_root(path, dataset_root)
-    store = read_json(view_coverage_path(root), default={})
+    store = tcip_store.read(view_coverage_key(root), default={})
     if not isinstance(store, dict):
         store = {}
     bucket = store.get(status_bucket(subject, date))
@@ -194,7 +195,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
     a non-dated dataset passes ``null``, so an image under a date bucket can never
     silently land in the dateless one.
     """
-    from tcip_mcp.dataset_layout import status_bucket, view_coverage_path
+    from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     subject = _require_subject(payload.subject)
@@ -213,10 +214,10 @@ def post_coverage(payload: CoveragePayload) -> dict:
 
     bucket = status_bucket(subject, payload.date)
     image_name = Path(payload.image_path).name
-    path = view_coverage_path(root)
+    key = view_coverage_key(root)
     replaced = False
-    with file_transaction(path):
-        store = read_json(path, default={})
+    with tcip_store.transaction(key) as txn:
+        store = txn.read(key, default={})
         if not isinstance(store, dict):
             store = {}
         records = store.setdefault(bucket, {})
@@ -237,7 +238,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
             "viewing": payload.viewing,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        atomic_write_json(path, store)
+        txn.write(key, store)
 
     audit_key = (root, bucket, image_name)
     # A replaced grid re-audits even within one process: the record's identity changed.
@@ -258,7 +259,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
 
 
 # Region completeness gates a scientific claim rather than warning advisory, so (unlike view
-# coverage above) it is written with classes.py's image-status discipline (file_transaction + atomic_write_json + _audit_dataset_write).
+# coverage above) every write is audited as well as transacted.
 
 
 class CompletenessTogglePayload(BaseModel):
@@ -288,16 +289,16 @@ def get_completeness(
     """
     from tcip_mcp.dataset_layout import (
         normalize_region_completeness_store,
-        region_completeness_digest_path,
-        region_completeness_path,
+        region_completeness_digest_key,
+        region_completeness_key,
     )
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
     root = _resolve_root(path, dataset_root)
     stem = Path(path).stem
     store = normalize_region_completeness_store(
-        read_json(region_completeness_path(root), default={}))
-    digests = read_json(region_completeness_digest_path(root), default={})
+        tcip_store.read(region_completeness_key(root), default={}))
+    digests = tcip_store.read(region_completeness_digest_key(root), default={})
     if not isinstance(digests, dict):
         digests = {}
 
@@ -329,8 +330,8 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
         annotation_path,
         normalize_region_completeness_store,
         parse_image_path,
-        region_completeness_digest_path,
-        region_completeness_path,
+        region_completeness_digest_key,
+        region_completeness_key,
         status_bucket,
     )
     from tcip_mcp.pipelines.reference_grid import reference_cells
@@ -352,15 +353,15 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
                  f"cells")
 
     bucket = status_bucket(subject, stem)
-    completeness_path = region_completeness_path(root)
-    digest_path = region_completeness_digest_path(root)
+    completeness_key = region_completeness_key(root)
+    digest_key = region_completeness_digest_key(root)
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # The digest write nests inside the completeness-store transaction, before the store's own
-    # write: stale_cells fails closed on a missing digest, so it must exist before an attestation.
-    with file_transaction(completeness_path):
-        store = normalize_region_completeness_store(read_json(completeness_path, default={}))
+    # Digest key named first, so it is applied first: stale_cells fails closed on a missing
+    # digest, so a stamp must never land after the attestation that points at it.
+    with tcip_store.transaction(digest_key, completeness_key) as txn:
+        store = normalize_region_completeness_store(txn.read(completeness_key, default={}))
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
         cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()
@@ -370,23 +371,22 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
             cells_complete.add(payload.cell)
         else:
             cells_complete.discard(payload.cell)
-        with file_transaction(digest_path):
-            digests = read_json(digest_path, default={})
-            if not isinstance(digests, dict):
-                digests = {}
-            bucket_digests = digests.get(bucket)
-            bucket_digests = dict(bucket_digests) if isinstance(bucket_digests, dict) else {}
-            if replaced:
-                bucket_digests = {}
-            if complete:
-                label_path = annotation_path(root, date, stem)
-                annotations = read_annotations(str(label_path)) if label_path.is_file() else []
-                bucket_digests[payload.cell] = cell_annotation_digest(
-                    annotations, subject, cells_by_name[payload.cell])
-            else:
-                bucket_digests.pop(payload.cell, None)
-            digests[bucket] = bucket_digests
-            atomic_write_json(digest_path, digests)
+        digests = txn.read(digest_key, default={})
+        if not isinstance(digests, dict):
+            digests = {}
+        bucket_digests = digests.get(bucket)
+        bucket_digests = dict(bucket_digests) if isinstance(bucket_digests, dict) else {}
+        if replaced:
+            bucket_digests = {}
+        if complete:
+            label_path = annotation_path(root, date, stem)
+            annotations = read_annotations(str(label_path)) if label_path.is_file() else []
+            bucket_digests[payload.cell] = cell_annotation_digest(
+                annotations, subject, cells_by_name[payload.cell])
+        else:
+            bucket_digests.pop(payload.cell, None)
+        digests[bucket] = bucket_digests
+        txn.write(digest_key, digests)
 
         store[bucket] = {
             "grid": grid,
@@ -397,7 +397,7 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
             "date": date,
             "subject": subject,
         }
-        atomic_write_json(completeness_path, store)
+        txn.write(completeness_key, store)
 
     _audit_dataset_write(
         root, "gui_set_region_completeness",
