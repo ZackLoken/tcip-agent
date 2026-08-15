@@ -10,6 +10,9 @@ import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, NamedTuple
 
+import tcip_store as ts
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.sam_wrapper import column_label, grid_to_rect
@@ -26,6 +29,7 @@ from tcip_annotation.viz import (
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+from tcip_mcp.project_paths import project_root
 from tcip_mcp.server import mcp
 
 if TYPE_CHECKING:
@@ -33,6 +37,32 @@ if TYPE_CHECKING:
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.raster_source import Rect
+
+
+_PROPOSAL_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The proposal envelope one image's run stages, under the platform state root."""
+
+PROPOSAL_STAGING_STORE = "proposal_staging"
+ts.register_store(
+    ts.StoreDescriptor(
+        name=PROPOSAL_STAGING_STORE,
+        kind="record",
+        key_fields=("image",),
+        codec=ts.json_codec(indent=None, default=str),
+        concurrency="last_writer_wins",
+        locator=_PROPOSAL_DOC,
+    )
+)
+
+
+def proposal_staging_key(stem: str) -> ts.Key:
+    """The proposals one run staged for one image, for ``accept_proposals`` to read back.
+
+    ``last_writer_wins``: a run writes the whole envelope from the candidates it just
+    produced, so a re-run replaces the previous one rather than merging into it. Scoped to
+    the platform state root so the handoff survives a cwd that is not the project.
+    """
+    return ts.Key(PROPOSAL_STAGING_STORE, str(project_root().resolve()), (f"proposals_{stem}",))
 
 
 class DisplayRead(NamedTuple):
@@ -761,17 +791,11 @@ def propose_annotations(
     read = _display_for_path(image_path)
     out = render_candidates(read.pixels, candidates, native_size=read.native_size)
 
-    # Resolve state via the platform root so the handoff to accept_proposals survives CWD !=
-    # project root; the envelope records the engine so accept_proposals stamps the right producer.
-    from tcip_mcp.project_paths import resolve_state
-
-    import json
-    state_file = resolve_state(Path(".tcip") / "state" / f"proposals_{img.stem}.json")
-    state_file.parent.mkdir(parents=True, exist_ok=True)
+    # The envelope records the engine so accept_proposals stamps the right producer.
     envelope: dict = {"engine": engine, "candidates": candidates}
     if region_info is not None:
         envelope["region"] = region_info
-    state_file.write_text(json.dumps(envelope, default=str), encoding="utf-8")
+    ts.replace(proposal_staging_key(img.stem), envelope)
 
     region_note = f" (region {grid_cells})" if region_info is not None else ""
     return {
@@ -814,20 +838,15 @@ def accept_proposals(
         assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name).
             Only listed candidates are staged.
     """
-    import json
-
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
-    # Load cached proposals from the same platform-root state location propose_annotations wrote to.
-    from tcip_mcp.project_paths import resolve_state
-
-    state_file = resolve_state(Path(".tcip") / "state" / f"proposals_{img.stem}.json")
-    if not state_file.is_file():
+    # Load cached proposals from the same record propose_annotations staged them in.
+    envelope = ts.read(proposal_staging_key(img.stem), default=None)
+    if envelope is None:
         return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
 
-    envelope = json.loads(state_file.read_text(encoding="utf-8"))
     engine = envelope.get("engine", "unknown")
     candidates = envelope.get("candidates", [])
     cand_map = {c["candidate_id"]: c for c in candidates}

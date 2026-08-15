@@ -108,6 +108,38 @@ def test_project_retrospective_appends_to_existing(tmp_path: Path):
     assert "Second pass after three days" in content
 
 
+def test_concurrent_retrospectives_all_survive(tmp_path: Path):
+    # Appending is a read, a concatenation and a write. Taken outside one serialized step, two
+    # sessions finishing together each append to the text they read and one section is dropped.
+    import threading
+
+    n_threads = 16
+    barrier = threading.Barrier(n_threads)
+
+    def _call(index: int):
+        barrier.wait()  # maximize actual overlap, not just "started around the same time"
+        project_retrospective(
+            str(tmp_path),
+            project_id="project-under-test",
+            task=f"pass {index}",
+            worked="a",
+            did_not_work="b",
+        )
+
+    threads = [threading.Thread(target=_call, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+
+    content = (tmp_path / ".tcip" / "retrospectives" / "project-under-test.md").read_text(
+        encoding="utf-8")
+    assert content.count("# project-under-test") == 1
+    assert content.count("## Retrospective") == n_threads
+    missing = [i for i in range(n_threads) if f"pass {i}" not in content]
+    assert not missing, f"sections lost: {missing}"
+
+
 def test_project_retrospective_handles_empty_optional_fields(tmp_path: Path):
     result = project_retrospective(
         str(tmp_path),

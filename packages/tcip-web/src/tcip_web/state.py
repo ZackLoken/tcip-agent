@@ -8,17 +8,45 @@ changes fan out to connected browsers via WebSocket.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
+from tcip_store import Key, StoreDescriptor, StoreError, json_codec, read, register_store, replace
+from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
 
-STATE_FILENAME = "gui.json"
 PERSIST_DEBOUNCE_SECONDS = 0.5
+
+_SNAPSHOT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The GUI snapshot, one document per project."""
+
+GUI_SNAPSHOT_STORE = "gui_snapshot"
+_SNAPSHOT_PARTS = ("gui",)
+register_store(
+    StoreDescriptor(
+        name=GUI_SNAPSHOT_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        durable=False,
+        locator=_SNAPSHOT_DOC,
+    )
+)
+
+
+def gui_snapshot_key(project_root: str | Path) -> Key:
+    """This project's persisted GUI snapshot.
+
+    ``last_writer_wins``: the backend holds the live state in memory and writes the whole
+    snapshot from it, so the document is one process's view rather than one writers merge
+    into. ``durable=False``: the snapshot is rewritten on a debounce cycle and a crash losing
+    the last one costs a re-selection, not history.
+    """
+    return Key(GUI_SNAPSHOT_STORE, str(project_root), _SNAPSHOT_PARTS)
 
 TAB_NAMES = ("annotate", "review", "training", "tuning", "inference", "results", "meta")
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
@@ -88,10 +116,9 @@ class GuiState(BaseModel):
     review: ReviewFilters = Field(default_factory=ReviewFilters)
     pred_reference: Optional[PredictionReference] = None
 
-    def state_dir(self) -> Optional[Path]:
-        if not self.dataset.project_root:
-            return None
-        return Path(self.dataset.project_root) / ".tcip" / "state"
+    def persistence_root(self) -> Optional[str]:
+        """The project root this snapshot persists under, or None when no project is open."""
+        return self.dataset.project_root or None
 
 
 # ── Store with debounced persistence ────────────────────────────────────
@@ -167,7 +194,7 @@ class StateStore:
                 logger.exception("state subscriber failed")
 
     def _schedule_save(self) -> None:
-        if self._state.state_dir() is None:
+        if self._state.persistence_root() is None:
             return  # No project root → nothing to persist
         if self._save_task and not self._save_task.done():
             return  # Debounce: coalesce into the pending save
@@ -190,33 +217,33 @@ class StateStore:
         # Resolve the destination at flush time, not schedule time: if project_root
         # changed during the debounce window, the new project's snapshot must not be
         # written into the previous project's gui.json.
-        state_dir = self._state.state_dir()
-        if state_dir is None:
+        root = self._state.persistence_root()
+        if root is None:
             return
         try:
-            from tcip_mcp.utils.atomic_io import atomic_write_json
-
-            state_dir.mkdir(parents=True, exist_ok=True)
-            atomic_write_json(state_dir / STATE_FILENAME, self.snapshot())
-        except OSError:
-            logger.exception("Could not write %s", state_dir / STATE_FILENAME)
+            replace(gui_snapshot_key(root), self.snapshot())
+        except (OSError, StoreError):
+            # A snapshot that cannot be written must not fail the mutation that scheduled it,
+            # so this is logged with the project it belongs to rather than raised.
+            logger.exception("Could not write the GUI snapshot for %s", root)
 
     def load_from_disk(self, project_root: Path) -> bool:
         """Load a previous snapshot from ``<project_root>/.tcip/state/gui.json``.
 
         Returns ``True`` if a snapshot was loaded, ``False`` otherwise. Called when
         a project becomes known (dataset select) so backend state survives a restart.
+        An absent snapshot is the ordinary first-open answer and returns quietly; one that
+        exists and will not decode is logged, because that is a project losing state it had.
         """
-        path = Path(project_root) / ".tcip" / "state" / STATE_FILENAME
-        if not path.exists():
-            return False
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = read(gui_snapshot_key(project_root), default=None)
+            if data is None:
+                return False
             self._state = GuiState.model_validate(data)
             self._version += 1
             return True
         except Exception:
-            logger.exception("Could not load GUI state from %s", path)
+            logger.exception("Could not load the GUI snapshot for %s", project_root)
             return False
 
 
