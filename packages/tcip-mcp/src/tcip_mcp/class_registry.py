@@ -39,6 +39,10 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tcip_store import Key
 
 #: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module docstring.
 ATTR_TYPES = ("categorical", "ordinal")
@@ -175,16 +179,49 @@ def attribute_schema_digest(registry: ClassRegistry, subject: str) -> str | None
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def _registry_key(path: str | Path) -> "Key":
+    """The stored registry a ``classes.json`` path names, addressed by the dataset root holding it."""
+    from tcip_mcp.dataset_layout import class_registry_key
+
+    return class_registry_key(Path(path).absolute().parent)
+
+
 def read_registry(path: str | Path) -> ClassRegistry:
-    """Read ``classes.json`` into a :class:`ClassRegistry`."""
-    return registry_from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+    """Read ``classes.json`` into a :class:`ClassRegistry`.
+
+    Absence and corruption are different answers: no registry raises ``FileNotFoundError``,
+    and a registry whose bytes are present but will not decode raises :class:`RegistryError`,
+    the same refusal a structurally invalid registry raises. Reading an undecodable registry
+    as an empty one would let every name-based label under it train as an unknown subject.
+    """
+    import tcip_store
+
+    try:
+        document = tcip_store.read(_registry_key(path))
+    except tcip_store.NotFound as exc:
+        raise FileNotFoundError(f"no class registry at {path}") from exc
+    except tcip_store.DecodeError as exc:
+        raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
+    return registry_from_dict(document)
 
 
 def write_registry(path: str | Path, registry: ClassRegistry) -> None:
-    """Write a :class:`ClassRegistry` to ``classes.json`` (atomic)."""
-    from tcip_mcp.utils.atomic_io import atomic_write_text
+    """Write a :class:`ClassRegistry` to ``classes.json``."""
+    import tcip_store
 
-    atomic_write_text(Path(path), json.dumps(registry_to_dict(registry), indent=2) + "\n")
+    tcip_store.replace(_registry_key(path), registry_to_dict(registry))
+
+
+def copy_registry(source: str | Path, destination: str | Path) -> None:
+    """Place one dataset's registry beside another dataset's data.
+
+    Carries the stored document across rather than a re-serialization of a parsed registry,
+    so a materialized copy declares exactly what its source declares and a digest taken
+    against either one agrees, and it lands through the one writer every registry write uses.
+    """
+    import tcip_store
+
+    tcip_store.replace(_registry_key(destination), tcip_store.read(_registry_key(source)))
 
 
 def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:

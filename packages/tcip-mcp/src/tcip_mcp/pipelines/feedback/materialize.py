@@ -14,12 +14,15 @@ copied image's dimensions (the canonical JSON is pixel-space), no inference re-r
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import tcip_store
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
@@ -30,6 +33,38 @@ from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+
+_CURATED_DOC = RootedFileLocator(suffix=".json")
+"""A curated dataset's own documents. The output directory is wherever the caller asked the
+dataset to be materialized, so no dataset resolver owns its layout."""
+
+CURATED_MANIFEST_STORE = "curated_manifest"
+_CURATED_MANIFEST_PARTS = ("curated_manifest",)
+register_store(
+    StoreDescriptor(
+        name=CURATED_MANIFEST_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(default=None),
+        concurrency="last_writer_wins",
+        locator=_CURATED_DOC,
+    )
+)
+
+
+def curated_manifest_key(output_dir: str | Path) -> Key:
+    """What a curated dataset was assembled from, image by image.
+
+    ``last_writer_wins``: written once, whole, at the end of the materialization that
+    produced the directory it describes.
+    """
+    return Key(CURATED_MANIFEST_STORE, str(Path(output_dir).absolute()), _CURATED_MANIFEST_PARTS)
+
+
+def curated_manifest_path(output_dir: str | Path) -> Path:
+    """Where the manifest lands, for a caller reporting the artifact it just produced."""
+    key = curated_manifest_key(output_dir)
+    return Path(key.scope, *_CURATED_DOC.relative_path(key.scope, key.parts).parts)
 
 
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
@@ -182,7 +217,9 @@ def materialize_dataset(
         # quarantine can actually protect these review-harvested negatives later; without this,
         # confirmed_negative_names has no classes.json to compare against and quarantine can never
         # fire here (a permanent no-op, not the "admit until proven stale" default it should be).
-        from tcip_mcp.class_registry import attribute_schema_digest, read_registry
+        from tcip_mcp.class_registry import (
+            RegistryError, attribute_schema_digest, copy_registry, read_registry,
+        )
         from tcip_mcp.dataset_layout import (
             classes_path, dataset_root_of, stamp_image_status_digests,
         )
@@ -192,10 +229,10 @@ def materialize_dataset(
         if src_classes is not None and src_classes.is_file():
             try:
                 digest = attribute_schema_digest(read_registry(src_classes), neg_subject)
-            except (OSError, ValueError):
+            except (OSError, RegistryError):
                 digest = None
             if digest is not None:
-                shutil.copy2(src_classes, classes_path(out))
+                copy_registry(src_classes, classes_path(out))
                 stamp_image_status_digests(out, bucket_key, negatives, digest)
 
     manifest = {
@@ -209,7 +246,7 @@ def materialize_dataset(
         "subjects": sorted(subjects),
         "images": manifest_images,
     }
-    (out / "curated_manifest.json").write_text(json.dumps(manifest, indent=2))
+    tcip_store.replace(curated_manifest_key(out), manifest)
 
     return {
         **counts,
@@ -217,7 +254,7 @@ def materialize_dataset(
         "subject": neg_subject,
         "output_dir": str(out),
         "structure": f"{out}/images/ + {out}/annotations/",
-        "manifest": str(out / "curated_manifest.json"),
+        "manifest": str(curated_manifest_path(out)),
     }
 
 

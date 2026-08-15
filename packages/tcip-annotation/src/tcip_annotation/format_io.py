@@ -19,9 +19,12 @@ Usage::
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Literal
+
+import tcip_store
+from tcip_store import Key, StoreDescriptor, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import ANNOTATIONS_KEY, read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
@@ -29,6 +32,27 @@ from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 AnnotFormat = Literal["coco", "json"]
 
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
+
+COCO_DOCUMENTS_STORE = "coco_documents"
+_COCO_DOCUMENT_LOCATOR = RootedFileLocator(suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=COCO_DOCUMENTS_STORE,
+        kind="blob",
+        key_fields=("stem",),
+        locator=_COCO_DOCUMENT_LOCATOR,
+    )
+)
+
+
+def coco_document_key(directory: str | Path, stem: str) -> Key:
+    """One assembled COCO document, addressed by the directory that holds it.
+
+    A blob on the same terms as a per-image label document: it is written whole, from a view
+    the caller already assembled. This package receives a location and never learns a layout,
+    so an export bucket and a dataset root are addressed the same way.
+    """
+    return Key(COCO_DOCUMENTS_STORE, str(Path(directory).absolute()), (str(stem),))
 
 
 # ── Format detection ────────────────────────────────────────────────────────
@@ -226,9 +250,11 @@ def write_coco(
                     rec[k] = v
             coco["annotations"].append(rec)
             ann_id += 1
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(coco, f, indent=2)
+    target = Path(path)
+    tcip_store.put_blob(
+        coco_document_key(target.parent, target.stem),
+        json.dumps(coco, indent=2).encode("utf-8"),
+    )
 
 
 # ── dispatch ────────────────────────────────────────────────────────────────
