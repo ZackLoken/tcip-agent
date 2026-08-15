@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 
 import pytest
 from pathlib import Path
@@ -27,7 +28,7 @@ if str(_MCP_SRC) not in sys.path:
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
-from tcip_mcp.traits import TraitSpec  # noqa: E402
+from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 
 
@@ -429,11 +430,51 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
     prefixed = {c for c in schema if c.startswith(spec.phenology_prefix + "_")}
     # The provisional marker is stamped by the delivery tool rather than computed here, and exists
     # only when the spec names a majority alias for it to qualify.
-    stamped = ({f"{spec.phenology_prefix}_{spec.majority_label}_provisional"}
-               if spec.majority_milestone else set())
+    marker = phenology.majority_provisional_column(spec)
+    stamped = {marker} if marker else set()
     assert prefixed - produced - stamped == set()
     assert produced - schema == set()  # and nothing computed is silently dropped
     assert not any(c.startswith(f"{spec.phenology_prefix}__") for c in schema)
+
+
+# Trait-neutral, but carrying the field shape a registered trait's config authors, so the column
+# name below is the one a real delivery builds rather than one a bare stub happens to allow.
+_MAJORITY_ALIAS_SPEC = TraitSpec(
+    name="unit",
+    count_objective=COUNT_UNBIASED,
+    localization=CENTER_MATCH,
+    localization_tolerance="half_class_avg_size",
+    localization_tolerance_frac=0.5,
+    positive_class_name="present",
+    milestone_fractions=(0.05, 0.50, 0.95),
+    milestone_on="positive_fraction",
+    majority_milestone="95per",
+    majority_provisional=True,
+    phenology_prefix="unit",
+    majority_label="crossing",
+)
+
+
+def test_the_majority_provisional_column_name_has_one_owner():
+    """The marker column is named from the spec's own prefix and majority label, and the schema
+    declares exactly the name that owner returns, so a delivery door stamping through the same owner
+    cannot name the column differently from the schema that must declare it.
+    """
+    assert phenology.majority_provisional_column(_MAJORITY_ALIAS_SPEC) == "unit_crossing_provisional"
+    declared = [c for c in phenology.phenology_csv_columns(_MAJORITY_ALIAS_SPEC)
+                if c.endswith("_provisional")]
+    assert declared == [phenology.majority_provisional_column(_MAJORITY_ALIAS_SPEC)]
+
+
+def test_a_spec_naming_no_majority_crossing_has_no_marker_column():
+    """Nothing qualifies an alias the spec never names, so the owner returns no name and the schema
+    declares no marker column, while the trait's own milestone dates still ship.
+    """
+    no_alias = replace(_MAJORITY_ALIAS_SPEC, majority_milestone="")
+    assert phenology.majority_provisional_column(no_alias) is None
+    columns = phenology.phenology_csv_columns(no_alias)
+    assert not [c for c in columns if c.endswith("_provisional")]
+    assert "unit_95per_date" in columns
 
 
 def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(tmp_path):

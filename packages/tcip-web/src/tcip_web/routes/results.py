@@ -414,8 +414,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         "producer_experiment_id": producer.get("experiment_id"),
     }
     if payload.payload == "milestones":
-        if measurement.spec.majority_milestone:
-            stamp[f"{measurement.spec.phenology_prefix}_{measurement.spec.majority_label}_provisional"] = (
+        provisional_column = phenology.majority_provisional_column(measurement.spec)
+        if provisional_column:
+            stamp[provisional_column] = (
                 "true" if measurement.spec.majority_provisional else "false")
         rows = [{**row, **stamp} for row in measurement.milestone_rows()]
         keys = phenology.phenology_csv_columns(measurement.spec)
