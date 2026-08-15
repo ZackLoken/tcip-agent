@@ -147,6 +147,19 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-annotation/src/tcip_annotation/utils.py | Shared utilities: image orientation, geometry helpers. | 0 | 4 |
 | packages/tcip-annotation/src/tcip_annotation/viz.py | Visualization rendering: draws annotations and predictions on images. | 2 | 1 |
 
+## tcip-store
+
+Counts in this table are import edges inside `packages/tcip-store/src`, counted the same way as every other table here. This package is not one of the five roots the regenerated module inventory scanned, so its rows are not cross-checked against that JSON.
+
+| Module path | Ownership (one line) | In-repo imports | Imported by |
+|---|---|---|---|
+| packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 4 | 0 |
+| packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 4 |
+| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs. | 3 | 1 |
+| packages/tcip-store/src/tcip_store/model.py | Identity and value types the seam speaks on every backend: Key, Version, Versioned, LogPage, Capabilities. | 0 | 5 |
+| packages/tcip-store/src/tcip_store/registry.py | The store catalogue: kind, key shape, codec, concurrency policy, durability, enumeration. | 3 | 3 |
+| packages/tcip-store/src/tcip_store/store.py | The bound-backend surface and the rules that must mean the same thing on every backend. | 3 | 1 |
+
 ## tcip-web
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |

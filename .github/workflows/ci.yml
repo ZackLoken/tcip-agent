@@ -65,12 +65,13 @@ jobs:
       - name: Install packages
         run: |
           pip install mypy
+          pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
           pip install -e "packages/tcip-web[dev]"
 
       - name: Type check (mypy, permissive; see mypy.ini)
-        run: mypy packages/tcip-annotation/src packages/tcip-mcp/src packages/tcip-web/src
+        run: mypy packages/tcip-store/src packages/tcip-annotation/src packages/tcip-mcp/src packages/tcip-web/src
 
   python:
     runs-on: ubuntu-latest
@@ -93,6 +94,7 @@ jobs:
       - name: Install packages
         run: |
           pip install pytest-timeout pytest-xdist ruff
+          pip install -e packages/tcip-store
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
           pip install -e "packages/tcip-web[dev]"
