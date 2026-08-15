@@ -31,12 +31,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
 from tcip_mcp.pipelines.resolution import VALIDATED_REVIEW_CONFIRMED, ResolvedBundle
-
-_POSITIVE_ACTIONS = {"accepted", "edited"}
 
 # Every name resolve_operating_point can put in sweep["failures"] (cross-cutting named-failure
 # architecture), paired with its breeder-facing message. describe_review_validation surfaces the
@@ -145,7 +145,7 @@ def _breeder_message(name: str) -> str:
     raise AssertionError(f"{name!r} is not a name in _FAILURE_MESSAGES")
 
 
-def _to_xywh(box_norm: list, img_w: float, img_h: float) -> list[float]:
+def _to_xywh(box_norm: Sequence[float], img_w: float, img_h: float) -> list[float]:
     """Normalized center-form ``[cx, cy, w, h]`` -> top-left ``[x, y, w, h]`` scaled by image dims.
 
     With no image dimensions the unit square (1.0, 1.0) keeps every record on one consistent
@@ -279,9 +279,8 @@ def review_to_records(
         gt: list[dict] = []
         dt: list[dict] = []
         for entry in scoped:
-            gt_norm = entry.get("gt_bbox_norm")
-            pred_norm = entry.get("pred_bbox_norm")
-            if gt_norm is None and pred_norm is None:
+            verdict = decode_verdict(entry)
+            if not verdict.geometry_recorded:
                 # A coverage-only attestation ("swept this image, found nothing more", the Review
                 # tab's "sweep" verdict: neither gt_idx nor pred_idx set and no edited geometry
                 # either) carries no class-scoped evidence at all, only its own
@@ -289,9 +288,7 @@ def review_to_records(
                 # Requiring a resolvable class_id here would refuse the whole reference over an
                 # entry that could never contribute a gt/dt box in the first place.
                 continue
-            action = entry.get("action")
-            cid_raw = entry.get("class_id")
-            if cid_raw is None:
+            if verdict.class_id is None:
                 # An unresolved class identity (never recorded, or the producing bucket's own
                 # id_map didn't recognize this verdict's class_name, e.g. an attribute-scoped
                 # bucket, whose id_map is keyed by attribute values, being handed a GT annotation's
@@ -304,19 +301,20 @@ def review_to_records(
                     f"{_breeder_message('class_id_unresolvable')} "
                     f"(image {img_name!r}, class {entry.get('class_name')!r})"
                 )
-            cid = int(cid_raw)
-            conf = entry.get("conf")
+            cid = verdict.class_id
             # dt: the model's own prediction with its recorded score (any verdict that has one).
-            if pred_norm and len(pred_norm) == 4 and conf is not None:
-                dt.append({"category_id": cid + 1, "bbox": _to_xywh(pred_norm, img_w, img_h),
-                           "score": float(conf)})
+            if verdict.pred_box is not None and verdict.conf is not None:
+                dt.append({"category_id": cid + 1,
+                           "bbox": _to_xywh(verdict.pred_box, img_w, img_h),
+                           "score": verdict.conf})
             # gt: boxes the breeder affirmed exist (accepted FP carries only a predicted box).
-            if action in _POSITIVE_ACTIONS:
-                box = gt_norm or pred_norm
-                if box and len(box) == 4:
-                    gt.append({"category_id": cid + 1, "bbox": _to_xywh(box, img_w, img_h),
-                               "iscrowd": 0})
-        has_missed_object_attestation = any(e.get("missed_object_attested") for e in scoped)
+            if verdict.is_positive and verdict.affirmed_box is not None:
+                gt.append({"category_id": cid + 1,
+                           "bbox": _to_xywh(verdict.affirmed_box, img_w, img_h),
+                           "iscrowd": 0})
+        has_missed_object_attestation = any(
+            decode_verdict(e).missed_object_attested for e in scoped
+        )
         records.append({"width": int(img_w), "height": int(img_h),
                         "image_id": Path(img_name).stem, "gt": gt, "dt": dt,
                         "adjudication_covered": gt_preexisting or has_missed_object_attestation})

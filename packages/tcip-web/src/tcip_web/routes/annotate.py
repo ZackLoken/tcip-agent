@@ -15,9 +15,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_annotation import BBox, Point, Polygon
-from tcip_annotation.json_io import read_annotations, write_annotations
+from tcip_annotation.json_io import (
+    annotation_from_payload,
+    read_annotations_versioned,
+    write_annotations,
+)
 from tcip_annotation.state import Annotation
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+from tcip_store import Version, VersionConflict
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import PredictionReference, store
@@ -57,9 +62,8 @@ class SavePayload(BaseModel):
     annotations: list[AnnotationPayload] = []
     # Project root for the audit trail (optional; skipped if absent).
     project_root: Optional[str] = None
-    # The label-file mtime token the client loaded. When present, a write is rejected (409) if the
-    # file changed underneath the client (a concurrent agent or second browser tab), so its edits
-    # aren't clobbered. Omit to skip the check.
+    # The label document's version token as the client loaded it: with one, the save is a
+    # compare-and-set and a 409 says it changed underneath. Omit to skip the comparison.
     base_mtime: Optional[str] = None
     # GUI-set annotator identity (bare name, e.g. "breeder"); stamped as created_by ("user:<name>").
     # Omitted by non-GUI callers -> backend falls back to the OS/env user.
@@ -92,21 +96,6 @@ def _guard_label_path(path: Optional[str]) -> None:
         assert_path_allowed(path)
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
-
-
-def _mtime_token(path: Optional[str]) -> Optional[str]:
-    """Modification time (ns) of a label file as an opaque string token, or None if absent.
-
-    A string, not an int: the ns value exceeds JavaScript's 2**53 exact-integer range, so a
-    numeric token is silently rounded by the browser's JSON parse and every echo mismatches
-    (the 409-on-every-save bug). The client never inspects it: it only echoes it back.
-    """
-    if not path:
-        return None
-    try:
-        return str(os.stat(path).st_mtime_ns)
-    except OSError:
-        return None
 
 
 def _ann_dict(a: Annotation) -> dict:
@@ -170,15 +159,18 @@ def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
     w, h = _image_dims(image_path)
     _guard_label_path(label_path)
     annotations: list[dict] = []
+    token: Optional[str] = None
     if label_path:
-        annotations = [_ann_dict(a) for a in read_annotations(label_path)]
+        stored, version = read_annotations_versioned(label_path)
+        annotations = [_ann_dict(a) for a in stored]
+        token = version.token
     return {
         "image_path": image_path,
         "img_width": w,
         "img_height": h,
         "annotations": annotations,
         # Version token the client echoes back on save for the lost-update guard.
-        "base_mtime": _mtime_token(label_path),
+        "base_mtime": token,
     }
 
 
@@ -194,53 +186,28 @@ def save_labels(payload: SavePayload) -> dict:
     w, h = _image_dims(payload.image_path)
     _guard_label_path(payload.label_path)
 
-    # Lost-update guard: reject if the label file changed since the client loaded it (a concurrent
-    # agent write or a second browser tab). The client resolves the 409 by reloading. Omitting
-    # base_mtime skips the check.
-    if payload.base_mtime is not None and payload.label_path:
-        if _mtime_token(payload.label_path) != payload.base_mtime:
-            raise HTTPException(409, {"error": "label file changed since it was loaded"})
-
-    # Human-authored GT: a round-tripped shape keeps its original created_by (the creator stays the
-    # creator through edits); only shapes with no provenance (new ones) are stamped to the current
-    # annotator. json_io persists all four provenance fields natively.
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
-
-    def _to_annotation(ap: AnnotationPayload) -> Annotation:
-        geometry = None
-        if ap.rings:
-            geometry = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ring] for ring in ap.rings])
-        elif ap.points:
-            # The canvas draws one contour by hand: single-ring input. Polygon itself supports
-            # multiple rings (occlusion-split model output), but a freshly-drawn shape is always one.
-            geometry = Polygon(rings=[[(float(p[0]), float(p[1])) for p in ap.points]])
-        elif ap.bbox is not None:
-            geometry = BBox(*ap.bbox)
-        elif ap.point is not None:
-            geometry = Point(float(ap.point[0]), float(ap.point[1]))
-        # accepted_* only ride along on round-tripped shapes (created_by present): a new shape
-        # claiming acceptance would mint review sign-off that never happened.
-        round_tripped = bool(ap.created_by)
-        return Annotation(
-            subject=ap.subject,
-            geometry=geometry,
-            attributes=dict(ap.attributes),
-            created_by=ap.created_by or author,
-            created_at=ap.created_at if round_tripped else now_iso,
-            accepted_by=ap.accepted_by if round_tripped else None,
-            accepted_at=ap.accepted_at if round_tripped else None,
-        )
-
-    annotations = [_to_annotation(ap) for ap in payload.annotations]
+    annotations = [
+        annotation_from_payload(ap.model_dump(), author=author, now=now_iso)
+        for ap in payload.annotations
+    ]
 
     written = payload.label_path is not None
+    token: Optional[str] = None
     if payload.label_path:
+        # The lost-update guard, inside the store's own lock: with a token the write is refused
+        # unless the stored document still matches it, and the client resolves the 409 by reloading.
+        expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
         try:
-            os.makedirs(os.path.dirname(payload.label_path) or ".", exist_ok=True)
-            write_annotations(payload.label_path, annotations, w, h, keep_empty=True)
+            version = write_annotations(
+                payload.label_path, annotations, w, h, keep_empty=True, expect=expect
+            )
+        except VersionConflict as exc:
+            raise HTTPException(409, {"error": "label file changed since it was loaded"}) from exc
         except OSError as exc:
             raise HTTPException(500, f"could not write labels: {exc}") from exc
+        token = version.token if version is not None else None
 
     _audit_gui_write(payload)
 
@@ -250,7 +217,7 @@ def save_labels(payload: SavePayload) -> dict:
         "label_written": written,
         "n_annotations": len(annotations),
         # New version token so the client can save again without a reload.
-        "base_mtime": _mtime_token(payload.label_path),
+        "base_mtime": token,
     }
 
 

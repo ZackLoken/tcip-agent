@@ -40,8 +40,12 @@ from __future__ import annotations
 import json
 import math
 import os
-import tempfile
+from collections.abc import Mapping
 from pathlib import Path
+
+import tcip_store
+from tcip_store import Key, StoreDescriptor, Version, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
@@ -50,25 +54,47 @@ ANNOTATIONS_KEY = "annotations"  # the one top-level list key; format_io.detect_
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
 
-# ── low-level file I/O (tcip-annotation must not depend on tcip-mcp) ──────────
+# ── the store (tcip-annotation must not depend on tcip-mcp) ───────────────────
+
+ANNOTATION_RECORDS_STORE = "annotation_records"
+_ANNOTATION_RECORD_LOCATOR = RootedFileLocator(suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=ANNOTATION_RECORDS_STORE,
+        kind="blob",
+        key_fields=("stem",),
+        locator=_ANNOTATION_RECORD_LOCATOR,
+    )
+)
 
 
-def _atomic_write_json(path: str, payload: dict) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            # allow_nan=False: a non-finite value here is a bug we sanitize before this call, but
-            # fail loudly rather than emit non-standard `NaN` that strict parsers (JS, jq) reject.
-            json.dump(payload, f, ensure_ascii=False, indent=1, allow_nan=False)
-        os.replace(tmp, str(p))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+def annotation_record_key(directory: str | Path, stem: str) -> Key:
+    """One image's per-image JSON document, addressed by the directory that holds it.
+
+    The generic form, for a tree no layout resolver describes (a materialized split's
+    ``labels/``, an export bucket) and for a caller using this package on its own. A caller that
+    holds a dataset root mints a layout-aware key from its own resolver instead and hands that to
+    :func:`write_annotations`; both address the same file and take the same lock, since the lock
+    is the file's, not the store name's.
+    """
+    return Key(ANNOTATION_RECORDS_STORE, str(Path(directory).absolute()), (str(stem),))
+
+
+def _record_key(target: Key | str | Path) -> Key:
+    """The key ``target`` names: a key passed straight through, or a path placed generically."""
+    if isinstance(target, Key):
+        return target
+    path = Path(target).absolute()
+    return annotation_record_key(path.parent, path.stem)
+
+
+def _document_bytes(payload: dict) -> bytes:
+    """The exact on-disk bytes of one per-image document.
+
+    ``allow_nan=False``: a non-finite value here is a bug sanitized before this call, and failing
+    loudly beats emitting non-standard ``NaN`` that strict parsers (JS, jq) reject.
+    """
+    return json.dumps(payload, ensure_ascii=False, indent=1, allow_nan=False).encode("utf-8")
 
 
 def _load(path: str) -> dict | None:
@@ -135,6 +161,57 @@ def _coerce_point(pt) -> tuple[float, float] | None:
         return None
 
 
+def _ring_vertex(vertex) -> tuple[float, float]:
+    """A polygon ring vertex as ``(x, y)``, from an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping.
+
+    The producers of ring data disagree on the vertex shape (a canvas round-trip sends pairs, a
+    segmentation prompt sends mappings), so the one conversion door takes either.
+    """
+    if isinstance(vertex, Mapping):
+        return float(vertex["x"]), float(vertex["y"])
+    return float(vertex[0]), float(vertex[1])
+
+
+def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -> Annotation:
+    """One client payload dict as an :class:`Annotation`: the single conversion every save door uses.
+
+    Geometry precedence is ``rings``, then ``points``, then ``bbox``, then ``point``. A payload
+    carrying more than one of them never loses the richer shape: a polygon is the source of truth
+    and its box is derived on write, so letting a box win would collapse it to a box-only record.
+    An empty ``points`` list falls through to ``bbox`` rather than becoming a degenerate polygon.
+    ``point`` is a single placed prompt or keypoint, deliberately a different key from ``points``:
+    a one-vertex contour and a point are not the same geometry.
+
+    Provenance: a payload carrying ``created_by`` is a shape round-tripping back through the
+    client, so it keeps its own ``created_at`` and its review sign-off
+    (``accepted_by``/``accepted_at``) verbatim, and the creator stays the creator through edits.
+    One that does not is new: it is stamped to ``author`` at ``now`` and claims no sign-off, since
+    a new shape minting acceptance would record a review that never happened. With no ``author``
+    resolved either, a new shape carries no provenance rather than a time with nobody attached.
+    """
+    geometry: BBox | Polygon | Point | None = None
+    if payload.get("rings"):
+        geometry = Polygon(rings=[[_ring_vertex(v) for v in ring] for ring in payload["rings"]])
+    elif payload.get("points"):
+        geometry = Polygon(rings=[[_ring_vertex(v) for v in payload["points"]]])
+    elif payload.get("bbox") is not None:
+        x1, y1, x2, y2 = (float(v) for v in payload["bbox"])
+        geometry = BBox(x1, y1, x2, y2)
+    elif payload.get("point") is not None:
+        geometry = Point(float(payload["point"][0]), float(payload["point"][1]))
+    round_tripped = bool(payload.get("created_by"))
+    created_by = payload.get("created_by") or author
+    return Annotation(
+        subject=str(payload["subject"]),
+        geometry=geometry,
+        attributes={str(k): str(v) for k, v in (payload.get("attributes") or {}).items()},
+        created_by=created_by,
+        created_at=payload.get("created_at") if round_tripped else (now if created_by else None),
+        accepted_by=payload.get("accepted_by") if round_tripped else None,
+        accepted_at=payload.get("accepted_at") if round_tripped else None,
+    )
+
+
 def _attributes_of(obj: dict) -> dict[str, str]:
     """The annotation's attribute values (name → value name); non-string entries dropped."""
     raw = obj.get("attributes")
@@ -196,7 +273,36 @@ def read_annotations(path) -> list[Annotation]:
     return _annotations_of(_load(str(path)))
 
 
+def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotation], Version]:
+    """An image's annotations and the version of the document they came from, read together.
+
+    What a load-edit-save client needs: the token names exactly the bytes the client was shown,
+    so a document that changed in between cannot pass the comparison on the way back in. An
+    absent document reads as no annotations at ``Version.ABSENT``, which is the token that says
+    "create this, or refuse". Unreadable bytes read as no annotations at their own version, the
+    same never-raise contract every reader here keeps.
+    """
+    stored = tcip_store.read_blob_versioned(_record_key(target), default=b"")
+    if not stored.value:
+        return [], stored.version
+    try:
+        data = json.loads(stored.value.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return [], stored.version
+    return _annotations_of(data if isinstance(data, dict) else None), stored.version
+
+
 # ── writer ─────────────────────────────────────────────────────────────────
+
+
+def _xywh(box: BBox) -> list[float]:
+    """A pixel box as this schema's ``bbox``: COCO ``[x, y, w, h]``, rounded to 2 decimals.
+
+    The inverse, reading such a record back, is ``BBox(x, y, x + w, y + h)`` in
+    :func:`_annotations_of`, which is what keeps write and read symmetric.
+    """
+    return [round(box.x1, 2), round(box.y1, 2),
+            round(box.x2 - box.x1, 2), round(box.y2 - box.y1, 2)]
 
 
 def _annotation_record(a: Annotation) -> dict | None:
@@ -211,11 +317,9 @@ def _annotation_record(a: Annotation) -> dict | None:
         # The polygon's box travels with it (COCO-style record). Derived from the rings here and
         # never authored or trusted as input: the polygon stays the sole source of truth, so the two
         # can't diverge; every reader re-derives via bbox_of rather than reading this stored value.
-        b = bbox_of(Polygon(valid_rings))
-        rec["bbox"] = [round(b.x1, 2), round(b.y1, 2), round(b.x2 - b.x1, 2), round(b.y2 - b.y1, 2)]
+        rec["bbox"] = _xywh(bbox_of(Polygon(valid_rings)))
     elif isinstance(geom, BBox):
-        rec["bbox"] = [round(geom.x1, 2), round(geom.y1, 2),
-                       round(geom.x2 - geom.x1, 2), round(geom.y2 - geom.y1, 2)]
+        rec["bbox"] = _xywh(geom)
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:
@@ -229,22 +333,29 @@ def _annotation_record(a: Annotation) -> dict | None:
     return rec
 
 
-def write_annotations(path, annotations, img_w: int, img_h: int, *, keep_empty: bool = False) -> None:
-    """Write all of an image's annotations to its per-image JSON file.
+def write_annotations(target, annotations, img_w: int, img_h: int, *,
+                      keep_empty: bool = False, expect: Version | None = None) -> Version | None:
+    """Write all of an image's annotations to its per-image JSON document.
 
-    Empty list: ``keep_empty`` writes ``{"annotations": []}`` (unannotated until a human confirms it),
-    else removes the file; writing an empty file never manufactures a negative.
+    ``target`` is either the document's storage key, minted by whichever resolver owns the tree it
+    lives in, or its path, which is placed generically by :func:`annotation_record_key` here so this
+    package never has to learn a layout.
+
+    Empty list: ``keep_empty`` writes ``{"annotations": []}`` (unannotated until a human confirms
+    it), else removes the document; writing an empty document never manufactures a negative.
+
+    ``expect`` is the version the caller read (:func:`tcip_store.read_blob_versioned`), turning the
+    write into a compare-and-set: anything that changed underneath raises ``VersionConflict`` and
+    nothing is written. Returns the new version, or ``None`` when the document was removed.
     """
     records = [r for r in (_annotation_record(a) for a in annotations) if r is not None]
-    p = str(path)
+    key = _record_key(target)
     if not records and not keep_empty:
-        if os.path.exists(p):
-            os.remove(p)
-        return
-    _atomic_write_json(
-        p, {"image": Path(p).stem, "width": int(img_w), "height": int(img_h),
-            ANNOTATIONS_KEY: records}
-    )
+        tcip_store.delete(key, expect=expect)
+        return None
+    payload = {"image": key.parts[-1], "width": int(img_w), "height": int(img_h),
+               ANNOTATIONS_KEY: records}
+    return tcip_store.put_blob(key, _document_bytes(payload), expect=expect)
 
 
 # ── the one target-membership decision (shared by assembly and the loader) ───
@@ -355,8 +466,7 @@ def to_coco_dataset(
             box = bbox_of(a.geometry)
             rec: dict = {
                 "id": ann_id, "image_id": img_id, "category_id": cid, "iscrowd": 0,
-                "bbox": [round(box.x1, 2), round(box.y1, 2),
-                         round(box.x2 - box.x1, 2), round(box.y2 - box.y1, 2)],
+                "bbox": _xywh(box),
                 "area": round((box.x2 - box.x1) * (box.y2 - box.y1), 2),
             }
             if isinstance(a.geometry, Polygon):

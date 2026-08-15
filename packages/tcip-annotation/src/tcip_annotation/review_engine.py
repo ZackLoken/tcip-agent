@@ -19,17 +19,16 @@ shard, not the whole cross-image log), and a small spatial-hash cache for fast l
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
-import shutil
-import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
-from tcip_store import Key, StoreDescriptor, json_codec, register_store
+import tcip_store
+from tcip_store import Key, StoreDescriptor, Version, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, Point, bbox_of
@@ -140,6 +139,28 @@ def review_verdict_key(state_dir: str | Path, img_name: str) -> Key:
     return Key(REVIEW_VERDICTS_STORE, str(state_dir), (img_name,))
 
 
+LABEL_BASELINES_STORE = "label_baselines"
+BASELINE_DIRNAME = ".original"
+register_store(
+    StoreDescriptor(
+        name=LABEL_BASELINES_STORE,
+        kind="blob",
+        key_fields=("stem",),
+        locator=RootedFileLocator(prefix=(BASELINE_DIRNAME,), suffix=".json"),
+    )
+)
+
+
+def label_baseline_key(label_dir: str | Path, stem: str) -> Key:
+    """One label file's pristine copy, beside the directory the original lives in.
+
+    The generic placement, because the directory is whatever the caller was handed (a dataset's
+    ``annotations/<date>/``, a materialized split's ``labels/``) and this package resolves no
+    layout of its own.
+    """
+    return Key(LABEL_BASELINES_STORE, str(Path(label_dir).absolute()), (str(stem),))
+
+
 # ── Engine ────────────────────────────────────────────────────────────────
 
 
@@ -165,6 +186,7 @@ class ReviewEngine:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.current_user = current_user
         self._review_state: dict = {}
+        self._shard_versions: dict[str, Version] = {}
         self._reviewed_lookup: tuple[str, dict, dict] = ("", {}, {})
         self.load_review_state()
 
@@ -179,59 +201,43 @@ class ReviewEngine:
         return Path(self.state_dir, *relative.parts)
 
     def load_review_state(self) -> None:
-        shards = sorted(self.shard_dir.glob("*.json")) if self.shard_dir.is_dir() else []
-        self._review_state = {"image": self._read_shards(shards)} if shards else {}
-        self._invalidate_reviewed_lookup()
-
-    def _read_shards(self, shards: list[Path]) -> dict:
         per_image: dict = {}
-        for shard in shards:
+        self._shard_versions = {}
+        for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(self.state_dir)):
             try:
-                payload = json.loads(shard.read_text(encoding="utf-8"))
-            except Exception:
-                logger.exception("Could not load review shard %s", shard)
+                stored = tcip_store.read_versioned(key)
+            except tcip_store.StoreError:
+                logger.exception("Could not load review shard %s", key.parts[-1])
                 continue
+            payload = stored.value
             # The true image key is stored inside the payload, so a sanitized/hash-suffixed filename
             # never mutates or merges keys on reload.
             img_name, state = payload.get("img_name"), payload.get("state")
             if img_name is None or state is None:
-                img_name, state = shard.name[: -len(".json")], payload
+                img_name, state = key.parts[-1], payload
             per_image[img_name] = state
-        return per_image
-
-    def _atomic_write_json(self, path: Path, obj: dict) -> None:
-        """Serialize ``obj`` compactly and swap it into ``path`` atomically (temp file +
-        ``os.replace``, fsync'd). A plain ``write_text`` can leave a half-written /
-        truncated file if the process dies mid-write; the atomic swap means a reader
-        always sees either the old or the new complete file, never a torn one.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
-        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, path)
-        finally:
-            if os.path.exists(tmp):
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
+            self._shard_versions[img_name] = stored.version
+        self._review_state = {"image": per_image} if per_image else {}
+        self._invalidate_reviewed_lookup()
 
     def _save_image(self, img_name: str) -> None:
-        """Persist only ``img_name``'s shard: O(detections on that image), not O(all-reviewed)."""
+        """Persist only ``img_name``'s shard: O(detections on that image), not O(all-reviewed).
+
+        Compare-and-set against the version this engine last saw. A refusal is raised, never
+        logged and dropped: this engine rewrites the shard whole from its own cached aggregate,
+        so a shard that moved underneath it would otherwise have another reviewer's verdicts
+        silently overwritten, and a contended shard would be reported to the reviewer as saved.
+        """
         img_data = self._review_state.get("image", {}).get(img_name)
         if img_data is None:
             return
-        try:
-            # Store the true key alongside the state so reload reconstructs it from the payload, not
-            # the (possibly sanitized) filename.
-            self._atomic_write_json(self._shard_path(img_name), {"img_name": img_name, "state": img_data})
-        except Exception:
-            logger.exception("Could not save review shard for %s", img_name)
+        # Store the true key alongside the state so reload reconstructs it from the payload, not
+        # the (possibly sanitized) filename.
+        self._shard_versions[img_name] = tcip_store.replace(
+            review_verdict_key(self.state_dir, img_name),
+            {"img_name": img_name, "state": img_data},
+            expect=self._shard_versions.get(img_name, Version.ABSENT),
+        )
 
     def save_review_state(self) -> None:
         """Flush every image's shard. The per-verdict callers use :meth:`_save_image`
@@ -667,23 +673,26 @@ class ReviewEngine:
 
         Per-file and idempotent: a file is captured the first time it is seen and never
         overwritten afterwards, so labels added after the first backup still get their
-        baseline before the platform first mutates them. Returns the number of files
-        newly captured by this call.
+        baseline before the platform first mutates them. Create-only in one call rather than
+        an existence check and a copy after it, so a baseline written in between is kept
+        instead of being overwritten by this call's read of an already-mutated original.
+        Returns the number of files newly captured by this call.
         """
         captured = 0
         for label_dir in label_dirs:
             d = Path(label_dir)
             if not d.is_dir():
                 continue
-            backup_dir = d / ".original"
             for src in d.iterdir():
                 if not (src.is_file() and src.suffix == ".json"):
                     continue
-                dst = backup_dir / src.name
-                if dst.exists():
+                try:
+                    tcip_store.put_blob(
+                        label_baseline_key(d, src.stem), src.read_bytes(),
+                        expect=Version.ABSENT,
+                    )
+                except tcip_store.VersionConflict:
                     continue
-                backup_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dst)
                 captured += 1
         return captured
 

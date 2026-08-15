@@ -166,7 +166,7 @@ def _calls_for(kind: Kind) -> str:
         return "read / replace / delete / transaction"
     if kind == "log":
         return "append / read_log"
-    return "put_blob / write_blob / open_blob"
+    return "read_blob_versioned / put_blob / write_blob / open_blob / delete"
 
 
 @dataclass(frozen=True)

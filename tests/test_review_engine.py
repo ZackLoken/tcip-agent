@@ -615,15 +615,16 @@ def test_an_attested_miss_stays_attested_when_keyed_to_the_authored_geometry(
     assert entry["gt_bbox_norm"] == pytest.approx([0.466667, 0.28, 0.1, 0.16], abs=1e-6)
 
 
-def test_a_shard_write_that_fails_to_land_leaves_the_review_dir_holding_only_shards(
+def test_a_shard_write_that_fails_to_land_is_refused_out_loud(
     engine: ReviewEngine, unordered_ctx: ReviewContext, tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A shard write that never lands leaves nothing behind and costs only its own verdict.
+    """A shard write that never lands raises rather than being logged and dropped.
 
-    The staging file it writes through must be gone whether or not the swap succeeded: the review
-    dir is enumerated as shards, so a stranded staging file accumulates alongside them. The
-    verdict already confirmed on disk stays complete and readable.
+    A caller told a verdict was recorded when it was not is a reviewer who will never revisit
+    that detection. The staging file it wrote through must also be gone whether or not the swap
+    succeeded, since the review dir is enumerated as shards, and the verdict already confirmed on
+    disk stays complete and readable.
     """
     matches = _unordered_matches(unordered_ctx)
     dets = engine.build_detection_list(unordered_ctx, matches)
@@ -633,10 +634,12 @@ def test_a_shard_write_that_fails_to_land_leaves_the_review_dir_holding_only_sha
         raise OSError("shard swap refused")
 
     monkeypatch.setattr(os, "replace", refuse)
-    engine.record_detection_action(dets[1], unordered_ctx, action="rejected")
+    with pytest.raises(OSError, match="shard swap refused"):
+        engine.record_detection_action(dets[1], unordered_ctx, action="rejected")
     monkeypatch.undo()
 
-    assert sorted(p.name for p in engine.shard_dir.iterdir()) == ["IMG_0501.JPG.json"]
+    assert sorted(p.name for p in engine.shard_dir.glob("*.json")) == ["IMG_0501.JPG.json"]
+    assert [p.name for p in engine.shard_dir.iterdir() if p.suffix == ".tmp"] == []
 
     reloaded = ReviewEngine(state_dir=tmp_path)
     persisted = reloaded.raw_state["image"][unordered_ctx.img_name]["detections"]

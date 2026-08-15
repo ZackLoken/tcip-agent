@@ -279,6 +279,21 @@ def _cmd_hold_lock(root: str, name: str, ready: str) -> None:
         time.sleep(300)
 
 
+def _cmd_write_blob_after(root: str, name: str, mode: str, value: str, ready: str, go: str, result: str) -> None:
+    key = _record(BLOB, root, name)
+    expect = ts.read_blob_versioned(key, default=b"").version if mode == "cas" else None
+    Path(ready).write_text("read", encoding="utf-8")
+    wait_for(Path(go))
+    outcome = "written"
+    try:
+        ts.put_blob(key, value.encode("utf-8"), expect=expect)
+    except ts.VersionConflict:
+        outcome = "VersionConflict"
+    except ts.StoreBusy:
+        outcome = "StoreBusy"
+    Path(result).write_text(json.dumps({"outcome": outcome}), encoding="utf-8")
+
+
 def _cmd_pause_mid_apply(root: str, first: str, second: str, marker: str, pause_s: str) -> None:
     ts.bind(PausingApplyBackend(pause_marker=Path(marker), pause_s=float(pause_s)))
     keys = (_record(LWW, root, first), _record(LWW, root, second))
@@ -299,6 +314,7 @@ _COMMANDS = {
     "count-log": _cmd_count_log,
     "hold-lock": _cmd_hold_lock,
     "pause-mid-apply": _cmd_pause_mid_apply,
+    "write-blob-after": _cmd_write_blob_after,
 }
 
 
