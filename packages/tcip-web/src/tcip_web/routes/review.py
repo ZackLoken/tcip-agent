@@ -40,6 +40,7 @@ from tcip_annotation import (
 )
 from tcip_annotation.json_io import read_annotations
 from tcip_annotation.state import Annotation
+from tcip_mcp.dataset_layout import derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_mcp.utils.atomic_io import append_jsonl, atomic_write_json, read_json
 from tcip_web.identity import resolve_user, user_id
@@ -603,10 +604,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     # with no annotations of any subject is an empty (negative) record.
     has_content = bool(payload.gt_path and os.path.isfile(payload.gt_path)
                        and read_annotations(payload.gt_path))
-    if payload.completed:
-        annotation_status = "complete" if has_content else "negative"
-    else:
-        annotation_status = "partial" if has_content else "unannotated"
+    annotation_status = derive_status(completed=payload.completed, has_content=has_content)
     _audit(payload.project_root, "gui_review_mark_complete", {
         "image_name": payload.image_name,
         "completed": payload.completed,

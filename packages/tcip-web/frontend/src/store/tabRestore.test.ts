@@ -16,6 +16,7 @@ function selection(over: Partial<DatasetSelection> = {}): DatasetSelection {
     date: "2026-01-01",
     image_list: ["a.jpg"],
     current_image_index: 0,
+    images_dir: null,
     annotations_dir: null,
     predictions_dir: null,
     ...over,

@@ -691,7 +691,7 @@ def _focus_annotate(
 ) -> dict:
     """Drive the live Annotate tab to a (subject, date), in the right mode, on a frame labeled for
     the subject. Posts an ``annotate_focus`` event the GUI honors with local view setters."""
-    from tcip_mcp.dataset_layout import annotation_dir, image_dir
+    from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
     from tcip_mcp.web_client import post_panel_event
 
     idir = Path(image_dir(dataset_root, date))
@@ -704,7 +704,7 @@ def _focus_annotate(
     adir = Path(annotation_dir(dataset_root, date))
 
     def _task(stem: str) -> str | None:
-        f = adir / f"{stem}.json"
+        f = adir / label_filename(stem)
         return _subject_task(read_labels(str(f)), subject) if f.is_file() else None
 
     n_annotated = 0
@@ -752,7 +752,7 @@ def _focus_review(
 ) -> dict:
     """Drive the live Review tab to a model's predictions of ``subject`` on a frame. Posts a
     ``review_focus`` event the GUI honors with local setters."""
-    from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.dataset_layout import image_dir, label_filename, prediction_dir
     from tcip_mcp.web_client import post_panel_event
     from tcip_mcp.workspace import is_valid_name
 
@@ -772,7 +772,7 @@ def _focus_review(
     pred_dir = Path(prediction_dir(dataset_root, model_name, date))
 
     def _has_pred(stem: str) -> bool:
-        f = pred_dir / f"{stem}.json"
+        f = pred_dir / label_filename(stem)
         return bool(f.is_file() and any(a.subject == subject and a.geometry is not None
                                         for a in read_labels(str(f))))
 

@@ -131,3 +131,59 @@ def test_dataset_root_of_recovers_the_root_from_any_layout_dir():
     assert dataset_root_of("/data/images/proj/annotations/2026-03-02") == Path("/data/images/proj")
     # A bare segment with nothing above it is not inside a dataset.
     assert dataset_root_of("annotations/2026-03-02") is None
+
+
+def test_the_status_derivation_makes_a_negative_take_the_human_marking() -> None:
+    """A finished image with nothing on it is a negative; an unfinished empty one is not.
+
+    The one mapping every caller shares, so a Complete on an empty image and a Complete on a
+    populated one land on opposite tokens rather than degrees of the same one.
+    """
+    from tcip_mcp.dataset_layout import derive_status
+
+    assert derive_status(completed=True, has_content=False) == "negative"
+    assert derive_status(completed=True, has_content=True) == "complete"
+    assert derive_status(completed=False, has_content=False) == "unannotated"
+    assert derive_status(completed=False, has_content=True) == "partial"
+
+
+def test_only_the_negative_token_reads_as_a_confirmed_negative() -> None:
+    """The predicate every reader shares admits the confirmation and refuses its opposite."""
+    from tcip_mcp.dataset_layout import IMAGE_STATUSES, is_confirmed_negative
+
+    assert is_confirmed_negative("negative")
+    assert not is_confirmed_negative("complete")
+    assert not any(is_confirmed_negative(s) for s in IMAGE_STATUSES if s != "negative")
+    assert not is_confirmed_negative(None)
+
+
+def test_a_bucket_key_takes_apart_into_the_subject_and_date_it_was_built_from() -> None:
+    """The published inverse round-trips every bucket the writer can build, dateless included."""
+    from tcip_mcp.dataset_layout import bucket_subject_date, status_bucket
+
+    for subject, date in (("catkin", "2026-03-02"), ("bush", None)):
+        assert bucket_subject_date(status_bucket(subject, date)) == (subject, date)
+
+
+def test_the_tree_roots_are_the_dated_dirs_without_their_date() -> None:
+    """The top-level calls and the dated ones are one implementation, so they cannot disagree."""
+    from tcip_mcp.dataset_layout import (
+        annotation_root,
+        image_dir,
+        image_root,
+        prediction_root,
+    )
+
+    assert image_root("/ds") == image_dir("/ds", None) == Path("/ds/images")
+    assert annotation_root("/ds") == annotation_dir("/ds", None) == Path("/ds/annotations")
+    assert prediction_root("/ds") == Path("/ds/predictions")
+    assert prediction_dir("/ds", "m", "2026-03-02").is_relative_to(prediction_root("/ds"))
+
+
+def test_a_record_file_name_is_the_stem_the_resolver_would_have_used() -> None:
+    """The name a label or prediction record takes, stated once and reused by both path builders."""
+    from tcip_mcp.dataset_layout import annotation_path, label_filename, prediction_path
+
+    assert label_filename("IMG_0001") == "IMG_0001.json"
+    assert annotation_path("/ds", "2026-03-02", "IMG_0001").name == label_filename("IMG_0001")
+    assert prediction_path("/ds", "m", "2026-03-02", "IMG_0001").name == label_filename("IMG_0001")

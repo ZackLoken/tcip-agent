@@ -27,6 +27,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from tcip_store.file_backend import bind_default
+
 from tcip_mcp.web_client import VALID_PANELS
 from tcip_web.paths import is_loopback_host, origin_allowed
 
@@ -73,6 +75,10 @@ async def _lifespan(_app: FastAPI):
     except Exception:  # pragma: no cover - shutdown cleanup is best-effort
         logger.exception("agent terminal shutdown failed")
 
+
+# At import, not in the lifespan: a route may be exercised against this app without one running,
+# and a route that reaches a store with no backend bound would refuse rather than write.
+bind_default()
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 

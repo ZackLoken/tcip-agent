@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
 
 import { classesApi } from "@/api/classes";
+import type { ImageStatus } from "@/api/classes";
 import { ROUTES } from "@/api/routes";
 import { sessionsApi } from "@/api/sessions";
 import { ProjectPicker } from "@/components/ProjectPicker";
@@ -272,13 +273,10 @@ function App() {
             image_list: imageList,
             complete_override: confirmed,
           });
-          const reconciled = (derivedRes.statuses ?? {}) as Record<
-            string,
-            "complete" | "partial" | "negative" | "unannotated"
-          >;
+          const reconciled = (derivedRes.statuses ?? {}) as Record<string, ImageStatus>;
           const changed = Object.fromEntries(
             Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
-          ) as Record<string, "complete" | "partial" | "negative" | "unannotated">;
+          ) as Record<string, ImageStatus>;
           if (Object.keys(changed).length) {
             await classesApi.setImageStatusBulk(
               projectRoot,

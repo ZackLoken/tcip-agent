@@ -25,6 +25,7 @@ import {
 } from "@/lib/bandSelection";
 import { stepUnsweptCell, type GridCell } from "@/lib/coverage";
 import type { LoadedImage } from "@/lib/imageLoader";
+import { currentImage, labelPath } from "@/lib/paths";
 import { zoomToRect } from "@/lib/viewGeometry";
 import {
   buildAnnotateShapes,
@@ -45,14 +46,7 @@ import {
 } from "@/lib/polygonGeometry";
 import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
-import type {
-  Box,
-  DatasetSelection,
-  Mode,
-  PointShape,
-  PolygonShape,
-  PredictionReference,
-} from "@/store/types";
+import type { Box, Mode, PointShape, PolygonShape, PredictionReference } from "@/store/types";
 
 const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
@@ -62,13 +56,6 @@ const MIN_BOX_SIDE = 3;
 // Screen-px grab radius for a placed point: the whole mark is its own handle, so this matches the
 // mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
 const POINT_HIT_CANVAS = 11;
-
-function currentImagePath(dataset: DatasetSelection): string | null {
-  if (!dataset.dataset_root || !dataset.date) return null;
-  const name = dataset.image_list[dataset.current_image_index];
-  if (!name) return null;
-  return `${dataset.dataset_root}/images/${dataset.date}/${name}`;
-}
 
 /** A polygon's read-only derived box (the axis-aligned bounds of every ring), for box-mode display
  *  only. Reuses ringsBbox (the same min/max the loader and COCO export re-derive), so it can't
@@ -350,7 +337,7 @@ export function AnnotateTab() {
   const [conflict, setConflict] = useState(false);
   const agentActivity = useStore((s) => s.agentActivity);
 
-  const imgPath = currentImagePath(dataset);
+  const imgPath = currentImage(dataset).path;
   const currentImageName = dataset.image_list[dataset.current_image_index] ?? null;
   // A confirmed negative is a completed review (empty): lock it like "complete".
   const currentStatus = currentImageName ? imageStatus.byImage[currentImageName] : undefined;
@@ -739,8 +726,7 @@ export function AnnotateTab() {
 
   useEffect(() => {
     if (!imgPath || !currentImageName) return;
-    const stem = currentImageName.replace(/\.[^.]+$/, "");
-    const label = dataset.annotations_dir ? `${dataset.annotations_dir}/${stem}.json` : null;
+    const label = labelPath(dataset, currentImageName);
     const key = `${imgPath}\0${label ?? ""}`;
 
     // Already displaying this exact image + label target. Ignore: this is what

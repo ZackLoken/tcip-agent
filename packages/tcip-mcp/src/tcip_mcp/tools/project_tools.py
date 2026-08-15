@@ -210,7 +210,9 @@ def view_gui_state() -> dict:
     dataset_root, date = ds.get("dataset_root"), ds.get("date")
     current_image = None
     if dataset_root and date and 0 <= idx < len(image_list):
-        current_image = str(Path(dataset_root) / "images" / date / image_list[idx])
+        from tcip_mcp.dataset_layout import image_dir
+
+        current_image = str(image_dir(dataset_root, date) / image_list[idx])
     ctx.update({
         "dataset_root": dataset_root,
         "subject": ds.get("subject"),
@@ -258,9 +260,10 @@ def inspect_project(project_path: str = "") -> dict:
     # tcip_mcp.dataset_layout); ingest_images writes there. Count that tree
     # recursively so date buckets aren't missed, and report the capture dates.
     image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
-    images_dir = root / "images"
+    from tcip_mcp import dataset_layout
+
+    images_dir = dataset_layout.image_root(root)
     if images_dir.is_dir():
-        from tcip_mcp import dataset_layout
 
         status["image_count"] = sum(
             1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in image_exts
@@ -322,7 +325,10 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
 
     with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
         # Canonical dataset trees.
-        for tree, exts in ((root / "images", image_exts), (root / "annotations", label_exts)):
+        from tcip_mcp.dataset_layout import annotation_root, image_root
+
+        for tree, exts in ((image_root(root), image_exts),
+                           (annotation_root(root), label_exts)):
             if tree.is_dir():
                 for sub in tree.rglob("*"):
                     if sub.is_file() and sub.suffix.lower() in exts:

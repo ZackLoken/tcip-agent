@@ -23,6 +23,9 @@ from typing import TYPE_CHECKING
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.dataset_layout import (
+    CONFIRMED_NEGATIVE, annotation_root, image_root, label_filename,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -106,8 +109,8 @@ def materialize_dataset(
     """
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
     out = Path(output_dir)
-    images_out = out / "images"
-    labels_out = out / "annotations"
+    images_out = image_root(out)
+    labels_out = annotation_root(out)
     images_out.mkdir(parents=True, exist_ok=True)
     labels_out.mkdir(parents=True, exist_ok=True)
 
@@ -147,7 +150,7 @@ def materialize_dataset(
                 place(str(src), str(dst_img))
             record_name = src.name
             stem = src.stem
-        label_path = labels_out / f"{stem}.json"
+        label_path = labels_out / label_filename(stem)
         img_w, img_h = image_dimensions(src)
 
         if status == "positive":
@@ -169,22 +172,23 @@ def materialize_dataset(
     # never bare empty files (someone may have emptied a label mid-work). The subject is threaded
     # (or the single subject the verdicts name); with none, negatives can't be attributed and are
     # left as unconfirmed empties rather than mis-keyed.
-    negatives = {e["image"]: "negative" for e in manifest_images if e["status"] == "hard_negative"}
+    negatives = {e["image"]: CONFIRMED_NEGATIVE
+                 for e in manifest_images if e["status"] == "hard_negative"}
     neg_subject = subject or (next(iter(subjects)) if len(subjects) == 1 else None)
     if negatives and neg_subject:
-        from tcip_mcp.dataset_layout import image_status_path, status_bucket
+        from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket
 
-        status_file = image_status_path(out)
-        status_file.parent.mkdir(parents=True, exist_ok=True)
         bucket_key = status_bucket(neg_subject, None)
-        status_file.write_text(json.dumps({bucket_key: negatives}, indent=2))
+        replace_image_status_store(out, {bucket_key: negatives})
 
         # Give the materialized dataset its own registry copy + a fresh per-image schema stamp, so
         # quarantine can actually protect these review-harvested negatives later; without this,
         # confirmed_negative_names has no classes.json to compare against and quarantine can never
         # fire here (a permanent no-op, not the "admit until proven stale" default it should be).
         from tcip_mcp.class_registry import attribute_schema_digest, read_registry
-        from tcip_mcp.dataset_layout import classes_path, dataset_root_of, image_status_digest_path
+        from tcip_mcp.dataset_layout import (
+            classes_path, dataset_root_of, stamp_image_status_digests,
+        )
 
         src_root = dataset_root_of(source_images_dir)
         src_classes = classes_path(src_root) if src_root is not None else None
@@ -194,9 +198,8 @@ def materialize_dataset(
             except (OSError, ValueError):
                 digest = None
             if digest is not None:
-                shutil.copy2(src_classes, out / "classes.json")
-                image_status_digest_path(out).write_text(json.dumps(
-                    {bucket_key: {name: digest for name in negatives}}, indent=2))
+                shutil.copy2(src_classes, classes_path(out))
+                stamp_image_status_digests(out, bucket_key, negatives, digest)
 
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(),

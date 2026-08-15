@@ -3,6 +3,7 @@
  * All routes hit /api/* and return typed payloads.
  */
 
+import type { ImageStatus } from "@/api/classes";
 import { asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type { CanvasStateBody } from "@/lib/canvasSync";
@@ -394,7 +395,7 @@ export const api = {
         status: string;
         image_status: MatchesResponse["image_status"];
         // Per-image annotation status after the GT write (null when unchanged), for the client to sync.
-        annotation_status: "complete" | "partial" | "negative" | "unannotated" | null;
+        annotation_status: ImageStatus | null;
         // Fresh matches recomputed against the written GT; install these instead of re-fetching.
         matches: MatchesResponse;
       }>(ROUTES.postReviewAction, {
@@ -415,7 +416,7 @@ export const api = {
         status: string;
         image_status: MatchesResponse["image_status"];
         // Derived server-side from the GT file, never from a stale client snapshot.
-        annotation_status: "complete" | "partial" | "negative" | "unannotated";
+        annotation_status: ImageStatus;
       }>(ROUTES.postReviewMarkComplete, {
         method: "POST",
         body: JSON.stringify(body),

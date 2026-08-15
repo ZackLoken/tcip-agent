@@ -18,6 +18,8 @@ def _scan_dataset(root: str) -> dict:
     Labels are the name-based per-image JSON (one file per image, all subjects) under
     ``annotations/<date>/`` (no detect/segment split), or a single assembled dataset-level COCO.
     """
+    from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
+
     root_path = Path(root)
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
     images: list[str] = []
@@ -26,14 +28,14 @@ def _scan_dataset(root: str) -> dict:
     detected_format: str | None = None
 
     # Find images (recurse to catch the canonical images/<date>/ layout).
-    images_dir = root_path / "images"
+    images_dir = image_root(root_path)
     scan_root = images_dir if images_dir.is_dir() else root_path
     for f in sorted(scan_root.rglob("*")):
         if f.is_file() and f.suffix.lower() in image_exts:
             images.append(str(f))
 
     # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject).
-    ann_dir = root_path / "annotations"
+    ann_dir = annotation_root(root_path)
     if ann_dir.is_dir():
         labels = [str(f) for f in sorted(ann_dir.rglob("*.json")) if f.is_file()]
         if labels:
@@ -57,7 +59,7 @@ def _scan_dataset(root: str) -> dict:
             break
 
     # Predictions: predictions/<model>/[<date>/]<stem>.json (operating_point.json is a stamp).
-    pred_dir = root_path / "predictions"
+    pred_dir = prediction_root(root_path)
     if pred_dir.is_dir():
         preds = [str(f) for f in sorted(pred_dir.rglob("*.json"))
                  if f.is_file() and f.name != "operating_point.json"]
@@ -453,15 +455,14 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
     No subject threaded -> nothing to attribute the confirmations to, so none are carried.
     """
-    import json as _json
     import shutil as _shutil
 
     if not subject:
         return
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        annotation_date, classes_path, dataset_root_of, image_status_digest_path,
-        image_status_path, status_bucket,
+        CONFIRMED_NEGATIVE, annotation_date, classes_path, dataset_root_of,
+        replace_image_status_store, stamp_image_status_digests, status_bucket,
     )
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
@@ -497,14 +498,12 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     bucket_key = status_bucket(subject, None)
     for split_name, split_stems in parts.items():
         names = {Path(image_map[s]).name for s in split_stems if s in image_map}
-        carried = {n: "negative" for n in sorted(negatives & names)}
+        carried = {n: CONFIRMED_NEGATIVE for n in sorted(negatives & names)}
         if not carried:
             continue
         split_root = out_dir / split_name
-        store = image_status_path(split_root)
-        store.parent.mkdir(parents=True, exist_ok=True)
-        store.write_text(_json.dumps({bucket_key: carried}, indent=2), encoding="utf-8")
+        split_root.mkdir(parents=True, exist_ok=True)
+        replace_image_status_store(split_root, {bucket_key: carried})
         if digest is not None and src_classes is not None:
-            _shutil.copy2(src_classes, split_root / "classes.json")
-            image_status_digest_path(split_root).write_text(_json.dumps(
-                {bucket_key: {n: digest for n in carried}}, indent=2))
+            _shutil.copy2(src_classes, classes_path(split_root))
+            stamp_image_status_digests(split_root, bucket_key, carried, digest)

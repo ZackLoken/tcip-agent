@@ -25,9 +25,14 @@ from pydantic import BaseModel
 
 from tcip_mcp.dataset_layout import (
     annotation_dir,
+    annotation_root,
+    classes_path,
+    image_dir,
+    image_root,
     list_subjects,
     models_with_predictions,
     prediction_dir,
+    prediction_root,
     subjects_with_labels,
 )
 from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
@@ -96,11 +101,11 @@ def _dir_mtime_ns(p: Path) -> int:
 
 def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
     sig = [
-        _dir_mtime_ns(root / "images"),
-        _dir_mtime_ns(root / "annotations"),
+        _dir_mtime_ns(image_root(root)),
+        _dir_mtime_ns(annotation_root(root)),
         _dir_mtime_ns(root / "models"),
-        _dir_mtime_ns(root / "predictions"),
-        _dir_mtime_ns(root / "classes.json"),
+        _dir_mtime_ns(prediction_root(root)),
+        _dir_mtime_ns(classes_path(root)),
     ]
     for d in dates:
         sig.append(_dir_mtime_ns(annotation_dir(root, d)))
@@ -116,12 +121,12 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
 
-    dates = _list_children(root / "images")
+    dates = _list_children(image_root(root))
     # Subjects come from the dataset registry, not from listing annotations/: that dir now holds
     # date buckets, not subject dirs.
     subjects = list_subjects(root)
     model_names = sorted(
-        set(_list_children(root / "models")) | set(_list_children(root / "predictions"))
+        set(_list_children(root / "models")) | set(_list_children(prediction_root(root)))
     )
 
     key = str(root)
@@ -184,13 +189,13 @@ async def select_dataset(req: SelectionRequest) -> dict:
 
     image_list: list[str] = []
     if req.date:
-        date_dir = root / "images" / req.date
+        date_dir = image_dir(root, req.date)
         if date_dir.is_dir():
             image_list = _logical_image_names(date_dir)
 
     # Canonical layout (see tcip_mcp.dataset_layout): the single source of truth shared with the
-    # agent tools, so agent writes land where the GUI reads. One file per image now holds every
-    # subject, so the label/prediction dirs carry no subject or task segment.
+    # agent tools, so agent writes land where the GUI reads. The browser composes none of these.
+    images_dir = str(image_dir(root, req.date)) if req.date else None
     annotations_dir = str(annotation_dir(root, req.date)) if req.date else None
     predictions_dir = (
         str(prediction_dir(root, req.model_name, req.date)) if req.model_name and req.date else None
@@ -219,6 +224,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
         date=req.date,
         image_list=image_list,
         current_image_index=index,
+        images_dir=images_dir,
         annotations_dir=annotations_dir,
         predictions_dir=predictions_dir,
     )

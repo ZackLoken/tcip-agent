@@ -16,6 +16,7 @@ import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageNav } from "@/hooks/useImageNav";
 import type { BandSelection } from "@/lib/bandSelection";
+import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
 
 // Progression order (start state first, terminal states last), matches Review's parallel
@@ -132,10 +133,7 @@ export function AnnotateToolbar({
     ? imageStatus.byImage[currentImage]
     : undefined;
   const loadedImagePath = useStore((s) => s.canvas.loadedImagePath);
-  const canvasReady =
-    !!dataset.dataset_root &&
-    !!dataset.date &&
-    loadedImagePath === `${dataset.dataset_root}/images/${dataset.date}/${currentImage}`;
+  const canvasReady = !!loadedImagePath && loadedImagePath === imagePath(dataset, currentImage);
   const nav = useImageNav();
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
