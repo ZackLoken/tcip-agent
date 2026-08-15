@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
 import logging
 import math
 from collections.abc import Iterable
@@ -28,9 +27,48 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from tcip_store import Key, StoreDescriptor, json_codec, register_store, store
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
+
+_RESULTS_DOC = RootedFileLocator(suffix=".json")
+
+EVALUATION_RESULTS_STORE = "evaluation_results"
+register_store(
+    StoreDescriptor(
+        name=EVALUATION_RESULTS_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(default=None),
+        concurrency="last_writer_wins",
+        locator=_RESULTS_DOC,
+    )
+)
+
+_RESULTS_DOCUMENT = "test_results"
+
+
+def evaluation_results_key(output_dir: Path | str) -> Key:
+    """Where one evaluation run's scored result lands, under the directory it was given.
+
+    Measurement output, so it is durable and written whole. ``last_writer_wins``: an
+    evaluation composes its entire result in memory and writes it once; a later evaluation
+    into the same directory is a new measurement replacing the old one, not a merge into it.
+    """
+    return Key(EVALUATION_RESULTS_STORE, str(Path(output_dir).resolve()), (_RESULTS_DOCUMENT,))
+
+
+def evaluation_results_path(output_dir: Path | str) -> Path:
+    """The result record's own file, spelled the way the caller spelled ``output_dir``.
+
+    A finished evaluation hands its caller this path and nothing else, so it is resolved
+    through the store's locator rather than composed a second time.
+    """
+    relative = _RESULTS_DOC.relative_path("", (_RESULTS_DOCUMENT,))
+    return Path(output_dir).joinpath(*relative.parts)
 
 # Composite-objective weights. Note: in compute_composite_objective the F1 and
 # mAP50 terms are multiplied by 10 to lift them onto the same scale as val_loss,
@@ -1195,11 +1233,8 @@ def run_test_evaluation(
         "tiled": tiled,
         "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
     }
-    out = Path(output_dir) / "test_results.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
-        json.dump(result, f, indent=2)
-    result["results_path"] = str(out)
+    store.replace(evaluation_results_key(output_dir), result)
+    result["results_path"] = str(evaluation_results_path(output_dir))
     return result
 
 
@@ -1372,9 +1407,6 @@ def run_full_frame_evaluation(
             "tp": gc["tp"], "fp": gc["fp"], "fn": gc["fn"],
             "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
         })
-    out = Path(output_dir) / "test_results.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
-        json.dump(result, f, indent=2)
-    result["results_path"] = str(out)
+    store.replace(evaluation_results_key(output_dir), result)
+    result["results_path"] = str(evaluation_results_path(output_dir))
     return result

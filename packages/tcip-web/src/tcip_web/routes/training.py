@@ -68,8 +68,14 @@ def _historical_training_runs() -> list[dict]:
     anomaly), a narrower, degenerate case, not the common case of a directory whose ``status.json``
     never stamped ``run_id``.
     """
-    from tcip_mcp.experiments import experiments_dir, reconstruct_run_status
-    from tcip_mcp.utils.atomic_io import read_json
+    from tcip_store import DecodeError, store
+
+    from tcip_mcp.experiments import (
+        config_key,
+        experiments_dir,
+        reconstruct_run_status,
+        status_key,
+    )
 
     exp_root = experiments_dir()
     if not exp_root.exists():
@@ -78,10 +84,15 @@ def _historical_training_runs() -> list[dict]:
     for d in sorted(exp_root.iterdir()):
         if not d.is_dir():
             continue
-        config = read_json(d / "config.json", default={})
+        try:
+            config = store.read(config_key(d.name), default={})
+            status = store.read(status_key(d.name), default={})
+        except DecodeError:
+            # One unreadable record must not cost the breeder the whole run listing.
+            logger.warning("experiment %s has a member that does not decode", d.name, exc_info=True)
+            continue
         if not isinstance(config, dict) or not config.get("model_source"):
             continue  # not a training experiment (e.g. review-feedback lineage)
-        status = read_json(d / "status.json", default={})
         run_id = status.get("run_id", d.name)  # the real run_id when stamped, else the
                                                 # experiment_id itself as the fallback
         reconstructed = reconstruct_run_status(run_id, stale_seconds=_HEARTBEAT_STALE_SECONDS)

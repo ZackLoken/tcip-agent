@@ -557,6 +557,36 @@ def test_corrupt_lock_file_refuses_instead_of_silent_redraw():
     assert redrawn["redraw_history"][0]["old_content_hash"] is None
 
 
+def test_a_dataset_identity_cannot_place_a_lock_outside_the_artifact_store():
+    """An identity names one lock, so an identity spelled as a path locks nothing elsewhere.
+
+    A lock written outside the artifact store is a held-out split no later call would find,
+    which is the silent redraw this lock exists to prevent.
+    """
+    from tcip_store import BadKey
+
+    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+
+    with pytest.raises(BadKey):
+        resolve_locked_cal_holdout_split(
+            ["a_0_0", "b_0_0"], identity_hash="../escaped-identity", seed=1)
+
+
+def test_a_first_draw_locks_a_split_an_ordinary_identity_can_read_back():
+    """The refusal above must leave the ordinary path intact: draw once, read the same split."""
+    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+
+    first = resolve_locked_cal_holdout_split(
+        ["a_0_0", "a_0_1", "b_0_0", "b_0_1"], identity_hash="d41d8cd98f00b204", seed=1,
+        timestamp="2026-01-01T00:00:00Z")
+    again = resolve_locked_cal_holdout_split(
+        ["a_0_0", "a_0_1", "b_0_0", "b_0_1"], identity_hash="d41d8cd98f00b204", seed=1)
+
+    assert first["calibration"] and first["holdout"]
+    assert again["calibration"] == first["calibration"]
+    assert again["holdout"] == first["holdout"]
+
+
 def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
     """At the tool level: a locked stem whose image was later deleted must produce a clean
     ValueError through _calibrate_operating_point, never a bare KeyError from a stale

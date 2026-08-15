@@ -9,7 +9,6 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import (
-    _atomic_torch_save,
     create_run,
     train,
 )
@@ -113,32 +112,39 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     assert run.end_time >= run.start_time > 0
 
 
-# ====================================================================
-# _atomic_torch_save: durable, torn-read-free checkpoint writes
-# ====================================================================
+# ── checkpoints: durable, torn-read-free writes ──────────────────────
 
-def test_atomic_torch_save_roundtrips_and_leaves_no_tmp(tmp_path):
-    path = tmp_path / "model_best.pt"
-    _atomic_torch_save({"epoch": 3, "weights": torch.zeros(2, 2)}, path)
 
-    loaded = torch.load(path, weights_only=False)
+def _run_artifacts(directory):
+    """What a run left behind, without the storage layer's own lock bookkeeping."""
+    return sorted(p.name for p in directory.iterdir() if not p.name.endswith(".lock"))
+
+
+def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
+    """A checkpoint is only worth writing if ``torch.load`` returns the payload unchanged."""
+    key = gt.checkpoint_key(tmp_path, "model_best")
+
+    landed = gt.write_checkpoint({"epoch": 3, "weights": torch.zeros(2, 2)}, key)
+
+    loaded = torch.load(landed, weights_only=False)
     assert loaded["epoch"] == 3
     assert torch.equal(loaded["weights"], torch.zeros(2, 2))
-    assert [p.name for p in tmp_path.iterdir()] == ["model_best.pt"]
+    assert landed == tmp_path / "model_best.pt"
+    assert _run_artifacts(tmp_path) == ["model_best.pt"]
 
 
-def test_atomic_torch_save_failure_preserves_previous_checkpoint(tmp_path, monkeypatch):
-    path = tmp_path / "model_best.pt"
-    _atomic_torch_save({"epoch": 1}, path)
+def test_a_failed_checkpoint_write_preserves_the_previous_one(tmp_path, monkeypatch):
+    key = gt.checkpoint_key(tmp_path, "model_best")
+    gt.write_checkpoint({"epoch": 1}, key)
 
     def broken_save(*args, **kwargs):
         raise RuntimeError("simulated crash mid-serialization")
 
     monkeypatch.setattr(gt.torch, "save", broken_save)
     with pytest.raises(RuntimeError, match="simulated crash"):
-        _atomic_torch_save({"epoch": 2}, path)
+        gt.write_checkpoint({"epoch": 2}, key)
     monkeypatch.undo()
 
-    # The previous checkpoint is intact and loadable; the temp file was cleaned up.
-    assert torch.load(path, weights_only=False)["epoch"] == 1
-    assert [p.name for p in tmp_path.iterdir()] == ["model_best.pt"]
+    # The previous checkpoint is intact and loadable; the staged file was cleaned up.
+    assert torch.load(tmp_path / "model_best.pt", weights_only=False)["epoch"] == 1
+    assert _run_artifacts(tmp_path) == ["model_best.pt"]

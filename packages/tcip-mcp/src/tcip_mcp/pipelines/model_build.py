@@ -14,13 +14,17 @@ its inference output must be something the platform's library scorers can consum
      "task": "detection",                  # optional, measurement/eval routing
      "in_chans": 3}                        # optional, channel-compat check
 
-Pure-stdlib at import time (importlib only); torch imports lazily inside the builder so
-MCP-server startup stays fast.
+At import time this reaches no further than the standard library and the storage seam; torch
+imports lazily inside the builder so MCP-server startup stays fast.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+from tcip_store import Key, StoreDescriptor, json_codec, register_store, store
+from tcip_store.file_backend import RootedFileLocator
 
 MODEL_SOURCE_KEY = "model_source"
 STATE_DICT_KEY = "model_state_dict"
@@ -173,6 +177,50 @@ def capture_env() -> dict:
     return env
 
 
+_SNAPSHOT_DIR = ("model_src",)
+
+SNAPSHOT_MANIFEST_STORE = "model_snapshot_manifest"
+register_store(
+    StoreDescriptor(
+        name=SNAPSHOT_MANIFEST_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=RootedFileLocator(prefix=_SNAPSHOT_DIR, suffix=".json"),
+    )
+)
+
+SNAPSHOT_FILE_STORE = "model_snapshot_file"
+register_store(
+    StoreDescriptor(
+        name=SNAPSHOT_FILE_STORE,
+        kind="blob",
+        key_fields=("content", "filename"),
+        locator=RootedFileLocator(prefix=_SNAPSHOT_DIR),
+    )
+)
+
+
+def snapshot_manifest_key(exp_dir: Path | str) -> Key:
+    """What one run's source snapshot claims to hold: the files, the env, what was missed.
+
+    A record and not a blob because it is a document the platform reads back and reasons
+    about, while the files it lists are opaque bytes. ``last_writer_wins``: one snapshot pass
+    composes the whole manifest and writes it once.
+    """
+    return Key(SNAPSHOT_MANIFEST_STORE, str(Path(exp_dir).resolve()), ("manifest",))
+
+
+def snapshot_file_key(exp_dir: Path | str, content: str, filename: str) -> Key:
+    """One copied source file, addressed by its content and its own name.
+
+    Content-addressed so two distinct files sharing a basename never clobber each other, and
+    so the same file reached by two path spellings lands once.
+    """
+    return Key(SNAPSHOT_FILE_STORE, str(Path(exp_dir).resolve()), (content, filename))
+
+
 def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     """Copy a bespoke run's model + training + dataset source into ``<exp>/model_src/`` with sha256 + env.
 
@@ -188,9 +236,6 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     Returns the manifest, or ``None`` when there is nothing bespoke to snapshot.
     """
     import hashlib
-    from pathlib import Path
-
-    from tcip_mcp.utils.atomic_io import atomic_write_json
 
     model_source = config.get(MODEL_SOURCE_KEY)
     training_source = config.get("training_source")
@@ -225,8 +270,6 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
             except Exception as exc:
                 snapshot_errors.append(f"could not import {dotted!r}: {exc}")
 
-    dst = Path(exp_dir) / "model_src"
-    dst.mkdir(parents=True, exist_ok=True)
     entries: list[dict] = []
     seen_content: set[str] = set()
     missing: list[str] = []
@@ -240,11 +283,9 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         if sha in seen_content:
             continue
         seen_content.add(sha)
-        key = f"{sha[:8]}/{p.name}"
-        dst_file = dst / key
-        dst_file.parent.mkdir(parents=True, exist_ok=True)
-        dst_file.write_bytes(data)
-        entries.append({"file": key, "src": str(p), "sha256": sha, "bytes": len(data)})
+        store.put_blob(snapshot_file_key(exp_dir, sha[:8], p.name), data)
+        entries.append({"file": f"{sha[:8]}/{p.name}", "src": str(p),
+                        "sha256": sha, "bytes": len(data)})
 
     manifest = {
         "builder": builder,
@@ -257,7 +298,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
         "env": capture_env(),
         "seed": config.get("seed", config.get("training", {}).get("seed")),
     }
-    atomic_write_json(dst / "manifest.json", manifest)
+    store.replace(snapshot_manifest_key(exp_dir), manifest)
     return manifest
 
 

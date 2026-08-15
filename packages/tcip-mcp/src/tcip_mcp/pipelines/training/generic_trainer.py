@@ -13,9 +13,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
-import os
 import random
-import tempfile
 import threading
 import time
 import uuid
@@ -27,8 +25,16 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from tcip_store import Key, StoreDescriptor, register_store, store
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.pipelines.model_contract import TCIPModel
-from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model, stamp_model_ref
+from tcip_mcp.pipelines.model_build import (
+    MODEL_SOURCE_KEY,
+    STATE_DICT_KEY,
+    build_model,
+    stamp_model_ref,
+)
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.optimizer_factory import (
@@ -37,7 +43,6 @@ from tcip_mcp.pipelines.training.optimizer_factory import (
     restore_optimizer_state,
     snapshot_optimizer_state,
 )
-from tcip_mcp.utils.atomic_io import _replace_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -351,30 +356,46 @@ def cancel_run(run_id: str) -> bool:
     return True
 
 
-def _atomic_torch_save(payload: dict, path: Path) -> None:
-    """``torch.save`` via temp file + ``os.replace`` (the ``atomic_io`` convention).
+RUN_CHECKPOINT_STORE = "run_checkpoint"
+register_store(
+    StoreDescriptor(
+        name=RUN_CHECKPOINT_STORE,
+        kind="blob",
+        key_fields=("name",),
+        locator=RootedFileLocator(suffix=".pt"),
+        path_readable=True,
+    )
+)
+"""A run's checkpoints, keyed by the run's own output directory and the checkpoint's name.
 
-    A crash/OOM mid-save can't destroy the previous checkpoint, and a concurrent
-    reader (GUI inference tab, ``evaluate_model`` on a live run) never observes a
-    half-written file.
+Path-readable because a checkpoint is handed on as a path, not as bytes: ``torch.load``, the
+model registry's sha256 of the real file, and the GUI's inference tab all take one.
+"""
+
+
+def checkpoint_key(output_dir: Path | str, name: str) -> Key:
+    """One checkpoint of the run that writes into ``output_dir``.
+
+    ``name`` is the checkpoint's own name without its extension: ``model_best``,
+    ``model_final``, an epoch checkpoint, or a bespoke loop's own tag.
     """
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as f:
-            torch.save(payload, f)
-            f.flush()
-            os.fsync(f.fileno())
-        _replace_with_retry(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+    return Key(RUN_CHECKPOINT_STORE, str(Path(output_dir).resolve()), (name,))
+
+
+def write_checkpoint(payload: dict, key: Key) -> Path:
+    """Write one checkpoint's bytes and return where they landed.
+
+    A crash or an OOM mid-save cannot destroy the previous checkpoint, and a concurrent
+    reader (GUI inference tab, ``evaluate_model`` on a live run) never observes a
+    half-written file: the stream becomes the checkpoint only on a clean exit.
+    """
+    with store.write_blob(key) as handle:
+        torch.save(payload, handle)
+    return store.blob_path(key)
 
 
 def _save_checkpoint(
-    path: Path, *, model, optimizer, scheduler, scaler, config: dict,
+    key: Key, *, model, optimizer, scheduler, scaler, config: dict,
     stage_idx: int, stage_epoch: int, run: "TrainRun",
     es_best: float, es_counter: int, global_step: int, seed, metrics: dict,
 ) -> None:
@@ -383,7 +404,7 @@ def _save_checkpoint(
     Superset of the previous payload, ``GenericPredictor`` reads only the model reference
     (``model_source``) + the weights and stays compatible.
     """
-    _atomic_torch_save(stamp_model_ref({
+    write_checkpoint(stamp_model_ref({
         STATE_DICT_KEY: model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
@@ -404,7 +425,7 @@ def _save_checkpoint(
         "numpy_rng_state": np.random.get_state(),
         "torch_rng_state": torch.get_rng_state(),
         "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
-    }, config), path)
+    }, config), key)
 
 
 # ====================================================================
@@ -566,7 +587,7 @@ def apply_stage_freeze(
 
 def _expected_in_chans(config: dict) -> int:
     """Input channels the model expects, from ``model_source.in_chans``."""
-    src = config.get("model_source")
+    src = config.get(MODEL_SOURCE_KEY)
     if isinstance(src, dict):
         return int(src.get("in_chans", 3))
     return 3
@@ -939,12 +960,12 @@ def train(
                 if sel < run.best_metric:
                     run.best_metric = sel
                     try:
-                        _atomic_torch_save(stamp_model_ref({
+                        write_checkpoint(stamp_model_ref({
                             STATE_DICT_KEY: model.state_dict(),
                             "config": config,
                             "metrics": epoch_metrics,
                             "stage": stage_idx, "epoch": run.current_epoch,
-                        }, config), out_dir / "model_best.pt")
+                        }, config), checkpoint_key(out_dir, "model_best"))
                     except PermissionError:
                         # Windows: a concurrent reader (GUI inference / evaluate_model)
                         # holding model_best.pt open can outlast the replace retries.
@@ -960,7 +981,7 @@ def train(
 
                 if ckpt_every > 0 and run.current_epoch % ckpt_every == 0:
                     _save_checkpoint(
-                        out_dir / f"checkpoint_epoch_{run.current_epoch}.pt",
+                        checkpoint_key(out_dir, f"checkpoint_epoch_{run.current_epoch}"),
                         model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
                         config=config, stage_idx=stage_idx, stage_epoch=epoch + 1, run=run,
                         es_best=es_best, es_counter=es_counter, global_step=global_step,
@@ -986,11 +1007,11 @@ def train(
                 break  # stop before starting the next stage
 
         # Final checkpoint (saved even on cancellation so partial progress is recoverable).
-        _atomic_torch_save(stamp_model_ref({
+        write_checkpoint(stamp_model_ref({
             STATE_DICT_KEY: model.state_dict(),
             "config": config,
             "metrics": run.metrics_history,
-        }, config), out_dir / "model_final.pt")
+        }, config), checkpoint_key(out_dir, "model_final"))
 
         if run.should_cancel():
             run.status = "cancelled"

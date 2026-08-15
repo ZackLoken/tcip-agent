@@ -22,6 +22,9 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 logger = logging.getLogger(__name__)
 
 # Ray is one cluster per process, shared by every concurrent sweep, so its lifetime is
@@ -29,8 +32,6 @@ logger = logging.getLogger(__name__)
 _ray_lifecycle = threading.Lock()
 _active_searches = 0
 _ray_started_here = False
-
-_RAY_DASHBOARD_STATE = Path(".tcip") / "state" / "ray_dashboard.json"
 
 # Ray Tune raises on these deprecated variables' mere presence; storage_path alone decides
 # where trial results land, so a sweep drops them for its duration and restores them after.
@@ -201,11 +202,28 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     return {"cpu": 1.0, "gpu": gpu}
 
 
-def ray_dashboard_state_path() -> Path:
-    """Where a running cluster's dashboard URL is written down, under the platform root."""
-    from tcip_mcp.project_paths import resolve_state
+RAY_DASHBOARD_STORE = "ray_dashboard"
+register_store(
+    StoreDescriptor(
+        name=RAY_DASHBOARD_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=RootedFileLocator(prefix=(".tcip", "state"), suffix=".json"),
+    )
+)
 
-    return resolve_state(_RAY_DASHBOARD_STATE)
+
+def ray_dashboard_key() -> Key:
+    """Where a running cluster's dashboard URL is written down, under the platform root.
+
+    ``last_writer_wins``: the whole document is composed from what ``ray.init()`` just
+    returned and written in one shot, never merged into.
+    """
+    from tcip_mcp.project_paths import project_root
+
+    return Key(RAY_DASHBOARD_STORE, str(project_root().resolve()), ("ray_dashboard",))
 
 
 def _publish_ray_dashboard(dashboard_url: str | None) -> None:
@@ -220,23 +238,27 @@ def _publish_ray_dashboard(dashboard_url: str | None) -> None:
         return
     from datetime import datetime, timezone
 
-    from tcip_mcp.utils.atomic_io import atomic_write_json
+    from tcip_store import StoreError, store
 
     try:
-        atomic_write_json(ray_dashboard_state_path(), {
+        store.replace(ray_dashboard_key(), {
             "url": f"http://{dashboard_url}",
             "pid": os.getpid(),
             "started_at": datetime.now(timezone.utc).isoformat(),
         })
-    except OSError:
+    except (OSError, StoreError):
+        # A dashboard URL nobody could record is a missing convenience, never a reason to
+        # sink the sweep the cluster was started for.
         logger.warning("could not record the Ray dashboard URL", exc_info=True)
 
 
 def _clear_ray_dashboard() -> None:
     """Drop the recorded dashboard so a torn-down cluster's URL is never served."""
+    from tcip_store import StoreError, store
+
     try:
-        ray_dashboard_state_path().unlink(missing_ok=True)
-    except OSError:
+        store.delete(ray_dashboard_key())
+    except (OSError, StoreError):
         logger.warning("could not clear the recorded Ray dashboard URL", exc_info=True)
 
 
@@ -245,14 +267,21 @@ def read_ray_dashboard() -> dict | None:
 
     Ray's dashboard is its own OS process on a real port, so any process on the machine can
     serve its URL once it has been written down: an agent-launched sweep initializes Ray
-    inside the MCP server, and the web backend reads the same file. A recorded URL whose
+    inside the MCP server, and the web backend reads the same record. A recorded URL whose
     initiating process is gone is stale, since that process's exit takes the cluster with it.
+
+    An unreadable record is reported and then answered the way an absent one is: this record
+    describes a live process, so bytes that do not decode cannot name one either.
     """
     import psutil
 
-    from tcip_mcp.utils.atomic_io import read_json
+    from tcip_store import DecodeError, store
 
-    state = read_json(ray_dashboard_state_path(), default=None)
+    try:
+        state = store.read(ray_dashboard_key(), default=None)
+    except DecodeError:
+        logger.warning("the recorded Ray dashboard does not decode", exc_info=True)
+        return None
     if not isinstance(state, dict) or not state.get("url"):
         return None
     pid = state.get("pid")

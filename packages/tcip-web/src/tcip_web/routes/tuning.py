@@ -62,40 +62,45 @@ def _sweeps_dir() -> Path:
     return hpo_root()
 
 
-def _manifest_path(sweep_id: str) -> Path:
-    """``<hpo root>/<sweep_id>/manifest.json``, with ``sweep_id`` treated as untrusted."""
-    from tcip_web.paths import safe_join
-
-    return safe_join(_sweeps_dir(), sweep_id, "manifest.json")
-
-
 def _read_manifest(sweep_id: str) -> dict | None:
-    """The sweep's manifest, or ``None`` if no sweep by that name is on disk."""
-    from tcip_mcp.utils.atomic_io import read_json
+    """The sweep's manifest, or ``None`` if no sweep by that name is on disk.
+
+    ``sweep_id`` is untrusted, and the store's own key constructor is what refuses one that
+    would address a record outside the HPO store. A manifest that will not decode is reported
+    and then answered as absent: the listing serves every other sweep rather than failing
+    whole, and the sweep with the unreadable manifest is not presented as running.
+    """
+    from tcip_store import BadKey, DecodeError, store
+
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
 
     try:
-        path = _manifest_path(sweep_id)
-    except ValueError as exc:
+        key = sweep_manifest_key(sweep_id)
+    except BadKey as exc:
         raise HTTPException(400, f"invalid sweep_id: {sweep_id}") from exc
-    manifest = read_json(path, default=None)
+    try:
+        manifest = store.read(key, default=None)
+    except DecodeError:
+        logger.warning("the manifest for sweep %s does not decode", sweep_id, exc_info=True)
+        return None
     return manifest if isinstance(manifest, dict) else None
 
 
 def _sweep_root(sweep_id: str) -> Path:
-    """The directory a sweep's trials live in, from the manifest that was found there.
+    """The directory a sweep's trials live in, once a manifest proves the sweep exists.
 
-    The manifest's own location is what resolves this, not a path recorded inside it: an
-    absolute path in a file is not a path this process should follow.
+    The sweep's own resolved location is what this is, not a path recorded inside the
+    manifest: an absolute path in a file is not a path this process should follow.
     """
+    from tcip_mcp.tools.training_tools import sweep_dir
+
     if _read_manifest(sweep_id) is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
-    return _manifest_path(sweep_id).parent
+    return sweep_dir(sweep_id)
 
 
 def _disk_sweeps() -> list[dict]:
     """Every sweep with a manifest under the HPO root, in directory-name order."""
-    from tcip_mcp.utils.atomic_io import read_json
-
     root = _sweeps_dir()
     if not root.is_dir():
         return []
@@ -103,7 +108,7 @@ def _disk_sweeps() -> list[dict]:
     for d in sorted(root.iterdir()):
         if not d.is_dir():
             continue
-        manifest = read_json(d / "manifest.json", default=None)
+        manifest = _read_manifest(d.name)
         if isinstance(manifest, dict) and manifest.get("study_name"):
             found.append(_manifest_summary(manifest))
     return found
@@ -238,14 +243,21 @@ def list_trials(sweep_id: str) -> dict:
     Ray names its own per-trial directories after the trainable, so only the
     ``trial_<id>`` dirs the platform writes are listed here.
     """
-    from tcip_mcp.utils.atomic_io import read_json
+    from tcip_store import DecodeError, store
+
+    from tcip_mcp.tools.training_tools import trial_config_key
 
     root = _sweep_root(sweep_id)
     trials: list[dict] = []
     for d in sorted(root.iterdir()):
         if not d.is_dir() or not d.name.startswith(_TRIAL_DIR_PREFIX):
             continue
-        resolved = read_json(d / "resolved_config.json", default={})
+        try:
+            resolved = store.read(trial_config_key(root, d.name), default={})
+        except DecodeError:
+            # A trial whose own record is unreadable is still listed, with no params to show.
+            logger.warning("the resolved config for %s does not decode", d.name, exc_info=True)
+            resolved = {}
         if not isinstance(resolved, dict):
             resolved = {}
         trials.append({

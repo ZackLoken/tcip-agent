@@ -95,6 +95,23 @@ def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
     assert saved_best["config"]["model_source"]["in_chans"] == 5
 
 
+def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
+    """A tag is a name inside the run, so one spelled as a path leaves nothing outside it.
+
+    A bespoke loop names its own tags, and a checkpoint landing beside the run rather than in
+    it is a weight file no provenance points at.
+    """
+    from tcip_store import BadKey
+
+    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    ctx = TrainContext(run=run, train_loader=None, experiment_id="expEscape")
+
+    with pytest.raises(BadKey):
+        ctx.save_checkpoint({"model_state_dict": {}}, "../escaped")
+
+    assert not (tmp_path / "escaped.pt").exists()
+
+
 def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
     """The stamp goes onto the saved payload, never back into the loop's own live state dict."""
     run = create_run(dict(CONFIG), str(tmp_path / "out"))

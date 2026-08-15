@@ -176,12 +176,13 @@ def test_ray_dashboard_serves_the_url_the_process_that_started_ray_wrote(
     client, hpo_root, tmp_path
 ) -> None:
     """The sweep's own process records the URL; this one only reads it back."""
-    from tcip_mcp.pipelines.training.hpo import ray_dashboard_state_path
-    from tcip_mcp.utils.atomic_io import atomic_write_json
+    from tcip_store import store
 
-    atomic_write_json(ray_dashboard_state_path(),
-                      {"url": "http://127.0.0.1:8265", "pid": os.getpid(),
-                       "started_at": "2026-01-01T00:00:00+00:00"})
+    from tcip_mcp.pipelines.training.hpo import ray_dashboard_key
+
+    store.replace(ray_dashboard_key(),
+                  {"url": "http://127.0.0.1:8265", "pid": os.getpid(),
+                   "started_at": "2026-01-01T00:00:00+00:00"})
 
     assert client.get("/api/tuning/ray-dashboard").json() == {"url": "http://127.0.0.1:8265"}
 

@@ -31,11 +31,20 @@ import random
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Callable, Sequence
 
+from tcip_store import (
+    BadKey,
+    DecodeError,
+    Key,
+    StoreDescriptor,
+    json_codec,
+    register_store,
+    store,
+)
+
 from tcip_mcp.project_paths import project_root
-from tcip_mcp.utils.atomic_io import atomic_write_json
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -623,10 +632,65 @@ def cal_holdout_split(
     return {"calibration": parts["train"], "holdout": parts["val"]}
 
 
+_LOCK_DIR = (".tcip", "artifacts")
+_LOCK_STEM = "cal_holdout_split_"
+
+
+@dataclass(frozen=True)
+class _CalHoldoutLockLocator:
+    """One locked split per dataset identity, named for the identity it locks.
+
+    The identity is in the filename rather than in a directory of its own, which is the
+    convention the operating-point sweep artifact beside it already uses.
+    """
+
+    def relative_path(self, scope: str, parts: tuple[str, ...]) -> "PurePosixPath":
+        (identity_hash,) = parts
+        return PurePosixPath(*_LOCK_DIR, f"{_LOCK_STEM}{identity_hash}.json")
+
+    def parts_from(self, relative_path: "PurePosixPath") -> tuple[str, ...] | None:
+        segments = relative_path.parts
+        if segments[:len(_LOCK_DIR)] != _LOCK_DIR or len(segments) != len(_LOCK_DIR) + 1:
+            return None
+        name = segments[-1]
+        if not name.startswith(_LOCK_STEM) or not name.endswith(".json"):
+            return None
+        return (name[len(_LOCK_STEM):-len(".json")],)
+
+
+CAL_HOLDOUT_LOCK_STORE = "cal_holdout_split_lock"
+register_store(
+    StoreDescriptor(
+        name=CAL_HOLDOUT_LOCK_STORE,
+        kind="record",
+        key_fields=("identity_hash",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_CalHoldoutLockLocator(),
+    )
+)
+
+
+def cal_holdout_lock_key(identity_hash: str) -> Key:
+    """A dataset identity's locked calibration/holdout split.
+
+    ``last_writer_wins`` rather than compare-and-set: a redraw is the only write that reads
+    first, and it is also the deliberate recovery for a lock whose bytes do not decode, which
+    is a state no version token can be read from. The redraw is an audited admin call on one
+    dataset identity, so the write it stakes is single-shot in practice.
+    """
+    if PureWindowsPath(identity_hash).name != identity_hash or identity_hash == "..":
+        raise BadKey(
+            f"dataset identity {identity_hash!r} is not a single name: an identity carrying a "
+            "path separator would address a lock outside the artifact store"
+        )
+    return Key(CAL_HOLDOUT_LOCK_STORE, str(project_root().resolve()), (identity_hash,))
+
+
 def cal_holdout_lock_path(identity_hash: str) -> Path:
-    """Where a dataset identity's locked cal/holdout split lives (mirrors the operating-point
-    sweep artifact's ``.tcip/artifacts/`` convention, see ``inference_tools.py``)."""
-    return project_root() / ".tcip" / "artifacts" / f"cal_holdout_split_{identity_hash}.json"
+    """Where a dataset identity's locked cal/holdout split lives on disk."""
+    key = cal_holdout_lock_key(identity_hash)
+    return project_root().joinpath(*_CalHoldoutLockLocator().relative_path("", key.parts).parts)
 
 
 def label_image_stems(
@@ -724,24 +788,24 @@ def resolve_locked_cal_holdout_split(
     / ``unlocked_stems`` report fields above when a lock already existed.
     """
     group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-    lock_path = cal_holdout_lock_path(identity_hash)
-    existing = None
-    if lock_path.is_file():
-        try:
-            existing = json.loads(lock_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            if not force_redraw:
-                raise ValueError(
-                    f"cal/holdout lock file at {lock_path} exists but could not be read/parsed "
-                    f"({exc}). Refusing to silently treat a corrupt lock as 'no lock exists' and "
-                    "redraw. Investigate the file, or use force_redraw_cal_holdout_split once "
-                    "you've deliberately decided to replace it."
-                ) from exc
-            logger.warning(
-                "cal/holdout lock file at %s is corrupt (%s); force_redraw=True proceeds to draw "
-                "a fresh lock (this call is the deliberate, audited fix). Its prior redraw "
-                "history could not be recovered from the unreadable file.", lock_path, exc,
-            )
+    lock_key = cal_holdout_lock_key(identity_hash)
+    try:
+        existing = store.read(lock_key, default=None)
+    except DecodeError as exc:
+        if not force_redraw:
+            raise ValueError(
+                f"the cal/holdout lock for identity_hash={identity_hash!r} exists but could not "
+                f"be read/parsed ({exc}). Refusing to silently treat a corrupt lock as 'no lock "
+                "exists' and redraw. Investigate the file, or use force_redraw_cal_holdout_split "
+                "once you've deliberately decided to replace it."
+            ) from exc
+        logger.warning(
+            "the cal/holdout lock for identity_hash=%s is corrupt (%s); force_redraw=True "
+            "proceeds to draw a fresh lock (this call is the deliberate, audited fix). Its prior "
+            "redraw history could not be recovered from the unreadable record.",
+            identity_hash, exc,
+        )
+        existing = None
     declared_policy = {
         "group_by": group_by, "group_key_map": group_key_map,
         "seed": seed, "holdout_ratio": holdout_ratio,
@@ -793,5 +857,5 @@ def resolve_locked_cal_holdout_split(
         **declared_policy,
         "redraw_history": redraw_history,
     }
-    atomic_write_json(lock_path, locked)
+    store.replace(lock_key, locked)
     return locked
