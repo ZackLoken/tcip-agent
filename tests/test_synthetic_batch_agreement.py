@@ -15,7 +15,8 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("PIL")
 
 from tcip_mcp.pipelines.components.heads import OrdinalHead  # noqa: E402
-from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
+from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import task_collate  # noqa: E402
 
 
 class _DetectionTargetRecorder(torch.nn.Module):
@@ -54,9 +55,9 @@ class _OrdinalProbe(torch.nn.Module):
         return self.head.decode(out)
 
 
-def _real_detection_target(tmp_path):
-    """One target from a real ``DetectionDataset``: a non-square frame, a non-square box, and a
-    subject that is not the first one in the registry."""
+def _real_detection_item(tmp_path):
+    """One ``(image, target)`` from a real ``DetectionDataset``: a non-square frame, a non-square
+    box, and a subject that is not the first one in the registry."""
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -71,12 +72,16 @@ def _real_detection_target(tmp_path):
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="catkin", geometry=BBox(4, 6, 40, 19))], 96, 48)
-    _img, target = DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")[0]
-    return target
+    return DetectionDataset(str(images_dir), str(labels_dir), subject="catkin")[0]
 
 
-def _real_ordinal_target(tmp_path):
-    """One target from a real ``OrdinalDataset`` over a skewed, sparsely populated rank column."""
+def _real_detection_target(tmp_path):
+    return _real_detection_item(tmp_path)[1]
+
+
+def _real_ordinal_items(tmp_path):
+    """Two ``(image, target)`` items from a real ``OrdinalDataset`` over a skewed, sparsely
+    populated rank column."""
     from PIL import Image
     from tcip_mcp.pipelines.data.datasets import OrdinalDataset
 
@@ -86,8 +91,12 @@ def _real_ordinal_target(tmp_path):
         Image.new("RGB", (96, 48)).save(images_dir / f"{name}.png")
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("image_stem,rank\na,0\nb,3\n")
-    _img, target = OrdinalDataset(str(images_dir), str(csv_path))[1]
-    return target
+    dataset = OrdinalDataset(str(images_dir), str(csv_path))
+    return [dataset[0], dataset[1]]
+
+
+def _real_ordinal_target(tmp_path):
+    return _real_ordinal_items(tmp_path)[1][1]
 
 
 def _synthetic_detection_target():
@@ -159,3 +168,70 @@ def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch():
     assert report["ok"], report["issues"]
     assert report["train_loss"] is not None
     assert report["eval_output_type"] == "dict"
+
+
+class _BatchRecorder(torch.nn.Module):
+    """Records the whole training batch handed to it and answers with a tensor-carrying dict."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scale = torch.nn.Parameter(torch.tensor(1.0))
+        self.seen: list = []
+
+    def forward(self, images, targets=None):
+        if self.training and targets is not None:
+            self.seen.append((images, targets))
+            return {"loss": self.scale * 1.0}
+        return {"values": torch.zeros(1)}
+
+
+def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(tmp_path):
+    """The contract's detection batch is the one the trainer's collate builds over per-sample
+    items, so it carries every per-image target key the real loader emits, at the same python
+    type, rather than a hand-assembled subset of them that can drift."""
+    recorder = _DetectionTargetRecorder()
+    check_model_contract(recorder, "detection", num_classes=1, img_size=64)
+    assert len(recorder.seen) == 1, "the contract never ran a train-mode forward"
+    synth_target = recorder.seen[0][0]
+
+    real_images, real_targets = task_collate("detection")([_real_detection_item(tmp_path)])
+
+    assert isinstance(real_images, list)
+    assert isinstance(real_targets, list)
+    assert set(synth_target) == set(real_targets[0]), (sorted(synth_target), sorted(real_targets[0]))
+    for key, real_value in real_targets[0].items():
+        assert type(synth_target[key]) is type(real_value), key
+
+
+def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
+    """Same for a stacking task: the contract's ordinal batch carries the loader's target keys at
+    the loader's dtype and rank, batched along the same axis as the images."""
+    recorder = _BatchRecorder()
+    check_model_contract(recorder, "ordinal", num_classes=4)
+    assert len(recorder.seen) == 1, "the contract never ran a train-mode forward"
+    synth_images, synth_targets = recorder.seen[0]
+
+    real_images, real_targets = task_collate("ordinal")(_real_ordinal_items(tmp_path))
+
+    assert isinstance(synth_images, torch.Tensor)
+    assert synth_images.ndim == real_images.ndim
+    assert set(synth_targets) == set(real_targets), (sorted(synth_targets), sorted(real_targets))
+    for key, real_value in real_targets.items():
+        assert synth_targets[key].dtype == real_value.dtype, key
+        assert synth_targets[key].ndim == real_value.ndim, key
+        assert synth_targets[key].shape[0] == synth_images.shape[0], key
+
+
+def test_real_models_still_smoke_green_on_the_collated_batch():
+    """The rail admits valid work: a real torchvision detector passes the contract on the collated
+    batch, per-image key included, and a model on the real ordinal head still learns on it."""
+    pytest.importorskip("torchvision")
+    from tests import bespoke_models
+
+    detector = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
+    report = check_model_contract(detector, "detection", num_classes=1, img_size=64)
+    assert report["ok"], report["issues"]
+    assert report["eval_output_type"] == "list[dict]"
+
+    learned = overfit_check(_OrdinalProbe(num_ranks=4), "ordinal", steps=20, num_classes=4, seed=0)
+    assert learned["passed"], learned["issue"]
