@@ -478,6 +478,37 @@ class TestCompletenessRoute:
             "image_name": "plot.tif", "subject": "catkin", "cell": "A1",
             "complete": True, "stem": "plot", "date": "2026-03-01"}
 
+    def test_the_digest_is_named_before_the_record_that_attests_it(
+        self, client, dated_dataset, monkeypatch,
+    ):
+        """One transaction over both stores, digest key named first.
+
+        A transaction applies its staged writes in the order the keys were named, and
+        ``stale_cells`` reports a cell carrying no stamp as stale, so an attestation applied
+        ahead of its own stamp would read back stale the moment a breeder made it.
+        """
+        import tcip_store
+
+        from tcip_mcp.dataset_layout import (
+            region_completeness_digest_key,
+            region_completeness_key,
+        )
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        declared: list[tuple] = []
+        real_transaction = tcip_store.transaction
+
+        def recording(*keys, **kwargs):
+            declared.append(keys)
+            return real_transaction(*keys, **kwargs)
+
+        monkeypatch.setattr(tcip_store, "transaction", recording)
+        assert self._toggle(client, path, grid, "A1").status_code == 200
+
+        assert declared == [
+            (region_completeness_digest_key(root), region_completeness_key(root))]
+
     def test_region_completeness_path_locator(self, tmp_path):
         from tcip_mcp.dataset_layout import region_completeness_path
 

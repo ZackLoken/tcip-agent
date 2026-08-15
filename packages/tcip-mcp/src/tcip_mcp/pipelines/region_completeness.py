@@ -15,6 +15,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import tcip_store
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
 from tcip_mcp.pipelines.reference_grid import Cell
@@ -191,16 +192,15 @@ def incomplete_cells_for_rect(
     human toggled, not this call's own tiling choice.
     """
     from tcip_mcp.dataset_layout import (
-        normalize_region_completeness_store, region_completeness_digest_path,
-        region_completeness_path, status_bucket,
+        normalize_region_completeness_store, region_completeness_digest_key,
+        region_completeness_key, status_bucket,
     )
     from tcip_mcp.pipelines.data.tiling import rects_overlap
     from tcip_mcp.pipelines.reference_grid import reference_cells
-    from tcip_mcp.utils.atomic_io import read_json
 
     bucket = status_bucket(subject, stem)
     store = normalize_region_completeness_store(
-        read_json(region_completeness_path(dataset_root), default={}))
+        tcip_store.read(region_completeness_key(dataset_root), default={}))
     record = store.get(bucket)
     if record is None:
         return None
@@ -215,7 +215,7 @@ def incomplete_cells_for_rect(
     rx0, ry0, rx1, ry1 = rect
     intersecting = [c for c in cells if rects_overlap((c.x0, c.y0, c.x1, c.y1), (rx0, ry0, rx1, ry1))]
     complete = set(record.get("cells_complete") or [])
-    digests = read_json(region_completeness_digest_path(dataset_root), default={})
+    digests = tcip_store.read(region_completeness_digest_key(dataset_root), default={})
     stamped = digests.get(bucket) if isinstance(digests, dict) else None
     stale = set(stale_cells(dataset_root, record, stamped if isinstance(stamped, dict) else {}, subject))
     return sorted({c.name for c in intersecting if c.name not in complete or c.name in stale})

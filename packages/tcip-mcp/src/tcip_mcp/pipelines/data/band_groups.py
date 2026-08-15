@@ -37,7 +37,46 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import tcip_store
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 MANIFEST_EXT = ".bandgroup"
+
+BAND_GROUP_MANIFEST_STORE = "band_group_manifest"
+_MANIFEST_FILE = RootedFileLocator(suffix=MANIFEST_EXT)
+"""A manifest sits beside the sibling files it names, so its scope is that image directory."""
+
+register_store(
+    StoreDescriptor(
+        name=BAND_GROUP_MANIFEST_STORE,
+        kind="record",
+        key_fields=("stem",),
+        codec=json_codec(default=None),
+        concurrency="last_writer_wins",
+        locator=_MANIFEST_FILE,
+    )
+)
+
+
+def band_group_manifest_key(images_dir: str | Path, stem: str) -> Key:
+    """The manifest recording which sibling files form the capture ``stem``.
+
+    Scoped to the image directory rather than a dataset root: a group is a fact about files
+    that sit beside each other, and detection runs against a directory that need not be
+    inside a dataset at all.
+
+    ``last_writer_wins``: a manifest is written whole from bands the caller already resolved,
+    and nothing merges into a stored one.
+    """
+    return Key(BAND_GROUP_MANIFEST_STORE, str(images_dir), (stem,))
+
+
+def band_group_manifest_path(images_dir: str | Path, stem: str) -> Path:
+    """Where ``stem``'s manifest lives, for a reader holding the directory and the stem."""
+    relative = _MANIFEST_FILE.relative_path(str(images_dir), (stem,))
+    return Path(images_dir, *relative.parts)
+
 
 # Extensions an embedded-metadata scan bothers reading, the DJI-shaped rigs this generalizes to
 # write one XMP-bearing TIFF per band. A container format with no embedded correlation metadata
@@ -340,12 +379,11 @@ def write_band_group_manifest(
 ) -> Path:
     """Write ``<images_dir>/<stem>.bandgroup`` recording ``bands`` (by filename, not full path,
     the originals never move) and return its path."""
-    manifest_path = Path(images_dir) / f"{stem}{MANIFEST_EXT}"
     payload: dict = {"bands": {name: p.name for name, p in bands.items()}, "source": source}
     if central_wavelength_nm:
         payload["central_wavelength_nm"] = central_wavelength_nm
-    manifest_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return manifest_path
+    tcip_store.replace(band_group_manifest_key(images_dir, stem), payload)
+    return band_group_manifest_path(images_dir, stem)
 
 
 def detect_and_write_band_groups(
@@ -387,7 +425,7 @@ def detect_and_write_band_groups(
     manifests: list[str] = []
     for group in (*explicit_found, *embedded_found):
         stem = group["stem"]
-        if (d / f"{stem}{MANIFEST_EXT}").exists():
+        if tcip_store.exists(band_group_manifest_key(d, stem)):
             continue  # idempotent: a recorded fact is not re-inferred
         mp = write_band_group_manifest(
             d, stem, group["bands"],
