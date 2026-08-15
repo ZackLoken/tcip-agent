@@ -15,7 +15,7 @@ Public API:
     predict_from_points(image_path, points, labels, model_type)
     predict_from_box(image_path, x1, y1, x2, y2, model_type)
     auto_mask(image_path, model_type, ...)
-    grid_to_pixel(cell, cells) / cell_fields(cell)
+    grid_to_rect(cell, cells) / grid_to_pixel(cell, cells) / cell_fields(cell)
     column_label(index) / column_index(label)
 
 The prompted predictors return polygon rings (a mask with two disjoint regions is two rings),
@@ -326,14 +326,17 @@ def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
             float(cell.x1), float(cell.y1))
 
 
-def grid_to_pixel(cell: str, cells: "list[Any]") -> tuple[float, float]:
-    """Resolve a grid cell reference (e.g. 'B3') to the named cell's center in native pixels.
+def grid_to_rect(cell: str, cells: "list[Any]") -> tuple[float, float, float, float]:
+    """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect
+    ``(x0, y0, x1, y1)``.
 
-    ``cells`` is the caller's own cell list (see :func:`cell_fields` for the accepted
-    shapes), the same list the overlay was rendered with: a cell name means nothing
-    without the grid that produced it. Matching is case-insensitive and
-    whitespace-stripped. A name not in the grid raises ValueError naming the grid's valid
-    range.
+    The one cell-name lookup: every consumer of a cell name resolves through this, whether it
+    wants the cell's center (:func:`grid_to_pixel`, for a point prompt) or its rect (a region a
+    caller crops or bounds). ``cells`` is the caller's own cell list (see :func:`cell_fields` for
+    the accepted shapes), the same list the overlay was rendered with: a cell name means nothing
+    without the grid that produced it. Matching is case-insensitive and whitespace-stripped. A
+    reference that is not a cell name at all raises ValueError naming the expected format; one
+    that names no cell in this grid raises ValueError naming the grid's valid range.
     """
     wanted = cell.strip().upper()
     if re.fullmatch(r"[A-Z]+[0-9]+", wanted) is None:
@@ -345,10 +348,20 @@ def grid_to_pixel(cell: str, cells: "list[Any]") -> tuple[float, float]:
     for c in cells:
         name, x0, y0, x1, y1 = cell_fields(c)
         if name.strip().upper() == wanted:
-            return (x0 + x1) / 2.0, (y0 + y1) / 2.0
+            return x0, y0, x1, y1
         parsed = re.fullmatch(r"([A-Z]+)([0-9]+)", name.strip().upper())
         if parsed is not None:
             max_col = max(max_col, column_index(parsed.group(1)))
             max_row = max(max_row, int(parsed.group(2)))
     hint = f" Use A1 through {column_label(max_col)}{max_row}." if max_col >= 0 else ""
     raise ValueError(f"Cell '{wanted}' is not in this grid.{hint}")
+
+
+def grid_to_pixel(cell: str, cells: "list[Any]") -> tuple[float, float]:
+    """Resolve a grid cell reference (e.g. 'B3') to the named cell's center in native pixels.
+
+    The center of the rect :func:`grid_to_rect` resolves; see it for the accepted ``cells``
+    shapes, the matching rules and the refusals.
+    """
+    x0, y0, x1, y1 = grid_to_rect(cell, cells)
+    return (x0 + x1) / 2.0, (y0 + y1) / 2.0

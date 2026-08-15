@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable, NamedTuple
 
 from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
 from tcip_annotation.json_io import read_annotations as read_labels
-from tcip_annotation.sam_wrapper import column_label
+from tcip_annotation.sam_wrapper import column_label, grid_to_rect
 from tcip_annotation.viz import (
     render_candidates,
     render_canvas_state,
@@ -122,21 +122,30 @@ def _display_for_stem(images_dir: str | Path, stem: str) -> DisplayRead | None:
     return _read_for_display(source)
 
 
-def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
-                      region: tuple[float, float, float, float] | None = None) -> DisplayRead:
-    """As ``_display_for_stem``, for a caller that already has a path rather than a
-    ``(dir, stem)`` pair. A path the enumeration primitive doesn't resolve (one outside any
-    recognized ``images/`` layout) is read as itself, so the caller's own not-a-file handling
-    surfaces the real error instead of this swallowing it.
+def _source_for_path(image_path: str) -> "str | Path | BandGroupRef":
+    """The logical image source behind ``image_path``, for a caller that has a path rather than a
+    ``(dir, stem)`` pair.
+
+    The enumeration primitive's own resolution of it, so a ``.bandgroup``-grouped capture reads as
+    the group it names. A path the primitive doesn't resolve (one outside any recognized
+    ``images/`` layout) is returned as itself, so the caller's own not-a-file handling surfaces the
+    real error instead of this swallowing it.
     """
     from tcip_mcp.pipelines import image_utils
 
     img = Path(image_path)
     try:
-        source = image_utils.resolve_image_source(img.parent, img.stem)
+        return image_utils.resolve_image_source(img.parent, img.stem)
     except (FileNotFoundError, image_utils.BandGroupIncomplete):
-        source = img
-    return _read_for_display(source, max_edge=max_edge, region=region)
+        return img
+
+
+def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+                      region: tuple[float, float, float, float] | None = None) -> DisplayRead:
+    """As ``_display_for_stem``, for a caller that already has a path rather than a
+    ``(dir, stem)`` pair.
+    """
+    return _read_for_display(_source_for_path(image_path), max_edge=max_edge, region=region)
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -578,32 +587,26 @@ def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
     """The bounding rect, in the grid's native-pixel frame, of the named reference-grid cells.
 
     A region-scoped proposal pass needs one rectangle to crop, not the point prompts
-    ``segment_prompt`` turns grid cells into: multiple names union to their cells' combined
-    bounding box, matched case-insensitively the same way ``sam_wrapper.grid_to_pixel`` matches a
-    single cell name.
+    ``segment_prompt`` turns grid cells into: each name resolves through the one cell lookup
+    (``sam_wrapper.grid_to_rect``, so a malformed or out-of-grid name is refused here exactly as it
+    is for a point prompt) and the matched cells union to their combined bounding box.
     """
     from tcip_mcp.pipelines.raster_source import Rect
 
-    by_name = {c.name.upper(): c for c in cells}
-    matched = []
-    for name in names:
-        cell = by_name.get(name.strip().upper())
-        if cell is None:
-            raise ValueError(f"Cell {name!r} is not in this grid. Valid cells: "
-                             f"{', '.join(sorted(by_name))}.")
-        matched.append(cell)
-    return Rect(min(c.x0 for c in matched), min(c.y0 for c in matched),
-               max(c.x1 for c in matched), max(c.y1 for c in matched))
+    matched = [grid_to_rect(name, cells) for name in names]
+    return Rect(int(min(r[0] for r in matched)), int(min(r[1] for r in matched)),
+                int(max(r[2] for r in matched)), int(max(r[3] for r in matched)))
 
 
 def _write_region_crop(pixels: "np.ndarray") -> Path:
     """Save an RGB region crop to a fresh temp PNG file; the caller deletes it once the engine has
     read it.
 
-    The crop is taken from ``PhotographicSource``'s already-``auto_orient_image``'d frame, so it
-    carries no EXIF orientation tag once saved (a PIL ``.save()`` never re-emits an orientation tag
-    it didn't read from a source file): ``auto_mask``'s own internal re-orientation call is a no-op
-    against this file, not a second, wrong rotation of pixels that are already upright.
+    The crop is taken from the raster layer's already-``auto_orient_image``'d frame (a photographic
+    source is EXIF-oriented on decode), so it carries no EXIF orientation tag once saved (a PIL
+    ``.save()`` never re-emits an orientation tag it didn't read from a source file):
+    ``auto_mask``'s own internal re-orientation call is a no-op against this file, not a second,
+    wrong rotation of pixels that are already upright.
     """
     import os
     import tempfile
@@ -707,18 +710,26 @@ def propose_annotations(
                              "cells were read off (overlay_reference_grid echoes it back, with "
                              "overlap). Without it a cell name resolves against a grid nobody "
                              "rendered."}
-        from tcip_mcp.pipelines.raster_source import PhotographicSource
+        from tcip_mcp.pipelines.image_utils import image_dimensions
+        from tcip_mcp.pipelines.raster_source import open_raster
         from tcip_mcp.pipelines.reference_grid import reference_cells
 
-        # PhotographicSource directly (not segment_prompt's dataset-layout _dims_for): this tool
-        # takes a bare path, oriented the same way auto_mask's own re-orientation will then no-op against.
+        # One resolution of the source for both halves: the frame the cells are laid over is the
+        # frame the crop is read from, so they can never come from two decisions.
+        source = _source_for_path(image_path)
         try:
-            with PhotographicSource(image_path, 3) as src:
-                cells = reference_cells(src.width, src.height, tile_size, overlap, clamp=True)
-                rect = _region_rect_from_cells(cells, grid_cells)
+            w, h = image_dimensions(source)
+            cells = reference_cells(w, h, tile_size, overlap, clamp=True)
+            rect = _region_rect_from_cells(cells, grid_cells)
+            with open_raster(source, 3) as src:
                 pixels, _spec = src.read_region(rect)
         except ValueError as e:
             return {"error": str(e)}
+        if pixels.dtype != "uint8" or pixels.shape[-1] != 3:
+            return {"error": "A region crop is handed to the engine as an RGB image, and "
+                             f"{img.name} reads as {pixels.shape[-1]} band(s) of {pixels.dtype}. "
+                             "Propose over the whole frame instead, or bring an engine that reads "
+                             "this source itself."}
         crop_tmp = _write_region_crop(pixels)
         propose_path = str(crop_tmp)
         origin = (float(rect.x0), float(rect.y0))
