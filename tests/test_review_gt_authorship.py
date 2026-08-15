@@ -9,15 +9,21 @@ first verdict rewrites it, so the pristine copy survives and stays out of the la
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
+import tcip_store
 from fastapi.testclient import TestClient
 from PIL import Image
+from tcip_store import StoreBusy
+from tcip_store.file_backend import FileBackend, path_lock
 
 from tcip_annotation.json_io import read_annotations, write_annotations
+from tcip_annotation.review_engine import label_baseline_key
 from tcip_annotation.state import Annotation, BBox
 from tcip_web.app import app
+from tcip_web.routes import review
 
 IMG_W, IMG_H = 160, 100
 PREDICTED_BOX = (12.0, 20.0, 52.0, 44.0)  # 40 wide, 24 tall
@@ -124,3 +130,94 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
             live.geometry.x2, live.geometry.y2) == EDITED_BOX
 
     assert sorted(p.name for p in label_dir.glob("*.json")) == ["IMG_0000.json"]
+
+
+def _verdict(client: TestClient, project_root: Path, img: Path, gt: Path,
+             box: tuple[float, float, float, float],
+             edited: tuple[float, float, float, float]) -> None:
+    resp = client.post("/api/review/action", json={
+        "project_root": str(project_root),
+        "image_name": "IMG_0000.JPG",
+        "image_path": str(img),
+        "gt_path": str(gt),
+        "det_type": "fn", "class_name": "catkin",
+        "conf": None, "iou": None,
+        "gt_idx": 0, "pred_idx": None,
+        "bbox": list(box),
+        "action": "edited",
+        "edited_box": list(edited),
+    })
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_second_verdict_keeps_the_baseline_the_first_one_captured(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The baseline is captured once and then left alone.
+
+    A second verdict rewrites the label file again, and the pristine copy must still hold the
+    content the file had before any verdict touched it, not the state the previous edit left
+    behind. This is the ordinary reviewing path, so the capture has to keep succeeding on it.
+    """
+    img = _image(tmp_path)
+    label_dir = tmp_path / "annotations" / "2-11-26"
+    label_dir.mkdir(parents=True)
+    gt = label_dir / "IMG_0000.json"
+    original = (10.0, 10.0, 50.0, 30.0)
+    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
+                      IMG_W, IMG_H)
+    project_root = _project_root(tmp_path)
+
+    _verdict(client, project_root, img, gt, original, EDITED_BOX)
+    second = (5.0, 5.0, 25.0, 35.0)
+    _verdict(client, project_root, img, gt, EDITED_BOX, second)
+
+    baseline = label_dir / ".original" / "IMG_0000.json"
+    (kept,) = read_annotations(str(baseline))
+    assert (kept.geometry.x1, kept.geometry.y1,
+            kept.geometry.x2, kept.geometry.y2) == original
+
+    (live,) = read_annotations(str(gt))
+    assert (live.geometry.x1, live.geometry.y1,
+            live.geometry.x2, live.geometry.y2) == second
+
+    assert sorted(p.name for p in (label_dir / ".original").iterdir()) == ["IMG_0000.json"]
+
+
+def test_the_baseline_capture_waits_on_the_lock_its_record_is_written_under(
+    tmp_path: Path
+) -> None:
+    """The capture takes the baseline record's own lock, and reports the contention instead of
+    writing past it.
+
+    A copy that ignores the lock can land on top of bytes another writer is part way through
+    replacing, which is the one thing a pristine copy must never be.
+    """
+    label_dir = tmp_path / "annotations" / "2-11-26"
+    label_dir.mkdir(parents=True)
+    gt = label_dir / "IMG_0000.json"
+    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 50.0, 30.0))],
+                      IMG_W, IMG_H)
+
+    backend = FileBackend(lock_timeout_s=0.2)
+    tcip_store.bind(backend)
+    baseline = backend.path_for(label_baseline_key(label_dir, gt.stem))
+    baseline.parent.mkdir(parents=True, exist_ok=True)
+
+    holding, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with path_lock(baseline, timeout_s=30):
+            holding.set()
+            release.wait(30)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    try:
+        assert holding.wait(30)
+        with pytest.raises(StoreBusy):
+            review._ensure_original_backup(str(gt))
+        assert not baseline.exists()
+    finally:
+        release.set()
+        holder.join(30)

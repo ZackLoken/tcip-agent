@@ -245,6 +245,37 @@ class TestPortDiscovery:
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
         assert resolve_web_port(project_root=tmp_path) == DEFAULT_PORT
 
+    def test_an_unreadable_recorded_port_falls_through_to_the_default(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A handoff nothing can turn into a port is not a port.
+
+        This lookup runs before the backend is known to be up, so it reports the default and
+        lets the caller try rather than raising on a record it cannot use.
+        """
+        from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
+
+        port_file = tmp_path / ".tcip" / "state" / "web_port.txt"
+        port_file.parent.mkdir(parents=True)
+        port_file.write_text("not a port", encoding="utf-8")
+        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
+        assert resolve_web_port(project_root=tmp_path) == DEFAULT_PORT
+
+    def test_the_port_handoff_is_one_declaration_that_both_packages_reach(self) -> None:
+        """The reader owns the declaration and the backend imports it.
+
+        The reader is in the MCP package and cannot import the web package, so a declaration on
+        each side would be two stores wearing one name and whichever imported first would decide
+        where the handoff lands.
+        """
+        import tcip_store as ts
+        from tcip_mcp import web_client
+        from tcip_web import __main__ as web_main
+
+        assert web_main.backend_port_key is web_client.backend_port_key
+        descriptor = ts.get_descriptor(web_client.BACKEND_PORT_STORE)
+        assert descriptor.declared_in == web_client.__name__
+
     def test_host_env_override(self, monkeypatch) -> None:
         from tcip_mcp.web_client import resolve_web_host
 

@@ -30,8 +30,6 @@ src/tcip_mcp/
   project_paths.py, workspace.py     # platform-state-root and workspace-root resolvers
   experiments.py, model_registry.py   # experiment tracking (.tcip/experiments/) and the trained-model registry
   audit.py, project_status.py, web_client.py
-  utils/
-    atomic_io.py
 ```
 
 Every tool in `tools/` is decorated `@mcp.tool()` + `@audited`. Run `python scripts/list_tools.py`

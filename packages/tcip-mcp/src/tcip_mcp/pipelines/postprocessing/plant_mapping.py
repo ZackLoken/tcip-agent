@@ -25,7 +25,6 @@ measurement-integrity invariant).
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import math
 import statistics
@@ -34,7 +33,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
+import tcip_store
 from PIL import ExifTags, Image
+from tcip_store import Key, StoreDescriptor, json_codec, register_store
+from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
 
@@ -485,18 +487,45 @@ def build_mapping(
     return result
 
 
+PLANT_MAPPING_STORE = "plant_mapping"
+_MAPPING_DOC = RootedFileLocator(suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=PLANT_MAPPING_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=json_codec(),
+        concurrency="last_writer_wins",
+        locator=_MAPPING_DOC,
+    )
+)
+
+
+def plant_mapping_key(path: Path | str) -> Key:
+    """One build's per-date plant assignments, addressed by the document the caller named.
+
+    The generic placement, because the caller chooses where a mapping lands (a project's state
+    directory, an export bucket) and this module resolves no layout of its own.
+
+    ``last_writer_wins``: a mapping is assigned whole in memory and written in one call, and a
+    later build over the same document is a fresh assignment replacing that one rather than a
+    merge into it. No writer reads the record first.
+    """
+    document = Path(path).absolute()
+    return Key(PLANT_MAPPING_STORE, str(document.parent), (document.stem,))
+
+
 def persist_mapping(mapping: dict[str, list[Assignment]], out_path: Path) -> None:
     serialisable = {
         date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
     }
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(serialisable, indent=2, default=str), encoding="utf-8")
+    tcip_store.replace(plant_mapping_key(out_path), serialisable)
 
 
 def load_mapping(path: Path) -> dict[str, list[Assignment]]:
-    if not path.exists():
+    raw = tcip_store.read(plant_mapping_key(path), default=None)
+    if raw is None:
         return {}
-    raw = json.loads(path.read_text(encoding="utf-8"))
     out: dict[str, list[Assignment]] = {}
     for date, rows in raw.items():
         out[date] = []

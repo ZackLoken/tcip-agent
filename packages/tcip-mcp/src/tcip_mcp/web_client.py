@@ -3,12 +3,17 @@
 MCP tools call ``post_panel_event`` to ship a panel event to the running FastAPI GUI over HTTP,
 never through a file on disk.
 
+The backend's port handoff store is declared here rather than in the web package: this module
+is the reader, and it cannot import ``tcip_web``. The web entry point imports the declaration
+from here, which is the legal dependency direction and the same one ``VALID_PANELS`` already
+takes.
+
 Port discovery order:
   1. ``TCIP_WEB_PORT`` environment variable.
-  2. ``.tcip/state/web_port.txt`` under the pinned platform root.
-  3. The same file under the repo root: the backend writes it at its startup root (the repo,
+  2. The port record under the pinned platform root.
+  3. The same record under the repo root: the backend writes it at its startup root (the repo,
      pre-adoption), so after ``set_active_project`` repins this process's root to a project the
-     pinned location no longer holds the file; without this fallback the ping silently degraded
+     pinned location no longer holds the record; without this fallback the ping silently degraded
      to the default port whenever the backend ran on a non-default one.
   4. Default: 8765.
 
@@ -28,6 +33,10 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+import tcip_store
+from tcip_store import Key, StoreDescriptor, register_store, text_codec
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.project_paths import project_root as _platform_root
 from tcip_mcp.project_paths import repo_root_from_here as _repo_root
 
@@ -35,7 +44,34 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-PORT_FILE_RELATIVE = Path(".tcip") / "state" / "web_port.txt"
+
+_PORT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
+"""The backend's port handoff, one document under the platform state root."""
+
+BACKEND_PORT_STORE = "backend_port"
+_PORT_PARTS = ("web_port",)
+register_store(
+    StoreDescriptor(
+        name=BACKEND_PORT_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=text_codec(),
+        concurrency="last_writer_wins",
+        locator=_PORT_DOC,
+    )
+)
+
+
+def backend_port_key(root: Path | str | None = None) -> Key:
+    """Where the backend publishes the port it bound, for MCP tools in other processes.
+
+    ``last_writer_wins``: one backend writes the whole value once per start and reads nothing
+    first. ``root`` defaults to the platform state root, so a process launched from another
+    directory reads the same handoff rather than a cwd-local one; the reader passes a root
+    explicitly when it walks its candidate roots.
+    """
+    resolved = Path(root) if root is not None else _platform_root()
+    return Key(BACKEND_PORT_STORE, str(resolved.resolve()), _PORT_PARTS)
 
 # Every panel a pushed event may target: one per GUI tab, plus "app", the app-level channel for
 # steering the GUI itself (open a project, focus a tab). The MCP tool that pushes and the web
@@ -56,9 +92,13 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
     Parameters
     ----------
     project_root : Path, optional
-        Directory that contains ``.tcip/state/web_port.txt``. Defaults to the pinned platform
-        state root (``$TCIP_PROJECT_ROOT`` or cwd), the same place the web backend writes it,
-        so the port is found regardless of the reader's cwd.
+        Root the port record hangs off. Defaults to the pinned platform state root
+        (``$TCIP_PROJECT_ROOT`` or cwd), the same place the web backend writes it, so the port
+        is found regardless of the reader's cwd.
+
+    An absent record and an unparseable one both fall through to the next candidate root and
+    then to the default, rather than raising: this runs before the backend is known to be up,
+    so a missing handoff is an ordinary state, not a failure.
     """
     env = os.environ.get("TCIP_WEB_PORT")
     if env:
@@ -69,12 +109,13 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
 
     roots = [Path(project_root)] if project_root else [_platform_root(), _repo_root()]
     for root in roots:
-        port_file = root / PORT_FILE_RELATIVE
-        if port_file.exists():
-            try:
-                return int(port_file.read_text(encoding="utf-8").strip())
-            except ValueError:
-                logger.warning("Cannot parse port from %s; using default", port_file)
+        recorded = tcip_store.read(backend_port_key(root), default=None)
+        if recorded is None:
+            continue
+        try:
+            return int(recorded.strip())
+        except ValueError:
+            logger.warning("Cannot parse port recorded under %s; using default", root)
 
     return DEFAULT_PORT
 
