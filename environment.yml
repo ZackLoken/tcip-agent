@@ -4,7 +4,7 @@
 #   conda activate tcip-agent
 #
 # This installs conda-managed Python + Node, then the project's third-party
-# dependencies and the three local packages (editable) via pip. Run it from the
+# dependencies and the four local packages (editable) via pip. Run it from the
 # repository root so the editable paths resolve.
 #
 # GPU note: defaults to the CUDA build (cu126) via --extra-index-url below; it runs fine without a GPU too, since every device placement here branches on torch.cuda.is_available(). CI installs its own separate CPU wheel (.github/workflows/ci.yml), unaffected by this.
@@ -69,6 +69,7 @@ dependencies:
       # Not on PyPI: distribution `sam-2`, import path `sam2`, built against the torch entry above.
       - sam-2 @ git+https://github.com/facebookresearch/sam2.git
       # --- local packages (editable; run from repo root) ---
+      - -e ./packages/tcip-store
       - -e ./packages/tcip-annotation
       - -e ./packages/tcip-mcp
       - -e ./packages/tcip-web

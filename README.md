@@ -33,7 +33,7 @@ Status: the browser GUI is built out across all tabs (Annotate / Review / Traini
 
 All three processes share `.tcip/` on disk (experiment state, model registry, audit log, GUI state).
 
-Supporting library: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper). No dependency on the other packages.
+Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
 ## Repository layout
 
@@ -49,6 +49,8 @@ packages/
                                #   nn.Module blocks; postprocessing (per-image plant mapping +
                                #   phenology, plus orthomosaic georeferencing/windowed inference)
   tcip-annotation/             # headless annotation library
+  tcip-store/                  # storage seam: keyed records, append-only logs, blobs
+    src/tcip_store/            # the contract (model, errors, registry, store) + file backend
   tcip-web/                    # FastAPI backend + React frontend
     src/tcip_web/
       routes/                  # annotate, review, training, tuning, inference, results, ...

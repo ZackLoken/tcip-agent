@@ -20,7 +20,7 @@ dependencies = [
     "shapely>=2.0",
     "pycocotools>=2.0.7",
     "pydantic>=2",
-    "filelock>=3.0",
+    "tcip-store",
     "tcip-annotation",
     # torch.utils.tensorboard.SummaryWriter and tensorboard_manager both need this installed.
     "tensorboard>=2.14",

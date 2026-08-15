@@ -12,6 +12,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "tcip-mcp",
+    # The storage seam is declared here rather than inherited through tcip-mcp: a package
+    # declares the layers it uses directly.
+    "tcip-store",
     # ConPTY backend for the embedded agent terminal (POSIX uses the stdlib pty).
     "pywinpty>=2.0; sys_platform == 'win32'",
 ]

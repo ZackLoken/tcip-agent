@@ -9,6 +9,7 @@ dependencies = [
     "opencv-python>=4.5",
     "pillow>=9.0",
     "shapely>=2.0",
+    "tcip-store",
 ]
 
 [project.optional-dependencies]

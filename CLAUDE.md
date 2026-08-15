@@ -61,8 +61,12 @@ doesn't repeat them:
 
 - `packages/tcip-mcp/`: MCP server, domain tools + composable ML. Your primary surface.
   See `packages/tcip-mcp/CLAUDE.md`.
-- `packages/tcip-annotation/`: headless annotation/review engine. No dependency on the
-  other packages. See `packages/tcip-annotation/CLAUDE.md`.
+- `packages/tcip-annotation/`: headless annotation/review engine. Depends on `tcip-store`
+  and on neither of the other two. See `packages/tcip-annotation/CLAUDE.md`.
+- `packages/tcip-store/`: the storage seam. One keyed, locked, atomic interface for the
+  platform's records, append-only logs and blobs, plus the file backend that serves today's
+  on-disk layout byte for byte. Bottom of the stack: standard library plus `filelock`, no
+  dependency on the other three, and every other package depends on it.
 - `packages/tcip-web/`: FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The
   human's UI. See `packages/tcip-web/CLAUDE.md`.
 - `scripts/`: one-off scripts you write (prefer this over a new MCP tool, see Conventions).
