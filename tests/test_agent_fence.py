@@ -108,32 +108,41 @@ def test_fence_settings_wires_sessionstart_only_no_stop():
     assert "Stop" not in data["hooks"]
 
 
-def test_bash_and_powershell_guards_protect_the_same_roots():
-    # Drift guard: the two shells must fence the same platform paths, or one becomes a hole.
-    # Compare the compiled _PROTECTED regexes by behaviour, not source text.
+def test_both_guards_read_the_protected_set_from_the_fence_declaration():
+    # Both shells import one matcher built from the settings deny rules, so the paths they fence
+    # are the paths declared there rather than a list either guard restates.
     from tcip_web import agent_bash_guard as bg
+    from tcip_web import agent_fence_rules
     from tcip_web import agent_powershell_guard as pg
 
-    protected = [
-        "packages/tcip-mcp/x.py",
-        "tests/y.py",
-        "scripts/z.py",
-        ".github/skills/a.md",
-        ".claude/settings.json",
-        "CLAUDE.md",
-        ".mcp.json",
-        "pyproject.toml",
-        "package.json",
-        "tsconfig.json",
-        ".gitignore",
-    ]
-    for path in protected:
-        assert bg._PROTECTED.search(path), f"bash guard misses {path}"
-        assert pg._PROTECTED.search(path), f"powershell guard misses {path}"
-    # A breeder's workspace path is not platform-protected in either guard.
+    assert bg.fence_rules is agent_fence_rules
+    assert pg.fence_rules is agent_fence_rules
+    pattern = agent_fence_rules.protected_pattern()
+    deny = json.loads(FENCE.read_text(encoding="utf-8"))["permissions"]["deny"]
+    declared = [r[len("Edit(") : -1] for r in deny if r.startswith("Edit(")]
+    assert len(declared) >= 10, declared
+    for target in declared:
+        sample = target[: -len("/**")] + "/sample.txt" if target.endswith("/**") else target
+        assert pattern.search(sample), f"the declared path {target} is not fenced"
+    # A breeder's workspace path is not platform-protected: the rail admits their own data.
     workspace = "/c/Users/breeder/tcip-projects/hazelnut/annotations/catkin/2026-02-11/detect/a.txt"
-    assert not bg._PROTECTED.search(workspace)
-    assert not pg._PROTECTED.search(workspace)
+    assert not pattern.search(workspace)
+
+
+def test_a_protected_path_is_fenced_whatever_its_case():
+    # The guards protect a filesystem, and on the platform's Windows host that filesystem is
+    # case-insensitive, so PACKAGES/x.py and packages/x.py are one file and one denial.
+    assert _run_guard("echo x > PACKAGES/tcip-mcp/x.py").returncode == 2
+    assert _run_ps_guard('Set-Content PACKAGES\\tcip-mcp\\x.py "x"').returncode == 2
+    assert _run_guard("echo '{}' > /c/proj/Labels/a.json").returncode == 2
+    assert _run_ps_guard('Set-Content C:\\proj\\Labels\\a.json "{}"').returncode == 2
+
+
+def test_relocating_a_whole_breeder_data_directory_is_denied_in_both_shells():
+    # Moving annotations/ wholesale removes every label from where the platform tracks it, the
+    # same harm as moving one file out, so a bare directory argument counts as a target too.
+    assert _run_guard("mv /c/proj/annotations /tmp/exfil").returncode == 2
+    assert _run_ps_guard("Move-Item C:\\proj\\annotations C:\\out").returncode == 2
 
 
 # ── the spawn wiring ─────────────────────────────────────────────────────
@@ -193,15 +202,19 @@ def test_override_is_not_fenced(monkeypatch):
     assert "--settings" not in argv
 
 
-def test_repo_root_is_resolved_from_the_module_not_the_launch_cwd(tmp_path, monkeypatch):
-    """The root the fence binds its deny paths and hook commands to comes from this module's own
-    location, so the same directory is resolved however the web process was started, and it
-    contains the fence settings file the spawned session is handed."""
-    from_install_dir = pty_host._repo_root()
+def test_the_agent_runs_at_the_repo_root_the_fence_deny_paths_are_written_against(
+    tmp_path, monkeypatch
+):
+    """The fence's deny paths (``packages/**``, ``tests/**``…) are repo-root-relative, so the
+    spawned agent's cwd must be the repo root itself, not the package directory this module
+    happens to live in, and must not depend on how the web process was started."""
+    monkeypatch.delenv(pty_host.TERMINAL_CWD_ENV, raising=False)
+    from_install_dir = Path(pty_host.terminal_cwd())
     monkeypatch.chdir(tmp_path)
-    assert pty_host._repo_root() == from_install_dir
+    assert Path(pty_host.terminal_cwd()) == from_install_dir
+    assert (from_install_dir / ".mcp.json").is_file()
+    assert (from_install_dir / "packages").is_dir()
     assert FENCE.is_relative_to(from_install_dir)
-    assert (from_install_dir / "CLAUDE.md").is_file()
 
 
 # ── the Bash guard hook ──────────────────────────────────────────────────

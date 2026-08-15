@@ -10,7 +10,8 @@ src/tcip_web/
   routes/          # annotate, canvas, classes, dataset, fs, images, inference, meta, projects,
                     # results, review, sessions, terminal, training, tuning
   app.py, state.py, jobstore.py, paths.py, identity.py, __main__.py
-  terminal.py + agent_bash_guard.py + agent_powershell_guard.py + agent_session_start.py
+  terminal.py + agent_fence_rules.py + agent_bash_guard.py + agent_powershell_guard.py
+    + agent_session_start.py
                     # the breeder-facing in-app agent terminal and its permission fence
 frontend/src/
   api/  components/  hooks/  lib/  store/  tabs/  test/
@@ -37,6 +38,12 @@ not merged with the repo root's own `.claude/settings.json`: the developer's own
 session (this one, with no `--settings` flag) stays unrestricted by it, by design. Don't extend or
 edit that fence file without calling it out explicitly; it's a security boundary, not incidental
 config.
+
+That file's `Edit(...)` deny rules are the one declaration of the platform-protected set: both shell
+guards build their matcher from it at hook time via `agent_fence_rules.protected_pattern()`, so a
+path added there fences both shells and neither guard carries a path list to keep in step. A guard
+that cannot read the declaration denies rather than falling through, so the terminal stops visibly
+instead of silently unfencing.
 
 ## Conventions specific to this package
 

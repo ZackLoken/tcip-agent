@@ -37,6 +37,8 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+from tcip_mcp.project_paths import repo_root_from_here
+
 logger = logging.getLogger(__name__)
 
 TERMINAL_CMD_ENV = "TCIP_TERMINAL_CMD"
@@ -56,20 +58,6 @@ _UNAVAILABLE_REASON = (
     "Claude Code is not available. Install the `claude` CLI and sign in "
     "(subscription or ANTHROPIC_API_KEY) to enable the in-app agent terminal."
 )
-
-
-def _repo_root() -> Path:
-    """The repo root: the ancestor of this file that holds ``.mcp.json`` / ``CLAUDE.md``.
-
-    Resolved from ``__file__`` (not the launch cwd) so the fence's cwd-relative deny
-    paths and hook command bind to the repo reliably, however tcip-web was started.
-    Falls back to the process cwd if no marker is found (e.g. an unusual install).
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / ".mcp.json").is_file() or (parent / "CLAUDE.md").is_file():
-            return parent
-    return Path(os.getcwd())
 
 
 def _absolutize_guard_command(command: str, python: str, guard_dir: str) -> str:
@@ -226,8 +214,13 @@ def terminal_status() -> dict:
 
 def terminal_cwd() -> str:
     """Where the agent runs: the repo root (so .mcp.json / CLAUDE.md / skills load and the
-    fence's cwd-relative deny paths bind correctly). Overridable via env."""
-    return os.environ.get(TERMINAL_CWD_ENV, str(_repo_root()))
+    fence's cwd-relative deny paths bind correctly). Overridable via env.
+
+    ``repo_root_from_here`` finds ``.mcp.json`` across every ancestor before falling back to
+    ``CLAUDE.md``, so it climbs past the ``CLAUDE.md`` this file's own package carries instead
+    of stopping there, and resolves from the module rather than the launch cwd.
+    """
+    return os.environ.get(TERMINAL_CWD_ENV, str(repo_root_from_here()))
 
 
 # ── PTY backends ────────────────────────────────────────────────────────
