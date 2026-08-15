@@ -153,9 +153,10 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 |---|---|---|---|
 | packages/tcip-web/src/tcip_web/__init__.py | TCIP Web: FastAPI server for the ML pipeline. | 0 | 0 |
 | packages/tcip-web/src/tcip_web/__main__.py | Entry point: ``python -m tcip_web``. | 2 | 0 |
-| packages/tcip-web/src/tcip_web/agent_bash_guard.py | PreToolUse Bash guard for the fenced in-app agent terminal. | 0 | 0 |
+| packages/tcip-web/src/tcip_web/agent_bash_guard.py | PreToolUse Bash guard for the fenced in-app agent terminal. | 1 | 0 |
+| packages/tcip-web/src/tcip_web/agent_fence_rules.py | What the in-app agent fence protects, declared once for both shell guards. | 0 | 2 |
 | packages/tcip-web/src/tcip_web/agent_learning_capture.py | SessionEnd capture hook: the soft backstop for the self-learning loop. | 1 | 0 |
-| packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 0 | 0 |
+| packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive with live open-loop counts. | 0 | 0 |
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 9 | 2 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 3 |  <!-- queued: P5-329 unwired -->
@@ -180,7 +181,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: validate config, launch, list runs, live metrics stream. | 8 | 1 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: launch + list + per-trial visibility. | 8 | 2 |
 | packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 1 | 3 |
-| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 1 | 3 |
+| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 2 | 3 |
 
 ## tcip-web-frontend
 
@@ -357,7 +358,7 @@ Non-zero cross-package edge counts at HEAD:
 - `scripts` -> `tcip-web`: 5 import edges.
 - `tcip-mcp` -> `tcip-annotation`: 43 import edges.
 - `tcip-web` -> `tcip-annotation`: 7 import edges.
-- `tcip-web` -> `tcip-mcp`: 70 import edges.
+- `tcip-web` -> `tcip-mcp`: 71 import edges.
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the four Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`docs/audit/phase0/module-inventory/build_module_inventory.py:301-321`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
@@ -1802,21 +1803,19 @@ Side A: `packages/tcip-web/src/tcip_web/paths.py:44` (`def origin_allowed(origin
 Side B: `packages/tcip-web/src/tcip_web/app.py:147` (`if not origin_allowed(websocket.headers.get("origin")):`).
 Phase 3 verdict: single.
 
-## S61. Bash guard and PowerShell guard protected-path sets  <!-- queued: P5-327 unify -->
+## S61. Bash guard and PowerShell guard protected-path sets
 
 Must agree: the two shells fence the same platform paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:28` (`_PROTECTED = re.compile(`).
-Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:32` (`_PROTECTED = re.compile(`).
-Phase 3 verdict: duplicated.
-Differs from phase0 record: phase0 cited `agent_powershell_guard.py:31`, the comment line immediately preceding the pattern; the pattern itself (`_PROTECTED = re.compile(`) is at line 32.
+Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:115` (`protected = fence_rules.protected_pattern()`).
+Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:125` (`protected = fence_rules.protected_pattern()`).
+Phase 3 verdict: single.
 
-## S62. Guard hooks against the fence settings deny list  <!-- queued: P5-302 unify -->
+## S62. Guard hooks against the fence settings deny list
 
 Must agree: what the tool-level deny list blocks and what the shell guards block cover the same paths.
 Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (`permissions.deny` lists `Edit(packages/**)` and similar).
-Side B: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:24` (comment: `# Repo-internal paths the fenced agent must never write to (mirrors the settings deny).`).
-Phase 3 verdict: duplicated.
-Differs from phase0 record: phase0 cited `agent_bash_guard.py:28`, the `_PROTECTED = re.compile(` line; the comment stating the regex mirrors the settings deny is at line 24.
+Side B: `packages/tcip-web/src/tcip_web/agent_fence_rules.py:128` (`def protected_pattern() -> "re.Pattern[str]":`, which builds the guards' matcher from those deny rules).
+Phase 3 verdict: single.
 
 ## S63. Fence settings materialization for the spawned terminal  <!-- queued: P5-328 unify -->
 

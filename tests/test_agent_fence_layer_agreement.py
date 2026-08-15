@@ -52,10 +52,6 @@ def _verdict(guard: Path, command: str) -> str:
 
 # -- the settings deny list against both guards' decisions ----------------
 
-# Platform-internal paths the settings deny for the Edit tool and neither shell guard fences,
-# pinned so that closing a gap, or opening a second one, both show up here.
-_NOT_FENCED_IN_EITHER_SHELL = {"Edit(README.md)"}
-
 
 def _edit_deny_rules() -> list[str]:
     return [r for r in _settings()["permissions"]["deny"] if r.startswith("Edit(")]
@@ -82,8 +78,47 @@ def test_every_edit_deny_rule_is_fenced_in_both_shells():
         ps_cmd = 'Set-Content {} "x"'.format(sample.replace("/", "\\"))
         if _verdict(GUARD, bash_cmd) != DENY or _verdict(PS_GUARD, ps_cmd) != DENY:
             unfenced.add(rule)
-    assert unfenced == _NOT_FENCED_IN_EITHER_SHELL
-    assert len(rules) > len(unfenced)
+    assert unfenced == set()
+
+
+def _fence_copy(tmp_path: Path, deny_rules: list[str] | None) -> Path:
+    """A runnable copy of the fence directory declaring ``deny_rules``, or (``None``) nothing."""
+    dest = tmp_path / "fence"
+    dest.mkdir()
+    for script in FENCE.parent.glob("agent_*.py"):
+        (dest / script.name).write_bytes(script.read_bytes())
+    if deny_rules is not None:
+        cfg = _settings()
+        cfg["permissions"]["deny"] = deny_rules
+        (dest / FENCE.name).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return dest
+
+
+def test_a_path_added_to_the_declaration_is_fenced_in_both_shells_without_editing_a_guard(tmp_path):
+    """The guards read the declaration, so a rule added to it lands in both shells at once.
+
+    The equivalence between the two shells then holds by construction: neither guard carries a
+    path list of its own for the other to drift from.
+    """
+    fence = _fence_copy(tmp_path, ["Edit(vineyard/**)", "Edit(FIELD-NOTES.txt)"])
+    for sample in ("vineyard/plan.txt", "FIELD-NOTES.txt"):
+        assert _verdict(fence / GUARD.name, f"echo x > {sample}") == DENY, sample
+        ps_cmd = 'Set-Content {} "x"'.format(sample.replace("/", "\\"))
+        assert _verdict(fence / PS_GUARD.name, ps_cmd) == DENY, sample
+    # Only what the declaration names is fenced: a path it does not name still admits a write.
+    assert _verdict(fence / GUARD.name, "echo x > orchard/plan.txt") == ALLOW
+    assert _verdict(fence / PS_GUARD.name, 'Set-Content orchard\\plan.txt "x"') == ALLOW
+
+
+def test_a_guard_that_cannot_read_the_declaration_refuses_instead_of_guessing(tmp_path):
+    """With no declaration to read, a guard cannot tell platform code from a breeder's project.
+
+    It refuses rather than falling through, so a lost or unparseable declaration is a visible,
+    fixable stop instead of a fence that silently stopped protecting anything.
+    """
+    fence = _fence_copy(tmp_path, None)
+    assert _verdict(fence / GUARD.name, "echo x > /tmp/scratch.txt") == DENY
+    assert _verdict(fence / PS_GUARD.name, 'Set-Content $env:TEMP\\scratch.txt "x"') == DENY
 
 
 # -- the two guards' decisions on the same intent -------------------------
