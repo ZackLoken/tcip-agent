@@ -131,7 +131,7 @@ def test_bash_and_powershell_guards_protect_the_same_roots():
         assert bg._PROTECTED.search(path), f"bash guard misses {path}"
         assert pg._PROTECTED.search(path), f"powershell guard misses {path}"
     # A breeder's workspace path is not platform-protected in either guard.
-    workspace = "/c/Users/zack/tcip-projects/hazelnut/annotations/catkin/2026-02-11/detect/a.txt"
+    workspace = "/c/Users/breeder/tcip-projects/hazelnut/annotations/catkin/2026-02-11/detect/a.txt"
     assert not bg._PROTECTED.search(workspace)
     assert not pg._PROTECTED.search(workspace)
 
@@ -261,7 +261,7 @@ def test_both_guards_deny_a_write_to_the_same_protected_path():
         "echo hello > /tmp/scratch.txt",  # a write, but not into repo internals
         # fd redirects / non-protected targets are not writes into internals: the mandated
         # diagnostics and their redirect variants must fall through.
-        "python scripts/doctor.py C:/Users/zack/tcip-projects/hazelnut 2>&1",  # mandated command
+        "python scripts/doctor.py C:/Users/breeder/tcip-projects/hazelnut 2>&1",  # mandated command
         "python scripts/doctor.py /c/proj 2>/dev/null",
         "python scripts/list_tools.py",  # no redirect at all
         "python scripts/list_tools.py > /tmp/tools.txt",  # real redirect, non-protected target
@@ -341,11 +341,11 @@ def test_guard_fails_open_on_garbage_stdin():
 @pytest.mark.parametrize(
     "cmd",
     [
-        "rm C:/Users/zack/tcip-projects/proj/labels/a.txt",
-        "rmdir /c/Users/zack/tcip-projects/proj/annotations/2026-01-01",
-        "unlink /c/Users/zack/tcip-projects/proj/labels/a.txt",
-        "shred /c/Users/zack/tcip-projects/proj/labels/a.txt",
-        "truncate -s 0 /c/Users/zack/tcip-projects/proj/annotations/a.json",
+        "rm C:/Users/breeder/tcip-projects/proj/labels/a.txt",
+        "rmdir /c/Users/breeder/tcip-projects/proj/annotations/2026-01-01",
+        "unlink /c/Users/breeder/tcip-projects/proj/labels/a.txt",
+        "shred /c/Users/breeder/tcip-projects/proj/labels/a.txt",
+        "truncate -s 0 /c/Users/breeder/tcip-projects/proj/annotations/a.json",
         # xargs, with and without a flag on the trailing verb
         "ls /c/proj/annotations/*.json | xargs rm",
         "ls /c/proj/annotations/*.json | xargs rm -f",
@@ -418,8 +418,8 @@ def test_bash_and_powershell_guards_deny_the_same_breeder_data_operations():
     # and breeder data are orthogonal invariants. Covers all three harm classes (delete, truncate,
     # overwrite-via-redirect-or-cmdlet), not delete alone.
     pairs = [
-        ("rm C:/Users/zack/tcip-projects/proj/labels/a.txt",
-         'rm C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.txt'),
+        ("rm C:/Users/breeder/tcip-projects/proj/labels/a.txt",
+         'rm C:\\Users\\breeder\\tcip-projects\\proj\\labels\\a.txt'),
         ("find /c/proj/annotations -name '*.json' -delete", None),  # Bash-only construct
         ("truncate -s 0 /c/proj/annotations/a.json",
          "Clear-Content C:\\proj\\annotations\\a.json"),
@@ -467,7 +467,7 @@ def _run_ps_guard(command: str) -> subprocess.CompletedProcess:
         # deletions (blocked unconditionally, incl. the ``ri`` alias)
         "Remove-Item packages/tcip-mcp/server.py",
         "ri packages/tcip-mcp/server.py",
-        "rm C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.txt",
+        "rm C:\\Users\\breeder\\tcip-projects\\proj\\labels\\a.txt",
         # inline / nested / encoded execution
         'iex "malicious"',
         "Invoke-Expression $payload",
@@ -496,8 +496,8 @@ def test_ps_guard_denies_mutations_and_dangerous(cmd):
 @pytest.mark.parametrize(
     "cmd",
     [
-        "Clear-Content C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.json",
-        "clc C:\\Users\\zack\\tcip-projects\\proj\\labels\\a.json",
+        "Clear-Content C:\\Users\\breeder\\tcip-projects\\proj\\labels\\a.json",
+        "clc C:\\Users\\breeder\\tcip-projects\\proj\\labels\\a.json",
         'Set-Content -Path C:\\proj\\annotations\\2026-01-01\\a.json -Value \'{}\'',
         "Out-File -FilePath C:\\proj\\predictions\\live\\2026-01-01\\a.json",
         'sc C:\\proj\\labels\\a.json "x"',
@@ -571,7 +571,7 @@ def test_ps_guard_still_denies_move_and_rename_of_breeder_data(cmd):
         "git status",
         "git log --oneline -5",
         # fd redirects / non-protected targets are not writes into internals (standing checks).
-        "python scripts/doctor.py C:\\Users\\zack\\proj 2>&1",  # mandated command, redirect form
+        "python scripts/doctor.py C:\\Users\\breeder\\proj 2>&1",  # mandated command, redirect form
         "python scripts/list_tools.py 2>$null",
         "python scripts/list_tools.py > $env:TEMP\\tools.txt",  # real redirect, non-protected
         "Get-ChildItem packages 2>&1",  # fd-dup while reading a protected dir
