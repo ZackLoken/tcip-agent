@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import tcip_store
 from tcip_store import Key, StoreDescriptor, json_codec, register_store
 from tcip_store.file_backend import RootedFileLocator
-
-from tcip_mcp.utils.atomic_io import atomic_write_json, file_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +45,18 @@ def registry_index_key(project_path: str | Path) -> Key:
 def registry_index_path(project_path: str | Path) -> Path:
     """Where the project's registry index lives on disk."""
     return Path(project_path, *_INDEX_DOC.relative_path(str(project_path), _INDEX_PARTS).parts)
+
+
+def read_registry_index(project_path: str | Path) -> list[dict]:
+    """Every model entry the project has registered, in registration order.
+
+    The read path for anything outside this module: a reader takes the entries from here
+    rather than parsing the index document itself, so the entry keys have one owner and a
+    key the writer stops emitting shows up as a reader going quiet. A project that has
+    registered nothing reads as an empty list; an index that exists but does not decode
+    raises ``DecodeError``, because a corrupt registry is not a project with no models.
+    """
+    return tcip_store.read(registry_index_key(project_path), default=[])
 
 
 def _compute_sha256(filepath: str | Path) -> str:
@@ -177,19 +187,14 @@ class ModelRegistry:
     """Simple file-based model registry in .tcip/models/."""
 
     def __init__(self, project_path: str) -> None:
-        self._index_path = registry_index_path(project_path)
-        self.root = self._index_path.parent
+        self._project_path = project_path
+        self._key = registry_index_key(project_path)
+        self.root = registry_index_path(project_path).parent
         self.root.mkdir(parents=True, exist_ok=True)
         self._index: list[dict] = self._load_index()
 
     def _load_index(self) -> list[dict]:
-        if self._index_path.is_file():
-            with open(self._index_path) as f:
-                return json.load(f)
-        return []
-
-    def _save_index(self) -> None:
-        atomic_write_json(self._index_path, self._index)
+        return read_registry_index(self._project_path)
 
     def register_model(
         self,
@@ -235,14 +240,15 @@ class ModelRegistry:
             "metrics": metrics or {},
             "tags": tags or [],
         }
-        # Lock-guarded read-modify-write: re-read the on-disk index under the lock so a
-        # concurrent writer's entries aren't clobbered, replace-by-name, then atomic save.
-        with file_transaction(self._index_path):
-            self._index = self._load_index()
-            superseded = next((e for e in self._index if e["name"] == name), None)
-            self._index = [e for e in self._index if e["name"] != name]
-            self._index.append(entry)
-            self._save_index()
+        # Lock-guarded read-modify-write: re-read the stored index under the lock so a
+        # concurrent writer's entries aren't clobbered, then replace by name.
+        with tcip_store.transaction(self._key) as txn:
+            index = txn.read(self._key, default=[])
+            superseded = next((e for e in index if e["name"] == name), None)
+            index = [e for e in index if e["name"] != name]
+            index.append(entry)
+            txn.write(self._key, index)
+        self._index = index
         # A replace-by-name that actually changes content (a resumed or re-registered run under the
         # same name) needs a record, or the prior sha256/config/metrics are destroyed silently.
         # Purely additive: nothing here changes what get_model/best_model/

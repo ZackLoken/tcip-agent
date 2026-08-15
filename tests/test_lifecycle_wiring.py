@@ -5,7 +5,7 @@ import json
 
 
 def test_register_model_from_experiment_links_metrics_and_lineage(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # .tcip/experiments + .tcip/models live under cwd
+    monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
     from tcip_mcp.experiments import (
         create_experiment,
         log_metrics,
@@ -25,7 +25,7 @@ def test_register_model_from_experiment_links_metrics_and_lineage(tmp_path, monk
     assert result["metrics"]["map50"] == 0.81  # final-epoch metrics, not fabricated
 
     # The registry entry carries the experiment back-reference + final metrics.
-    m = ModelRegistry(".").get_model("exp1")
+    m = ModelRegistry(str(tmp_path)).get_model("exp1")
     assert m is not None
     assert "experiment:exp1" in m["tags"]
     assert m["metrics"]["map50"] == 0.81

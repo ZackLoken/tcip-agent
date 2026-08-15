@@ -5,57 +5,57 @@ has metric X" vs "no models" distinction, lower-is-better ranking, and registere
 from the checkpoint's own epoch rather than the last training epoch."""
 
 
-def test_select_best_model_requires_explicit_metric(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # registry lives under .tcip/models in cwd
+def test_select_best_model_requires_explicit_metric(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.tools.model_tools import select_best_model
 
-    # Empty registry → the "no models" message, even with no metric passed.
-    assert select_best_model(".")["error"] == "No models registered"
+    project = str(tmp_path)
 
-    reg = ModelRegistry(".")
+    # Empty registry → the "no models" message, even with no metric passed.
+    assert select_best_model(project)["error"] == "No models registered"
+
+    reg = ModelRegistry(project)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     reg.register_model("a", str(ckpt), {}, metrics={"val_map50": 0.70}, tags=[])
     reg.register_model("b", str(ckpt), {}, metrics={"val_map50": 0.90}, tags=[])
 
     # A populated registry with no metric → required-metric error, not a silent pick.
-    res = select_best_model(".")
+    res = select_best_model(project)
     assert "metric is required" in res["error"]
     assert res["available_metrics"] == [{"metric": "val_map50", "role": "comparability_only"}]
     assert res["n_models"] == 2
 
     # An explicit, legitimate metric still succeeds: a rail must admit valid work.
-    res = select_best_model(".", metric="val_map50")
+    res = select_best_model(project, metric="val_map50")
     assert res["name"] == "b"
     assert res["ranking_basis"] == "val_map50"
 
     # A metric no model carries → a distinct error that lists what's actually available.
-    res = select_best_model(".", metric="val_map99")
+    res = select_best_model(project, metric="val_map99")
     assert "No registered model has metric" in res["error"]
     assert res["available_metrics"] == [{"metric": "val_map50", "role": "comparability_only"}]
     assert res["n_models"] == 2
 
 
-def test_register_model_refuses_nonexistent_checkpoint(tmp_path, monkeypatch):
+def test_register_model_refuses_nonexistent_checkpoint(tmp_path):
     """register_model must refuse a phantom deliverable, not silently store a null-checksum
     entry: the shared chokepoint both register_model_from_experiment and
     model_tools.register_model's explicit mode route through."""
     import pytest as _pytest
-    monkeypatch.chdir(tmp_path)
+
     from tcip_mcp.model_registry import ModelRegistry
 
-    reg = ModelRegistry(".")
+    reg = ModelRegistry(str(tmp_path))
     with _pytest.raises(FileNotFoundError):
         reg.register_model("ghost", str(tmp_path / "nonexistent.pt"), {})
     assert reg.get_model("ghost") is None
 
 
-def test_best_model_lower_is_better_for_loss(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_best_model_lower_is_better_for_loss(tmp_path):
     from tcip_mcp.model_registry import ModelRegistry
 
-    reg = ModelRegistry(".")
+    reg = ModelRegistry(str(tmp_path))
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     reg.register_model("hi", str(ckpt), {}, metrics={"val_loss": 0.9}, tags=[])
