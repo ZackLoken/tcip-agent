@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
 
 import { classesApi } from "@/api/classes";
+import { ROUTES } from "@/api/routes";
 import { sessionsApi } from "@/api/sessions";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { TerminalRail } from "@/components/TerminalRail";
@@ -188,7 +189,7 @@ function App() {
       try {
         if (navigator.sendBeacon) {
           const blob = new Blob([payload], { type: "application/json" });
-          navigator.sendBeacon("/api/sessions/end", blob);
+          navigator.sendBeacon(ROUTES.postSessionsEnd, blob);
           return;
         }
       } catch {
@@ -196,7 +197,7 @@ function App() {
       }
 
       try {
-        void fetch("/api/sessions/end", {
+        void fetch(ROUTES.postSessionsEnd, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: payload,

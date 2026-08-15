@@ -1,6 +1,7 @@
 /** Tuning (HPO) API helpers for the Tuning tab. */
 
 import { getJson, postJson } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 import type { TensorboardLaunch } from "@/api/training";
 
 export interface Sweep {
@@ -27,18 +28,18 @@ export interface SweepTrial {
 }
 
 export const tuningApi = {
-  listSweeps: () => getJson<{ sweeps: Sweep[] }>("/api/tuning/sweeps"),
+  listSweeps: () => getJson<{ sweeps: Sweep[] }>(ROUTES.getTuningSweeps),
 
-  getSweep: (sweep_id: string) => getJson<SweepDetail>(`/api/tuning/sweeps/${sweep_id}`),
+  getSweep: (sweep_id: string) => getJson<SweepDetail>(ROUTES.getTuningSweepsBySweepId(sweep_id)),
 
   listTrials: (sweep_id: string) =>
     getJson<{ sweep_id: string; trials: SweepTrial[] }>(
-      `/api/tuning/sweeps/${encodeURIComponent(sweep_id)}/trials`,
+      ROUTES.getTuningSweepsBySweepIdTrials(sweep_id),
     ),
 
   getTrialMetrics: (sweep_id: string, trial_id: string) =>
     getJson<{ metrics: Record<string, unknown>[]; exists: boolean }>(
-      `/api/tuning/sweeps/${encodeURIComponent(sweep_id)}/trials/${encodeURIComponent(trial_id)}/metrics`,
+      ROUTES.getTuningSweepsBySweepIdTrialsByTrialIdMetrics(sweep_id, trial_id),
     ),
 
   launch: (body: {
@@ -48,26 +49,23 @@ export const tuningApi = {
     output_dir: string;
     search_alg: string;
     scheduler: string;
-  }) => postJson<{ sweep_id?: string; [k: string]: unknown }>("/api/tuning/launch", body),
+  }) => postJson<{ sweep_id?: string; [k: string]: unknown }>(ROUTES.postTuningLaunch, body),
 
   /** Ray runs one cluster per process, so its dashboard is not scoped to a sweep. */
-  getRayDashboard: () => getJson<{ url: string | null }>("/api/tuning/ray-dashboard"),
+  getRayDashboard: () => getJson<{ url: string | null }>(ROUTES.getTuningRayDashboard),
 
   launchSweepTensorboard: (sweep_id: string) =>
-    postJson<TensorboardLaunch>(
-      `/api/tuning/sweeps/${encodeURIComponent(sweep_id)}/tensorboard`,
-      {},
-    ),
+    postJson<TensorboardLaunch>(ROUTES.postTuningSweepsBySweepIdTensorboard(sweep_id), {}),
 
   launchTrialTensorboard: (sweep_id: string, trial_id: string) =>
     postJson<TensorboardLaunch>(
-      `/api/tuning/sweeps/${encodeURIComponent(sweep_id)}/trials/${encodeURIComponent(trial_id)}/tensorboard`,
+      ROUTES.postTuningSweepsBySweepIdTrialsByTrialIdTensorboard(sweep_id, trial_id),
       {},
     ),
 
   stopTrialTensorboard: (sweep_id: string, trial_id: string) =>
     postJson<{ status: string; pid?: number }>(
-      `/api/tuning/sweeps/${encodeURIComponent(sweep_id)}/trials/${encodeURIComponent(trial_id)}/tensorboard/stop`,
+      ROUTES.postTuningSweepsBySweepIdTrialsByTrialIdTensorboardStop(sweep_id, trial_id),
       {},
     ),
 };

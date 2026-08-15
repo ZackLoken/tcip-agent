@@ -3,6 +3,8 @@
  * Auto-reconnects with capped exponential backoff.
  */
 
+import { wsUrl } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 import type { GuiState } from "@/store/types";
 import { useStore } from "@/store";
 
@@ -12,17 +14,12 @@ type IncomingMessage =
 
 const MAX_BACKOFF_MS = 15_000;
 
-function wsUrl(path: string): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}${path}`;
-}
-
 export class StateSocket {
   private ws: WebSocket | null = null;
   private closed = false;
   private backoffMs = 500;
 
-  constructor(private path: string = "/ws/state") {}
+  constructor(private path: string = ROUTES.socketWsState) {}
 
   connect() {
     this.closed = false;
@@ -114,7 +111,7 @@ export class StateSocket {
 
     const connect = () => {
       if (closedByClient) return;
-      ws = new WebSocket(wsUrl(`/ws/panel/${panel}`));
+      ws = new WebSocket(wsUrl(ROUTES.socketWsPanelByPanel(panel)));
       ws.onopen = () => {
         backoff = 500;
       };

@@ -1,6 +1,7 @@
 /** Inference + Results API helpers for the Inference and Results tabs. */
 
-import { getJson, postJson } from "@/api/http";
+import { getJson, postJson, wsUrl } from "@/api/http";
+import { ROUTES } from "@/api/routes";
 
 export interface RegisteredModel {
   name: string;
@@ -48,15 +49,15 @@ export const inferenceApi = {
       output_dir: string;
       bucket_redirected: boolean;
       requested_output_dir: string | null;
-    }>("/api/inference/launch", body),
+    }>(ROUTES.postInferenceLaunch, body),
 
-  listJobs: () => getJson<{ jobs: InferenceJob[] }>("/api/inference/jobs"),
+  listJobs: () => getJson<{ jobs: InferenceJob[] }>(ROUTES.getInferenceJobs),
 
-  getJob: (jobId: string) => getJson<InferenceJob>(`/api/inference/jobs/${jobId}`),
+  getJob: (jobId: string) => getJson<InferenceJob>(ROUTES.getInferenceJobsByJobId(jobId)),
 
   cancel: (jobId: string) =>
     postJson<{ job_id: string; status: string; cancel_requested: boolean }>(
-      `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
+      ROUTES.postInferenceJobsByJobIdCancel(jobId),
       {},
     ),
 };
@@ -70,10 +71,7 @@ export function openInferenceStream(
   jobId: string,
   onMessage: (msg: Record<string, unknown>) => void,
 ): () => void {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${proto}//${window.location.host}/api/inference/jobs/${encodeURIComponent(
-    jobId,
-  )}/stream`;
+  const url = wsUrl(ROUTES.socketInferenceJobsByJobIdStream(jobId));
   let ws: WebSocket | null = null;
   let closedByClient = false;
   let terminated = false;
@@ -177,7 +175,7 @@ export interface PhenologyResponse<Row> {
 export const resultsApi = {
   registeredModels: (project_path: string) =>
     getJson<{ models: RegisteredModel[] }>(
-      `/api/results/models/registered?project_path=${encodeURIComponent(project_path)}`,
+      `${ROUTES.getResultsModelsRegistered}?project_path=${encodeURIComponent(project_path)}`,
     ),
 
   // The project's own registered traits, so the Results tab resolves which trait it is
@@ -188,7 +186,7 @@ export const resultsApi = {
       traits: string[];
       milestone_fractions_by_trait: Record<string, number[]>;
       invalid_specs: { file: string; reason: string }[];
-    }>(`/api/results/traits?project_root=${encodeURIComponent(project_root)}`),
+    }>(`${ROUTES.getResultsTraits}?project_root=${encodeURIComponent(project_root)}`),
 
   buildPlantMapping: (body: {
     images_root: string;
@@ -198,18 +196,18 @@ export const resultsApi = {
     persist_path?: string;
   }) =>
     postJson<{ summary: PlantMappingSummary; mapping: unknown }>(
-      "/api/results/plant_mapping/build",
+      ROUTES.postResultsPlantMappingBuild,
       body,
     ),
 
   loadPlantMapping: (persist_path: string) =>
-    postJson<{ mapping: unknown }>("/api/results/plant_mapping/load", { persist_path }),
+    postJson<{ mapping: unknown }>(ROUTES.postResultsPlantMappingLoad, { persist_path }),
 
   perPlantCurves: (body: PhenologyRequest) =>
-    postJson<PhenologyResponse<PerPlantRow>>("/api/results/per_plant_curves", body),
+    postJson<PhenologyResponse<PerPlantRow>>(ROUTES.postResultsPerPlantCurves, body),
 
   onsetDates: (body: PhenologyRequest) =>
-    postJson<PhenologyResponse<OnsetRow>>("/api/results/onset_dates", body),
+    postJson<PhenologyResponse<OnsetRow>>(ROUTES.postResultsOnsetDates, body),
 
   // The server computes what it exports: this sends the inputs a phenology measurement is derived from
   // plus which computation to run, never a table of rows: sending rows would let the caller
@@ -220,7 +218,7 @@ export const resultsApi = {
     payload: "curves" | "milestones",
     filename: string,
   ): Promise<Blob> => {
-    const resp = await fetch("/api/results/export_csv", {
+    const resp = await fetch(ROUTES.postResultsExportCsv, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // acknowledge_unvalidated is deliberately dropped: it may reveal provisional numbers on
