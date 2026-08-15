@@ -209,4 +209,3 @@ dependencies:
       - widgetsnbextension==4.0.15
       - wrapt==2.2.2
       - zoopt==0.4.2
-prefix: C:\Users\zack\anaconda3\envs\tcip-agent
