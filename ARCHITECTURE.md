@@ -723,12 +723,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:389` |  <!-- queued: P5-105 delete -->
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:484` |
-| GET | `/jobs/{job_id}` | `get_job` | `routes/inference.py:502` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:519` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:533` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:543` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:392` |  <!-- queued: P5-105 delete -->
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:487` |
+| GET | `/jobs/{job_id}` | `get_job` | `routes/inference.py:505` |
+| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:522` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:536` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:546` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -1266,7 +1266,8 @@ producer and takes a producer's own extras through `**fields`. The producers are
 export (stamped at `tools/inference_tools.py:1044`, written at `tools/inference_tools.py:1081`),
 the image export (stamped at `tools/inference_tools.py:1380`, written at
 `tools/inference_tools.py:1402`), the GUI's inference worker (stamped at
-`routes/inference.py:289`, written at `routes/inference.py:312`), and the two phenology
+`routes/inference.py:289`, written at `routes/inference.py:331`, after every prediction file it
+certifies is on disk), and the two phenology
 deliveries (`tools/phenology_tools.py:403,572`).
 
 Reader: `read_operating_point_sidecar`, `resolution.py:817`, which never raises: an unreadable
@@ -1530,7 +1531,7 @@ Phase 3 verdict: single. The browser still joins directory plus filename client-
 
 Must agree: the verdict writer and the bucket-immutability reader look at the same review store.
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:33` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 44, counts through the store the engine writes into).
-Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:117` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:425` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
+Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:117` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
 Phase 3 verdict: single.
 
 ## S17. Canonical per-image annotation JSON schema
@@ -1622,7 +1623,7 @@ Phase 3 verdict: single.
 
 Must agree: no writer overwrites a bucket whose predictions already carry human review verdicts.
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:86` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, line 20, excludes every provenance stamp through `resolution.SIDECAR_FILENAMES` rather than naming one filename).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:875`, `tools/vision_tools.py:897`, `tools/inference_tools.py:1268` and `packages/tcip-web/src/tcip_web/routes/inference.py:427` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:875`, `tools/vision_tools.py:897`, `tools/inference_tools.py:1268` and `packages/tcip-web/src/tcip_web/routes/inference.py:430` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
 Phase 3 verdict: single.
 
 ## S30. split.json train/val manifest
@@ -1769,7 +1770,7 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:542` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:545` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:56` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
