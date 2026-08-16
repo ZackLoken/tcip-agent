@@ -410,7 +410,7 @@ def test_review_save_gt_round_trips_a_point(client: TestClient, tmp_path: Path) 
     img = _img(tmp_path)
     label = tmp_path / "labels" / "IMG_0001.json"
     resp = client.post("/api/review/save_gt", json={
-        "project_root": str(tmp_path / "proj"),
+        "dataset_root": str(tmp_path / "proj"),
         "image_name": "IMG_0001.JPG", "image_path": str(img), "label_path": str(label),
         "annotations": [{"subject": "catkin", "point": [12.0, 34.0]},
                         {"subject": "catkin", "bbox": [10.0, 10.0, 30.0, 30.0]}],
@@ -430,7 +430,7 @@ def test_review_matches_returns_a_point_gt_without_scoring_it(
     json_io.write_annotations(pred, [Annotation(subject="catkin", geometry=BOX, score=0.9)], 100, 80)
 
     body = client.post("/api/review/matches", json={
-        "project_root": str(tmp_path / "proj"),
+        "dataset_root": str(tmp_path / "proj"),
         "image_name": "IMG_0001.JPG", "image_path": str(img),
         "gt_path": str(gt), "pred_path": str(pred),
         "iou_threshold": 0.3, "conf_threshold": 0.1,

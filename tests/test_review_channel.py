@@ -27,6 +27,18 @@ def _stub_gui(monkeypatch):
                         lambda *a, **k: {"delivered": False, "status": "no_subscribers"})
 
 
+def _project_root(tmp_path: Path) -> Path:
+    """A project directory that is genuinely not the dataset directory.
+
+    ``focus(tab='review')`` resolves images and predictions from the dataset root and carries the
+    project root through to the GUI event untouched, so passing one directory for both would let a
+    resolution off the wrong root pass unnoticed.
+    """
+    root = tmp_path / "workspace" / "proj"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _images(root: Path, date: str, names: list[str]) -> None:
     idir = Path(image_dir(root, date))
     idir.mkdir(parents=True, exist_ok=True)
@@ -59,7 +71,7 @@ def test_focus_review_lands_on_first_frame_with_predictions(tmp_path: Path) -> N
     _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
     _pred(root, "baseline", date, "IMG_0003", [("catkin", 0.8)])
 
-    res = focus("review", str(root), str(root), "catkin", date, model_name="baseline")
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline")
     assert "error" not in res
     assert res["image_index"] == 2  # first frame with predictions for this model
     assert res["image"] == "IMG_0002.JPG"
@@ -75,7 +87,7 @@ def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> N
     _pred(root, "baseline", date, "IMG_0000", [])  # empty (no detections), skip
     _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
 
-    res = focus("review", str(root), str(root), "catkin", date, model_name="baseline")
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline")
     assert res["image_index"] == 2
     assert res["n_with_predictions"] == 1
 
@@ -86,7 +98,7 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(4)])
     _pred(root, "baseline", date, "IMG_0000", [("catkin", 0.9)])
 
-    res = focus("review", str(root), str(root), "catkin", date, model_name="baseline",
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline",
                        image_index=3, detection_idx=2, filter_type="fp")
     assert res["image_index"] == 3
     assert res["detection_idx"] == 2
@@ -96,7 +108,7 @@ def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
 def test_focus_review_rejects_bad_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     _images(root, "2026-02-11", ["IMG_0000.JPG"])
-    res = focus("review", str(root), str(root), "catkin", "2026-02-11", model_name="baseline", filter_type="bogus")
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", "2026-02-11", model_name="baseline", filter_type="bogus")
     assert "error" in res
 
 
@@ -164,9 +176,9 @@ def test_focus_review_rejects_path_traversal(tmp_path: Path) -> None:
     # focus(tab='review') is read-only, but a traversal model_name/date must still be rejected (it becomes
     # a path segment in prediction_dir/image_dir), the guard mirrors stage_proposals.
     for bad_model in ("../../annotations", "a\\b", ".."):
-        res = focus("review", str(root), str(root), "catkin", date, model_name=bad_model)
+        res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name=bad_model)
         assert "error" in res
-    res = focus("review", str(root), str(root), "catkin", "../evil", model_name="baseline")
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", "../evil", model_name="baseline")
     assert "error" in res
 
 

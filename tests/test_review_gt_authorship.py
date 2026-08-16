@@ -44,7 +44,7 @@ def _image(tmp_path: Path) -> Path:
     return p
 
 
-def _project_root(tmp_path: Path) -> Path:
+def _dataset_root(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     (root / ".tcip" / "state").mkdir(parents=True)
     return root
@@ -65,10 +65,10 @@ def test_accepted_false_positive_becomes_ground_truth_without_a_model_score(
         [Annotation(subject="catkin", geometry=BBox(*PREDICTED_BOX), score=PREDICTED_SCORE)],
         IMG_W, IMG_H,
     )
-    project_root = _project_root(tmp_path)
+    dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/action", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
@@ -103,10 +103,10 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     gt = label_dir / "IMG_0000.json"
     write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 50.0, 30.0))],
                       IMG_W, IMG_H)
-    project_root = _project_root(tmp_path)
+    dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/action", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
@@ -132,11 +132,11 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     assert sorted(p.name for p in label_dir.glob("*.json")) == ["IMG_0000.json"]
 
 
-def _verdict(client: TestClient, project_root: Path, img: Path, gt: Path,
+def _verdict(client: TestClient, dataset_root: Path, img: Path, gt: Path,
              box: tuple[float, float, float, float],
              edited: tuple[float, float, float, float]) -> None:
     resp = client.post("/api/review/action", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
@@ -166,11 +166,11 @@ def test_a_second_verdict_keeps_the_baseline_the_first_one_captured(
     original = (10.0, 10.0, 50.0, 30.0)
     write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
                       IMG_W, IMG_H)
-    project_root = _project_root(tmp_path)
+    dataset_root = _dataset_root(tmp_path)
 
-    _verdict(client, project_root, img, gt, original, EDITED_BOX)
+    _verdict(client, dataset_root, img, gt, original, EDITED_BOX)
     second = (5.0, 5.0, 25.0, 35.0)
-    _verdict(client, project_root, img, gt, EDITED_BOX, second)
+    _verdict(client, dataset_root, img, gt, EDITED_BOX, second)
 
     baseline = label_dir / ".original" / "IMG_0000.json"
     (kept,) = read_annotations(str(baseline))

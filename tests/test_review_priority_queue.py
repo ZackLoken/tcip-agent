@@ -41,7 +41,7 @@ def test_launch_404s_on_missing_checkpoint(client, tmp_path: Path):
     images = tmp_path / "images"
     images.mkdir()
     resp = client.post("/api/review/queue/launch", json={
-        "project_root": str(tmp_path), "checkpoint_path": str(tmp_path / "nope.pt"),
+        "dataset_root": str(tmp_path), "checkpoint_path": str(tmp_path / "nope.pt"),
         "images_dir": str(images)})
     assert resp.status_code == 404
     assert "checkpoint not found" in resp.json()["detail"]
@@ -51,7 +51,7 @@ def test_launch_404s_on_missing_images_dir(client, tmp_path: Path):
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
     resp = client.post("/api/review/queue/launch", json={
-        "project_root": str(tmp_path), "checkpoint_path": str(ckpt),
+        "dataset_root": str(tmp_path), "checkpoint_path": str(ckpt),
         "images_dir": str(tmp_path / "nope")})
     assert resp.status_code == 404
     assert "images_dir not found" in resp.json()["detail"]
@@ -82,7 +82,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     monkeypatch.setattr(feedback_tools_mod, "prioritize_review_queue", fake_prioritize_review_queue)
 
     resp = client.post("/api/review/queue/launch", json={
-        "project_root": str(tmp_path), "checkpoint_path": str(ckpt), "images_dir": str(images)})
+        "dataset_root": str(tmp_path), "checkpoint_path": str(ckpt), "images_dir": str(images)})
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]
 
@@ -118,7 +118,7 @@ def test_job_fails_honestly_on_the_tool_s_own_refusal(client, tmp_path: Path, mo
     monkeypatch.setattr(feedback_tools_mod, "prioritize_review_queue", fake_prioritize_review_queue)
 
     resp = client.post("/api/review/queue/launch", json={
-        "project_root": str(tmp_path), "checkpoint_path": str(ckpt), "images_dir": str(images)})
+        "dataset_root": str(tmp_path), "checkpoint_path": str(ckpt), "images_dir": str(images)})
     job_id = resp.json()["job_id"]
 
     body = _wait_for_terminal(client, job_id)

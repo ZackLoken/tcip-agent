@@ -171,10 +171,19 @@ def _entry(action, cid, gt, pred, conf, *, producer_identity=_IDENTITY, conf_thr
 
 def _write_shard(review_dir: Path, bucket_dir: Path, name: str, detections: list, *,
                  gt_preexisting: bool = True) -> None:
-    """One completed image's shard, filed under the prediction bucket it was reviewed on."""
+    """One completed image's shard, filed under the prediction bucket it was reviewed on.
+
+    Each verdict records the identity of the prediction document the reviewer saw, exactly as the
+    route does, so the promotion has the recorded digest it compares against the file on disk. The
+    bucket's prediction file for ``name`` must therefore already be written when this is called.
+    """
     from tcip_annotation.review_engine import bucket_dirname
     from tcip_mcp.prediction_buckets import bucket_key_of
 
+    digest = _pred_digest(bucket_dir, name)
+    entries = [{**d, "producer_identity": {**d["producer_identity"], "prediction_digest": digest}}
+               if isinstance(d.get("producer_identity"), dict) else d
+               for d in detections]
     bucket = bucket_key_of(bucket_dir)
     shard_dir = review_dir / bucket_dirname(bucket)
     shard_dir.mkdir(parents=True, exist_ok=True)
@@ -182,8 +191,15 @@ def _write_shard(review_dir: Path, bucket_dir: Path, name: str, detections: list
         json.dumps({"bucket": bucket, "img_name": name,
                     "state": {"img_status": "completed",
                               "gt_preexisting": gt_preexisting,
-                              "detections": detections}}),
+                              "detections": entries}}),
         encoding="utf-8")
+
+
+def _pred_digest(bucket_dir: Path, image_name: str) -> str | None:
+    """The identity the route records for one image's prediction document, through its own helper."""
+    from tcip_web.routes.review import _prediction_digest
+
+    return _prediction_digest(str(bucket_dir), image_name)
 
 
 def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | None = None,
@@ -219,6 +235,9 @@ def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _I
     review_dir = proj / ".tcip" / "state" / "review"
     pred_dir = proj / "predictions" / "model" / "2026-01-01" / "detect"
     lo = 0.05 if floored else 0.8
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    for stem in ("A", "B"):
+        (pred_dir / f"{stem}.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
     _write_shard(review_dir, pred_dir, "A.jpg", [
         _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
                producer_identity=producer_identity),
@@ -229,9 +248,6 @@ def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _I
                producer_identity=producer_identity),
         _entry("accepted", 0, [0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], lo,
                producer_identity=producer_identity)], gt_preexisting=gt_preexisting)
-    pred_dir.mkdir(parents=True, exist_ok=True)
-    for stem in ("A", "B"):
-        (pred_dir / f"{stem}.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
     _write_sidecar(pred_dir, sidecar_identity or producer_identity)
     return str(proj), str(pred_dir)
 
@@ -262,13 +278,13 @@ def _make_dense_reviewed_project(tmp_path: Path, *, n_images: int = 6, gt_preexi
         name = chr(ord("A") + i)
         x = 0.05 + 0.1 * i
         gt1, gt2 = [x, 0.2, 0.05, 0.05], [x, 0.6, 0.05, 0.05]
+        (pred_dir / f"{name}.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
         _write_shard(review_dir, pred_dir, f"{name}.jpg", [
             _entry("accepted", 0, gt1, gt1, 0.9, producer_identity=producer_identity,
                    conf_threshold=conf_threshold),
             _entry("accepted", 0, gt2, gt2, 0.9, producer_identity=producer_identity,
                    conf_threshold=conf_threshold),
         ], gt_preexisting=gt_preexisting)
-        (pred_dir / f"{name}.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
     _write_sidecar(pred_dir, producer_identity, generation_conf=conf_threshold,
                   tile_size_op=tile_size_op)
     return str(proj), str(pred_dir)
@@ -299,7 +315,7 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     # reach review_confirmed end to end through the route.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is True
@@ -307,6 +323,54 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
     assert sc["validated_reference"] == "reviewer_confirmed_annotations"
+    # The claim is earned, not asserted: a record outside the bucket answers for it, and the stamp
+    # names the trait it was earned for.
+    assert sc["trait"] == "catkin"
+    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.pipelines.resolution import verify_stamp_binding
+
+    pointer = sc["validated_by"]
+    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    assert row is not None
+    assert row["trait"] == "catkin"
+    assert row["reference_identity"]["stated_values"]["review_image_count"] == 6
+    assert verify_stamp_binding(sc, pred_dir, document="operating_point").ok is True
+
+
+def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp_path: Path):
+    """An image the bucket predicted nothing for is reviewed by marking it Complete. The verdict
+    records the absence of a prediction document as the value it is, and the promotion compares that
+    absence against the absence still on disk rather than skipping the comparison, so a review
+    holding one still earns its record."""
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    negative = client.post("/api/review/mark_complete", json={
+        "dataset_root": proj, "image_name": "Z.jpg", "pred_dir": pred_dir})
+    assert negative.status_code == 200, negative.text
+    shard = json.loads(
+        next(iter(sorted((Path(proj) / ".tcip" / "state" / "review").rglob("Z.jpg.json"))))
+        .read_text(encoding="utf-8"))
+    assert shard["state"]["producer_identity"]["prediction_digest"] is None
+    assert shard["state"]["adjudication_covered"] is True
+
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validated"] is True
+    assert body["buckets_stamped"] == [pred_dir]
+
+
+def test_route_with_no_pred_dir_stamps_nothing_and_says_why(client, tmp_path: Path):
+    # The request carries a dataset root and no bucket at all, which is a shape the API accepts:
+    # it is answered honestly rather than refused for want of a prediction directory.
+    proj, _ = _make_dense_reviewed_project(tmp_path)
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validated"] is False
+    assert body["buckets_stamped"] == []
+    assert "No predictions are selected" in body["reason"]
 
 
 def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(client, tmp_path: Path):
@@ -327,7 +391,7 @@ def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(cli
         "validation_kind": "geometry",
     })
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     sc = _read_sidecar(pred_dir)
     restamped = sc["operating_point"]["tile_size"]
@@ -339,7 +403,7 @@ def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_p
     # The identical gate refuses a display-floored reference, surfaced honestly, not upgraded.
     proj, pred_dir = _make_project(tmp_path, floored=False)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
@@ -355,7 +419,7 @@ def test_route_no_completed_reviews(client, tmp_path: Path):
     pred_dir.mkdir(parents=True, exist_ok=True)
     (pred_dir / "A.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": str(proj), "trait": "catkin", "pred_dir": str(pred_dir)})
+        "dataset_root": str(proj), "trait": "catkin", "pred_dir": str(pred_dir)})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
@@ -367,7 +431,7 @@ def test_route_no_completed_reviews(client, tmp_path: Path):
 def test_route_unknown_trait_is_honest_400(client, tmp_path: Path):
     proj, pred_dir = _make_project(tmp_path, floored=True)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "annotations", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "annotations", "pred_dir": pred_dir})
     assert resp.status_code == 400
     assert "not defined for trait" in resp.json()["detail"]
 
@@ -386,7 +450,7 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
     shard_path.write_text(json.dumps(shard), encoding="utf-8")
 
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 400
     assert "no resolvable class identity" in resp.json()["detail"]
     # The refusal happens before any stamping: the sidecar's own generation-time `validated: False`
@@ -396,22 +460,47 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
     assert "validated_reference" not in sc
 
 
-def test_route_does_not_downgrade_already_validated(client, tmp_path: Path):
-    # A bucket already validated against held-out GT must not be lowered by a (censored) review.
-    proj, pred_dir = _make_project(tmp_path, floored=False)
-    Path(pred_dir, "operating_point.json").write_text(json.dumps({
-        "validated": True,
-        "operating_point": {"conf": {"validated_against": "held_out_annotations", "value": 0.31}},
-    }), encoding="utf-8")
+def test_route_does_not_downgrade_a_validation_a_record_answers_for(client, tmp_path: Path):
+    # A bucket whose validation a record answers for is never re-stamped by a later Validate press:
+    # the route reports it as already validated and leaves the earned claim exactly as it stands.
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    first = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert first.json()["validated"] is True, first.text
+    earned = _read_sidecar(pred_dir)
+
+    again = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert again.status_code == 200, again.text
+    body = again.json()
+    assert body["validated"] is True
+    assert body["reference"] == "reviewer_confirmed_annotations"
+    assert body["buckets_stamped"] == []  # left untouched
+    assert _read_sidecar(pred_dir) == earned  # the same claim, the same record, the same timestamp
+
+
+def test_route_promotes_over_a_validated_stamp_no_record_answers_for(client, tmp_path: Path):
+    """A stamp claiming validation that nothing outside the bucket answers for is an assertion, not
+    a validation. Reading the raw flag would let a forged or orphaned claim both survive and deny
+    the breeder the real validation their review earned, so the route verifies before it decides and
+    promotes over it."""
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    asserted = _read_sidecar(pred_dir)
+    asserted["validated"] = True
+    asserted["validated_reference"] = "held_out_annotations"
+    asserted["operating_point"]["conf"] = {"validated_against": "held_out_annotations", "value": 0.31}
+    Path(pred_dir, "operating_point.json").write_text(json.dumps(asserted), encoding="utf-8")
+
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is True
-    assert body["reference"] == "held_out_annotations"
-    assert body["buckets_stamped"] == []  # left untouched
+    assert body["reference"] == "reviewer_confirmed_annotations"  # earned here, not the claim found
+    assert body["buckets_stamped"] == [pred_dir]
     sc = _read_sidecar(pred_dir)
-    assert sc["validated"] is True  # not downgraded
+    assert sc["validated_reference"] == "reviewer_confirmed_annotations"
+    assert sc["validated_by"]["record_digest"]
 
 
 def test_route_refuses_when_verdicts_belong_to_a_different_producer(client, tmp_path: Path):
@@ -421,7 +510,7 @@ def test_route_refuses_when_verdicts_belong_to_a_different_producer(client, tmp_
     proj, pred_dir = _make_project(
         tmp_path, floored=True, producer_identity=_IDENTITY, sidecar_identity=_OTHER_IDENTITY)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
@@ -437,7 +526,7 @@ def test_route_refuses_when_no_image_ever_recorded_fn_adjudication(client, tmp_p
     # staged_conf_floor is threaded and conf_censored does not mask this failure.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path, gt_preexisting=False)
     resp = client.post("/api/review/validate_reference", json={
-        "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["validated"] is False
