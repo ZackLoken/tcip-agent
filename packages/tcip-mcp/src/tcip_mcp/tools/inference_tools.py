@@ -491,8 +491,8 @@ def run_inference(
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = 96,
-    global_nms_iou: float = DEFAULT_NMS_IOU,
-    max_dets: int = DEFAULT_MAX_DETS,
+    global_nms_iou: float | None = None,
+    max_dets: int | None = None,
     postprocess: str = "nms",
     dry_run: bool = False,
     trait: str | None = None,
@@ -537,8 +537,14 @@ def run_inference(
         overlap: Fractional tile overlap (stride = tile_size*(1-overlap)). ``None`` derives from the
             checkpoint (else 0.2).
         tile_batch_size: Tiles per forward batch.
-        global_nms_iou: Cross-tile global NMS IoU threshold.
-        max_dets: Full-frame detection cap (after any tiled merge).
+        global_nms_iou: Cross-tile global NMS IoU threshold. ``None`` (default) means the caller
+            stated nothing, so a calibrated run derives it from the calibration GT's own
+            neighbor-IoU distribution; a stated value is honored as an explicit override and
+            stamped as one, including when it happens to equal the platform default.
+        max_dets: Full-frame detection cap (after any tiled merge). ``None`` (default) means the
+            caller stated nothing, so a calibrated run derives it from the calibration GT's own
+            object density; a stated value is honored as an explicit override and stamped as one,
+            including when it happens to equal the platform default.
         postprocess: Cross-tile merge, "nms" suppresses overlaps, "nmm" unions boxes split
             across a tile seam (better for an object straddling a boundary).
         dry_run: Report the effective operating point (conf/tiling/max_dets/postprocess) without
@@ -571,6 +577,11 @@ def run_inference(
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
 
+    # An unstated cap falls to the shared platform default for the pass while staying unstated for
+    # the resolver, the only thing that can derive one from the data.
+    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
+    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
+
     if dry_run:
         # No model load here: an unset ``tile`` is a pending derivation (the checkpoint decides
         # it), not a fabricated default, like tile_size/overlap already report.
@@ -580,7 +591,7 @@ def run_inference(
             cross_tile_nms_dry: float | None | str = "pending-checkpoint-derivation"
         else:
             tiled_dry, tiled_source_dry = tile, "explicit"
-            cross_tile_nms_dry = global_nms_iou if tile else None
+            cross_tile_nms_dry = applied_nms_iou if tile else None
         return {
             "dry_run": True,
             "checkpoint_path": checkpoint_path,
@@ -591,7 +602,7 @@ def run_inference(
                 "tiled_source": tiled_source_dry,
                 "tile_size": tile_size if tile_size is not None else "pending-checkpoint-derivation",
                 "overlap": overlap if overlap is not None else "pending-checkpoint-derivation",
-                "max_dets": max_dets,
+                "max_dets": applied_max_dets,
                 "postprocess": postprocess,
             },
             "note": ("These operating-point values govern the object count (the phenotype for count "
@@ -610,8 +621,8 @@ def run_inference(
         checkpoint_path=checkpoint_path,
         device=device,
         score_threshold=conf_threshold,
-        nms_iou=global_nms_iou,
-        max_dets=max_dets,
+        nms_iou=applied_nms_iou,
+        max_dets=applied_max_dets,
     )
 
     # Resolve the tiled bool now the checkpoint's own persisted training geometry is in hand: an
@@ -684,9 +695,9 @@ def run_inference(
                 tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
                 tile_resize=tile_resize,
                 tile_size_source=tile_size_source, tiled_source=tiled_source,
-                tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
-                cross_tile_nms=(global_nms_iou if global_nms_iou != DEFAULT_NMS_IOU else None),
-                max_dets=(max_dets if max_dets != DEFAULT_MAX_DETS else None),
+                tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou,
+                postprocess=postprocess,
+                cross_tile_nms=global_nms_iou, max_dets=max_dets,
                 group_by=group_by, group_key_map=group_key_map,
                 experiment_id=identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
@@ -699,11 +710,12 @@ def run_inference(
         conf_param = bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
                 else conf_param.unvalidated_value(acknowledge_unvalidated=True))
-        max_dets = int(bundle.get("max_dets").value)
-        global_nms_iou = float(bundle.get("cross_tile_nms").value or global_nms_iou)
+        applied_max_dets = int(bundle.get("max_dets").value)
+        applied_nms_iou = float(bundle.get("cross_tile_nms").value or applied_nms_iou)
         # Apply the resolved operating point to the model so it governs which boxes exist.
         predictor.score_threshold = conf
-        set_detector_operating_point(predictor.model, score_thresh=conf, detections_per_img=max_dets)
+        set_detector_operating_point(predictor.model, score_thresh=conf,
+                                     detections_per_img=applied_max_dets)
         op_bundle = bundle
         # Dataset-scope firewall: the conf is scoped to the calibration GT. The inference target is
         # usually unlabeled, so its GT identity (a content hash) is undefined, pass None and record
@@ -767,7 +779,7 @@ def run_inference(
                 "predictor_path": {
                     "tile": resolved_tile_bool, "tile_size": resolved_tile,
                     "overlap": resolved_overlap, "postprocess": postprocess,
-                    "global_nms_iou": global_nms_iou, "max_dets": max_dets,
+                    "global_nms_iou": applied_nms_iou, "max_dets": applied_max_dets,
                 },
             }
             body_hash = hashlib.sha256(
@@ -783,8 +795,8 @@ def run_inference(
         # its in-model conf; the bundle stamps it validated_against=false so the un-trustworthiness of
         # this uncalibrated operating point (the count is the phenotype) travels with the result.
         op_bundle = raw_operating_point(
-            conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=resolved_tile_bool,
-            tile_size=resolved_tile, max_dets=max_dets, tile_size_source=tile_size_source,
+            conf=conf_threshold, cross_tile_nms=applied_nms_iou, tiled=resolved_tile_bool,
+            tile_size=resolved_tile, max_dets=applied_max_dets, tile_size_source=tile_size_source,
             tiled_source=tiled_source,
         )
         extra = {"validated": False, "conf_source": "default"}
@@ -806,7 +818,7 @@ def run_inference(
 
     results = predictor.predict_batch(
         image_paths, tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
-        tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, postprocess=postprocess,
+        tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou, postprocess=postprocess,
         tile_resize=tile_resize,
     )
     total_detections = sum(r["count"] for r in results)
@@ -848,7 +860,7 @@ def run_inference(
 def _export_predictions_raster(
     *, checkpoint_path: str, raster_path: str, out: Path, resolution, device: str | None,
     conf_threshold: float, tile_size: int | None, overlap: float | None, tile_batch_size: int,
-    global_nms_iou: float, max_dets: int, postprocess: str, require_masks: bool,
+    global_nms_iou: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
     experiment_id: str | None, acknowledge_unvalidated: bool, trait: str | None = None,
 ) -> dict:
     """The windowed-raster regime of :func:`export_predictions`: tiled detection/instance_seg
@@ -890,9 +902,14 @@ def _export_predictions_raster(
         build_predictor, native_ratio_tile_resize, resolve_tile_geometry,
     )
 
+    # An unstated cap falls to the shared platform default for the pass; this regime has no
+    # per-dataset derivation of one to leave room for.
+    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
+    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
+
     predictor = build_predictor(
         checkpoint_path=checkpoint_path, device=device, score_threshold=conf_threshold,
-        nms_iou=global_nms_iou, max_dets=max_dets,
+        nms_iou=applied_nms_iou, max_dets=applied_max_dets,
     )
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
@@ -917,7 +934,6 @@ def _export_predictions_raster(
     conf_source = "default"
     block_prov: dict | None = None
     claim_scope_validated: str | None = None
-    applied_nms_iou = global_nms_iou
 
     if trait is not None:
         from tcip_mcp.pipelines.block_calibration import (
@@ -929,7 +945,7 @@ def _export_predictions_raster(
         try:
             block_bundle, block_prov = resolve_block_calibration_records(
                 predictor, checkpoint_path=checkpoint_path, trait_name=trait,
-                experiment_id=identity["experiment_id"], global_nms_iou=global_nms_iou,
+                experiment_id=identity["experiment_id"], global_nms_iou=applied_nms_iou,
                 tile_batch_size=tile_batch_size, postprocess=postprocess,
             )
         except BlockCalibrationRefused as exc:
@@ -959,7 +975,8 @@ def _export_predictions_raster(
         from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
         predictor.score_threshold = conf
-        set_detector_operating_point(predictor.model, score_thresh=conf, detections_per_img=max_dets)
+        set_detector_operating_point(predictor.model, score_thresh=conf,
+                                     detections_per_img=applied_max_dets)
         predictor.max_dets = None
 
         op_bundle = block_calibrated_export_operating_point(
@@ -982,8 +999,9 @@ def _export_predictions_raster(
         # Always tiled (a raster too large to load whole has no untiled alternative); every input
         # the gate needs is already resolved, so it runs here, before the expensive raster pass.
         op_bundle = raw_operating_point(
-            conf=conf_threshold, cross_tile_nms=global_nms_iou, tiled=True, tile_size=resolved_tile,
-            max_dets=max_dets, tile_size_source=tile_size_source, tiled_source="default",
+            conf=conf_threshold, cross_tile_nms=applied_nms_iou, tiled=True,
+            tile_size=resolved_tile, max_dets=applied_max_dets,
+            tile_size_source=tile_size_source, tiled_source="default",
         )
         op_provenance = op_bundle.to_provenance()["operating_point"]
 
@@ -1100,8 +1118,8 @@ def export_predictions(
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = 96,
-    global_nms_iou: float = DEFAULT_NMS_IOU,
-    max_dets: int = DEFAULT_MAX_DETS,
+    global_nms_iou: float | None = None,
+    max_dets: int | None = None,
     postprocess: str = "nms",
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
@@ -1176,8 +1194,12 @@ def export_predictions(
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
-        global_nms_iou: Cross-tile NMS IoU.
-        max_dets: Full-frame detection cap.
+        global_nms_iou: Cross-tile NMS IoU. ``None`` (default) states nothing and forwards that on,
+            leaving the value to be derived; a stated value is an explicit override even when it
+            equals the platform default. See ``run_inference``'s own doc.
+        max_dets: Full-frame detection cap. ``None`` (default) states nothing and forwards that on,
+            leaving the value to be derived; a stated value is an explicit override even when it
+            equals the platform default. See ``run_inference``'s own doc.
         postprocess: Cross-tile merge, "nms" or "nmm".
         trait: Trait to calibrate the operating point per dataset. ``images_dir`` regime: with
             ``calibration_labels_dir``. ``raster_path`` regime: alone, against the checkpoint's own
@@ -1418,8 +1440,8 @@ def tabulate_counts(
     tile_size: int | None = None,
     overlap: float | None = None,
     tile_batch_size: int = 96,
-    global_nms_iou: float = DEFAULT_NMS_IOU,
-    max_dets: int = DEFAULT_MAX_DETS,
+    global_nms_iou: float | None = None,
+    max_dets: int | None = None,
     postprocess: str = "nms",
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
@@ -1457,8 +1479,12 @@ def tabulate_counts(
         tile_size: Sliding-window tile edge (px).
         overlap: Fractional tile overlap.
         tile_batch_size: Tiles per forward batch.
-        global_nms_iou: Cross-tile NMS IoU.
-        max_dets: Full-frame detection cap.
+        global_nms_iou: Cross-tile NMS IoU. ``None`` (default) states nothing and forwards that on,
+            leaving the value to be derived; a stated value is an explicit override even when it
+            equals the platform default. See ``run_inference``'s own doc.
+        max_dets: Full-frame detection cap. ``None`` (default) states nothing and forwards that on,
+            leaving the value to be derived; a stated value is an explicit override even when it
+            equals the platform default. See ``run_inference``'s own doc.
         postprocess: Cross-tile merge, "nms" or "nmm".
         trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
