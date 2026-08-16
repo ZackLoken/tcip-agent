@@ -534,8 +534,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `materialize_review_dataset` | `feedback_tools.py:31` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:107` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+| `materialize_review_dataset` | `feedback_tools.py:49` | yes | Build a curated detection dataset from human review verdicts. |
+| `prioritize_review_queue` | `feedback_tools.py:133` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
 
 ### inference_tools.py (4 tools)
 
@@ -762,17 +762,17 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:366` |
-| POST | `/action` | `record_action` | `routes/review.py:490` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:588` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:634` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:655` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:706` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:910` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:946` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:974` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1095` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1127` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:380` |
+| POST | `/action` | `record_action` | `routes/review.py:504` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:603` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:651` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:672` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:723` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:929` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:967` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:995` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1116` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1148` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -957,9 +957,9 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:699`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:766`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
-`packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:187`.
+`packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:215`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:272`;
@@ -1262,18 +1262,18 @@ only two web-route tests check a 403-confinement case and an empty-registry case
 Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 `tcip_mcp.dataset_layout.prediction_dir`.
 
-Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:187`, the
+Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:215`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:387` (format 1's writer).
-`resolve_prediction_bucket`, `prediction_buckets.py:156`, resolves a `(dataset_root, model_name,
-date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:124`,
+`resolve_prediction_bucket`, `prediction_buckets.py:184`, resolves a `(dataset_root, model_name,
+date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:152`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
-recorded review verdict; `BucketHasVerdicts`, `prediction_buckets.py:95`, is raised instead when
+recorded review verdict; `BucketHasVerdicts`, `prediction_buckets.py:118`, is raised instead when
 `overwrite=True` is requested against a verdicted bucket.
 
 Readers: `bucket_stems`, `prediction_buckets.py:21`, excludes every provenance stamp via
 `resolution.SIDECAR_FILENAMES` rather than naming one filename, so a stamp added for a new
-measurement dimension is excluded here too; `verdict_count`, `prediction_buckets.py:82`, delegates
+measurement dimension is excluded here too; `verdict_count`, `prediction_buckets.py:105`, delegates
 to `tcip_annotation.review_engine.ReviewEngine.verdict_count_for_images` against the store
 `review_state_dir_of`, line 33, names.
 
@@ -1363,21 +1363,25 @@ store family (inference/tuning job registries), not this file.
 
 ## 21. `.tcip/state/review/*.json`, review-verdict shard store
 
-Path: `<state_dir>/review/<sanitized_img_name>.json`
-(`REVIEW_SHARD_DIRNAME = "review"`, `packages/tcip-annotation/src/tcip_annotation/review_engine.py:77`).
+Path: `<state_dir>/review/<sanitized_bucket>/<sanitized_img_name>.json`
+(`REVIEW_SHARD_DIRNAME = "review"`, `packages/tcip-annotation/src/tcip_annotation/review_engine.py:83`).
+The store is keyed `("bucket", "image")`, the bucket being the prediction bucket's path relative to
+its dataset root as `bucket_key_of` spells it (`prediction_buckets.py:71`), folded into one
+directory name by `bucket_dirname` (`review_engine.py:112`). A verdict recorded with no prediction
+bucket keeps its shard directly under `review/`.
 Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
 `review_state_dir_of`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:71`;
-`verdict_count`, `prediction_buckets.py:82`, opens a `ReviewEngine` on that root rather than
+`verdict_count`, `prediction_buckets.py:105`, opens a `ReviewEngine` on that root rather than
 composing a state dir of its own.
 
-Writer: `ReviewEngine._save_image`, `review_engine.py:223`, called by `mark_image_reviewed`
-(`review_engine.py:256`), `unmark_image_reviewed` (`review_engine.py:285`),
-`record_detection_action` (`review_engine.py:543`), `check_image_review_complete`
-(`review_engine.py:637`); `save_review_state`, `review_engine.py:242`, flushes every shard.
+Writer: `ReviewEngine._save_image`, `review_engine.py:262`, called by `mark_image_reviewed`
+(`review_engine.py:308`), `unmark_image_reviewed` (`review_engine.py:339`),
+`record_detection_action` (`review_engine.py:606`), `check_image_review_complete`
+(`review_engine.py:705`); `save_review_state`, `review_engine.py:282`, flushes every shard.
 
-Readers: `ReviewEngine.load_review_state`, `review_engine.py:203`, which enumerates the store's
-keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:429`,
-and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:409`.
+Readers: `ReviewEngine.load_review_state`, `review_engine.py:241`, which enumerates the store's
+keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:490`,
+and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:471`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
@@ -1570,8 +1574,8 @@ Phase 3 verdict: single. The browser still joins directory plus filename client-
 ## S16. ReviewEngine shard-store directory
 
 Must agree: the verdict writer and the bucket-immutability reader look at the same review store.
-Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:71` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 44, counts through the store the engine writes into).
-Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:117` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
+Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:71` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 105, counts one bucket's verdicts through the store the engine writes into).
+Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:149` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
 Phase 3 verdict: single.
 
 ## S17. Canonical per-image annotation JSON schema
@@ -1662,7 +1666,7 @@ Phase 3 verdict: single.
 ## S29. Prediction-bucket immutability
 
 Must agree: no writer overwrites a bucket whose predictions already carry human review verdicts.
-Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:124` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, line 20, excludes every provenance stamp through `resolution.SIDECAR_FILENAMES` rather than naming one filename).
+Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:152` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, line 20, excludes every provenance stamp through `resolution.SIDECAR_FILENAMES` rather than naming one filename).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:875`, `tools/vision_tools.py:897`, `tools/inference_tools.py:1268` and `packages/tcip-web/src/tcip_web/routes/inference.py:430` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
 Phase 3 verdict: single.
 
@@ -1775,7 +1779,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S45. Review verdicts promoted into a calibration reference
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
-Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:543` (`def record_detection_action(`, the one writer of a stored verdict entry).
+Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:606` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:67` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 16), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 
@@ -1860,7 +1864,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:310` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:323` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry

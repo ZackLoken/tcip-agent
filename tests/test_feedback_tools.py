@@ -7,6 +7,9 @@ from pathlib import Path
 
 from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
 
+# The prediction bucket these verdicts were recorded against, as bucket_key_of spells one.
+BUCKET = "predictions/detector/2026-03-04"
+
 
 def _setup(tmp_path: Path):
     from PIL import Image
@@ -16,10 +19,10 @@ def _setup(tmp_path: Path):
     src.mkdir()
     for name in ("imgA.png", "imgB.png"):
         Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
-    state = {"image": {
-        "imgA.png": {"img_status": "completed", "detections": [
+    state = {"verdicts": {
+        (BUCKET, "imgA.png"): {"img_status": "completed", "detections": [
             {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
-        "imgB.png": {"img_status": "completed", "detections": [
+        (BUCKET, "imgB.png"): {"img_status": "completed", "detections": [
             {"action": "rejected", "class_name": "catkin", "gt_bbox_norm": None, "pred_bbox_norm": [0.8, 0.8, 0.1, 0.1]}]},
     }}
     # Seed through the engine so the fixture cannot drift from the real shard format.

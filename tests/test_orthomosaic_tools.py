@@ -226,12 +226,14 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
     from tcip_annotation.state import Annotation, BBox
 
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
     engine = ReviewEngine(project_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="mosaic", img_width=64, img_height=64,
                         preds=[Annotation(subject="0", geometry=BBox(1.0, 1.0, 5.0, 5.0), score=0.9)])
     det = ReviewDetection(det_type="fp", class_name="0", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(1.0, 1.0, 5.0, 5.0))
-    engine.record_detection_action(det, ctx, action="accepted")
+    engine.record_detection_action(bucket_key_of(out_dir), det, ctx, action="accepted")
 
     overwrite_attempt = export_predictions(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,

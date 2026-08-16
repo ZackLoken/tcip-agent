@@ -54,8 +54,10 @@ def _project_root(tmp_path: Path) -> Path:
 
 
 def _shard(project_root: Path, image_name: str) -> dict:
-    path = project_root / ".tcip" / "state" / "review" / f"{image_name}.json"
-    return json.loads(path.read_text(encoding="utf-8"))["state"]
+    """The one shard written for ``image_name``, wherever its bucket directory put it."""
+    found = sorted((project_root / ".tcip" / "state" / "review").rglob(f"{image_name}.json"))
+    assert len(found) == 1, found
+    return json.loads(found[0].read_text(encoding="utf-8"))["state"]
 
 
 def test_bulk_complete_on_a_predicted_image_is_not_adjudication_covered(

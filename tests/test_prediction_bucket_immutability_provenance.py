@@ -20,7 +20,9 @@ from PIL import Image
 from tcip_annotation import Annotation, BBox
 from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
 from tcip_mcp.dataset_layout import prediction_dir
-from tcip_mcp.prediction_buckets import resolve_prediction_bucket, stage_prediction_shapes
+from tcip_mcp.prediction_buckets import (
+    bucket_key_of, resolve_prediction_bucket, stage_prediction_shapes,
+)
 from tcip_web.app import app
 
 DATE = "2026-03-04"
@@ -53,8 +55,10 @@ def _write_bucket(dataset_root: Path, model: str, stems: list[str]) -> Path:
     return d
 
 
-def _record_verdicts(review_state_dir: Path, stem: str, boxes: list[tuple[float, ...]]) -> None:
-    """Record one human verdict per box against ``stem``, each on its own detection."""
+def _record_verdicts(review_state_dir: Path, bucket_dir: Path, stem: str,
+                     boxes: list[tuple[float, ...]]) -> None:
+    """Record one human verdict per box against ``stem`` under ``bucket_dir``, each on its own
+    detection."""
     review_state_dir.mkdir(parents=True, exist_ok=True)
     engine = ReviewEngine(review_state_dir)
     preds = [Annotation(subject="catkin", geometry=BBox(*b), score=0.7) for b in boxes]
@@ -64,7 +68,7 @@ def _record_verdicts(review_state_dir: Path, stem: str, boxes: list[tuple[float,
             det_type="fp", class_name="catkin", conf=0.7, iou=None,
             gt_idx=None, pred_idx=i, bbox=box,
         )
-        engine.record_detection_action(det, ctx, action="accepted")
+        engine.record_detection_action(bucket_key_of(bucket_dir), det, ctx, action="accepted")
 
 
 def test_redirect_reports_how_many_verdicts_froze_the_requested_bucket(tmp_path: Path) -> None:
@@ -73,9 +77,10 @@ def test_redirect_reports_how_many_verdicts_froze_the_requested_bucket(tmp_path:
     unexplained change of destination."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
-    _write_bucket(dataset_root, "detector", ["IMG_0007", "IMG_0021"])
-    _record_verdicts(review_state_dir, "IMG_0007", [(10.0, 12.0, 40.0, 60.0), (300.0, 40.0, 360.0, 90.0)])
-    _record_verdicts(review_state_dir, "IMG_0021", [(88.0, 200.0, 130.0, 260.0)])
+    detector = _write_bucket(dataset_root, "detector", ["IMG_0007", "IMG_0021"])
+    _record_verdicts(review_state_dir, detector, "IMG_0007",
+                     [(10.0, 12.0, 40.0, 60.0), (300.0, 40.0, 360.0, 90.0)])
+    _record_verdicts(review_state_dir, detector, "IMG_0021", [(88.0, 200.0, 130.0, 260.0)])
 
     _bucket, resolution = resolve_prediction_bucket(
         dataset_root, "detector", DATE, review_state_dir=review_state_dir
@@ -94,13 +99,15 @@ def test_variant_search_walks_past_every_reviewed_variant(tmp_path: Path) -> Non
     candidate would hand back a variant a reviewer had already adjudicated."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
-    _write_bucket(dataset_root, "detector", ["IMG_0007", "IMG_0021"])
-    _write_bucket(dataset_root, "detector@r2", ["IMG_0055"])
-    _write_bucket(dataset_root, "detector@r3", ["IMG_0090"])
-    _record_verdicts(review_state_dir, "IMG_0007", [(10.0, 12.0, 40.0, 60.0), (300.0, 40.0, 360.0, 90.0)])
-    _record_verdicts(review_state_dir, "IMG_0021", [(88.0, 200.0, 130.0, 260.0)])
-    _record_verdicts(review_state_dir, "IMG_0055", [(20.0, 20.0, 70.0, 70.0), (400.0, 300.0, 440.0, 350.0)])
-    _record_verdicts(review_state_dir, "IMG_0090", [(120.0, 130.0, 180.0, 190.0)])
+    detector = _write_bucket(dataset_root, "detector", ["IMG_0007", "IMG_0021"])
+    detector_r2 = _write_bucket(dataset_root, "detector@r2", ["IMG_0055"])
+    detector_r3 = _write_bucket(dataset_root, "detector@r3", ["IMG_0090"])
+    _record_verdicts(review_state_dir, detector, "IMG_0007",
+                     [(10.0, 12.0, 40.0, 60.0), (300.0, 40.0, 360.0, 90.0)])
+    _record_verdicts(review_state_dir, detector, "IMG_0021", [(88.0, 200.0, 130.0, 260.0)])
+    _record_verdicts(review_state_dir, detector_r2, "IMG_0055",
+                     [(20.0, 20.0, 70.0, 70.0), (400.0, 300.0, 440.0, 350.0)])
+    _record_verdicts(review_state_dir, detector_r3, "IMG_0090", [(120.0, 130.0, 180.0, 190.0)])
 
     bucket, resolution = resolve_prediction_bucket(
         dataset_root, "detector", DATE, review_state_dir=review_state_dir
@@ -120,9 +127,9 @@ def test_verdicts_on_a_neighbouring_bucket_do_not_freeze_this_one(tmp_path: Path
     as named, even while another bucket's images carry verdicts."""
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
-    _write_bucket(dataset_root, "detector", ["IMG_0007"])
+    detector = _write_bucket(dataset_root, "detector", ["IMG_0007"])
     _write_bucket(dataset_root, "second_pass", ["IMG_0333"])
-    _record_verdicts(review_state_dir, "IMG_0007", [(10.0, 12.0, 40.0, 60.0)])
+    _record_verdicts(review_state_dir, detector, "IMG_0007", [(10.0, 12.0, 40.0, 60.0)])
 
     bucket, resolution = resolve_prediction_bucket(
         dataset_root, "second_pass", DATE, review_state_dir=review_state_dir

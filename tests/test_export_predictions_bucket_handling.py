@@ -77,13 +77,15 @@ def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeyp
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
     from tcip_annotation.state import Annotation, BBox
 
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
     engine = ReviewEngine(project_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
                         preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
                                           score=0.9)])
     det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
-    engine.record_detection_action(det, ctx, action="accepted")
+    engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
 
     _fake_predictor(monkeypatch)
     ckpt = tmp_path / "m.pt"
@@ -114,6 +116,7 @@ def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.dataset_layout import prediction_dir
+    from tcip_mcp.prediction_buckets import bucket_key_of
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
@@ -135,7 +138,7 @@ def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:
                                           score=0.9)])
     det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
-    engine.record_detection_action(det, ctx, action="accepted")
+    engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
 
     _fake_predictor(monkeypatch)
     ckpt = tmp_path / "m.pt"

@@ -23,7 +23,25 @@ def _review_state_exists(review_state_dir: str) -> bool:
     from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME
 
     shard_dir = Path(review_state_dir) / REVIEW_SHARD_DIRNAME
-    return shard_dir.is_dir() and any(shard_dir.glob("*.json"))
+    return shard_dir.is_dir() and any(shard_dir.rglob("*.json"))
+
+
+def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str | None]:
+    """The prediction bucket to read verdicts from, and the refusal when that is not one answer.
+
+    Verdicts are keyed by the bucket they were recorded against, so a store holding several is
+    several reviews and not one; the sole bucket answers when there is exactly one, and several
+    are named for the caller to choose among rather than merged into a reference nobody reviewed.
+    """
+    if bucket is not None:
+        return bucket, None
+    buckets = engine.reviewed_buckets()
+    if len(buckets) == 1:
+        return buckets[0], None
+    return None, (
+        f"review state holds verdicts for {len(buckets)} prediction buckets "
+        f"({', '.join(repr(b) for b in buckets)}); pass bucket to name which one to read"
+    )
 
 
 @mcp.tool()
@@ -37,6 +55,7 @@ def materialize_review_dataset(
     only_completed: bool = False,
     copy_files: bool = True,
     subject: str | None = None,
+    bucket: str | None = None,
 ) -> dict:
     """Build a curated detection dataset from human review verdicts.
 
@@ -60,6 +79,10 @@ def materialize_review_dataset(
             name exactly one subject; a review touching more than one subject with no explicit
             ``subject`` can't attribute its negatives, and they are silently dropped rather than
             carried into the curated set.
+        bucket: Which prediction bucket's verdicts to curate, as
+            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
+            and refuses, naming them, when it holds several: two buckets are two reviews, and
+            merging them would curate one date's verdicts against another's images.
     """
     output_dir = str(resolve_output_path(output_dir))
     if not _review_state_exists(review_state_dir):
@@ -69,7 +92,10 @@ def materialize_review_dataset(
 
     from tcip_annotation.review_engine import ReviewEngine
     engine = ReviewEngine(review_state_dir)
-    review_state = engine.raw_state
+    resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
+    if refusal is not None:
+        return {"error": refusal}
+    review_state = {"image": engine.image_states(resolved_bucket)}
     state_path = engine.shard_dir
 
     result = materialize_dataset(
@@ -116,6 +142,7 @@ def prioritize_review_queue(
     low: float = 0.3,
     high: float = 0.8,
     auto_threshold: float | None = None,
+    bucket: str | None = None,
 ) -> dict:
     """Order un-reviewed images for the next review batch.
 
@@ -146,6 +173,9 @@ def prioritize_review_queue(
             get right. Derive this threshold from the model's validated confidence
             distribution and confirm with a breeder spot-check that high-conf actually equals truth,
             then pass it explicitly: the result is stamped as requiring that confirmation.
+        bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
+            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
+            and refuses, naming them, when it holds several.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -168,7 +198,11 @@ def prioritize_review_queue(
     if review_state_dir and skip_reviewed:
         if _review_state_exists(review_state_dir):
             from tcip_annotation.review_engine import ReviewEngine
-            reviewed = reviewed_image_names(ReviewEngine(review_state_dir).raw_state)
+            engine = ReviewEngine(review_state_dir)
+            resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
+            if refusal is not None:
+                return {"error": refusal}
+            reviewed = reviewed_image_names({"image": engine.image_states(resolved_bucket)})
             before = len(sources)
             # select_unreviewed compares basenames against review-state img_name, which for a
             # band-grouped capture is the manifest's own filename (the identity every review-state
