@@ -804,17 +804,6 @@ def study_result_key(study_name: str, output_dir: str = "") -> Key:
                (_sweep_name(study_name),))
 
 
-def trial_config_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
-    """The point one trial actually trained at: its merged config plus the sampled params.
-
-    Scoped to the sweep rather than to the HPO root, because a trial belongs to its sweep and
-    not to the store the sweeps sit in. ``last_writer_wins``: one trial process writes its own
-    document once, when the trial finishes.
-    """
-    return Key(TRIAL_CONFIG_STORE, str(Path(sweep_root).resolve()),
-               (trial_dir_name, "resolved_config"))
-
-
 def _trial_name(trial_dir_name: str) -> str:
     """``trial_dir_name`` once it is known to name one trial and not a path through the sweep.
 
@@ -827,6 +816,17 @@ def _trial_name(trial_dir_name: str) -> str:
             "separator, a drive or a parent reference would address a record outside the sweep"
         )
     return trial_dir_name
+
+
+def trial_config_key(sweep_root: Path | str, trial_dir_name: str) -> Key:
+    """The point one trial actually trained at: its merged config plus the sampled params.
+
+    Scoped to the sweep rather than to the HPO root, because a trial belongs to its sweep and
+    not to the store the sweeps sit in. ``last_writer_wins``: one trial process writes its own
+    document once, when the trial finishes.
+    """
+    return Key(TRIAL_CONFIG_STORE, str(Path(sweep_root).resolve()),
+               (_trial_name(trial_dir_name), "resolved_config"))
 
 
 def trial_metrics_key(sweep_root: Path | str, trial_dir_name: str) -> Key:

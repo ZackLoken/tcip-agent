@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import uuid
 import zipfile
@@ -11,6 +10,7 @@ from pathlib import Path
 import tcip_store
 from tcip_store import (
     RECORD_JSON,
+    DecodeError,
     Key,
     StoreDescriptor,
     Version,
@@ -261,6 +261,7 @@ def view_gui_state() -> dict:
     nothing is open.
     """
     from tcip_mcp import workspace
+    from tcip_mcp.web_client import gui_snapshot_key
 
     name = workspace.read_active_project()
     if not name:
@@ -268,14 +269,13 @@ def view_gui_state() -> dict:
                 "note": "no active project; open one in the GUI or call set_active_project"}
     project_root = workspace.project_path(name)
     ctx: dict = {"active_project": name, "project_root": str(project_root)}
-    gui_path = project_root / ".tcip" / "state" / "gui.json"
-    if not gui_path.is_file():
-        ctx["note"] = "no gui.json yet (the GUI has not persisted a selection for this project)"
-        return ctx
     try:
-        gui = json.loads(gui_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        ctx["error"] = f"could not read gui.json: {e}"
+        gui = tcip_store.read(gui_snapshot_key(project_root), default=None)
+    except (DecodeError, OSError) as e:
+        ctx["error"] = f"could not read the GUI snapshot: {e}"
+        return ctx
+    if gui is None:
+        ctx["note"] = "no GUI snapshot yet (the GUI has not persisted a selection for this project)"
         return ctx
     ds = gui.get("dataset") or {}
     image_list = ds.get("image_list") or []

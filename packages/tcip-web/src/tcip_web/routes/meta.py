@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -33,24 +32,14 @@ def _guard(project_root: str) -> None:
         raise HTTPException(403, str(exc)) from exc
 
 
-def _reports_dir(project_root: str) -> Path:
-    from tcip_mcp.tools.meta_tools import _reports_dir as reports_dir
-
-    return reports_dir(project_root)
-
-
-def _retrospectives_dir(project_root: str) -> Path:
-    from tcip_mcp.tools.meta_tools import _retrospectives_dir as retrospectives_dir
-
-    return retrospectives_dir(project_root)
-
-
 @router.get("/reports")
 def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
     """Return recent friction reports, most recent first."""
     _guard(project_root)
-    reports_dir = _reports_dir(project_root)
-    if not reports_dir.exists():
+
+    from tcip_mcp.tools.meta_tools import reports_dir
+
+    if not reports_dir(project_root).exists():
         return {"reports": [], "count": 0, "total_available": 0}
 
     from tcip_mcp.tools.meta_tools import report_documents
@@ -86,7 +75,10 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
 def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
     """Return recent retrospectives (markdown), most recent first."""
     _guard(project_root)
-    retros_dir = _retrospectives_dir(project_root)
+
+    from tcip_mcp.tools.meta_tools import retrospectives_dir
+
+    retros_dir = retrospectives_dir(project_root)
     if not retros_dir.exists():
         return {"retrospectives": [], "count": 0, "total_available": 0}
 

@@ -947,21 +947,21 @@ def capture_live_canvas(
             Pass False for the full frame with the same overlays.
         max_edge: Downscale the rendered output to at most this edge (px).
     """
-    import json
     import time as _time
 
-    from tcip_mcp.project_paths import resolve_state
+    from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
 
-    meta_file = resolve_state(Path(".tcip") / "state" / "canvas_live.json")
-    shapes_file = resolve_state(Path(".tcip") / "state" / "canvas_shapes.json")
+    root = str(project_root())
+    meta_doc = canvas_meta_key(root)
+    shapes_doc = canvas_geometry_key(root)
 
-    def _read(path: Path) -> dict | None:
+    def _read(key: ts.Key) -> dict | None:
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            return ts.read(key, default=None)
+        except (OSError, ts.DecodeError):
             return None
 
-    prev = _read(meta_file)
+    prev = _read(meta_doc)
     prev_ts = (prev or {}).get("received_at", 0)
     refreshed = False
     ping_delivered = False
@@ -973,16 +973,16 @@ def capture_live_canvas(
         if ping_delivered:
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)
-                cur = _read(meta_file)
+                cur = _read(meta_doc)
                 if cur and cur.get("received_at", 0) > prev_ts:
                     refreshed = True
                     break
 
-    state = _read(meta_file)
+    state = _read(meta_doc)
     if state is None:
         return {"error": "No live canvas state found; is the GUI open with a project loaded? "
-                         "The frontend pushes it to <project>/.tcip/state/canvas_live.json "
-                         f"(looked at {meta_file}; if the GUI has a different project open, "
+                         "The frontend pushes its canvas state to the project the GUI has open "
+                         f"(looked under {root}; if the GUI has a different project open, "
                          "set_active_project to it first)."}
 
     src_image = state.get("image_path") or ""
@@ -991,7 +991,7 @@ def capture_live_canvas(
 
     # Geometry is valid only when its identity matches the meta document: a heartbeat for a
     # different image/tab means the stored shapes are stale and must not render.
-    sdoc = _read(shapes_file) or {}
+    sdoc = _read(shapes_doc) or {}
     shapes_valid = (
         sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
     )

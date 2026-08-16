@@ -283,6 +283,34 @@ class TestPortDiscovery:
         assert resolve_web_host() == "10.0.0.1"
 
 
+class TestSharedWebStateDeclarations:
+    """Every document both packages touch is declared once, where the MCP side can import it.
+
+    An MCP tool reads each of these and cannot import ``tcip_web``, so a declaration on each
+    side would be two stores wearing one name and whichever imported first would decide where
+    the document lands.
+    """
+
+    def test_the_gui_snapshot_is_one_declaration_that_both_packages_reach(self) -> None:
+        import tcip_store as ts
+        from tcip_mcp import web_client
+        from tcip_web import state as web_state
+
+        assert web_state.gui_snapshot_key is web_client.gui_snapshot_key
+        descriptor = ts.get_descriptor(web_client.GUI_SNAPSHOT_STORE)
+        assert descriptor.declared_in == web_client.__name__
+
+    def test_the_canvas_documents_are_one_declaration_that_both_packages_reach(self) -> None:
+        import tcip_store as ts
+        from tcip_mcp import web_client
+        from tcip_web.routes import canvas
+
+        assert canvas.canvas_meta_key is web_client.canvas_meta_key
+        assert canvas.canvas_geometry_key is web_client.canvas_geometry_key
+        for store in (web_client.CANVAS_META_STORE, web_client.CANVAS_GEOMETRY_STORE):
+            assert ts.get_descriptor(store).declared_in == web_client.__name__
+
+
 # ── Tool output schemas (unchanged from pre-HTTP migration) ─────────────
 
 

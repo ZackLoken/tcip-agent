@@ -106,7 +106,7 @@ def _retrospective_path(project_path: str, project_id: str) -> Path:
     return root.joinpath(*_RETROSPECTIVE_DOC.relative_path(str(root), (project_id,)).parts)
 
 
-def _reports_dir(project_path: str) -> Path:
+def reports_dir(project_path: str) -> Path:
     """Where the report documents live, without creating anything: the read side scans it."""
     return Path(project_path, *_REPORT_DOC.prefix)
 
@@ -117,17 +117,17 @@ def report_documents(project_path: str) -> list[Path]:
     The one place a reader learns which files are reports, so the extension is stated by the
     store's locator rather than restated as a glob by each consumer.
     """
-    reports_dir = _reports_dir(project_path)
-    if not reports_dir.is_dir():
+    directory = reports_dir(project_path)
+    if not directory.is_dir():
         return []
     return sorted(
-        reports_dir.glob(f"*{_REPORT_DOC.suffix}"),
+        directory.glob(f"*{_REPORT_DOC.suffix}"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
 
 
-def _retrospectives_dir(project_path: str) -> Path:
+def retrospectives_dir(project_path: str) -> Path:
     """Where the retrospective documents live, without creating anything."""
     return Path(project_path, *_RETROSPECTIVE_DOC.prefix)
 
@@ -245,12 +245,12 @@ def load_project_memory(
 def _load_reports(
     project_path: str, limit: int, category: str, filter_substring: str
 ) -> dict:
-    reports_dir = _reports_dir(project_path)
-    if not reports_dir.exists():
+    directory = reports_dir(project_path)
+    if not directory.exists():
         return {
             "reports": [],
             "count": 0,
-            "note": f"{reports_dir} does not exist yet, no friction reports.",
+            "note": f"{directory} does not exist yet, no friction reports.",
         }
 
     files = report_documents(project_path)
@@ -414,7 +414,7 @@ def record_distillation_pass(project_path: str) -> dict:
 def _load_retrospectives(
     project_path: str, limit: int, filter_substring: str
 ) -> dict:
-    retros_dir = _retrospectives_dir(project_path)
+    retros_dir = retrospectives_dir(project_path)
     if not retros_dir.exists():
         return {
             "retrospectives": [],
