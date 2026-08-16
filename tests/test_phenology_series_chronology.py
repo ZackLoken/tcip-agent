@@ -268,8 +268,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
     buckets = {d: root / "predictions" / "run" / d for d in counts}
     for d, (pos, neg) in counts.items():
         bucket = buckets[d]
-        # Predictions land before the record is filed, so the bucket's content digest the record
-        # covers is the one the delivery will recompute and verify against.
+        # Predictions land before the record is filed, so the covered digest matches what delivery recomputes.
         _write_preds(bucket, f"P1_{d}", _states(pos, neg))
         _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=root)
     _write_classifier_sidecar(buckets["2026-03-01"], dataset_root=root, trait="catkin")
