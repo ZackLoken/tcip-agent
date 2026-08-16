@@ -907,6 +907,12 @@ def write_class_map(dataset_root: str, subjects: dict, output_path: str = "") ->
     :func:`class_registry.write_registry`. No numeric class ids, no colors, no id enumeration: a
     label-scan cannot infer an attribute's type or rank, the expert's fact is the input here.
 
+    Changing a subject's attribute vocabulary invalidates the confirmations made under the old one,
+    so before the new registry lands, :func:`class_registry.stamp_unstamped_confirmations` records
+    the outgoing digest onto that subject's still-unstamped confirmations; they then read as
+    predating the change rather than as made under the new vocabulary. What it stamped, and any
+    warning if it could not, comes back under ``schema_change_sweep``.
+
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/classes.json``.
         subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
@@ -923,5 +929,7 @@ def write_class_map(dataset_root: str, subjects: dict, output_path: str = "") ->
         return {"error": f"invalid registry: {exc}"}
 
     out = Path(output_path) if output_path else classes_path(dataset_root)
+    sweep = class_registry.stamp_unstamped_confirmations(out, registry)
     class_registry.write_registry(out, registry)
-    return {"classes_path": str(out), "subjects": [s.name for s in registry.subjects]}
+    return {"classes_path": str(out), "subjects": [s.name for s in registry.subjects],
+            "schema_change_sweep": sweep}

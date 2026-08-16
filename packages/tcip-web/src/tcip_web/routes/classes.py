@@ -166,7 +166,18 @@ class SaveClassesPayload(BaseModel):
 
 @router.post("/save")
 def save_classes(payload: SaveClassesPayload) -> dict:
-    from tcip_mcp.class_registry import RegistryError, registry_from_dict, write_registry
+    """Write the dataset's class registry.
+
+    Changing a subject's attribute vocabulary invalidates the confirmations made under the old one,
+    so ``stamp_unstamped_confirmations`` runs first, while the outgoing registry is still readable,
+    and records its digest onto that subject's still-unstamped confirmations. They then read as
+    predating the change instead of as made under the new vocabulary. Like ``_stamp_digest``, it
+    never blocks the write it accompanies; what it stamped, and any warning, ride back in
+    ``schema_change_sweep``.
+    """
+    from tcip_mcp.class_registry import (
+        RegistryError, registry_from_dict, stamp_unstamped_confirmations, write_registry,
+    )
     from tcip_mcp.dataset_layout import classes_path
 
     root = _resolve_dataset_root(payload.dataset_root, payload.annotations_dir)
@@ -179,14 +190,20 @@ def save_classes(payload: SaveClassesPayload) -> dict:
         raise HTTPException(400, f"invalid class registry: {exc}") from exc
     path = classes_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    sweep = stamp_unstamped_confirmations(path, registry)
+    if sweep["warning"]:
+        logger.warning("%s", sweep["warning"])
     try:
         write_registry(path, registry)
     except OSError as exc:
         raise HTTPException(500, f"could not write {path}: {exc}") from exc
     _audit_dataset_write(
-        root, "gui_save_classes", {"classes_path": str(path), "n_subjects": len(registry.subjects)}
+        root, "gui_save_classes",
+        {"classes_path": str(path), "n_subjects": len(registry.subjects),
+         "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"]},
     )
-    return {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path)}
+    return {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path),
+            "schema_change_sweep": sweep}
 
 
 # ── Per-image status (used by Complete checkbox + status filter) ─────────

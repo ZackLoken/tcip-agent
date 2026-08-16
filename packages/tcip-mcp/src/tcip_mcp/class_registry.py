@@ -212,6 +212,74 @@ def write_registry(path: str | Path, registry: ClassRegistry) -> None:
     tcip_store.replace(_registry_key(path), registry_to_dict(registry))
 
 
+def stamp_unstamped_confirmations(path: str | Path, incoming: ClassRegistry) -> dict:
+    """Before ``incoming`` replaces the registry at ``path``, stamp the outgoing attribute-schema
+    digest onto every confirmation of an affected subject that carries no stamp yet.
+
+    A confirmation and its digest stamp are two transactions, status first, so a stamp that could not
+    be written never rejects the human's confirmation and unstamped confirmations legitimately exist
+    (see ``tcip_web.routes.classes._stamp_digest``). An unstamped confirmation reads as valid
+    (``tcip_mcp.pipelines.data.datasets.confirmed_negative_names`` quarantines only a stamp that
+    positively disagrees), which is right until the vocabulary changes underneath it: from then on
+    nothing distinguishes it from a confirmation made under the new schema, and it trains against a
+    definition its human never saw. The outgoing registry is the last moment that digest is
+    recoverable, so it is recorded here, and those confirmations then read as stale exactly like the
+    stamped ones.
+
+    Stamps the same set the confirmation-time writer stamps, every status in the subject's buckets
+    rather than the negatives alone, since the quarantine question is asked of whatever a later
+    reader takes from the store. Already-stamped confirmations, and subjects whose digest is
+    unchanged, are left alone. The dataset swept is the one holding this registry file, the root
+    :func:`read_registry` and :func:`write_registry` address it by.
+
+    Never blocks the registry write: a missing outgoing registry (a first-ever write) is a no-op, and
+    an unreadable one or a failing sweep returns a ``warning`` for the caller to surface. Returns
+    ``{"newly_stamped": {subject: count}, "warning": str | None}``.
+    """
+    import tcip_store
+
+    from tcip_mcp.dataset_layout import (
+        bucket_subject_date, image_status_key, normalize_status_store, stamp_image_status_digests,
+    )
+
+    dataset_root = Path(path).absolute().parent
+    newly_stamped: dict[str, int] = {}
+    try:
+        outgoing = read_registry(path)
+    except FileNotFoundError:
+        return {"newly_stamped": newly_stamped, "warning": None}
+    except (OSError, RegistryError) as exc:
+        return {"newly_stamped": newly_stamped, "warning":
+                f"the outgoing registry at {path} does not read ({exc}), so confirmations made "
+                f"under it stay unstamped and will read as made under the new schema; re-review "
+                f"them before they train"}
+    changed = {
+        s.name: digest for s in outgoing.subjects
+        if (digest := attribute_schema_digest(outgoing, s.name)) is not None
+        and digest != attribute_schema_digest(incoming, s.name)
+    }
+    if not changed:
+        return {"newly_stamped": newly_stamped, "warning": None}
+    try:
+        statuses = normalize_status_store(
+            tcip_store.read(image_status_key(dataset_root), default={}))
+        for bucket, entries in statuses.items():
+            subject, _ = bucket_subject_date(bucket)
+            outgoing_digest = changed.get(subject)
+            if outgoing_digest is None:
+                continue
+            stamped = stamp_image_status_digests(
+                dataset_root, bucket, sorted(entries), outgoing_digest, only_unstamped=True)
+            if stamped:
+                newly_stamped[subject] = newly_stamped.get(subject, 0) + len(stamped)
+    except (OSError, tcip_store.StoreError) as exc:
+        return {"newly_stamped": newly_stamped, "warning":
+                f"could not stamp the outgoing attribute schema onto the confirmations under "
+                f"{dataset_root} ({exc}); the unstamped ones will read as made under the new "
+                f"schema, so re-review them before they train"}
+    return {"newly_stamped": newly_stamped, "warning": None}
+
+
 def copy_registry(source: str | Path, destination: str | Path) -> None:
     """Place one dataset's registry beside another dataset's data.
 

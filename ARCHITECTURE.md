@@ -678,10 +678,10 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `/load` | `load_classes` | `routes/classes.py:122` |
 | POST | `/save` | `save_classes` | `routes/classes.py:168` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:276` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:286` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:314` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:343` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:293` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:303` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:331` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:360` |
 
 ### routes/coverage.py, prefix `/api/coverage` (5 routes)
 
@@ -965,7 +965,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:263`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:764`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:777`.
 
 Seam S17 ("Canonical per-image annotation JSON schema"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: every writer and the shared `json_io.read_annotations`
@@ -1006,7 +1006,7 @@ Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:189`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:744`.
 
-`assign_class_ids`, `class_registry.py:227`, derives the training-time name-to-id map from this
+`assign_class_ids`, `class_registry.py:295`, derives the training-time name-to-id map from this
 file's declared attribute order; no integer id is stored in the file itself.
 `attribute_schema_digest`, `class_registry.py:161`, hashes a subject's attribute
 name/type/values for the `image_status_digest.json` staleness stamp (format 6).
@@ -1040,30 +1040,47 @@ named third consumer, `scripts/check_dataset_identity.py`, is never executed by 
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:286`; `set_image_status_bulk`,
-`routes/classes.py:314`; `tcip_mcp.tools.data_tools._carry_confirmed_negatives`
+`packages/tcip-web/src/tcip_web/routes/classes.py:303`; `set_image_status_bulk`,
+`routes/classes.py:331`; `tcip_mcp.tools.data_tools._carry_confirmed_negatives`
 (split-materialized copy), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:499`.
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:394`; `_status_bucket_for`,
-`packages/tcip-web/src/tcip_web/routes/sessions.py:253`.
+`packages/tcip-web/src/tcip_web/routes/sessions.py:253`;
+`tcip_mcp.class_registry.stamp_unstamped_confirmations`,
+`packages/tcip-mcp/src/tcip_mcp/class_registry.py:215`, which enumerates every bucket of a
+subject whose attribute schema is about to change so the confirmations under it can be stamped
+before the outgoing digest is gone.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:541`, imported by the web route module.
 
 Seam S22 ("image_status.json confirmed-negative store"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_classes_routes.py:132,149`,
-`tests/test_confirmations_travel_with_dataset.py:65,95`, `tests/test_doctor.py:48`. Gap: no test
-writes a status through the real `/api/classes/image_status` route and reads it back through the
-real `confirmed_negative_names` or `doctor.py`; MCP-side readers test membership through
+`tests/test_confirmations_travel_with_dataset.py:65,95`, `tests/test_doctor.py:48`.
+`tests/test_status_digest_stamp_writer.py` writes statuses through the real
+`/api/classes/image_status` and `/image_status/bulk` routes and reads them back through the real
+`confirmed_negative_names`. Gap: whether `doctor.py` is ever driven against a route-written store
+has not been re-verified; MCP-side readers test membership through
 `dataset_layout.is_confirmed_negative` against the vocabulary declared beside the resolver.
 
 ## 6. `image_status_digest.json`, attribute-schema staleness stamp
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writer: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:246`, called from
-`set_image_status`/`set_image_status_bulk` at confirmation time.
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:263`, called from
+`set_image_status`/`set_image_status_bulk` at confirmation time; and
+`tcip_mcp.class_registry.stamp_unstamped_confirmations`,
+`packages/tcip-mcp/src/tcip_mcp/class_registry.py:215`, called by both registry writers,
+`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:168`) and `write_class_map`
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:900`), before the new registry lands.
+A status and its stamp are two transactions, status first, so unstamped confirmations
+legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
+sweep records it there and they read as predating the change instead of as made under the new
+vocabulary. Both writers reach the store through the one transactional writer
+`dataset_layout.stamp_image_status_digests`,
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:609`, whose `only_unstamped` argument keeps
+the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`'s quarantine logic,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:394`; a name whose stamp no longer
@@ -1073,10 +1090,12 @@ trained as a negative (`datasets.py:296`).
 Seam S23 ("image_status_digest.json attribute-schema stamp"), verdict `both-sides-restated`,
 `phase0_implementation: once, shared`: `tests/test_confirmations_travel_with_dataset.py:119-266`,
 `tests/test_coco_training_assembly.py:591-680`. The shared function across both sides is
-`attribute_schema_digest`, `class_registry.py:161`. Gap: no test calls the real `_stamp_digest`
-writer or its HTTP route and then reads the resulting sidecar it produces; reader-side tests
-hand-write the `{bucket: {image_name: digest}}` shape directly, reusing only
-`attribute_schema_digest` to compute the digest value.
+`attribute_schema_digest`, `class_registry.py:161`. Both sides run their real implementations
+end to end in `tests/test_status_digest_stamp_writer.py` (the HTTP status routes produce the
+sidecar, `confirmed_negative_names` reads it) and in
+`tests/test_schema_change_staleness_sweep.py` (both registry writers run the sweep,
+`confirmed_negative_names` reads the result). Reader-only tests elsewhere still hand-write the
+`{bucket: {image_name: digest}}` shape, reusing `attribute_schema_digest` for the value.
 
 ## 7. `view_coverage.json`, reference-grid coverage record, advisory
 
@@ -1523,7 +1542,7 @@ Phase 3 verdict: single.
 ## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:642` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:655` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
 Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
@@ -1559,13 +1578,13 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:170` (`from tcip_mcp.dataset_layout import classes_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:181` (`from tcip_mcp.dataset_layout import classes_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
-Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:227` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/datasets.py:120`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:295` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/datasets.py:120`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:102` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
@@ -1579,7 +1598,7 @@ Phase 3 verdict: single.
 ## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:609` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer and the split tools).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:609` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry.stamp_unstamped_confirmations`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
 Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:161` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
