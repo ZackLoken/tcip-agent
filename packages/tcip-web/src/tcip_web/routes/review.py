@@ -1,8 +1,9 @@
 """Review routes: compute matches, walk detections, record actions, save GT.
 
 Uses the shared :class:`tcip_annotation.ReviewEngine`; one engine instance lives in memory per
-project (keyed by project_root). Review state is persisted via the engine to per-image shards under
-``<project_root>/.tcip/state/review/``.
+dataset (keyed by dataset_root). Review state is persisted via the engine to per-image shards under
+``<dataset_root>/.tcip/state/review/``, so a verdict travels with the images it was recorded on and
+the immutability guard that counts verdicts reads the store the reviewer wrote.
 
 Ground truth and predictions are each one JSON file per image holding every subject's annotations by
 name (a prediction is an :class:`~tcip_annotation.state.Annotation` whose ``score`` is set); a class
@@ -19,7 +20,7 @@ import logging
 import os
 import threading
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,12 +65,12 @@ def _current_user() -> str:
     return current_user()
 
 
-def _get_engine(project_root: str) -> ReviewEngine:
+def _get_engine(dataset_root: str) -> ReviewEngine:
     from tcip_mcp.prediction_buckets import review_state_dir_of
 
-    key = str(Path(project_root).resolve())
+    key = str(Path(dataset_root).resolve())
     if key not in _engines:
-        state_dir = review_state_dir_of(project_root)
+        state_dir = review_state_dir_of(dataset_root)
         _engines[key] = ReviewEngine(state_dir=state_dir, current_user=_current_user())
     return _engines[key]
 
@@ -77,10 +78,10 @@ def _get_engine(project_root: str) -> ReviewEngine:
 def _audit(scope: str, tool: str, arguments: dict) -> None:
     """Record a GUI review mutation in the audit log ``scope`` names.
 
-    A verdict is validation evidence held in the review store under the root the request
-    named, so those events are recorded there. A review that edits ground truth or stamps a
-    prediction bucket changes a record that travels with the dataset, so its caller resolves
-    the dataset root and passes it instead. Never fails the request.
+    Every mutation these routes make changes a record that travels with the dataset: the verdict
+    store, the ground-truth labels and a prediction bucket's provenance stamp all live under the
+    dataset root, so the dataset root the request states is the scope for all of them. Never fails
+    the request.
     """
     if not scope:
         return
@@ -90,21 +91,60 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
 
 
 def _dataset_root_of_all(paths: Iterable[Optional[str]]) -> Optional[str]:
-    """The one dataset root every path in ``paths`` belongs to, or None when that is not a
-    single answer: an event names one log, and picking among several roots would be a guess."""
+    """The one dataset root every path in ``paths`` belongs to, or None when that is not a single
+    answer.
+
+    A cross-check that a request naming one dataset is not pointing at another's files, never a
+    source of the root itself: the request states that. ``None`` means the paths answer nothing to
+    cross-check against (a bucket under no dataset root is legitimate work), or that they answer
+    several things, which is the refusal a request accepting more than one prediction directory
+    would need.
+    """
     from tcip_mcp.dataset_layout import dataset_root_of
 
     roots = {str(root) for p in paths if p and (root := dataset_root_of(p)) is not None}
     return roots.pop() if len(roots) == 1 else None
 
 
-def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict]:
-    """The producing model's identity for prediction bucket ``pred_dir``.
+def _prediction_digest(pred_dir: Optional[str], image_name: str) -> Optional[str]:
+    """The content identity of ``image_name``'s prediction document in ``pred_dir``, as it is now.
+
+    The platform's own :func:`~tcip_mcp.pipelines.resolution.dataset_hash` over that one stem, the
+    hasher a bucket's whole-content digest is built from, so a verdict records the file the reviewer
+    actually saw and the promotion can tell whether that file still says what it said. ``None`` when
+    the image has no prediction document, or the review names no bucket at all: the confirmed-negative
+    case, a value that is compared rather than a comparison that is skipped.
+    """
+    if not pred_dir:
+        return None
+    from tcip_mcp.pipelines.resolution import dataset_hash
+
+    stem = Path(image_name).stem
+    if not (Path(pred_dir) / f"{stem}.json").is_file():
+        return None
+    return dataset_hash(pred_dir, [stem])
+
+
+def _recorded_prediction_digests(image_state: dict) -> set[Optional[str]]:
+    """Every prediction-document identity recorded against one reviewed image at review time.
+
+    The image-level producer fact a confirmed negative carries, plus the one on each verdict entry.
+    A recorded identity carrying no digest reads as ``None``, the same value an image with no
+    prediction document records, so an unrecorded identity is compared rather than waved through.
+    """
+    identities = [image_state.get("producer_identity")]
+    identities += [d.get("producer_identity") for d in image_state.get("detections") or []]
+    return {i.get("prediction_digest") for i in identities if isinstance(i, dict)}
+
+
+def _resolve_producer_identity_for_dir(pred_dir: Optional[str], image_name: str) -> Optional[dict]:
+    """The producing model's identity for ``image_name`` in prediction bucket ``pred_dir``.
 
     Resolved from the bucket's own ``operating_point.json`` sidecar: ``checkpoint_sha256`` and
-    ``experiment_id``, the same facts ``validate_reference`` already reads for its own scoping.
-    ``None`` when there is no dir or no sidecar to read; callers store this as a plain fact on the
-    verdict/image record rather than looking it up again at validation time.
+    ``experiment_id``, the same facts ``validate_reference`` already reads for its own scoping,
+    alongside the content identity of the one prediction document this review is being recorded
+    against. ``None`` when there is no dir or no sidecar to read; callers store this as a plain fact
+    on the verdict/image record rather than looking it up again at validation time.
     """
     if not pred_dir:
         return None
@@ -117,6 +157,7 @@ def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict
         "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
         "experiment_id": sidecar.get("experiment_id"),
         "bucket_dir": str(Path(pred_dir)),
+        "prediction_digest": _prediction_digest(pred_dir, image_name),
     }
 
 
@@ -139,7 +180,7 @@ def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
     find the sidecar, never as the identity itself."""
     if not pred_path:
         return None
-    return _resolve_producer_identity_for_dir(str(Path(pred_path).parent))
+    return _resolve_producer_identity_for_dir(str(Path(pred_path).parent), Path(pred_path).name)
 
 
 def _resolve_verdict_class_id(pred_path: Optional[str], class_name: str) -> Optional[int]:
@@ -290,7 +331,7 @@ def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
 
 
 class MatchesRequest(BaseModel):
-    project_root: str
+    dataset_root: str
     image_name: str
     image_path: str
     gt_path: Optional[str] = None      # the per-image ground-truth label file
@@ -380,7 +421,7 @@ def _matches_response(
 def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     """Compute TP/FP/FN, decorate with review status, and return everything the canvas needs."""
     ctx = _load_ctx(req.image_name, req.image_path, gt_path=req.gt_path, pred_path=req.pred_path)
-    engine = _get_engine(req.project_root)
+    engine = _get_engine(req.dataset_root)
     matches = _compute_matches(
         ctx.gt, ctx.preds, iou_threshold=req.iou_threshold, conf_threshold=req.conf_threshold,
         subject=req.subject, attribute=req.attribute,
@@ -392,7 +433,7 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
 
 
 class ActionPayload(BaseModel):
-    project_root: str
+    dataset_root: str
     image_name: str
     image_path: str
     gt_path: Optional[str] = None
@@ -506,7 +547,7 @@ def record_action(payload: ActionPayload) -> dict:
     _check_classification_scope(payload.subject, payload.attribute)
     ctx = _load_ctx(payload.image_name, payload.image_path,
                     gt_path=payload.gt_path, pred_path=payload.pred_path)
-    engine = _get_engine(payload.project_root)
+    engine = _get_engine(payload.dataset_root)
     # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
     # (accepted_by/created_by, "user:<name>") so the two never disagree on who acted.
     reviewer_name = resolve_user(payload.user)
@@ -567,7 +608,7 @@ def record_action(payload: ActionPayload) -> dict:
         subject=payload.subject, attribute=payload.attribute,
     )
     engine.check_image_review_complete(bucket, payload.image_name, matches)
-    _audit(payload.project_root, "gui_review_action", {
+    _audit(payload.dataset_root, "gui_review_action", {
         "image_name": payload.image_name,
         "det_type": payload.det_type,
         "class_name": payload.class_name,
@@ -589,7 +630,7 @@ def record_action(payload: ActionPayload) -> dict:
 
 
 class MarkCompletePayload(BaseModel):
-    project_root: str
+    dataset_root: str
     image_name: str
     gt_path: Optional[str] = None
     # The prediction bucket loaded for this image: a confirmed negative carries zero
@@ -604,10 +645,10 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases."""
     _guard_path(payload.gt_path)
     _guard_path(payload.pred_dir)
-    engine = _get_engine(payload.project_root)
+    engine = _get_engine(payload.dataset_root)
     bucket = _bucket_of_dir(payload.pred_dir)
     if payload.completed:
-        producer_identity = _resolve_producer_identity_for_dir(payload.pred_dir)
+        producer_identity = _resolve_producer_identity_for_dir(payload.pred_dir, payload.image_name)
         # A zero-verdict Complete is FN-adjudication-covered only when it is a genuine negative:
         # the bucket held zero predictions for this image, so there was nothing to individually walk
         # and Complete is itself the confirming act. A bulk-accept of an image the bucket did
@@ -630,7 +671,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     has_content = bool(payload.gt_path and os.path.isfile(payload.gt_path)
                        and read_annotations(payload.gt_path))
     annotation_status = derive_status(completed=payload.completed, has_content=has_content)
-    _audit(payload.project_root, "gui_review_mark_complete", {
+    _audit(payload.dataset_root, "gui_review_mark_complete", {
         "image_name": payload.image_name,
         "completed": payload.completed,
         "annotation_status": annotation_status,
@@ -643,7 +684,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
 
 
 class BackupPayload(BaseModel):
-    project_root: str
+    dataset_root: str
     label_dirs: list[str]
 
 
@@ -652,13 +693,13 @@ def backup_labels(payload: BackupPayload) -> dict:
     """Top up ``<dir>/.original/``: capture any label file that has no baseline yet."""
     for d in payload.label_dirs:
         _guard_path(d)
-    engine = _get_engine(payload.project_root)
+    engine = _get_engine(payload.dataset_root)
     n = engine.backup_original_labels(*payload.label_dirs)
     return {"status": "ok", "files_backed_up": n}
 
 
 class SaveGtPayload(BaseModel):
-    project_root: str
+    dataset_root: str
     image_name: str
     image_path: str
     label_path: Optional[str] = None
@@ -673,7 +714,7 @@ def save_gt(payload: SaveGtPayload) -> dict:
     """Persist edited GT (post-review modification) for a single image."""
     w, h = _image_dims(payload.image_path)
     _guard_path(payload.label_path)
-    engine = _get_engine(payload.project_root)
+    engine = _get_engine(payload.dataset_root)
 
     # The reviewer authors this committed GT; a shape that round-trips its own provenance keeps it.
     author = user_id(resolve_user(payload.user))
@@ -685,15 +726,11 @@ def save_gt(payload: SaveGtPayload) -> dict:
     )
     ok = engine.save_gt(ctx, path=payload.label_path)
     # Ground truth travels with its dataset, so the edit is recorded beside the labels it changed.
-    gt_root = _dataset_root_of_all([payload.label_path])
-    if gt_root is None:
-        logger.warning("no dataset root for %s; GT edit not audited", payload.label_path)
-    else:
-        _audit(gt_root, "gui_review_save_gt", {
-            "image_name": payload.image_name,
-            "label_path": payload.label_path,
-            "n_annotations": len(payload.annotations),
-        })
+    _audit(payload.dataset_root, "gui_review_save_gt", {
+        "image_name": payload.image_name,
+        "label_path": payload.label_path,
+        "n_annotations": len(payload.annotations),
+    })
     return {"status": "ok" if ok else "partial"}
 
 
@@ -701,7 +738,7 @@ def save_gt(payload: SaveGtPayload) -> dict:
 
 
 class ValidateReferenceRequest(BaseModel):
-    project_root: str
+    dataset_root: str
     trait: str
     # The prediction bucket whose review is being promoted: the per-image prediction dir the
     # delivery gate reads an ``operating_point.json`` from.
@@ -725,10 +762,15 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     Reconstructs the review verdicts into the COCO records ``resolve_operating_point`` consumes (the
     ``review_calibration`` adapter) and runs them through the identical disjoint-split + count-bias
-    gate and conf-censoring guard the held-out-GT path uses: no shortcut to "validated". On success
-    the bucket's ``operating_point.json`` is stamped ``VALIDATED_REVIEW_CONFIRMED`` (so the delivery
-    gate reads it); on refusal an honest ``validated=false`` placeholder is written and the reason is
-    returned. An already-validated bucket is never downgraded.
+    gate and conf-censoring guard the held-out-GT path uses: no shortcut to "validated". A passing
+    gate is earned through ``open_validation``/``seal_validation``, which append the validation
+    record and hand back the stamp carrying its pointer, so the bucket's ``operating_point.json`` can
+    only claim ``VALIDATED_REVIEW_CONFIRMED`` with a record outside the bucket answering for it; on
+    refusal an honest ``validated=false`` placeholder is written and the reason is returned.
+
+    The promotion verifies before it decides. A bucket whose stamp claims validation that no record
+    answers for is treated as unvalidated and is promotable over, and a review whose prediction
+    documents are no longer the ones the reviewer saw earns nothing at all.
     """
     bucket_dirs = [req.pred_dir] if req.pred_dir else []
     for d in bucket_dirs:
@@ -740,24 +782,39 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                    "this dataset, then try again.",
             buckets_stamped=[])
 
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, verify_stamp_binding
     from tcip_mcp.prediction_buckets import bucket_stems
 
+    # The stated root places the record, its covered buckets and its reference; a bucket that
+    # answers a different one is another dataset's evidence.
+    named_root = _dataset_root_of_all(bucket_dirs)
+    if named_root is not None and Path(named_root).resolve() != Path(req.dataset_root).resolve():
+        raise HTTPException(
+            400,
+            f"the predictions at {req.pred_dir} belong to dataset {named_root}, not to "
+            f"{req.dataset_root}, the dataset this request names. Validate a bucket under its own "
+            "dataset root, so the verdicts, the validation record and the stamp all hang off one "
+            "dataset.")
+
     stems = bucket_stems(*bucket_dirs)
-    engine = _get_engine(req.project_root)
+    engine = _get_engine(req.dataset_root)
     # The verdicts recorded against the bucket being promoted, so a stem that exists under two
     # buckets contributes only what was reviewed here.
-    completed = {
+    reviewed = {
         name: data
         for name, data in engine.image_states(_bucket_of_dir(req.pred_dir)).items()
-        if Path(name).stem in stems and data.get("img_status") == "completed"
+        if data.get("img_status") == "completed"
     }
+    completed = {name: data for name, data in reviewed.items() if Path(name).stem in stems}
     n = len(completed)
 
-    # Never downgrade: predictions already validated (e.g. against held-out GT) stay validated: a
-    # review reference isn't needed there, and this action must not be able to lower them.
+    # Never downgrade what the verifier confirms, and treat a claim no record answers for as the
+    # assertion it is: unvalidated, and promotable over.
     sidecars = {d: (read_operating_point_sidecar(d) or {}) for d in bucket_dirs}
-    if all(sc.get("validated") for sc in sidecars.values()):
+    digest_memo: dict[str, str] = {}
+    bindings = {d: verify_stamp_binding(sc, d, document="operating_point", digest_memo=digest_memo)
+                for d, sc in sidecars.items()}
+    if all(b.claimed and b.ok for b in bindings.values()):
         ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_against")
                     for sc in sidecars.values()), None)
         return ValidateReferenceResponse(
@@ -770,6 +827,24 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             validated=False, reference=None, reviewed_image_count=0, conf=None,
             reason="No completed reviews yet for this model on this date. Review the predictions and "
                    "mark the images Reviewed, then try again.",
+            buckets_stamped=[])
+
+    # The evidence set and the covered set are one set: a prediction document that changed since its
+    # verdicts were recorded is evidence for nothing, and one that appeared or vanished changed too.
+    diverged = sorted(
+        name for name, data in reviewed.items()
+        if any(recorded != _prediction_digest(req.pred_dir, name)
+               for recorded in _recorded_prediction_digests(data))
+    )
+    if diverged:
+        return ValidateReferenceResponse(
+            validated=False, reference=None, reviewed_image_count=n, conf=None,
+            reason=f"The predictions for {', '.join(diverged)} are no longer the ones that were "
+                   "reviewed: a prediction file has been added, replaced or removed in this bucket "
+                   "since those verdicts were recorded. Re-running inference on a reviewed bucket "
+                   "writes the next free variant of it instead (the same '@r2' redirect the "
+                   "immutability guard makes), which keeps this review intact and can be reviewed "
+                   "and validated on its own.",
             buckets_stamped=[])
 
     from tcip_mcp.pipelines.feedback import (
@@ -843,14 +918,23 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
                            and review_tiled is not None else "default")
 
+    # One spelling of the evidence, run for the breeder-facing description and handed to
+    # open_validation, which runs the same resolver itself to earn the record.
+    resolver_inputs = {
+        "review_state": review_state,
+        "only_completed": True,
+        "bucket_identities": bucket_identities,
+        "staged_conf_floor": staged_conf_floor,
+        "tile_size": review_tile_size,
+        "tile_size_source": review_tile_size_source,
+        "tiled": review_tiled,
+        "tiled_source": review_tiled_source,
+        # The root the verdict store was opened on, so the split lock travels with the verdicts.
+        "scope_root": req.dataset_root,
+    }
     try:
         bundle = resolve_operating_point_from_review(
-            review_state, req.trait, only_completed=True, experiment_id=review_experiment_id,
-            # The root _get_engine opened the verdict store on, so the lock travels with them.
-            scope_root=req.project_root,
-            bucket_identities=bucket_identities, staged_conf_floor=staged_conf_floor,
-            tile_size=review_tile_size, tile_size_source=review_tile_size_source,
-            tiled=review_tiled, tiled_source=review_tiled_source)
+            trait_name=req.trait, experiment_id=review_experiment_id, **resolver_inputs)
     except TraitUnknownError:
         raise HTTPException(
             400,
@@ -867,22 +951,48 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     # Stamp each bucket's provenance sidecar (operating_point.json is not a label, so this never
     # touches the reviewed per-image predictions or the verdict-immutability guard).
-    from tcip_mcp.pipelines.resolution import update_sidecar
+    from tcip_mcp.pipelines.resolution import (
+        claim_payload,
+        open_validation,
+        seal_validation,
+        update_sidecar,
+    )
+    from tcip_mcp.prediction_buckets import review_state_dir_of
 
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
         review_to_records(review_state, bucket_identities=bucket_identities))
     now_iso = datetime.now(timezone.utc).isoformat()
+    record_digests: dict[str, str] = {}
+    stamped: list[str] = []
 
-    def _promote(stored: dict) -> dict | None:
-        """Merge this promotion into whatever the producing run left, inside the stamp's lock.
+    try:
+        draft = None
+        if result["validated"]:
+            shas = {sc.get("checkpoint_sha256") for sc in sidecars.values()
+                    if sc.get("checkpoint_sha256")}
+            draft = open_validation(
+                document="operating_point",
+                evidence={"resolver": "resolve_operating_point_from_review",
+                          "inputs": resolver_inputs},
+                trait=req.trait,
+                checkpoint_sha256=next(iter(shas)) if len(shas) == 1 else None,
+                producing_experiment_id=review_experiment_id,
+                reference_inputs={
+                    "dataset_root": req.dataset_root,
+                    "scope_roots": {"verdicts": str(review_state_dir_of(req.dataset_root))},
+                    "stated_values": {"review_reference_hash": ref_hash, "review_image_count": n},
+                },
+            )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
-        The no-downgrade decision is made against the stored stamp, not the copy read before the
-        lock: predictions validated some other way (held-out GT) stay validated, and a producer
-        that stamped the bucket while this review was being reconciled is not overwritten.
+    def _stamp_body(stored: dict) -> dict:
+        """This promotion merged over whatever the producing run left in ``stored``.
+
+        The trait is written only when a gate was cleared, so a bucket carries the trait its claim
+        was earned for and an honest placeholder claims no scope at all.
         """
-        if stored.get("validated"):
-            return None
         merged = dict(stored)
         merged.update({
             "operating_point": op_prov,
@@ -895,28 +1005,64 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             "validated_at": now_iso,
         })
         merged.setdefault("produced_at", now_iso)
+        if draft is not None:
+            merged["trait"] = req.trait
         return merged
 
-    stamped: list[str] = []
-    for d in bucket_dirs:
-        if sidecars[d].get("validated"):
-            continue  # a mixed set: leave an already-validated bucket untouched (no downgrade)
-        Path(d).mkdir(parents=True, exist_ok=True)
-        if update_sidecar(d, _promote):
-            stamped.append(d)
+    def _promotion_of(pred_dir: str, earned: dict) -> Callable[[dict], Optional[dict]]:
+        """The merge one bucket's stamp is promoted through, run inside that stamp's own lock."""
+
+        def _promote(stored: dict) -> dict | None:
+            """Merge this promotion into whatever the producing run left, inside the stamp's lock.
+
+            The no-downgrade decision is made against the stored stamp, not the copy read before the
+            lock: predictions whose validation a record answers for (held-out GT, an earlier review)
+            stay as they are, and a producer that stamped the bucket while this review was being
+            reconciled is not overwritten. ``earned`` is the body the record was sealed over, so the
+            pointer is merged only while the stamp still makes the claim that record answers for; a
+            claim that moved under the lock leaves the record inert rather than misnamed.
+            """
+            binding = verify_stamp_binding(stored, pred_dir, document="operating_point",
+                                           digest_memo=digest_memo)
+            if binding.claimed and binding.ok:
+                return None
+            merged = _stamp_body(stored)
+            if draft is None:
+                return merged
+            if claim_payload(merged, document="operating_point") != claim_payload(
+                    earned, document="operating_point"):
+                return None
+            merged["validated_by"] = earned["validated_by"]
+            return merged
+
+        return _promote
+
+    try:
+        for d in bucket_dirs:
+            if bindings[d].claimed and bindings[d].ok:
+                continue  # a mixed set: a bucket whose validation a record answers for is left alone
+            Path(d).mkdir(parents=True, exist_ok=True)
+            # Sealed outside the stamp's lock: the experiment store refuses a write inside another
+            # store's open transaction.
+            earned = _stamp_body(sidecars[d])
+            if draft is not None:
+                record_digests[d], earned = seal_validation(
+                    draft, dataset_root=req.dataset_root, bucket_dirs=list(bucket_dirs),
+                    stamp_body=earned)
+            if update_sidecar(d, _promotion_of(d, earned)):
+                stamped.append(d)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
     # The sidecar this stamps sits in the prediction bucket, which travels with the dataset.
-    bucket_root = _dataset_root_of_all(bucket_dirs)
-    if bucket_root is None:
-        logger.warning("no single dataset root for %s; validation not audited", bucket_dirs)
-    else:
-        _audit(bucket_root, "gui_review_validate_reference", {
-            "trait": req.trait,
-            "validated": result["validated"],
-            "reference": result["reference"],
-            "reviewed_image_count": n,
-            "buckets_stamped": stamped,
-        })
+    _audit(req.dataset_root, "gui_review_validate_reference", {
+        "trait": req.trait,
+        "validated": result["validated"],
+        "reference": result["reference"],
+        "reviewed_image_count": n,
+        "buckets_stamped": stamped,
+        "record_digests": record_digests,
+    })
     return ValidateReferenceResponse(
         validated=bool(result["validated"]),
         reference=result["reference"],
@@ -928,8 +1074,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
 
 @router.get("/image_status")
-def get_image_status(project_root: str, image_name: str) -> dict:
-    engine = _get_engine(project_root)
+def get_image_status(dataset_root: str, image_name: str) -> dict:
+    engine = _get_engine(dataset_root)
     # This route names no prediction bucket, so it answers across every bucket the image was
     # reviewed under rather than picking one.
     return {"status": engine.image_status_across_buckets(image_name)}
@@ -967,7 +1113,7 @@ def _stems_with_objects(*dirs: Optional[str]) -> set[str]:
 
 @router.get("/image_statuses")
 def image_statuses(
-    project_root: str,
+    dataset_root: str,
     gt_dir: Optional[str] = None,
     pred_dir: Optional[str] = None,
 ) -> ImageStatusesResponse:
@@ -977,7 +1123,7 @@ def image_statuses(
     predictions on the date)."""
     for d in (gt_dir, pred_dir):
         _guard_path(d)
-    engine = _get_engine(project_root)
+    engine = _get_engine(dataset_root)
     return ImageStatusesResponse(
         statuses=engine.get_all_image_statuses(),
         detection_stems=sorted(_stems_with_objects(gt_dir, pred_dir)),
@@ -1107,7 +1253,7 @@ def _pq_worker(job: PriorityQueueJob) -> None:
 
 
 class LaunchPriorityQueuePayload(BaseModel):
-    project_root: str
+    dataset_root: str
     checkpoint_path: str
     images_dir: str
     method: str = "combined"
@@ -1118,20 +1264,19 @@ class LaunchPriorityQueuePayload(BaseModel):
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     # checkpoint_path reaches torch.load via build_predictor (the same arbitrary-pickle sink the
     # Inference tab's own launch route confines): same guard, same treatment.
-    for p in (payload.project_root, payload.checkpoint_path, payload.images_dir):
+    for p in (payload.dataset_root, payload.checkpoint_path, payload.images_dir):
         _guard_path(p)
     if not Path(payload.checkpoint_path).is_file():
         raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
     if not Path(payload.images_dir).is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
 
-    # The root, not a store path: the tool derives the same store _get_engine opens, so the queue
-    # skips images that engine already holds verdicts for instead of reading a second store.
+    # The dataset root, not a store path: the tool derives from it the one verdict store _get_engine opens.
     job = PriorityQueueJob(
         job_id=f"pq-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
         images_dir=payload.images_dir,
-        dataset_root=payload.project_root,
+        dataset_root=payload.dataset_root,
         method=payload.method,
         budget=payload.budget,
     )

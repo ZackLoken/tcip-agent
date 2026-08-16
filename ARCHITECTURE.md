@@ -762,17 +762,17 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:380` |
-| POST | `/action` | `record_action` | `routes/review.py:504` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:603` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:651` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:672` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:723` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:931` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:969` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:997` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1118` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1146` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:421` |
+| POST | `/action` | `record_action` | `routes/review.py:545` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:644` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:692` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:713` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:760` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1077` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1115` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1143` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1264` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1291` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1392,12 +1392,12 @@ and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:471`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
-`tests/test_prediction_bucket_resolution.py:39,48`, `tests/test_tcip_web_routes.py:555`. Gap:
-`review.py`'s real `state_dir` derivation (`project_root`-based) is never invoked by a test that
-also checks `prediction_buckets.py`'s reader (`dataset_root`-based); tests construct
-`ReviewEngine(root / ".tcip" / "state")` directly with the same root standing in for both, so a
-real `project_root != dataset_root` divergence would leave a GUI-recorded verdict invisible to the
-MCP-side bucket-immutability check with nothing catching it.
+`tests/test_prediction_bucket_resolution.py:39,48`, `tests/test_tcip_web_routes.py:555`.
+`review.py` derives its `state_dir` from the dataset root the request states, which is the root
+`prediction_buckets.py`'s reader derives from, and both sides are driven across a project root and a
+dataset root that are different directories in `tests/test_review_verdict_scope.py:160`: a verdict
+recorded through the GUI route lands in the dataset-scoped store the MCP-side bucket-immutability
+check counts, and the promotion reads that same store.
 
 ## 22. `.tcip/datasets.json`, project-level dataset identity registry
 
@@ -1512,7 +1512,7 @@ Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-nam
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:139` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 86, the one emitter for code that is not an `@audited` tool; both append through `_write_entry`, line 77.
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:77` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:78` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 
 ## S07. Experiment record .tcip/experiments/<id>/
@@ -1871,7 +1871,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:323` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:364` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry

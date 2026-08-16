@@ -29,10 +29,9 @@ def client() -> TestClient:
 
 @pytest.fixture
 def allowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """An armed allow-list holding exactly one root, with a real image and project inside it."""
+    """An armed allow-list holding exactly one root, with a real image and dataset layout inside."""
     root = tmp_path / "allowed"
     (root / "images").mkdir(parents=True)
-    (root / "proj" / ".tcip" / "state").mkdir(parents=True)
     Image.new("RGB", (IMG_W, IMG_H), color=(70, 90, 110)).save(root / "images" / "IMG_0007.JPG")
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(root.resolve()))
     return root
@@ -50,8 +49,9 @@ def _image(allowed: Path) -> Path:
     return allowed / "images" / "IMG_0007.JPG"
 
 
-def _project_root(allowed: Path) -> Path:
-    return allowed / "proj"
+def _dataset_root(allowed: Path) -> Path:
+    """The dataset the review store, the labels and any prediction bucket all hang off."""
+    return allowed
 
 
 def test_save_gt_confines_the_label_file_it_writes(
@@ -59,7 +59,7 @@ def test_save_gt_confines_the_label_file_it_writes(
 ) -> None:
     escaped = outside / "stolen.json"
     payload = {
-        "project_root": str(_project_root(allowed)),
+        "dataset_root": str(_dataset_root(allowed)),
         "image_name": "IMG_0007.JPG",
         "image_path": str(_image(allowed)),
         "annotations": [{"subject": "catkin", "bbox": [12.0, 20.0, 52.0, 44.0]}],
@@ -79,7 +79,7 @@ def test_save_gt_confines_the_label_file_it_writes(
 def test_mark_complete_confines_the_paths_it_reads(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    base = {"project_root": str(_project_root(allowed)), "image_name": "IMG_0007.JPG"}
+    base = {"dataset_root": str(_dataset_root(allowed)), "image_name": "IMG_0007.JPG"}
 
     assert client.post("/api/review/mark_complete",
                        json={**base, "gt_path": str(outside / "gt.json")}).status_code == 403
@@ -101,7 +101,7 @@ def test_an_optional_path_the_client_omits_is_not_an_escape(
     """A completion with no label file and no bucket named is a legitimate call, and the armed
     allow-list must keep admitting it rather than reading the absent path as an escape."""
     resp = client.post("/api/review/mark_complete", json={
-        "project_root": str(_project_root(allowed)),
+        "dataset_root": str(_dataset_root(allowed)),
         "image_name": "IMG_0007.JPG",
     })
     assert resp.status_code == 200
@@ -112,7 +112,7 @@ def test_backup_labels_confines_the_directories_it_walks(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
     (outside / "IMG_0007.json").write_text('{"annotations": []}', encoding="utf-8")
-    base = {"project_root": str(_project_root(allowed))}
+    base = {"dataset_root": str(_dataset_root(allowed))}
 
     refused = client.post("/api/review/backup_labels",
                           json={**base, "label_dirs": [str(outside)]})
@@ -138,10 +138,10 @@ def test_image_statuses_confines_the_label_directories_it_lists(
                       [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0),
                                   score=0.71)],
                       IMG_W, IMG_H)
-    project_root = str(_project_root(allowed))
+    dataset_root = str(_dataset_root(allowed))
 
     refused = client.get("/api/review/image_statuses",
-                         params={"project_root": project_root, "pred_dir": str(outside)})
+                         params={"dataset_root": dataset_root, "pred_dir": str(outside)})
     assert refused.status_code == 403
 
     bucket = allowed / "predictions" / "baseline" / "2-11-26"
@@ -151,7 +151,7 @@ def test_image_statuses_confines_the_label_directories_it_lists(
                                   score=0.71)],
                       IMG_W, IMG_H)
     accepted = client.get("/api/review/image_statuses",
-                          params={"project_root": project_root, "pred_dir": str(bucket)})
+                          params={"dataset_root": dataset_root, "pred_dir": str(bucket)})
     assert accepted.status_code == 200
     assert accepted.json()["detection_stems"] == ["IMG_0007"]
 
@@ -177,7 +177,7 @@ def test_generation_conf_confines_the_bucket_it_reads(
 def test_validate_reference_confines_the_bucket_it_stamps(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    base = {"project_root": str(_project_root(allowed)), "trait": "catkin"}
+    base = {"dataset_root": str(_dataset_root(allowed)), "trait": "catkin"}
 
     refused = client.post("/api/review/validate_reference",
                           json={**base, "pred_dir": str(outside)})
@@ -201,7 +201,7 @@ def test_priority_queue_launch_confines_the_checkpoint_it_loads(
     images_dir = allowed / "images"
 
     refused = client.post("/api/review/queue/launch", json={
-        "project_root": str(_project_root(allowed)),
+        "dataset_root": str(_dataset_root(allowed)),
         "checkpoint_path": str(outside / "best.pt"),
         "images_dir": str(images_dir),
     })
@@ -209,7 +209,7 @@ def test_priority_queue_launch_confines_the_checkpoint_it_loads(
 
     # An in-root checkpoint clears the guard and is answered on its own merits.
     missing = client.post("/api/review/queue/launch", json={
-        "project_root": str(_project_root(allowed)),
+        "dataset_root": str(_dataset_root(allowed)),
         "checkpoint_path": str(allowed / "models" / "best.pt"),
         "images_dir": str(images_dir),
     })

@@ -75,9 +75,9 @@ def _scene(tmp_path: Path):
     pred = tmp_path / "pred.json"
     _write_gt(gt, GT_BOXES)
     _write_pred(pred, PRED_BOXES)
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
-    return img, gt, pred, project_root
+    dataset_root = tmp_path / "proj"
+    (dataset_root / ".tcip" / "state").mkdir(parents=True)
+    return img, gt, pred, dataset_root
 
 
 def test_iou_and_confidence_thresholds_are_not_interchangeable(
@@ -88,10 +88,10 @@ def test_iou_and_confidence_thresholds_are_not_interchangeable(
     the confidence floor as the overlap floor would admit both partial overlaps as hits instead,
     and reading the overlap floor as the confidence floor would hide the 0.5-scored prediction.
     """
-    img, gt, pred, project_root = _scene(tmp_path)
+    img, gt, pred, dataset_root = _scene(tmp_path)
 
     body = client.post("/api/review/matches", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
@@ -111,10 +111,10 @@ def test_recorded_verdict_returns_matches_at_the_requested_operating_point(
 ) -> None:
     """The fresh match set a verdict returns is scoped to the thresholds the verdict was recorded
     at, so the canvas installs it without a second fetch and without silently changing scope."""
-    img, gt, pred, project_root = _scene(tmp_path)
+    img, gt, pred, dataset_root = _scene(tmp_path)
 
     resp = client.post("/api/review/action", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
@@ -145,11 +145,11 @@ def test_completion_check_counts_detections_at_the_requested_operating_point(
     pred = tmp_path / "pred.json"
     _write_gt(gt, [GT_BOXES[0]])
     _write_pred(pred, [PRED_BOXES[0]])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
+    dataset_root = tmp_path / "proj"
+    (dataset_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = client.post("/api/review/action", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),
@@ -174,10 +174,10 @@ def test_detection_filter_narrows_the_walk_list_without_rescoping_the_counts(
     """A type filter is a navigation aid over the walk list. The reported counts stay the whole
     image's match set, the same population the completion check reads, so a filtered session never
     reports a smaller image than the platform considers unfinished."""
-    img, gt, pred, project_root = _scene(tmp_path)
+    img, gt, pred, dataset_root = _scene(tmp_path)
 
     body = client.post("/api/review/matches", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img),
         "gt_path": str(gt),

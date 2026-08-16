@@ -163,7 +163,7 @@ def test_staging_sees_the_verdicts_the_review_route_recorded(
     assert first["redirected"] is False
 
     resp = client.post("/api/review/action", json={
-        "project_root": str(root),
+        "dataset_root": str(root),
         "image_name": "IMG_0007.jpg",
         "image_path": str(img),
         "gt_path": str(tmp_path / "gt.json"),

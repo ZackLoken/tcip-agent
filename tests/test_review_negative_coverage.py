@@ -47,15 +47,15 @@ def _bucket(tmp_path: Path) -> Path:
     return d
 
 
-def _project_root(tmp_path: Path) -> Path:
+def _dataset_root(tmp_path: Path) -> Path:
     root = tmp_path / "proj"
     (root / ".tcip" / "state").mkdir(parents=True)
     return root
 
 
-def _shard(project_root: Path, image_name: str) -> dict:
+def _shard(dataset_root: Path, image_name: str) -> dict:
     """The one shard written for ``image_name``, wherever its bucket directory put it."""
-    found = sorted((project_root / ".tcip" / "state" / "review").rglob(f"{image_name}.json"))
+    found = sorted((dataset_root / ".tcip" / "state" / "review").rglob(f"{image_name}.json"))
     assert len(found) == 1, found
     return json.loads(found[0].read_text(encoding="utf-8"))["state"]
 
@@ -66,17 +66,17 @@ def test_bulk_complete_on_a_predicted_image_is_not_adjudication_covered(
     """The bucket holds a detection for this image and no verdict was recorded on it, so the
     completion is a bulk accept: reviewed, but with its misses unadjudicated."""
     bucket = _bucket(tmp_path)
-    project_root = _project_root(tmp_path)
+    dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0007.JPG",
         "pred_dir": str(bucket),
     })
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
 
-    state = _shard(project_root, "IMG_0007.JPG")
+    state = _shard(dataset_root, "IMG_0007.JPG")
     assert state["adjudication_covered"] is False
     assert state["producer_identity"]["checkpoint_sha256"] == CHECKPOINT_SHA
 
@@ -87,15 +87,15 @@ def test_complete_on_an_image_the_bucket_left_empty_is_a_covered_negative(
     """The bucket ran on this image and found nothing, so there was never a detection to walk and
     Complete confirms the negative outright."""
     bucket = _bucket(tmp_path)
-    project_root = _project_root(tmp_path)
+    dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0031.JPG",
         "pred_dir": str(bucket),
     })
     assert resp.status_code == 200
-    assert _shard(project_root, "IMG_0031.JPG")["adjudication_covered"] is True
+    assert _shard(dataset_root, "IMG_0031.JPG")["adjudication_covered"] is True
 
 
 def test_complete_on_an_image_the_bucket_never_wrote_is_a_covered_negative(
@@ -103,12 +103,12 @@ def test_complete_on_an_image_the_bucket_never_wrote_is_a_covered_negative(
 ) -> None:
     """No prediction file for this stem at all reads the same way: nothing to check."""
     bucket = _bucket(tmp_path)
-    project_root = _project_root(tmp_path)
+    dataset_root = _dataset_root(tmp_path)
 
     resp = client.post("/api/review/mark_complete", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0099.JPG",
         "pred_dir": str(bucket),
     })
     assert resp.status_code == 200
-    assert _shard(project_root, "IMG_0099.JPG")["adjudication_covered"] is True
+    assert _shard(dataset_root, "IMG_0099.JPG")["adjudication_covered"] is True

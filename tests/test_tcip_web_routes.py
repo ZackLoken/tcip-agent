@@ -541,13 +541,10 @@ def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_p
     pred = tmp_path / "pred.json"
     # One prediction matching the GT (TP) + one off-center prediction (FP).
     _write_pred(pred, [(40, 32, 60, 48, 0.9), (75, 60, 85, 68, 0.8)])
-    project_root = tmp_path / "proj"
-    project_root.mkdir()
-
     resp = client.post(
         "/api/review/matches",
         json={
-            "project_root": str(project_root),
+            "dataset_root": str(dataset_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
             "gt_path": str(gt),
@@ -570,20 +567,18 @@ def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp
     pred_dir.mkdir(parents=True)
     _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
     write_annotations(str(pred_dir / "IMG_0001.json"), [], 100, 80, keep_empty=True)  # empty negative
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     # Give one image a review status so the engine has state to return.
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
     client.post(
         "/api/review/mark_complete",
-        json={"project_root": str(project_root), "image_name": "IMG_0000.JPG", "gt_path": str(gt)},
+        json={"dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG", "gt_path": str(gt)},
     )
 
     resp = client.get(
         "/api/review/image_statuses",
-        params={"project_root": str(project_root), "pred_dir": str(pred_dir)},
+        params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -597,13 +592,11 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = client.post(
         "/api/review/action",
         json={
-            "project_root": str(project_root),
+            "dataset_root": str(dataset_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
             "gt_path": str(gt),
@@ -620,7 +613,7 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     )
     assert resp.status_code == 200
     # the image's review shard should now exist (per-image file, not one whole-state file)
-    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
+    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
     assert shard_path.exists()
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["action"] == "accepted"  # payload wraps {img_name, state}
@@ -643,15 +636,13 @@ def test_review_action_resolves_class_id_from_bucket_id_map(
         json.dumps({"checkpoint_sha256": "sha", "experiment_id": None,
                     "id_map": {"dormant": 0, "elongated": 1}}),
         encoding="utf-8")
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         pred_path=str(pred), det_type="tp", class_name="elongated", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
+    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["class_id"] == 1  # resolved via the bucket's id_map
 
@@ -674,15 +665,13 @@ def test_review_action_records_unresolvable_class_id_as_none(
         json.dumps({"checkpoint_sha256": "sha", "experiment_id": None,
                     "id_map": {"dormant": 0, "elongated": 1}}),
         encoding="utf-8")
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
+    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["class_id"] is None
 
@@ -697,22 +686,20 @@ def test_review_action_no_sidecar_records_unresolvable_class_id(
     _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
+    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["class_id"] is None
 
 
-def _review_action(client, img_path, gt, project_root, **over):
+def _review_action(client, img_path, gt, dataset_root, **over):
     body = {
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG",
         "image_path": str(img_path),
         "gt_path": str(gt),
@@ -733,11 +720,9 @@ def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) 
     _write_gt(gt, [], keep_empty=True)  # start with a confirmed negative (empty GT)
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         pred_path=str(pred), det_type="fp", action="accepted",
     )
     assert resp.status_code == 200
@@ -750,10 +735,8 @@ def test_review_reject_deletes_reviewed_gt(client, dataset_root, tmp_path) -> No
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])  # one GT box (a missed FN)
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
-    resp = _review_action(client, img_path, gt, project_root,
+    resp = _review_action(client, img_path, gt, dataset_root,
                           det_type="fn", pred_idx=None, action="rejected")
     assert resp.status_code == 200
     # Emptying GT does not auto-confirm a negative (that needs an explicit Complete): it reads as
@@ -768,10 +751,8 @@ def test_review_accept_tp_keeps_gt_untouched(client, dataset_root, tmp_path) -> 
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
     before = gt.read_text()
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
-    resp = _review_action(client, img_path, gt, project_root, det_type="tp", action="accepted")
+    resp = _review_action(client, img_path, gt, dataset_root, det_type="tp", action="accepted")
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] is None  # GT unchanged → no status update
     assert gt.read_text() == before
@@ -781,11 +762,9 @@ def test_review_edit_writes_edited_box_as_gt(client, dataset_root, tmp_path) -> 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
     )
     assert resp.status_code == 200
@@ -800,11 +779,9 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])  # one GT box, no predictions → an FN
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         det_type="fn", pred_idx=None,
         action="edited", edited_box=[10.0, 10.0, 30.0, 30.0],
     )
@@ -815,7 +792,7 @@ def test_review_edited_detection_stays_reviewed_after_reload(client, dataset_roo
     m = client.post(
         "/api/review/matches",
         json={
-            "project_root": str(project_root),
+            "dataset_root": str(dataset_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
             "gt_path": str(gt),
@@ -831,19 +808,17 @@ def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     # Accepting an FP writes GT; with no GT path configured the route must refuse loudly rather
     # than report ok while writing nothing.
     resp = _review_action(
-        client, img_path, "unused", project_root,
+        client, img_path, "unused", dataset_root,
         gt_path=None, pred_path=str(pred), det_type="fp", action="accepted",
     )
     assert resp.status_code == 400
     assert "no annotations path" in resp.json()["detail"]
     # The refused verdict must not have been recorded as reviewed.
-    review_dir = project_root / ".tcip" / "state" / "review"
+    review_dir = dataset_root / ".tcip" / "state" / "review"
     for shard_path in review_dir.rglob("IMG_0000.JPG.json"):
         data = json.loads(shard_path.read_text(encoding="utf-8"))
         assert not data.get("state", {}).get("detections")
@@ -859,13 +834,11 @@ def test_review_action_auto_completes_and_audits(
     _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])  # one matching prediction -> one TP
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = client.post(
         "/api/review/action",
         json={
-            "project_root": str(project_root),
+            "dataset_root": str(dataset_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
             "gt_path": str(gt),
@@ -878,47 +851,48 @@ def test_review_action_auto_completes_and_audits(
     )
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
-    assert "gui_review_action" in (project_root / ".tcip" / "audit.jsonl").read_text()
+    assert "gui_review_action" in (dataset_root / ".tcip" / "audit.jsonl").read_text()
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
+    dataset_root = tmp_path / "data"
 
     resp = client.post(
         "/api/review/mark_complete",
-        json={"project_root": str(project_root), "image_name": "IMG_9.JPG"},
+        json={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
     )
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
 
     status = client.get(
         "/api/review/image_status",
-        params={"project_root": str(project_root), "image_name": "IMG_9.JPG"},
+        params={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
     )
     assert status.json()["status"] == "completed"
-    assert "gui_review_mark_complete" in (project_root / ".tcip" / "audit.jsonl").read_text()
+    assert "gui_review_mark_complete" in (dataset_root / ".tcip" / "audit.jsonl").read_text()
 
 
 def test_review_gt_edit_audits_into_the_log_of_the_dataset_it_wrote(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
     """A review that edits ground truth changes a record that travels with the dataset, so the
-    entry belongs beside the labels rather than in the project that reviewed them. The verdict
-    events, whose store hangs off the project root, stay where they are."""
+    entry belongs beside the labels rather than in the project the breeder is working out of. The
+    project root is a genuinely different directory here, so a log written there is a log in the
+    wrong place rather than the same file under another name."""
     project_root = tmp_path / "proj"
+    project_root.mkdir()
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    label_path = tmp_path / "labels" / "IMG_0000.json"
+    label_path = dataset_root / "annotations" / "2-11-26" / "IMG_0000.json"
 
     resp = client.post("/api/review/save_gt", json={
-        "project_root": str(project_root),
+        "dataset_root": str(dataset_root),
         "image_name": "IMG_0000.JPG", "image_path": str(img_path), "label_path": str(label_path),
         "annotations": [{"subject": "catkin", "bbox": [10.0, 10.0, 30.0, 30.0]}],
     })
     assert resp.status_code == 200
 
-    audit = tmp_path / ".tcip" / "audit.jsonl"
-    assert "gui_review_save_gt" in audit.read_text(encoding="utf-8")
+    assert "gui_review_save_gt" in (
+        dataset_root / ".tcip" / "audit.jsonl").read_text(encoding="utf-8")
     assert not (project_root / ".tcip" / "audit.jsonl").exists()
 
 
@@ -932,14 +906,12 @@ def test_review_action_records_subject_name_and_reviewer(
     _write_gt(gt, [(40, 32, 60, 48)])
     pred = tmp_path / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    project_root = tmp_path / "proj"
-    state = project_root / ".tcip" / "state"
-    state.mkdir(parents=True)
+    state = dataset_root / ".tcip" / "state"
 
     resp = client.post(
         "/api/review/action",
         json={
-            "project_root": str(project_root),
+            "dataset_root": str(dataset_root),
             "image_name": "IMG_0000.JPG",
             "image_path": str(img_path),
             "gt_path": str(gt),
@@ -1174,11 +1146,9 @@ def test_review_accept_fp_carries_created_by_and_stamps_accepted_by(client, data
     write_annotations(str(pred), [Annotation(
         subject="catkin", geometry=BBox(40, 32, 60, 48), score=0.9,
         created_by="sam", created_at="2026-01-01T00:00:00+00:00")], 100, 80)
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         pred_path=str(pred), det_type="fp", action="accepted", user="breeder",
     )
     assert resp.status_code == 200
@@ -1193,11 +1163,9 @@ def test_review_edit_stamps_created_by(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     resp = _review_action(
-        client, img_path, gt, project_root,
+        client, img_path, gt, dataset_root,
         det_type="tp", action="edited", edited_box=[10.0, 10.0, 30.0, 30.0], user="breeder",
     )
     assert resp.status_code == 200
@@ -1273,8 +1241,6 @@ def test_review_subject_names_flow_from_annotations(
     'catkin', reviewing an efb records 'efb'; the name rides on the label, so one subject's name
     can never bleed onto another's (the bug a project-cached numeric-id engine would have)."""
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
 
     def _class_name_for(subject: str) -> str:
         gt = tmp_path / f"gt_{subject}.json"
@@ -1284,7 +1250,7 @@ def test_review_subject_names_flow_from_annotations(
         resp = client.post(
             "/api/review/action",
             json={
-                "project_root": str(project_root), "image_name": "IMG_0000.JPG",
+                "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
                 "image_path": str(img_path), "gt_path": str(gt),
                 "pred_path": str(pred), "det_type": "tp", "class_name": subject, "conf": 0.9,
                 "iou": 0.95, "gt_idx": 0, "pred_idx": 0,
@@ -1294,7 +1260,7 @@ def test_review_subject_names_flow_from_annotations(
         )
         assert resp.status_code == 200
         shard = json.loads(
-            _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json").read_text())
+            _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json").read_text())
         return shard["state"]["detections"][0]["class_name"]
 
     assert _class_name_for("catkin") == "catkin"

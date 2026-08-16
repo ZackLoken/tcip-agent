@@ -90,7 +90,7 @@ def test_review_matches_route_measures_a_grouped_captures_real_frame(
 ):
     manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
     resp = client.post("/api/review/matches", json={
-        "project_root": str(grouped_dataset),
+        "dataset_root": str(grouped_dataset),
         "image_name": "cap_001.bandgroup",
         "image_path": str(manifest),
     })
