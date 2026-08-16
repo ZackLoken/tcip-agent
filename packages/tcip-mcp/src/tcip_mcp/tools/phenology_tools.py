@@ -801,15 +801,25 @@ def compute_phenology(
     ``n_dates_missing_images``) but carry no fabricated milestone dates for that plant (see
     CLAUDE.md's measurement-integrity invariant).
     """
+    from tcip_mcp.operationalization import (
+        STATE_CROSSING_DATES,
+        check_operationalization,
+        resolve_trait_and_record,
+    )
     from tcip_mcp.project_paths import resolve_output_path
-    from tcip_mcp.traits import TraitUnknownError, get_trait
+    from tcip_mcp.traits import TraitUnknownError
 
     output_csv_path = str(resolve_output_path(output_csv_path))
     try:
-        spec = get_trait(trait)
+        spec, record, _specs_dir = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
     except TraitUnknownError as e:
         return {"error": str(e), "n_plants": 0}
-    pos = spec.positive_class_name or "positive"
+
+    # Ahead of the positive class id, so an unstated trait's class-id failure never names the wrong problem.
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    if not stated.ok:
+        return {"error": stated.message, "n_plants": 0}
+    pos = spec.positive_class_name
 
     mp = Path(mapping_path)
     if not mp.is_file():
@@ -949,7 +959,14 @@ def compute_phenology(
     provisional_column = phenology.majority_provisional_column(spec)
     if provisional_column:
         stamp[provisional_column] = "true" if spec.majority_provisional else "false"
-    csv_path = phenology.write_phenology_csv(rows, Path(output_csv_path), spec, stamp=stamp)
+    # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
+    spec_now, record_now, _ = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
+    still_stated = check_operationalization(
+        spec_now, record_now, STATE_CROSSING_DATES, basis=stated.basis)
+    if not still_stated.ok:
+        return {"error": still_stated.message, "n_plants": len(rows)}
+    csv_path = phenology.write_phenology_csv(
+        rows, Path(output_csv_path), spec, stamp=stamp, basis=still_stated.basis)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares,
     # not a single hardcoded "50per" key, a trait authored with different milestone fractions has
     # no fabricated zero for a crossing it was never asked to report.

@@ -12,10 +12,13 @@ import dataclasses
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tcip_mcp import operationalization as op
 from tcip_mcp.traits import TraitUnknownError
+from tcip_web.app import app
 from tests import _operationalization_fixtures as fx
+from tests.test_tcip_web_results_routes import _phenology_fixture
 
 
 @pytest.fixture
@@ -331,3 +334,400 @@ def test_the_record_is_read_from_the_project_the_caller_names(project: Path, mon
 
     assert op.check_operationalization(spec, stored, op.STATE_CROSSING_DATES).ok
     assert specs_dir == project / ".tcip" / "state" / "trait_specs"
+
+
+# ── the crossing delivery doors ──────────────────────────────────────────────
+
+DELIVERED_GOLDEN = (
+    b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
+    b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
+    b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
+    b"catkin_95per_date_bound,catkin_elongation_provisional,operating_point_conf,"
+    b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
+    b"producer_experiment_id\r\n"
+    b"PLANT_A,AccA,2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
+    b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,abc123,exp-1"
+    b"\r\n"
+    b"PLANT_B,AccB,2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
+    b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,abc123,exp-1"
+    b"\r\n"
+)
+"""What a confirmed crossing delivery writes, byte for byte, for the golden inputs below.
+
+Both writers produce this: the tool's ``write_phenology_csv`` and the web door's own DictWriter.
+A precondition in front of a door must leave what the door delivers untouched, so this is asserted
+as bytes rather than as the absence of an error.
+"""
+
+GOLDEN_INPUTS = {"fractions": (0.0, 1.0), "detections": 2}
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
+
+
+def _delivery(tmp_path: Path, **kwargs) -> dict:
+    """A registered, stated and confirmed catkin project with buckets the doors can deliver from.
+
+    The pinned platform root is this test's ``tmp_path``, and the body names the same root, so the
+    tool door and the web doors read one project rather than two.
+    """
+    return _phenology_fixture(tmp_path, **kwargs)
+
+
+def _compute(body: dict, out_csv: Path, **kwargs) -> dict:
+    from tcip_mcp.tools.phenology_tools import compute_phenology
+
+    return compute_phenology(
+        trait=body["trait"],
+        mapping_path=body["mapping_path"],
+        predictions_by_date=body["predictions_by_date"],
+        output_csv_path=str(out_csv),
+        **kwargs,
+    )
+
+
+def _validated_call(body: dict) -> dict:
+    """The arguments that clear every evidence dimension for a fully stamped fixture."""
+    return {
+        "classifier_pred_dirs": list(body["predictions_by_date"].values()),
+        "operating_point_conf": 0.4,
+        "operating_point_validated": "held_out_annotations",
+    }
+
+
+def _withdraw(project_root: Path, trait: str) -> None:
+    """Withdraw the breeder's confirmation, leaving the statement on file."""
+    _spec, record, _ = fx.resolve(project_root, trait, op.STATE_CROSSING_DATES)
+    op.confirm_trait_operationalization(
+        project_root, trait, op.STATE_CROSSING_DATES,
+        user="rosalind", record_seen=op.record_seen_hash(record.value),
+        identity_from_request=True, confirmed=False,
+    )
+
+
+def _hand_edit_spec(project_root: Path, trait: str, **fields) -> None:
+    """Edit the trait's own yml where it lies, the way a text editor does, around every writer."""
+    import yaml
+
+    path = Path(project_root) / ".tcip" / "state" / "trait_specs" / f"{trait}.yml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data.update(fields)
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def _web_refusal(client: TestClient, body: dict, route: str) -> dict:
+    sent = {**body, "payload": "milestones", "filename": "x.csv"} if route == "export_csv" else body
+    resp = client.post(f"/api/results/{route}", json=sent)
+    assert resp.status_code == 400, (route, resp.status_code, resp.text)
+    return resp.json()["detail"]
+
+
+def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
+    """A statement nobody confirmed is the agent's own definition, so the tool door refuses on it.
+
+    The refusal names who confirms and where, and the delivery writes nothing.
+    """
+    body = _delivery(tmp_path, validated=True)
+    _withdraw(tmp_path, "catkin")
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, **_validated_call(body))
+
+    assert "stated but not confirmed by the breeder" in res["error"]
+    assert "open the Results tab" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_superseded_confirmation_names_the_field(tmp_path: Path):
+    """A confirmation covers the values it was given, so a moved field refuses naming both of them."""
+    body = _delivery(tmp_path, validated=True)
+    _hand_edit_spec(tmp_path, "catkin", positive_class_name="dormant")
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, **_validated_call(body))
+
+    assert "positive_class_name has changed since" in res["error"]
+    assert "'elongated'" in res["error"] and "'dormant'" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_empty_constituting_field_refuses_before_class_id(tmp_path: Path):
+    """A trait resting on a field its spec leaves empty is refused for that, not for a class id.
+
+    The class-id resolution downstream would fail too, and its message names the wrong problem: it
+    would send the agent looking through the buckets for a class nothing has named. The
+    precondition runs first, so the refusal describes what is actually missing.
+    """
+    body = _delivery(tmp_path, validated=True)
+    _hand_edit_spec(tmp_path, "catkin", positive_class_name="")
+    fx.seed_confirmed_crossing(tmp_path, "catkin")
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, **_validated_call(body))
+
+    assert "rests on positive_class_name, which this trait's spec leaves empty" in res["error"]
+    assert "id_map" not in res["error"]
+    assert not out_csv.exists()
+
+
+def test_all_three_web_doors_refuse_identically(client: TestClient, tmp_path: Path):
+    """One precondition, one refusal body: a curve the breeder sees is never one Download refuses."""
+    body = _delivery(tmp_path, validated=True)
+    _withdraw(tmp_path, "catkin")
+
+    details = [_web_refusal(client, body, route)
+               for route in ("per_plant_curves", "onset_dates", "export_csv")]
+
+    assert all(d == details[0] for d in details), details
+    assert details[0]["kind"] == "operationalization"
+    assert details[0]["state"] == 2
+    assert details[0]["trait"] == "catkin"
+    assert details[0]["delivery_kind"] == op.STATE_CROSSING_DATES
+    assert not (tmp_path / "results_export").exists()
+
+
+def test_hand_edited_spec_is_caught_at_read_time(client: TestClient, tmp_path: Path):
+    """The spec is an ordinary file, so the comparison that catches an edit happens at every read.
+
+    Nothing here goes through the spec writer or its supersession signal: the yml is rewritten in
+    place, and the door still refuses, because the confirmation records the values it covered.
+    """
+    body = _delivery(tmp_path, validated=True)
+    _hand_edit_spec(tmp_path, "catkin", milestone_fractions=[0.5])
+
+    detail = _web_refusal(client, body, "onset_dates")
+
+    assert detail["state"] == 3
+    assert "milestone_fractions has changed since" in detail["message"]
+
+
+def test_acknowledge_does_not_clear_the_precondition_at_every_door(
+    client: TestClient, tmp_path: Path,
+):
+    """Acknowledging an unvalidated measurement says nothing about whether one was defined.
+
+    An acknowledged provisional number whose meaning is stated ships stamped false. An acknowledged
+    number whose meaning is unstated is not a number, so no door takes the acknowledgement for it.
+    """
+    body = _delivery(tmp_path, validated=True)
+    _withdraw(tmp_path, "catkin")
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, acknowledge_unvalidated=True, **_validated_call(body))
+    assert "stated but not confirmed by the breeder" in res["error"]
+    assert not out_csv.exists()
+
+    acknowledged = {**body, "acknowledge_unvalidated": True}
+    for route in ("per_plant_curves", "onset_dates", "export_csv"):
+        assert _web_refusal(client, acknowledged, route)["kind"] == "operationalization", route
+
+
+def test_acknowledge_still_clears_the_gate_dimensions_in_the_same_call(tmp_path: Path):
+    """The two rules are separate, and this is the direction that proves it rather than assumes it.
+
+    Same call, same acknowledgement: with the meaning confirmed, the unvalidated evidence ships
+    stamped false exactly as it did before the precondition existed.
+    """
+    body = _delivery(tmp_path, validated=False)
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, acknowledge_unvalidated=True)
+
+    assert "error" not in res, res
+    assert res["positive_state_classifier_validated"] == "false"
+    assert out_csv.exists()
+
+
+def test_confirmation_withdrawn_during_delivery_refuses_before_the_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A confirmation withdrawn while the numbers were being computed leaves nothing written.
+
+    The check that admitted this delivery and the check that lets it write are one function called
+    twice, so the window between them is closed rather than assumed to be empty. The withdrawal
+    happens inside the measurement, which is where it would happen for real.
+    """
+    from tcip_mcp.pipelines.postprocessing import phenology
+
+    body = _delivery(tmp_path, validated=True)
+    real = phenology.per_plant_phenology
+
+    def withdraw_then_measure(*args, **kwargs):
+        _withdraw(tmp_path, "catkin")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(phenology, "per_plant_phenology", withdraw_then_measure)
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, **_validated_call(body))
+
+    assert "not confirmed by the breeder" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_spec_edited_during_delivery_refuses_before_the_write(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A constituting field moved mid-delivery refuses at the export door with no file written.
+
+    Reported as the supersession it is: the confirmation covered the old value, and the states are
+    checked in one order so the first that applies reports alone.
+    """
+    from tcip_mcp.pipelines.postprocessing import phenology
+
+    body = _delivery(tmp_path, validated=True)
+    real = phenology.per_plant_phenology
+
+    def edit_then_measure(*args, **kwargs):
+        _hand_edit_spec(tmp_path, "catkin", milestone_on="detected_count")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(phenology, "per_plant_phenology", edit_then_measure)
+
+    detail = _web_refusal(client, body, "export_csv")
+
+    assert detail["state"] == 3
+    assert "milestone_on has changed since" in detail["message"]
+    assert not (tmp_path / "results_export").exists()
+
+
+def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
+    """The canonical writer is a ninth entry point, and it demands proof its caller ran the check.
+
+    It holds a spec rather than a project, so it cannot read the record itself without becoming a
+    second resolver. Its refusal names the primitive that produces a basis.
+    """
+    from tcip_mcp.pipelines.postprocessing import phenology
+
+    from tests._trait_fixtures import CATKIN
+
+    with pytest.raises(ValueError) as excinfo:
+        phenology.write_phenology_csv([], tmp_path / "out.csv", CATKIN, basis=None)
+
+    assert "compute_phenology produces one" in str(excinfo.value)
+    assert not (tmp_path / "out.csv").exists()
+
+
+# ── what the precondition must still admit ───────────────────────────────────
+
+
+def test_a_confirmed_delivery_writes_the_bytes_it_wrote_before_the_precondition(tmp_path: Path):
+    """The tool door's delivered CSV, asserted as bytes rather than as the absence of an error."""
+    body = _delivery(tmp_path, validated=True, **GOLDEN_INPUTS)
+    out_csv = tmp_path / "delivered.csv"
+
+    res = _compute(body, out_csv, **_validated_call(body))
+
+    assert "error" not in res, res
+    assert out_csv.read_bytes() == DELIVERED_GOLDEN
+
+
+def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
+    client: TestClient, tmp_path: Path,
+):
+    """The other writer of the same schema, byte for byte, through its own DictWriter."""
+    body = _delivery(tmp_path, validated=True, **GOLDEN_INPUTS)
+
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.content == DELIVERED_GOLDEN
+    assert (tmp_path / "results_export" / "x.csv").read_bytes() == DELIVERED_GOLDEN
+
+
+def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: Path):
+    """The rail admits the call it was built to admit: a basis in hand, the writer writes."""
+    from tcip_mcp.pipelines.postprocessing import phenology
+
+    from tests._trait_fixtures import CATKIN
+
+    _delivery(tmp_path, validated=True)
+    spec, record, _ = fx.resolve(tmp_path, "catkin", op.STATE_CROSSING_DATES)
+    check = op.check_operationalization(spec, record, op.STATE_CROSSING_DATES)
+    row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
+
+    out = phenology.write_phenology_csv(
+        [row], tmp_path / "out.csv", CATKIN, basis=check.basis)
+
+    header = Path(out).read_text(encoding="utf-8").splitlines()[0].split(",")
+    assert header == phenology.phenology_csv_columns(CATKIN)
+
+
+def test_a_provisional_majority_reading_delivers_and_flipping_it_invalidates_nothing(
+    tmp_path: Path,
+):
+    """The majority alias marker qualifies one disclosure column, not the crossing measurement.
+
+    It is deliberately outside what a confirmation covers, so a trait carrying it delivers, and
+    flipping it does not supersede the confirmation the way a constituting field would.
+    """
+    body = _delivery(tmp_path, validated=True)
+    out_csv = tmp_path / "delivered.csv"
+    assert "error" not in _compute(body, out_csv, **_validated_call(body))
+
+    _hand_edit_spec(tmp_path, "catkin", majority_provisional=False)
+    flipped = tmp_path / "flipped.csv"
+
+    res = _compute(body, flipped, **_validated_call(body))
+
+    assert "error" not in res, res
+    assert ",false,0.4," in flipped.read_text(encoding="utf-8")
+
+
+def test_the_screen_doors_still_honor_acknowledge_unvalidated_for_the_evidence_gate(
+    client: TestClient, tmp_path: Path,
+):
+    """A confirmed meaning plus unvalidated evidence still reaches the screen, marked provisional.
+
+    The precondition is about meaning and must not have absorbed the evidence gate's job, which is
+    what would strand a breeder who has nothing to look at.
+    """
+    body = _delivery(tmp_path, validated=False)
+    acknowledged = {**body, "acknowledge_unvalidated": True}
+
+    for route in ("per_plant_curves", "onset_dates"):
+        resp = client.post(f"/api/results/{route}", json=acknowledged)
+        assert resp.status_code == 200, (route, resp.text)
+        assert resp.json()["provisional"] is True, route
+    assert client.post("/api/results/onset_dates", json=body).status_code == 400
+
+
+def test_an_unstated_and_gate_unvalidated_delivery_reports_the_precondition_alone(
+    client: TestClient, tmp_path: Path,
+):
+    """Two refusals apply and the earlier one reports by itself.
+
+    A number with no defined meaning has nothing for a reference to validate, so naming the missing
+    evidence beside the missing definition would point the agent at the wrong repair.
+    """
+    body = _delivery(tmp_path, validated=False)
+    _withdraw(tmp_path, "catkin")
+
+    detail = _web_refusal(client, body, "onset_dates")
+
+    assert detail["kind"] == "operationalization"
+    assert "validated classifier and count operating point" not in detail["message"]
+
+
+def test_a_confirmed_delivery_with_an_unbound_classifier_stamp_reports_that_refusal(
+    client: TestClient, tmp_path: Path,
+):
+    """With the meaning confirmed, the refusal families behind the precondition report unchanged.
+
+    A classifier stamp earned for another trait does not validate this delivery, and that is what
+    the breeder is told, in the words that family already used.
+    """
+    from tests.test_tcip_web_results_routes import _rewrite_classifier_sidecars
+
+    body = _delivery(tmp_path, validated=True)
+    _rewrite_classifier_sidecars(body, trait="chestnut_bur")
+
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+
+    assert resp.status_code == 400
+    assert "was earned for trait" in resp.json()["detail"]
+    assert "chestnut_bur" in resp.json()["detail"]
