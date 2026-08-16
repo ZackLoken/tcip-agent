@@ -218,10 +218,12 @@ def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: p
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
     _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
     result = update_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 4.0}, ["count_bias_tolerance_frac: domain_expert_confirmed"],
+        str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0},
+        ["count_bias_tolerance_frac: domain_expert_confirmed"],
     )
     assert result["count_bias_tolerance_frac"] == 4.0
     assert get_trait("leaf").count_bias_tolerance_frac == 4.0
+    assert result["superseded"] == []
 
 
 def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
