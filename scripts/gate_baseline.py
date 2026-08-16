@@ -31,7 +31,7 @@ NPM = shutil.which("npm") or "npm"
 STAGES = [
     ("ruff", ["ruff", "check", "."], REPO_ROOT),
     ("mypy", ["mypy", *MYPY_PATHS], REPO_ROOT),
-    ("pytest", ["pytest", "tests/", "-n", "4", "--tb=short", "-q"], REPO_ROOT),
+    ("pytest", ["pytest", "tests/", "-n", "auto", "--tb=short", "-q"], REPO_ROOT),
     ("npm-format-check", [NPM, "run", "format:check"], FRONTEND),
     ("npm-lint", [NPM, "run", "lint"], FRONTEND),
     ("npm-typecheck", [NPM, "run", "typecheck"], FRONTEND),
