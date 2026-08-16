@@ -1026,7 +1026,7 @@ class PriorityQueueJob:
     job_id: str
     checkpoint_path: str
     images_dir: str
-    review_state_dir: str
+    dataset_root: str
     method: str = "combined"
     budget: int = 50
     status: str = "pending"  # pending | running | completed | failed
@@ -1083,7 +1083,7 @@ def _pq_worker(job: PriorityQueueJob) -> None:
         result = prioritize_review_queue(
             checkpoint_path=job.checkpoint_path,
             images_dir=job.images_dir,
-            review_state_dir=job.review_state_dir,
+            dataset_root=job.dataset_root,
             strategy="informativeness",
             method=job.method,
             budget=job.budget,
@@ -1123,17 +1123,13 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     if not Path(payload.images_dir).is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
 
-    from tcip_mcp.prediction_buckets import review_state_dir_of
-
-    # The same store _get_engine opens for this project: the queue skips images this engine
-    # already holds verdicts for, so the two must not read different stores.
-    review_state_dir = str(review_state_dir_of(payload.project_root))
-
+    # The root, not a store path: the tool derives the same store _get_engine opens, so the queue
+    # skips images that engine already holds verdicts for instead of reading a second store.
     job = PriorityQueueJob(
         job_id=f"pq-{uuid.uuid4().hex[:8]}",
         checkpoint_path=payload.checkpoint_path,
         images_dir=payload.images_dir,
-        review_state_dir=review_state_dir,
+        dataset_root=payload.project_root,
         method=payload.method,
         budget=payload.budget,
     )

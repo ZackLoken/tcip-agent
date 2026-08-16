@@ -4,8 +4,8 @@ The route (`/api/review/queue/launch` + `/api/review/queue/{job_id}`) must never
 `prioritize_review_queue`'s own scoring/filtering: its own tests (test_feedback_tools.py) already
 cover checkpoint-missing / non-composed-kind / unresolvable-scorer. These tests pin the route's
 own job-lifecycle wiring: it calls the same tool function on a background thread and maps its
-result (or its soft {"error": ...}) onto the job, deriving review_state_dir from project_root
-rather than trusting a client-supplied internal-state path.
+result (or its soft {"error": ...}) onto the job, handing the tool the root the request named so
+the verdict store is derived once, by the tool, and not from a client-supplied state path.
 """
 
 from __future__ import annotations
@@ -92,10 +92,11 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     assert body["total_candidates"] == 3
     assert body["reviewed_skipped"] == 1
 
-    # The route derives review_state_dir from project_root (the platform's own internal-state
-    # layout) rather than trusting a client-supplied path for it, same shape _get_engine uses.
+    # The route hands over the root the request named, never a client-supplied state path: the
+    # tool derives the store from it, the same one _get_engine opens.
     assert len(calls) == 1
-    assert calls[0]["review_state_dir"] == str(Path(tmp_path) / ".tcip" / "state")
+    assert calls[0]["dataset_root"] == str(tmp_path)
+    assert "review_state_dir" not in calls[0]
     # Only ever the ranking strategy: confidence_triage's auto-accept-as-GT path is not
     # reachable through this route.
     assert calls[0]["strategy"] == "informativeness"

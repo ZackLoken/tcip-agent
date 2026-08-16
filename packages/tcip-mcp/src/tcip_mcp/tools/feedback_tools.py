@@ -3,6 +3,10 @@
 ``materialize_review_dataset`` turns human review verdicts into a curated detection training set
 (with experiment lineage); ``prioritize_review_queue`` ranks un-reviewed images by
 active-learning informativeness for the next review batch.
+
+Both are scoped by the dataset root the review was recorded against, which is what derives the
+verdict store they read. A review whose verdicts live outside that dataset states its store
+instead, and the store it read is reported rather than folded into the derived one.
 """
 
 from __future__ import annotations
@@ -19,11 +23,32 @@ from tcip_mcp.project_paths import resolve_output_path
 
 
 def _review_state_exists(review_state_dir: str) -> bool:
-    """True if the ``review/`` shard dir holds any review state."""
-    from tcip_annotation.review_engine import REVIEW_SHARD_DIRNAME
+    """True if the verdict store rooted at ``review_state_dir`` holds any review shard.
 
-    shard_dir = Path(review_state_dir) / REVIEW_SHARD_DIRNAME
-    return shard_dir.is_dir() and any(shard_dir.rglob("*.json"))
+    Enumerated through the store, the way the immutability guard counts verdicts, rather than by
+    globbing the shard directory: shards are placed per prediction bucket, so where a shard sits
+    is the store's own layout question and a reader that answers it a second time undercounts.
+    """
+    import tcip_store
+
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    return bool(tcip_store.keys(REVIEW_VERDICTS_STORE, str(review_state_dir)))
+
+
+def _verdict_store_of(dataset_root: str, review_state_dir: str) -> Path:
+    """The verdict store to read: the one the caller stated, else the dataset's own.
+
+    A stated ``review_state_dir`` is used verbatim; with none stated the store is derived from the
+    dataset root through :func:`~tcip_mcp.prediction_buckets.review_state_dir_of`, the platform's
+    one derivation of where verdicts live. The two are never merged and neither backs the other:
+    a stated store holding nothing is a stated store holding nothing.
+    """
+    from tcip_mcp.prediction_buckets import review_state_dir_of
+
+    if review_state_dir:
+        return Path(review_state_dir)
+    return review_state_dir_of(dataset_root)
 
 
 def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str | None]:
@@ -47,7 +72,7 @@ def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str 
 @mcp.tool()
 @audited(scope_arg="output_dir", scope_via=resolve_output_path)
 def materialize_review_dataset(
-    review_state_dir: str,
+    dataset_root: str,
     source_images_dir: str,
     output_dir: str,
     experiment_id: str = "",
@@ -56,6 +81,7 @@ def materialize_review_dataset(
     copy_files: bool = True,
     subject: str | None = None,
     bucket: str | None = None,
+    review_state_dir: str = "",
 ) -> dict:
     """Build a curated detection dataset from human review verdicts.
 
@@ -65,8 +91,9 @@ def materialize_review_dataset(
     (``images/`` + ``annotations/``) chains straight into ``make_splits`` / ``launch_training``.
 
     Args:
-        review_state_dir: Directory holding the review state (``review/`` shards, or a
-            ``review/`` shards).
+        dataset_root: Root of the dataset the review was recorded against. It scopes the verdict
+            store read when ``review_state_dir`` is not stated (``<dataset_root>/.tcip/state``),
+            and it is what the experiment lineage records as the reviewed dataset.
         source_images_dir: Directory of the reviewed source images.
         output_dir: Destination for the curated dataset (distinct from the source). A relative
             path resolves against the project root, never the server process's cwd.
@@ -83,15 +110,23 @@ def materialize_review_dataset(
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
             and refuses, naming them, when it holds several: two buckets are two reviews, and
             merging them would curate one date's verdicts against another's images.
+        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
+            default) derives the store from ``dataset_root``; stated, it is read verbatim and the
+            response names it as where the shards came from. The two are never merged and neither
+            stands in for the other: a stated store holding no shards is refused, never answered
+            from the dataset's own store.
     """
     output_dir = str(resolve_output_path(output_dir))
-    if not _review_state_exists(review_state_dir):
-        return {"error": f"no review state (review/ shards) in {review_state_dir}"}
+    if not dataset_root:
+        return {"error": "dataset_root is required: it names the dataset whose review this curates"}
+    store_dir = _verdict_store_of(dataset_root, review_state_dir)
+    if not _review_state_exists(str(store_dir)):
+        return {"error": f"no review state (review/ shards) in {store_dir}"}
     if not Path(source_images_dir).is_dir():
         return {"error": f"Source images dir not found: {source_images_dir}"}
 
     from tcip_annotation.review_engine import ReviewEngine
-    engine = ReviewEngine(review_state_dir)
+    engine = ReviewEngine(str(store_dir))
     resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
     if refusal is not None:
         return {"error": refusal}
@@ -104,17 +139,26 @@ def materialize_review_dataset(
         copy_files=copy_files, only_completed=only_completed,
     )
     result["review_state"] = str(state_path)
+    result["dataset_root"] = dataset_root
+    result["review_state_stated"] = bool(review_state_dir)
+    result["review_state_origin"] = (
+        f"verdict shards read from the stated store {store_dir}, not from this dataset's own "
+        f"store at {_verdict_store_of(dataset_root, '')}"
+        if review_state_dir
+        else f"verdict shards read from this dataset's own store at {store_dir}"
+    )
 
     if experiment_id:
         from tcip_mcp.experiments import (
             create_experiment, get_experiment, update_lineage, record_artifact,
         )
         if "error" in get_experiment(experiment_id):
-            create_experiment(experiment_id, {"source": "review_feedback"}, data_source=review_state_dir)
-        # Set data_source in both branches so lineage points at the review session
-        # even when the experiment pre-existed.
-        update_lineage(experiment_id, data_source=review_state_dir, review_session={
-            "review_state_dir": review_state_dir,
+            create_experiment(experiment_id, {"source": "review_feedback"}, data_source=dataset_root)
+        # Set data_source in both branches so lineage names the reviewed dataset even when the
+        # experiment pre-existed.
+        update_lineage(experiment_id, data_source=dataset_root, review_session={
+            "dataset_root": dataset_root,
+            "review_state_dir": str(store_dir),
             "review_shards": str(state_path),
             "n_positive": result["positive"],
             "n_hard_negative": result["hard_negative"],
@@ -133,7 +177,7 @@ def materialize_review_dataset(
 def prioritize_review_queue(
     checkpoint_path: str,
     images_dir: str,
-    review_state_dir: str = "",
+    dataset_root: str = "",
     strategy: str = "informativeness",
     method: str = "combined",
     task: str = "detection",
@@ -143,6 +187,7 @@ def prioritize_review_queue(
     high: float = 0.8,
     auto_threshold: float | None = None,
     bucket: str | None = None,
+    review_state_dir: str = "",
 ) -> dict:
     """Order un-reviewed images for the next review batch.
 
@@ -155,8 +200,9 @@ def prioritize_review_queue(
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring / predictions).
         images_dir: Directory of candidate images.
-        review_state_dir: Optional review-state dir; with ``skip_reviewed`` excludes
-            already-completed images.
+        dataset_root: Root of the dataset whose review is in progress. It scopes the verdict store
+            (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
+            ``review_state_dir`` stated, no store is read and every candidate image is ranked.
         strategy: ``informativeness`` | ``confidence_triage``.
         method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
             built-in reference implementations, not the allowed set: register your own with
@@ -176,6 +222,9 @@ def prioritize_review_queue(
         bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
             and refuses, naming them, when it holds several.
+        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
+            default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
+            are never merged and neither stands in for the other.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -195,10 +244,11 @@ def prioritize_review_queue(
     sources = [logical[stem] for stem in sorted(logical)]
 
     reviewed_skipped = 0
-    if review_state_dir and skip_reviewed:
-        if _review_state_exists(review_state_dir):
+    if (dataset_root or review_state_dir) and skip_reviewed:
+        store_dir = _verdict_store_of(dataset_root, review_state_dir)
+        if _review_state_exists(str(store_dir)):
             from tcip_annotation.review_engine import ReviewEngine
-            engine = ReviewEngine(review_state_dir)
+            engine = ReviewEngine(str(store_dir))
             resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
             if refusal is not None:
                 return {"error": refusal}

@@ -11,14 +11,8 @@ from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize
 BUCKET = "predictions/detector/2026-03-04"
 
 
-def _setup(tmp_path: Path):
-    from PIL import Image
-    state_dir = tmp_path / "state"
-    src = tmp_path / "src"
-    state_dir.mkdir()
-    src.mkdir()
-    for name in ("imgA.png", "imgB.png"):
-        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
+def _seed_verdicts(state_dir: Path) -> Path:
+    """Record one accepted and one rejected image's verdicts in the store at ``state_dir``."""
     state = {"verdicts": {
         (BUCKET, "imgA.png"): {"img_status": "completed", "detections": [
             {"action": "accepted", "class_name": "catkin", "gt_bbox_norm": [0.5, 0.5, 0.2, 0.2], "pred_bbox_norm": None}]},
@@ -31,17 +25,87 @@ def _setup(tmp_path: Path):
     engine = ReviewEngine(str(state_dir))
     engine.raw_state.update(state)
     engine.save_review_state()
-    return state_dir, src
+    return state_dir
+
+
+def _source_images(src: Path) -> Path:
+    from PIL import Image
+    src.mkdir(parents=True, exist_ok=True)
+    for name in ("imgA.png", "imgB.png"):
+        Image.new("RGB", (64, 64), (120, 120, 120)).save(src / name)
+    return src
+
+
+def _own_store(dataset_root: Path) -> Path:
+    from tcip_mcp.prediction_buckets import review_state_dir_of
+
+    return review_state_dir_of(dataset_root)
+
+
+def _setup(tmp_path: Path):
+    """A dataset whose own verdict store holds the review, plus its reviewed source images."""
+    dataset_root = tmp_path / "dataset"
+    _seed_verdicts(_own_store(dataset_root))
+    return dataset_root, _source_images(tmp_path / "src")
 
 
 def test_materialize_review_dataset_end_to_end(tmp_path):
-    state_dir, src = _setup(tmp_path)
+    dataset_root, src = _setup(tmp_path)
     out = tmp_path / "out"
-    r = materialize_review_dataset(str(state_dir), str(src), str(out))
+    r = materialize_review_dataset(str(dataset_root), str(src), str(out))
     assert "error" not in r
     assert r["positive"] == 1 and r["hard_negative"] == 1
     assert (out / "images" / "imgA.png").is_file()
     assert (out / "annotations" / "imgA.json").is_file()
+
+
+def test_materialize_reads_the_dataset_s_own_store_when_none_is_stated(tmp_path):
+    """The dataset root alone names the store: no second argument, no second location."""
+    dataset_root, src = _setup(tmp_path)
+    r = materialize_review_dataset(str(dataset_root), str(src), str(tmp_path / "out"))
+    assert "error" not in r
+    assert r["dataset_root"] == str(dataset_root)
+    assert r["review_state_stated"] is False
+    assert r["review_state"] == str(_own_store(dataset_root) / "review")
+    assert str(_own_store(dataset_root)) in r["review_state_origin"]
+
+
+def test_materialize_consumes_a_stated_store_outside_the_dataset(tmp_path):
+    """A review recorded outside the dataset is still curated, and the response says from where.
+
+    The dataset here has no store of its own, so the shards can only have come from the stated
+    location, and the caller is told which one it was.
+    """
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
+    src = _source_images(tmp_path / "src")
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"), review_state_dir=str(external))
+    assert "error" not in r
+    assert r["positive"] == 1 and r["hard_negative"] == 1
+    assert r["dataset_root"] == str(dataset_root)
+    assert r["review_state_stated"] is True
+    assert r["review_state"] == str(external / "review")
+    assert str(external) in r["review_state_origin"]
+    assert str(_own_store(dataset_root)) in r["review_state_origin"]
+
+
+def test_materialize_refuses_an_empty_stated_store_rather_than_the_dataset_s_own(tmp_path):
+    """A stated store holding no shards is refused, never answered from the dataset's own.
+
+    The dataset's own store holds a full review here, so a fallback would succeed and quietly
+    curate a review the caller did not name.
+    """
+    dataset_root, src = _setup(tmp_path)
+    stated = tmp_path / "elsewhere" / "state"
+    stated.mkdir(parents=True)
+
+    r = materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"), review_state_dir=str(stated))
+    assert str(stated) in r["error"]
+    assert "positive" not in r
 
 
 def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
@@ -49,24 +113,45 @@ def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
     experiments.create_experiment("exp1", {"x": 1})
 
-    state_dir, src = _setup(tmp_path)
+    dataset_root, src = _setup(tmp_path)
     out = tmp_path / "out"
-    r = materialize_review_dataset(str(state_dir), str(src), str(out), experiment_id="exp1")
+    r = materialize_review_dataset(str(dataset_root), str(src), str(out), experiment_id="exp1")
     assert r["experiment_id"] == "exp1"
 
     lineage = json.loads((tmp_path / "exp" / "exp1" / "lineage.json").read_text())
-    assert lineage["data_source"] == str(state_dir)
-    assert "review_session" in lineage
+    assert lineage["data_source"] == str(dataset_root)
+    assert lineage["review_session"]["dataset_root"] == str(dataset_root)
+    assert lineage["review_session"]["review_state_dir"] == str(_own_store(dataset_root))
     artifacts = json.loads((tmp_path / "exp" / "exp1" / "artifacts.json").read_text())
     assert artifacts["curated_dataset"]["path"] == str(out)
+
+
+def test_lineage_records_a_stated_store_beside_the_dataset_it_curates(tmp_path, monkeypatch):
+    """Both facts are recorded: which dataset the review was of, and where its shards were read."""
+    import tcip_mcp.experiments as experiments
+    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
+
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
+    src = _source_images(tmp_path / "src")
+
+    materialize_review_dataset(
+        str(dataset_root), str(src), str(tmp_path / "out"),
+        experiment_id="ext1", review_state_dir=str(external))
+
+    lineage = json.loads((tmp_path / "exp" / "ext1" / "lineage.json").read_text())
+    assert lineage["data_source"] == str(dataset_root)
+    assert lineage["review_session"]["dataset_root"] == str(dataset_root)
+    assert lineage["review_session"]["review_state_dir"] == str(external)
 
 
 def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
     import tcip_mcp.experiments as experiments
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
 
-    state_dir, src = _setup(tmp_path)
-    r = materialize_review_dataset(str(state_dir), str(src), str(tmp_path / "out"), experiment_id="new1")
+    dataset_root, src = _setup(tmp_path)
+    r = materialize_review_dataset(str(dataset_root), str(src), str(tmp_path / "out"), experiment_id="new1")
     assert r["experiment_id"] == "new1"
     lineage = json.loads((tmp_path / "exp" / "new1" / "lineage.json").read_text())
     assert "review_session" in lineage
@@ -74,16 +159,52 @@ def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
 
 def test_materialize_invalid_inputs_error(tmp_path):
     empty = tmp_path / "empty"
-    empty.mkdir()  # no review/ shards
-    assert "error" in materialize_review_dataset(str(empty), str(tmp_path), str(tmp_path / "o1"))
+    empty.mkdir()  # a dataset root whose own store holds no shards
+    r = materialize_review_dataset(str(empty), str(tmp_path), str(tmp_path / "o1"))
+    assert str(_own_store(empty)) in r["error"]
 
-    state_dir, _src = _setup(tmp_path)
-    assert "error" in materialize_review_dataset(str(state_dir), str(tmp_path / "nope"), str(tmp_path / "o2"))
+    dataset_root, _src = _setup(tmp_path)
+    assert "error" in materialize_review_dataset(
+        str(dataset_root), str(tmp_path / "nope"), str(tmp_path / "o2"))
+
+    assert "dataset_root" in materialize_review_dataset("", str(tmp_path), str(tmp_path / "o3"))["error"]
 
 
 def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     r = prioritize_review_queue(str(tmp_path / "nope.pt"), str(tmp_path))
     assert "error" in r  # early guard, no torch import needed
+
+
+def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_path):
+    """The dataset root is enough to find the verdicts: both reviewed images drop out of the queue.
+
+    A store the tool could not find would rank every image again and send the breeder back through
+    a review they already finished.
+    """
+    dataset_root, images = _setup(tmp_path)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    r = prioritize_review_queue(
+        checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
+        strategy="confidence_triage")
+    assert r["reviewed_skipped"] == 2
+    assert r["total_images"] == 0
+
+
+def test_prioritize_review_queue_skips_what_a_stated_store_holds(tmp_path):
+    """A review recorded outside the dataset still filters the queue when its store is stated."""
+    dataset_root = tmp_path / "dataset"
+    dataset_root.mkdir()
+    external = _seed_verdicts(tmp_path / "elsewhere" / "state")
+    images = _source_images(tmp_path / "src")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    r = prioritize_review_queue(
+        checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
+        strategy="confidence_triage", review_state_dir=str(external))
+    assert r["reviewed_skipped"] == 2
 
 
 def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch):

@@ -164,7 +164,7 @@ def test_relative_output_dir_records_where_the_tool_anchors_it_not_where_the_pro
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(pinned_root))
 
     result = materialize_review_dataset(
-        review_state_dir=str(tmp_path / "no_review_state"),
+        dataset_root=str(tmp_path / "no_review_state"),
         source_images_dir=str(tmp_path / "source"),
         output_dir="curated_dataset",
     )
