@@ -17,6 +17,10 @@ measurement-integrity invariant). The milestone math lives once in
 ``tcip_mcp...postprocessing.phenology``; this module is the HTTP surface the Results tab calls
 and delegates to it.
 
+This module also serves the operationalization record: what a trait's delivered number means, who
+recorded it, and the breeder's confirmation of it. The confirmation is written here and nowhere
+else, because an agent able to write one would be confirming its own definition of the measurement.
+
 The backend owns everything except the model inference (which is driven by the Inference tab).
 """
 
@@ -33,7 +37,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
-from tcip_web.paths import assert_path_allowed
+from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +55,31 @@ def _guard(*paths: str | None) -> None:
             raise HTTPException(403, str(exc)) from exc
 
 
-def _audit(project_root: str, tool: str, arguments: dict) -> None:
+def _guarded_project_root(project_root: str) -> Path:
+    """Confine a request's project root and hand back the resolved path every later read uses.
+
+    The returned path is the load-bearing half: a door that guards the raw string and then
+    resolves that string again reopens exactly what the guard closed.
+    """
+    try:
+        return assert_project_root_allowed(project_root)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+def _audit(project_root: str, tool: str, arguments: dict, **extra: object) -> None:
     """Record a GUI results mutation in the project's audit log.
 
     A delivery and the plant mapping behind it are project state, not dataset state: the
     dataset can be read by more than one project, but the export is this project's own
-    outward action. Never fails the request.
+    outward action. ``extra`` carries a fact the entry shape has no home for, such as the
+    person an action is recorded as coming from. Never fails the request.
     """
     if not project_root:
         return
     from tcip_mcp.audit import record_event
 
-    record_event(tool, arguments, source="gui", scope=project_root)
+    record_event(tool, arguments, source="gui", scope=project_root, **extra)
 
 
 def _project_root_of_state_path(path: str) -> Optional[str]:
@@ -180,9 +197,13 @@ class PhenologyPayload(BaseModel):
 class _PhenologyMeasurement:
     """One trait's per-plant phenology measurement plus the on-disk evidence that qualifies it."""
 
-    def __init__(self, spec, plants: dict, validity: dict, gate, positive_class_id) -> None:
+    def __init__(
+        self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path
+    ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
+        # The guarded, resolved root every later write and audit entry resolves from.
+        self.project_root = project_root
 
     @property
     def positive_class_assessed(self) -> bool:
@@ -225,6 +246,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     )
     from tcip_mcp.traits import TraitUnknownError, get_trait
 
+    root = _guarded_project_root(payload.project_root)
     try:
         spec = get_trait(payload.trait)
     except TraitUnknownError as e:
@@ -271,7 +293,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         positive_class_name=spec.positive_class_name, spec=spec,
     )
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, payload.predictions_by_date)
-    return _PhenologyMeasurement(spec, plants, validity, gate, positive_class_id)
+    return _PhenologyMeasurement(spec, plants, validity, gate, positive_class_id, root)
 
 
 def _refusal(measurement: _PhenologyMeasurement) -> str:
@@ -425,15 +447,174 @@ def export_csv(payload: ExportCsvPayload) -> Response:
 
     # The browser download lands wherever the breeder's browser puts it; the delivery itself
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
-    saved_path = Path(payload.project_root) / "results_export" / Path(filename).name
+    saved_path = measurement.project_root / "results_export" / Path(filename).name
     saved_path.parent.mkdir(parents=True, exist_ok=True)
     saved_path.write_text(body, encoding="utf-8", newline="")
-    _audit(payload.project_root, "results.export_csv", {
+    _audit(str(measurement.project_root), "results.export_csv", {
         "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
         "rows": len(rows),
     })
     headers["X-TCIP-Saved-To"] = str(saved_path)
     return Response(content=body, media_type="text/csv", headers=headers)
+
+
+# ── What a delivered number means: the record, and the breeder's confirmation ──
+
+
+class ConfirmOperationalizationPayload(BaseModel):
+    """One breeder confirmation, or one withdrawal, for one trait's one delivery kind.
+
+    ``record_seen`` is the content hash of the record the surface rendered. Confirming is an act
+    over what the breeder read, so a record rewritten while the panel was open refuses rather than
+    taking the click for text nobody displayed. ``user`` is the name the surface carries; when it is
+    absent the backend falls back to its own process identity and records that it did.
+    """
+
+    project_root: str
+    trait: str
+    delivery_kind: str
+    record_seen: str
+    user: Optional[str] = None
+    confirmed: bool = True
+
+
+def _operationalization_body(project_root: Path, trait: str, delivery_kind: str) -> dict:
+    """One record as the confirming surface reads it: what is stated, what covers it, what moved.
+
+    ``confirmed_current`` and ``superseded`` come from the same ``check_operationalization`` the
+    delivery doors run, so the panel and the door cannot disagree about whether a confirmation still
+    holds, and no surface re-derives that comparison for itself. ``delivers`` quotes the crop
+    vocabulary's own wording, so the breeder reads their definition before the agent's statement.
+    Nothing stated yet reads as null statement fields with ``confirmed_current`` false.
+    """
+    from tcip_mcp import operationalization as op
+    from tcip_mcp.traits import crops_definitions
+
+    spec, record, _specs_dir = op.resolve_trait_and_record(
+        trait, delivery_kind, project_root=project_root
+    )
+    check = op.check_operationalization(spec, record, delivery_kind)
+    stated = record.value or {}
+    definitions = crops_definitions()
+    return {
+        "trait": trait,
+        "delivery_kind": delivery_kind,
+        **{field: stated.get(field) for field in op.STATEMENT_FIELDS},
+        "confirmed_by": stated.get("confirmed_by"),
+        "confirmed_at": stated.get("confirmed_at"),
+        "identity_from_request": stated.get("identity_from_request"),
+        "confirmed_current": check.ok,
+        "superseded": [dict(entry) for entry in check.superseded],
+        "delivers": [{"name": name, "definition": definitions.get(name)} for name in spec.delivers],
+        "record_seen": op.record_seen_hash(stated),
+    }
+
+
+@router.get("/operationalization")
+def get_operationalization(project_root: str, trait: str, delivery_kind: str) -> dict:
+    """What this trait's delivered number is recorded to mean, and whether it is confirmed now.
+
+    The panel renders every field this returns and posts ``record_seen`` back with the confirmation,
+    so what the breeder authorizes is what they were shown.
+    """
+    from tcip_mcp.traits import TraitUnknownError
+
+    root = _guarded_project_root(project_root)
+    try:
+        return _operationalization_body(root, trait, delivery_kind)
+    except (TraitUnknownError, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.get("/operationalizations")
+def list_operationalizations(project_root: str) -> dict:
+    """Every operationalization record this project holds, one row per trait and delivery kind.
+
+    The panel enumerates rather than selects: the record's key is a pair, so a surface that knew
+    only a trait could not address one, and a kind selector would hardcode today's kinds into the
+    browser. Rows for a kind the Results tab cannot compute are still listed, because a count or an
+    aggregate record is confirmable whether or not this tab renders that delivery.
+
+    ``unresolved`` names a record whose trait is no longer registered, or whose delivery kind is not
+    one this platform declares, rather than dropping it: an unlistable record and no record at all
+    would otherwise read identically.
+    """
+    import tcip_store as ts
+    from tcip_mcp import operationalization as op
+    from tcip_mcp.traits import TraitUnknownError
+
+    root = _guarded_project_root(project_root)
+    records: list[dict] = []
+    unresolved: list[dict] = []
+    for key in ts.keys(op.OPERATIONALIZATIONS_STORE, str(op.operationalizations_scope(root))):
+        trait, delivery_kind = key.parts
+        try:
+            records.append(_operationalization_body(root, trait, delivery_kind))
+        except (TraitUnknownError, ValueError) as e:
+            unresolved.append(
+                {"trait": trait, "delivery_kind": delivery_kind, "reason": str(e)}
+            )
+    return {"records": records, "unresolved": unresolved}
+
+
+@router.post("/operationalization/confirm")
+def confirm_operationalization(payload: ConfirmOperationalizationPayload) -> dict:
+    """Record the breeder's confirmation of what is on file, or withdraw one they gave before.
+
+    The one path a confirmation is ever written by. No MCP tool reaches this writer: an agent that
+    could confirm its own statement would be confirming its own definition of the measurement.
+
+    Refused with 400 when nothing is stated for this trait and kind, or the trait is not registered
+    for this project, and with 409 when the record moved since the surface read it, the body then
+    carrying what is on file so the panel re-renders that and the breeder confirms what they see.
+    ``confirmed`` false withdraws, clearing the four confirmation fields and leaving the statement.
+
+    Nothing verifies that the person at the keyboard is the person named. What this records is a
+    name the request supplied, whether the request supplied one at all, and an audit entry saying
+    the act happened; it is not authentication and nothing here may be read as one.
+    """
+    from tcip_mcp import operationalization as op
+    from tcip_mcp.traits import TraitUnknownError
+
+    from tcip_web.identity import resolve_user, user_id
+
+    root = _guarded_project_root(payload.project_root)
+    # The writer applies the user: convention to whatever name it is given, so it is passed bare.
+    actor = resolve_user(payload.user)
+    identity_from_request = bool((payload.user or "").strip())
+    try:
+        record = op.confirm_trait_operationalization(
+            root,
+            payload.trait,
+            payload.delivery_kind,
+            user=actor,
+            record_seen=payload.record_seen,
+            identity_from_request=identity_from_request,
+            confirmed=payload.confirmed,
+        )
+    except op.RecordMoved as e:
+        raise HTTPException(
+            409,
+            {
+                "message": str(e),
+                "record": _operationalization_body(root, payload.trait, payload.delivery_kind),
+            },
+        ) from e
+    except (TraitUnknownError, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+
+    _audit(
+        str(root),
+        "results.confirm_trait_operationalization",
+        {
+            "trait": payload.trait,
+            "delivery_kind": payload.delivery_kind,
+            "confirmed": payload.confirmed,
+            "identity_from_request": identity_from_request,
+        },
+        user=user_id(actor),
+    )
+    return {field: record[field] for field in op.CONFIRMATION_FIELDS}
 
 
 # ── Registered traits (drives the Results tab's trait selection) ───────
