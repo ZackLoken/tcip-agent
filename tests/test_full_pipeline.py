@@ -50,7 +50,7 @@ def output_dir(tmp_path):
 class TestFullClassificationPipeline:
     """End-to-end: bespoke builder → train → checkpoint → predict → CSV."""
 
-    def test_build_train_infer_export(self, tiny_classification_data, output_dir):
+    def test_build_train_infer_export(self, tiny_classification_data, output_dir, tmp_path):
         # --- Step 1: A bespoke classification model_source ---
         model_source = {
             "builder": "tests.bespoke_models:build_bespoke_classifier",
@@ -159,7 +159,11 @@ class TestFullClassificationPipeline:
             })
         # Uncalibrated smoke export: acknowledge the count is unvalidated (the delivery gate refuses
         # a bare write); it is stamped measurement_validated=false.
-        export_detection_csv(csv_results, csv_path, acknowledge_unvalidated=True)
+        from tests import _operationalization_fixtures as fx
+
+        fx.seed_confirmed_count(tmp_path)
+        export_detection_csv(csv_results, csv_path, trait=fx.COUNT_TRAIT,
+                             acknowledge_unvalidated=True)
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()
@@ -210,7 +214,7 @@ def detection_output_dir(tmp_path):
 class TestDetectionPipelineRealData:
     """End-to-end: build → train → infer → export CSV using real catkin images (nested schema)."""
 
-    def test_build_train_infer_export(self, detection_output_dir):
+    def test_build_train_infer_export(self, detection_output_dir, tmp_path):
         from tcip_mcp.pipelines.data.datasets import build_dataset
         from tcip_mcp.pipelines.training.generic_trainer import (
             create_run, train, task_collate,
@@ -305,7 +309,11 @@ class TestDetectionPipelineRealData:
 
         # --- Step 5: Export detection CSV ---
         csv_path = str(out / "catkin_detections.csv")
-        export_detection_csv(results, csv_path, acknowledge_unvalidated=True)
+        from tests import _operationalization_fixtures as fx
+
+        fx.seed_confirmed_count(tmp_path)
+        export_detection_csv(results, csv_path, trait=fx.COUNT_TRAIT,
+                             acknowledge_unvalidated=True)
 
         assert Path(csv_path).is_file()
         content = Path(csv_path).read_text()

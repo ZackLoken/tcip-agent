@@ -996,13 +996,17 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
             "operating_point": op, "validated": validated, "conf_source": "calibration",
         }
 
+    from tests import _operationalization_fixtures as fx
+
+    fx.seed_confirmed_count(tmp_path)
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
     monkeypatch.setattr(
         itools, "export_detection_csv",
-        lambda results, path, provenance=None, measurement_validated=None, pred_dirs=None,
-        acknowledge_unvalidated=False: str(path))
+        lambda results, path, provenance=None, *, trait, measurement_validated=None,
+        pred_dirs=None, acknowledge_unvalidated=False: str(path))
     return itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
-                                  trait="catkin", calibration_labels_dir=str(tmp_path),
+                                  trait=fx.COUNT_TRAIT,
+                                  calibration_labels_dir=str(tmp_path),
                                   acknowledge_unvalidated=acknowledge)
 
 
@@ -1011,7 +1015,9 @@ def test_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
     op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
     r = _tabulate_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured,
                               acknowledge=True)
-    assert captured["trait"] == "catkin"                    # calibration threaded through
+    from tests import _operationalization_fixtures as fx
+
+    assert captured["trait"] == fx.COUNT_TRAIT              # calibration threaded through
     assert captured["calibration_labels_dir"] == str(tmp_path)
     assert r["validated"] is True and r["conf_source"] == "calibration"
     assert r["operating_point"] == op
