@@ -18,6 +18,17 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     aggregate_per_plant,
     export_aggregated_csv,
 )
+from tests import _operationalization_fixtures as fx
+
+
+@pytest.fixture(autouse=True)
+def _recorded_meaning(tmp_path):
+    """Every export below ships under a trait whose delivered number has a confirmed meaning."""
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"])
+    fx.seed_confirmed_aggregate(tmp_path, "bark_thickness",
+                                value_keys=["principal_axis_extent_px"])
 
 
 def _identity_fn(image_name: str) -> str:
@@ -187,7 +198,7 @@ def test_export_aggregated_csv(tmp_path):
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
     export_aggregated_csv(
-        results, str(out_path), trait_name="catkin_count", crop="hazelnut",
+        results, str(out_path), trait_name="stem_count", crop="hazelnut",
         acknowledge_unvalidated=True,
     )
 
@@ -196,7 +207,7 @@ def test_export_aggregated_csv(tmp_path):
 
     assert [r["plant_id"] for r in rows] == ["PLANT_001", "PLANT_002"]
     assert rows[0]["crop"] == "hazelnut"
-    assert rows[0]["trait_name"] == "catkin_count"
+    assert rows[0]["trait_name"] == "stem_count"
     assert rows[0]["n_images"] == "3"
 
 
@@ -209,7 +220,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
     ]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(
-        results, str(out_path), trait_name="not_a_real_crops_yml_trait",
+        results, str(out_path), trait_name="plant_surface_area",
         acknowledge_unvalidated=True,
     )
     with open(out_path, newline="") as f:
@@ -220,7 +231,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
 def test_export_aggregated_csv_count_trait_has_blank_units(tmp_path):
     results = [{"plant_id": "PLANT_001", "value": 4, "observations": 3, "value_key": "count"}]
     out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="whatever",
+    export_aggregated_csv(results, str(out_path), trait_name="stem_count",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -254,15 +265,11 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
     unit at all."""
     from tcip_mcp.traits import crops_units
 
-    units = crops_units()
-    mm_trait = next((name for name, u in units.items() if u == "mm"), None)
-    if mm_trait is None:
-        pytest.skip("no mm-declared trait found in crops.yml")
-
+    assert crops_units()["bark_thickness"] == "mm"
     results = [{"plant_id": "P1", "value": 124.0, "observations": 1,
                 "value_key": "principal_axis_extent_px"}]
     out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name=mm_trait,
+    export_aggregated_csv(results, str(out_path), trait_name="bark_thickness",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
@@ -270,22 +277,20 @@ def test_export_aggregated_csv_never_labels_a_pixel_value_with_crops_yml_units(t
     assert rows[0]["value"] == "124.0"
 
 
-def test_export_aggregated_csv_units_never_falls_back_with_no_value_key_at_all(tmp_path):
+def test_units_never_fall_back_with_no_value_key_at_all():
     """A results list not produced by aggregate_per_plant (no value_key present) must not inherit
-    crops.yml's declared unit either; there is nothing to cross-check it against."""
+    crops.yml's declared unit either; there is nothing to cross-check it against.
+
+    Asserted on the resolution rather than on a delivered file, because a row that names no
+    quantity is refused at the door now: there is nothing for a confirmed operationalization to
+    check it against.
+    """
+    from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
     from tcip_mcp.traits import crops_units
 
-    units = crops_units()
-    mm_trait = next((name for name, u in units.items() if u == "mm"), None)
-    if mm_trait is None:
-        pytest.skip("no mm-declared trait found in crops.yml")
-
+    assert crops_units()["bark_thickness"] == "mm"
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1}]
-    out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name=mm_trait, acknowledge_unvalidated=True)
-    with open(out_path, newline="") as f:
-        rows = list(csv.DictReader(f))
-    assert rows[0]["units"] == ""
+    assert _resolve_units("bark_thickness", results) == ""
 
 
 @pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "elongated_fraction", "pct_open"])
@@ -381,7 +386,8 @@ def test_export_aggregated_csv_writes_value_key_column(tmp_path):
     reader independently detect a px/mm mismatch themselves."""
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2"}]
     out_path = tmp_path / "out.csv"
-    export_aggregated_csv(results, str(out_path), trait_name="whatever", acknowledge_unvalidated=True)
+    export_aggregated_csv(results, str(out_path), trait_name="plant_surface_area",
+                          acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = list(csv.DictReader(f))
     assert rows[0]["value_key"] == "area_mm2"
@@ -397,8 +403,9 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     from pathlib import Path as _Path
 
     out_path = tmp_path / "schema.csv"
-    export_aggregated_csv([{"plant_id": "P1", "value": 1.0, "observations": 1}], str(out_path),
-                          trait_name="whatever", acknowledge_unvalidated=True)
+    export_aggregated_csv(
+        [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "count"}],
+        str(out_path), trait_name="stem_count", acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))
 

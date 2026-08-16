@@ -499,10 +499,14 @@ class TestInferenceToolOutputSchema:
             "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
             "validated": True, "conf_source": "calibration"})
 
+        from tests import _operationalization_fixtures as fx
+
+        fx.seed_confirmed_count(tmp_path)
         out_csv = tmp_path / "block_counts.csv"
         # No predictions_dir: the CSV is the provisional one but still carries each measured count.
         res = itools.tabulate_counts("m.pt", str(tmp_path), str(out_csv),
-                                     trait="catkin", calibration_labels_dir=str(tmp_path),
+                                     trait=fx.COUNT_TRAIT,
+                                     calibration_labels_dir=str(tmp_path),
                                      acknowledge_unvalidated=True)
 
         assert "error" not in res, res

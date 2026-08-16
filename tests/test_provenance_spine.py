@@ -203,10 +203,14 @@ def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
 def test_export_detection_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
+    from tests import _operationalization_fixtures as fx
+
+    fx.seed_confirmed_count(tmp_path)
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expE")
     out = tmp_path / "counts.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
+        trait=fx.COUNT_TRAIT,
         provenance={"producer_model_sha256": sha, "experiment_id": "expE",
                     "operating_point_conf": 0.42, "produced_at": "2026-07-19T00:00:00Z"},
         measurement_validated="held_out_annotations")
@@ -219,11 +223,16 @@ def test_export_detection_csv_carries_provenance(tmp_path):
 def test_export_aggregated_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
+    from tests import _operationalization_fixtures as fx
+
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expA")
     out = tmp_path / "agg.csv"
     # No pred_dirs means no on-disk validity source, so the provisional delivery is acknowledged.
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 5, "observations": 2}], str(out), trait_name="count",
+        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
+        str(out), trait_name="stem_count",
         provenance={"producer_model_sha256": sha, "experiment_id": "expA",
                     "produced_at": "2026-07-19T00:00:00Z"},
         measurement_validated="held_out_annotations", acknowledge_unvalidated=True)

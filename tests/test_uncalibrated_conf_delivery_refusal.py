@@ -12,7 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+from tests import _operationalization_fixtures as fx  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _recorded_meaning(tmp_path):
+    """The count these tests deliver has a recorded, confirmed meaning behind it."""
+    fx.seed_confirmed_count(tmp_path)
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -68,7 +74,7 @@ def _held_out_bundle():
             miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
         "tiled": False, "staged_conf_floor": 0.01,
     }
-    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
+    return resolve_operating_point(fx.COUNT_TRAIT, experiment_id=None, **inputs), inputs
 
 
 def _prepare(tmp_path, monkeypatch):
@@ -89,7 +95,7 @@ def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkey
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_csv = tmp_path / "counts.csv"
 
-    r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv),
+    r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
                                conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False)
 
     assert "error" in r
@@ -111,7 +117,7 @@ def test_an_acknowledged_uncalibrated_count_is_written_flagged_rather_than_refus
     ckpt, images_dir = _prepare(tmp_path, monkeypatch)
     out_csv = tmp_path / "counts.csv"
 
-    r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv),
+    r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
                                conf_threshold=CALLER_PICKED_CONF, device="cpu", tile=False,
                                acknowledge_unvalidated=True)
 
@@ -144,7 +150,8 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
 
     r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv), device="cpu", tile=False,
-                               trait="catkin", calibration_labels_dir=str(images_dir),
+                               trait=fx.COUNT_TRAIT,
+                               calibration_labels_dir=str(images_dir),
                                predictions_dir=str(bucket))
 
     assert "error" not in r, r
@@ -157,4 +164,5 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
         assert (bucket / f"{stem}.json").is_file()
     stamp = read_operating_point_sidecar(bucket)
     assert stamp["validated"] is True
-    assert verify_stamp_binding(stamp, bucket, document="operating_point", trait="catkin").ok
+    assert verify_stamp_binding(
+        stamp, bucket, document="operating_point", trait=fx.COUNT_TRAIT).ok

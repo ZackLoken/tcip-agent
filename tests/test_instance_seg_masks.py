@@ -277,8 +277,12 @@ def test_tabulate_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_pa
     images_dir = tmp_path / "images"
     _image(images_dir)
     out_path = tmp_path / "counts.csv"
+    from tests import _operationalization_fixtures as fx
+
+    fx.seed_confirmed_count(tmp_path)
     r = tabulate_counts(instance_seg_ckpt, str(images_dir), str(out_path),
-                        device="cpu", tile_size=TILE, acknowledge_unvalidated=True)
+                        trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE,
+                        acknowledge_unvalidated=True)
     assert "error" not in r
     assert out_path.is_file()
 

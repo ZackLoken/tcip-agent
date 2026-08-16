@@ -9,6 +9,7 @@ that has not been shown to admit valid work.
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -741,3 +742,261 @@ def test_a_confirmed_delivery_with_an_unbound_classifier_stamp_reports_that_refu
     assert resp.status_code == 400
     assert "was earned for trait" in resp.json()["detail"]
     assert "chestnut_bur" in resp.json()["detail"]
+
+
+# ── the count and aggregate delivery doors ───────────────────────────────────
+
+
+@pytest.fixture
+def delivery_root(tmp_path: Path) -> Path:
+    """The pinned platform root, carrying every trait the count and aggregate doors deliver under.
+
+    These doors resolve the record from the root this process is pinned to, which is the root the
+    tool and the writer both read, so a test of them seeds that one rather than a project of its own.
+    """
+    return fx.seed_delivery_traits(tmp_path)
+
+
+def _count_rows() -> list[dict]:
+    return [{"image": "a.jpg", "count": 3, "scores": [0.9]}]
+
+
+def _aggregate_rows(value_key: str | None = "count") -> list[dict]:
+    row = {"plant_id": "p1", "value": 5, "observations": 2}
+    return [row if value_key is None else {**row, "value_key": value_key}]
+
+
+def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
+    """A prediction bucket whose sidecar records which names its labels decoded to."""
+    bucket = tmp_path / "ds" / "predictions" / "run"
+    bucket.mkdir(parents=True)
+    (bucket / "operating_point.json").write_text(
+        json.dumps({"validated": False, "id_map": id_map}), encoding="utf-8")
+    return str(bucket)
+
+
+def test_unstated_count_door_refuses(delivery_root: Path, tmp_path: Path):
+    """A per-image count CSV under a trait nobody has defined a count for is not a measurement."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    out_csv = tmp_path / "counts.csv"
+    with pytest.raises(ValueError) as excinfo:
+        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT,
+                             acknowledge_unvalidated=True)
+
+    assert "no operationalization is recorded" in str(excinfo.value)
+    assert op.PER_IMAGE_COUNT in str(excinfo.value)
+    assert not out_csv.exists()
+
+
+def test_the_count_tool_refuses_before_it_has_any_counts_to_return(
+    delivery_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The refusal happens ahead of the pass, so the response carries no count of its own.
+
+    This tool returns image_count and total_detections on its refusal paths as well as its success
+    one, so a check placed after the pass would hand back exactly the numbers it refused to write.
+    """
+    import tcip_mcp.tools.inference_tools as itools
+
+    def _never_runs(**kwargs):
+        raise AssertionError("run_inference must not run: the precondition refuses ahead of it")
+
+    monkeypatch.setattr(itools, "run_inference", _never_runs)
+
+    res = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+                                 trait=fx.COUNT_TRAIT)
+
+    assert "no operationalization is recorded" in res["error"]
+    assert "image_count" not in res
+    assert "total_detections" not in res
+
+
+def test_measured_subject_absent_from_id_maps_refuses(delivery_root: Path, tmp_path: Path):
+    """The counts have to be counts of the subject the breeder confirmed, read from the buckets."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    fx.seed_confirmed_count(tmp_path)
+    bucket = _bucket_recording(tmp_path, {"leaf": 0})
+    out_csv = tmp_path / "counts.csv"
+
+    with pytest.raises(ValueError) as excinfo:
+        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT,
+                             pred_dirs=[bucket], acknowledge_unvalidated=True)
+
+    assert fx.COUNT_SUBJECT in str(excinfo.value)
+    assert "The counts are of something else" in str(excinfo.value)
+    assert not out_csv.exists()
+
+
+def test_a_bucket_recording_the_subject_delivers_and_one_recording_none_is_unchecked(
+    delivery_root: Path, tmp_path: Path,
+):
+    """The rail admits both shapes it must: the subject recorded, and no subject recorded at all."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    fx.seed_confirmed_count(tmp_path)
+    matching = _bucket_recording(tmp_path, {fx.COUNT_SUBJECT: 0})
+    silent = tmp_path / "ds" / "predictions" / "silent"
+    silent.mkdir(parents=True)
+    (silent / "operating_point.json").write_text(json.dumps({"validated": False}), encoding="utf-8")
+
+    for name, bucket in (("recorded.csv", matching), ("silent.csv", str(silent))):
+        out_csv = tmp_path / name
+        export_detection_csv(_count_rows(), str(out_csv), trait=fx.COUNT_TRAIT,
+                             pred_dirs=[bucket], acknowledge_unvalidated=True)
+        assert out_csv.exists(), name
+
+
+def test_row_without_value_key_refuses(delivery_root: Path, tmp_path: Path):
+    """A row naming no quantity has nothing to check against what the breeder confirmed."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    fx.confirm_aggregate(tmp_path, fx.COUNT_TRAIT, op.PER_PLANT_COUNT_AGGREGATE,
+                         delivered_phenotype="stem_count", value_keys=["count"])
+    out_csv = tmp_path / "agg.csv"
+
+    with pytest.raises(ValueError) as excinfo:
+        export_aggregated_csv(_aggregate_rows(None), str(out_csv), trait_name="stem_count",
+                              acknowledge_unvalidated=True)
+
+    assert "1 of these rows carry no value key" in str(excinfo.value)
+    assert not out_csv.exists()
+
+
+def test_value_key_outside_confirmed_set_refuses(delivery_root: Path, tmp_path: Path):
+    """A quantity nobody confirmed cannot ship under a trait's name, even a plausible one."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    fx.confirm_aggregate(tmp_path, fx.COUNT_TRAIT, op.PER_PLANT_COUNT_AGGREGATE,
+                         delivered_phenotype="stem_count", value_keys=["count"])
+    out_csv = tmp_path / "agg.csv"
+
+    with pytest.raises(ValueError) as excinfo:
+        export_aggregated_csv(_aggregate_rows("leaf_length"), str(out_csv),
+                              trait_name="stem_count", acknowledge_unvalidated=True)
+
+    assert "leaf_length" in str(excinfo.value)
+    assert "never confirmed" in str(excinfo.value)
+    assert not out_csv.exists()
+
+
+def test_a_phenotype_no_registered_trait_delivers_refuses_and_names_the_authoring_step(
+    delivery_root: Path, tmp_path: Path,
+):
+    """The CSV column is a crop-vocabulary name; the record behind it is keyed by a registry trait.
+
+    A phenotype no spec claims has no record to rest on, and the refusal says which step supplies
+    one rather than letting the delivery ship under a name nothing answers for.
+    """
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    out_csv = tmp_path / "agg.csv"
+    with pytest.raises(ValueError) as excinfo:
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), trait_name="cluster_nut_count",
+                              acknowledge_unvalidated=True)
+
+    assert "no trait registered for this project delivers" in str(excinfo.value)
+    assert not out_csv.exists()
+
+
+def test_a_phenotype_two_registered_traits_deliver_refuses_as_ambiguous(
+    delivery_root: Path, tmp_path: Path,
+):
+    """Two specs claiming one phenotype means two records could say two different things."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    fx.write_spec(tmp_path, dataclasses.replace(fx.COUNT_SPEC, name="second_deliverer"))
+    out_csv = tmp_path / "agg.csv"
+
+    with pytest.raises(ValueError) as excinfo:
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), trait_name="stem_count",
+                              acknowledge_unvalidated=True)
+
+    assert "each deliver" in str(excinfo.value)
+    assert "second_deliverer" in str(excinfo.value)
+    assert not out_csv.exists()
+
+
+def test_ordinal_and_count_aggregates_need_their_own_records(delivery_root: Path, tmp_path: Path):
+    """One trait, two aggregate shapes, two confirmations, each covering only its own delivery.
+
+    A count aggregate rests on the trait's count objective and an ordinal aggregate on its agreement
+    floor, so a breeder who confirmed one has said nothing about the other.
+    """
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    rows = _aggregate_rows("astringency")
+    fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_ORDINAL_AGGREGATE,
+                         delivered_phenotype="astringency", value_keys=["astringency"])
+
+    ordinal_csv = tmp_path / "ordinal.csv"
+    export_aggregated_csv(rows, str(ordinal_csv), trait_name="astringency", task="ordinal",
+                          acknowledge_unvalidated=True)
+    assert ordinal_csv.exists()
+
+    count_csv = tmp_path / "count.csv"
+    with pytest.raises(ValueError) as excinfo:
+        export_aggregated_csv(rows, str(count_csv), trait_name="astringency",
+                              acknowledge_unvalidated=True)
+    assert op.PER_PLANT_COUNT_AGGREGATE in str(excinfo.value)
+    assert not count_csv.exists()
+
+    fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_COUNT_AGGREGATE,
+                         delivered_phenotype="astringency", value_keys=["astringency"])
+    export_aggregated_csv(rows, str(count_csv), trait_name="astringency",
+                          acknowledge_unvalidated=True)
+
+    assert count_csv.exists()
+    _spec, ordinal_record, _dir = fx.resolve(
+        tmp_path, "astringency", op.PER_PLANT_ORDINAL_AGGREGATE)
+    assert ordinal_record.value["confirmed_by"] == "user:grüne"
+
+
+def test_a_count_csv_no_longer_ships_under_no_trait_at_all(delivery_root: Path, tmp_path: Path):
+    """The permissive delivery this door used to allow, named directly: a count under no trait.
+
+    A confirmed meaning is keyed by the trait, so a call naming none has nothing to check against
+    and wrote the file regardless. The argument is required now and nothing is written without it.
+    """
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    out_csv = tmp_path / "counts.csv"
+    with pytest.raises(TypeError):
+        export_detection_csv(_count_rows(), str(out_csv), acknowledge_unvalidated=True)
+
+    assert not out_csv.exists()
+
+
+def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
+    delivery_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The same permissive delivery at the tool, which used to hand back the counts as well."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    monkeypatch.setattr(itools, "run_inference", lambda **kwargs: {
+        "results": [{"image": "a.png", "count": 3}], "image_count": 1, "total_detections": 3,
+        "operating_point": {"conf": {"value": 0.5}}, "validated": False, "conf_source": "default"})
+    out_csv = tmp_path / "o.csv"
+
+    with pytest.raises(TypeError):
+        itools.tabulate_counts("m.pt", str(tmp_path), str(out_csv), acknowledge_unvalidated=True)
+
+    assert not out_csv.exists()
+
+
+def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
+    delivery_root: Path, tmp_path: Path,
+):
+    """The other permissive delivery: a per-plant CSV whose trait_name came from a default.
+
+    That default shipped a trait_name column holding a word the crop vocabulary does not carry, so
+    no record could be keyed by it. The argument is required now and nothing is written without it.
+    """
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    out_csv = tmp_path / "agg.csv"
+    with pytest.raises(TypeError):
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), acknowledge_unvalidated=True)
+
+    assert not out_csv.exists()

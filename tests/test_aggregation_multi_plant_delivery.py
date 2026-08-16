@@ -20,7 +20,19 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     export_aggregated_csv,
 )
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
+from tests import _operationalization_fixtures as fx
 from tests._binding_fixtures import write_bound_sidecar, write_prediction
+
+
+@pytest.fixture(autouse=True)
+def _recorded_meaning(tmp_path):
+    """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
+    fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"],
+                                task="ordinal")
+    # A delivery that omits the task rests on the same trait's count aggregate, its own record.
+    fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"])
 
 
 def _by_plant(rows: list[dict]) -> dict[str, dict]:
@@ -98,7 +110,7 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")
 
     out_path = tmp_path / "per_plant.csv"
-    export_aggregated_csv(summaries, str(out_path), trait_name="catkin_count", crop="hazelnut",
+    export_aggregated_csv(summaries, str(out_path), trait_name="stem_count", crop="hazelnut",
                           acknowledge_unvalidated=True)
     with open(out_path, newline="") as f:
         rows = _by_plant(list(csv.DictReader(f)))
@@ -201,28 +213,29 @@ def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_pa
     still ship, so the rail admits the legitimate deliveries it exists to protect."""
     ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
     count_only = _count_bucket(tmp_path, "count_preds")
-    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "stage"}]
+    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3,
+             "value_key": "astringency"}]
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(rows, str(tmp_path / "omitted_task.csv"),
-                              trait_name="ripening_stage",
+                              trait_name="astringency",
                               measurement_validated=VALIDATED_HELD_OUT,
                               pred_dirs=[ordinal_only])
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(rows, str(tmp_path / "wrong_dimension.csv"),
-                              trait_name="ripening_stage",
+                              trait_name="astringency",
                               measurement_validated=VALIDATED_HELD_OUT,
                               pred_dirs=[count_only], task="ordinal")
 
     matched_ordinal = tmp_path / "matched_ordinal.csv"
-    export_aggregated_csv(rows, str(matched_ordinal), trait_name="ripening_stage",
+    export_aggregated_csv(rows, str(matched_ordinal), trait_name="astringency",
                           measurement_validated=VALIDATED_HELD_OUT,
                           pred_dirs=[ordinal_only], task="ordinal")
     matched_count = tmp_path / "matched_count.csv"
     export_aggregated_csv([{"plant_id": "PLANT_A", "value": 4, "observations": 3,
                             "value_key": "count"}],
-                          str(matched_count), trait_name="catkin_count",
+                          str(matched_count), trait_name="stem_count",
                           measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     for path in (matched_ordinal, matched_count):
@@ -235,10 +248,11 @@ def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
     the ordinal dimension: a caller who knows the measurement is not validated saying so must refuse
     the delivery, not be overruled by the on-disk stamp."""
     bucket = _ordinal_bucket(tmp_path, "ordinal_preds")
-    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "stage"}]
+    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3,
+             "value_key": "astringency"}]
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
-                              trait_name="ripening_stage",
+                              trait_name="astringency",
                               measurement_validated=VALIDATED_FALSE,
                               pred_dirs=[bucket], task="ordinal")

@@ -27,13 +27,30 @@ from tests.test_orthomosaic_tools import (  # noqa: E402
     _replace_boxes, _write_geo_raster,
 )
 
+from tcip_mcp import operationalization as op  # noqa: E402
+from tests import _operationalization_fixtures as fx  # noqa: E402
+
 # One detection sitting on the first plant of the grid (pixel 10, 10).
 _ON_FIRST_PLANT = [(8.0, 8.0, 12.0, 12.0)]
 
 
+
+@pytest.fixture(autouse=True)
+def _recorded_meaning(tmp_path):
+    """Every per-plant delivery below ships under a trait whose meaning is confirmed.
+
+    Seeded into the project these tests pin as well as the one the autouse pin names, so a
+    delivery reads the same registry whichever of the two it resolves against.
+    """
+    for project_root in (tmp_path, tmp_path / "proj"):
+        fx.seed_delivery_traits(project_root)
+        fx.confirm_aggregate(project_root, fx.COUNT_TRAIT, op.PER_PLANT_COUNT_AGGREGATE,
+                             delivered_phenotype="stem_count", value_keys=["count"])
+
+
 def _project(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
-    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True)
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
 
 
 def _raster_bucket(tmp_path, raster_path: Path, boxes) -> Path:
@@ -77,7 +94,7 @@ def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
 
 
 def _validated_count_stamp(*, claim_scope: str | None = None) -> dict:
-    stamp = {"validated": True, "trait": "catkin_count",
+    stamp = {"validated": True, "trait": fx.COUNT_TRAIT,
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     if claim_scope is not None:
         stamp["claim_scope_validated"] = claim_scope
@@ -103,7 +120,7 @@ def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(moved), [str(plant_csv)], str(out_csv), trait_name="catkin_count",
+        str(bucket), str(moved), [str(plant_csv)], str(out_csv), trait_name="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" in refused
@@ -127,7 +144,7 @@ def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(other), [str(plant_csv)], str(out_csv), trait_name="catkin_count",
+        str(bucket), str(other), [str(plant_csv)], str(out_csv), trait_name="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" in refused
@@ -148,7 +165,7 @@ def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, mon
 
     out_csv = tmp_path / "counts.csv"
     refused = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="catkin_count")
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count")
 
     assert "error" in refused
     assert "export_predictions" in refused["error"]
@@ -173,7 +190,7 @@ def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeyp
 
     out_csv = tmp_path / "counts.csv"
     delivered = deliver_orthomosaic_plant_counts(
-        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="catkin_count",
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count",
         acknowledge_unvalidated=True)
 
     assert "error" not in delivered
@@ -189,8 +206,9 @@ def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     return export_aggregated_csv(
-        [{"plant_id": "plot0", "value": 3, "observations": 1}], str(tmp_path / name),
-        trait_name="catkin_count", measurement_validated=VALIDATED_HELD_OUT,
+        [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count"}],
+        str(tmp_path / name),
+        trait_name="stem_count", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[str(bucket)])
 
 
@@ -226,3 +244,29 @@ def test_delivery_gate_never_gates_a_bucket_that_records_no_claim_scope(tmp_path
     out = _aggregated(tmp_path, bucket)
     rows = list(csv.DictReader(Path(out).open(newline="")))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_orthomosaic_precondition_precedes_the_raster_identity_refusal(tmp_path, monkeypatch):
+    """Two refusals apply to one delivery and the earlier one reports by itself.
+
+    A bucket that cannot vouch for the raster it was produced on says how a number would be
+    attributed, which is nothing to answer for while nobody has said what the number means. The
+    door runs its own check first for exactly this, rather than inheriting one from its writer.
+    """
+    _project(tmp_path, monkeypatch)
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket = _hand_written_bucket(tmp_path, "preds_no_identity", _validated_count_stamp())
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv),
+        trait_name="bark_thickness", acknowledge_unvalidated=True)
+
+    assert "no operationalization is recorded" in refused["error"]
+    assert "export_predictions" not in refused["error"]
+    assert "raster content identity" not in refused["error"]
+    assert not out_csv.exists()

@@ -20,6 +20,16 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     export_aggregated_csv,
 )
 from tcip_mcp.traits import crops_units
+from tests import _operationalization_fixtures as fx
+
+
+@pytest.fixture(autouse=True)
+def _recorded_meaning(tmp_path: Path):
+    """Every export below ships under a trait whose delivered number has a confirmed meaning."""
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count",
+                                value_keys=["detections_count"])
+    fx.seed_confirmed_aggregate(tmp_path, "plant_surface_area", value_keys=["area_mm2"])
 
 # crops.yml traits that declare a physical unit, one per declared unit shape it uses.
 DECLARED_UNITS = {

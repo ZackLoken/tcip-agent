@@ -129,3 +129,33 @@ def test_force_redraw_replaces_the_lock_the_calibration_door_drew(tmp_path: Path
     assert "error" not in result
     assert result["old_membership"] == {"calibration": drawn["calibration"],
                                         "holdout": drawn["holdout"]}
+
+
+def test_a_redraw_records_in_the_log_of_the_dataset_whose_split_it_replaced(tmp_path, monkeypatch):
+    """Both of the redraw entries file against the dataset the split was drawn over.
+
+    A locked split is evidence about one dataset, so the record of replacing it travels with that
+    data rather than with whatever project this process happens to be pinned to.
+    """
+    import tcip_mcp.audit as audit_module
+    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+
+    platform_root = tmp_path / "platform"
+    platform_root.mkdir()
+    monkeypatch.setattr(audit_module, "AUDIT_ROOT", platform_root)
+    dataset_root = tmp_path / "orchard_dataset"
+    dataset_root.mkdir()
+    stems = [f"src{g}_{r}_0" for g in range(6) for r in range(3)]
+    resolve_locked_cal_holdout_split(stems, identity_hash="scoped", scope_root=dataset_root, seed=1)
+
+    result = force_redraw_cal_holdout_split(
+        dataset_root=str(dataset_root), identity_hash="scoped", seed=2,
+        reason="the redraw travels with the data its split was drawn over")
+
+    assert "error" not in result
+    for tool in ("force_redraw_cal_holdout_split", "force_redraw_cal_holdout_split_result"):
+        assert len(_audit_events(dataset_root, tool)) == 1, tool
+        assert _audit_events(platform_root, tool) == [], tool
+    call_entry = _audit_events(dataset_root, "force_redraw_cal_holdout_split")[0]
+    assert call_entry["scope"] == str(dataset_root.resolve())
