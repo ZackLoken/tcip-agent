@@ -201,7 +201,7 @@ export interface OperationalizationSupersession {
  * delivery doors run, never re-derived here. `record_seen` is the content hash the confirmation
  * posts back, so a click lands on the text that was displayed.
  */
-export interface OperationalizationRecord {
+export type OperationalizationRecord = {
   trait: string;
   delivery_kind: string;
   statement: string;
@@ -219,40 +219,14 @@ export interface OperationalizationRecord {
   superseded: OperationalizationSupersession[];
   delivers: DeliveredPhenotypeDefinition[];
   record_seen: string;
-}
+};
 
-export type StatementField =
-  | "statement"
-  | "mechanism"
-  | "measured_subject"
-  | "delivered_phenotypes"
-  | "delivered_value_keys"
-  | "stated_by"
-  | "stated_at"
-  | "relayed_note";
-
-/**
- * Every field the `record_seen` hash covers, in the order a surface shows them.
- *
- * The one list the confirmation surface renders from, so a field a click authorizes cannot be a
- * field the breeder was never shown. Mirrors the record module's own STATEMENT_FIELDS.
- */
-export const STATEMENT_FIELDS: readonly StatementField[] = [
-  "statement",
-  "mechanism",
-  "measured_subject",
-  "delivered_phenotypes",
-  "delivered_value_keys",
-  "stated_by",
-  "stated_at",
-  "relayed_note",
-];
-
+/** The four fields the confirmation writer owns, every one of them null after a withdrawal. */
 export interface OperationalizationConfirmation {
-  confirmed_by: string;
-  confirmed_at: string;
-  identity_from_request: boolean;
-  confirmed_fields: Record<string, unknown>;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  identity_from_request: boolean | null;
+  confirmed_fields: Record<string, unknown> | null;
 }
 
 export interface ConfirmOperationalizationBody {
@@ -329,9 +303,10 @@ export const resultsApi = {
   onsetDates: (body: PhenologyRequest) =>
     postJson<PhenologyResponse<OnsetRow>>(ROUTES.postResultsOnsetDates, body),
 
-  // Enumerates what exists: records are keyed by trait plus delivery kind, never a fixed kind list.
+  /** Enumerates what exists, keyed by trait plus delivery kind; the served `statement_fields`
+   *  names what the `record_seen` hash covers, so the browser holds no list of its own to drift. */
   operationalizations: (project_root: string) =>
-    getJson<{ records: OperationalizationRecord[] }>(
+    getJson<{ records: OperationalizationRecord[]; statement_fields: string[] }>(
       `${ROUTES.getResultsOperationalizations}?project_root=${encodeURIComponent(project_root)}`,
     ),
 

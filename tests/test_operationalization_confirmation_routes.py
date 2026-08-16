@@ -363,6 +363,24 @@ def test_the_list_route_returns_every_kinds_record_and_confirming_one_leaves_the
     assert confirmed == {(fx.COUNT_TRAIT, op.PER_IMAGE_COUNT)}
 
 
+def test_the_list_route_names_the_fields_a_confirmation_covers(
+    client: TestClient, project: Path
+) -> None:
+    """The surface renders the hashed set the record module owns, not a list it keeps itself.
+
+    Served whether or not anything is stated, because the panel needs the field order before it has
+    a record to lay out.
+    """
+    empty = client.get(LIST_ROUTE, params={"project_root": str(project)}).json()
+    assert empty["statement_fields"] == list(op.STATEMENT_FIELDS)
+
+    fx.state_crossing(project)
+    listed = client.get(LIST_ROUTE, params={"project_root": str(project)}).json()
+
+    assert listed["statement_fields"] == list(op.STATEMENT_FIELDS)
+    assert all(field in listed["records"][0] for field in listed["statement_fields"])
+
+
 def test_the_list_route_names_a_record_whose_trait_is_no_longer_registered(
     client: TestClient, project: Path
 ) -> None:

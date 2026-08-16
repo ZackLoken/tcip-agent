@@ -220,6 +220,7 @@ describe("AnnotateTab save/load race", () => {
       "2026-01-01",
       "C:/data",
       "C:/data/annotations/2026-01-01",
+      undefined,
     );
 
     // ...and the next save must target img2 with img2's loaded mtime, not
@@ -254,6 +255,20 @@ describe("AnnotateTab save/load race", () => {
     });
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
     expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
+  });
+
+  it("records the status under the name the app is set to, not the backend's own identity", async () => {
+    act(() => useStore.getState().setUser("breeder"));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(useStore.getState().user).toBe("breeder");
+    expect(vi.mocked(classesApi.setImageStatus).mock.calls[0][7]).toBe("breeder");
   });
 });
 
