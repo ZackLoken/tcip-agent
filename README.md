@@ -87,7 +87,8 @@ npm run dev        # http://127.0.0.1:5173
 npm run build      # rebuild production bundle → ../static/
 
 # Tests
-pytest tests/ -v --tb=short
+pytest tests/ -n auto --tb=short
+mypy               # type gate; roots come from mypy.ini's files list, run from the repo root
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 
 # End-to-end smokes (scripts/smoke_*_e2e.py)
