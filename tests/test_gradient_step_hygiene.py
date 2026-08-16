@@ -56,8 +56,10 @@ def _per_batch_gradients(loader: DataLoader) -> list[torch.Tensor]:
         model.zero_grad(set_to_none=True)
         losses = model(images, targets)
         sum(losses.values()).backward()
-        grads.append(torch.cat([p.grad.detach().reshape(-1) for p in model.parameters()
-                                if p.grad is not None]))
+        # every parameter must carry a gradient here; skipping one would shrink the comparison
+        for p in model.parameters():
+            assert p.grad is not None
+        grads.append(torch.cat([p.grad.detach().reshape(-1) for p in model.parameters()]))
     return grads
 
 
