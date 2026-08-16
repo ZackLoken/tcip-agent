@@ -962,8 +962,8 @@ def test_a_count_csv_no_longer_ships_under_no_trait_at_all(delivery_root: Path, 
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     out_csv = tmp_path / "counts.csv"
-    with pytest.raises(TypeError):
-        export_detection_csv(_count_rows(), str(out_csv), acknowledge_unvalidated=True)
+    with pytest.raises(TypeError, match="'trait'"):
+        export_detection_csv(_count_rows(), str(out_csv), acknowledge_unvalidated=True)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to trait
 
     assert not out_csv.exists()
 
@@ -996,7 +996,7 @@ def test_a_per_plant_csv_no_longer_ships_under_the_writers_own_default_name(
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     out_csv = tmp_path / "agg.csv"
-    with pytest.raises(TypeError):
-        export_aggregated_csv(_aggregate_rows(), str(out_csv), acknowledge_unvalidated=True)
+    with pytest.raises(TypeError, match="'trait_name'"):
+        export_aggregated_csv(_aggregate_rows(), str(out_csv), acknowledge_unvalidated=True)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to trait_name
 
     assert not out_csv.exists()

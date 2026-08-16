@@ -112,8 +112,8 @@ class TestAutoAccept:
 
     def test_threshold_is_required(self):
         """No pinned default: a caller must derive and pass a confirmed threshold."""
-        with pytest.raises(TypeError):
-            auto_accept([{"image": "a.png", "scores": [0.95]}])
+        with pytest.raises(TypeError, match="'threshold'"):
+            auto_accept([{"image": "a.png", "scores": [0.95]}])  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to threshold
 
 
 # ====================================================================

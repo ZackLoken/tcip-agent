@@ -331,7 +331,7 @@ def test_validated_stamp_without_a_trait_is_refused_at_write(tmp_path):
     with pytest.raises(ValueError, match="validated_by"):
         write_sidecar(pred_dir, _count_stamp())
 
-    assert write_sidecar(pred_dir, {**untraited, "trait": TRAIT}) is None
+    assert write_sidecar(pred_dir, {**untraited, "trait": TRAIT}) is None  # type: ignore[func-returns-value]  # the assert documents the None return this writer contracts to
 
 
 # --- the residual, recorded rather than implied away ---------------------------------------

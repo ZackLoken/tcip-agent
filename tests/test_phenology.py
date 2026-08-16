@@ -148,8 +148,8 @@ def test_plant_milestones_requires_spec_no_catkin_fallback():
     # No silent default: a caller that forgets to pass spec must fail loudly.
     import pytest
 
-    with pytest.raises(TypeError):
-        phenology.plant_milestones([("2024-05-01", 0.5)])
+    with pytest.raises(TypeError, match="'spec'"):
+        phenology.plant_milestones([("2024-05-01", 0.5)])  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to spec
 
 
 def test_milestone_date_columns_is_proper_subset_of_full_columns():

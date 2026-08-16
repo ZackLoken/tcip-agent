@@ -6,7 +6,8 @@ from unittest import mock
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
+import torch  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 from PIL import Image  # noqa: E402
 
@@ -132,8 +133,8 @@ def test_semantic_seg_head_advertises_no_loss_choice():
     """
     import pytest as _pytest
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
-    with _pytest.raises(TypeError):
-        SemanticSegHead(in_channels=64, num_classes=3, loss="weighted_ce")
+    with _pytest.raises(TypeError, match="'loss'"):
+        SemanticSegHead(in_channels=64, num_classes=3, loss="weighted_ce")  # type: ignore[call-arg]  # the refused kwarg is the subject; the raises pins it to loss
     assert SemanticSegHead.default_loss == ""
 
 
