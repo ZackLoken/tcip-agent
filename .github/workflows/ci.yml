@@ -106,6 +106,10 @@ jobs:
         # The adopter-facing map must not drift from the code: every module-table path exists.
         run: python scripts/check_architecture_doc.py
 
+      - name: ARCHITECTURE.md citations match what they quote
+        # Every citation that quotes a line must still find that line in the file it names.
+        run: python scripts/check_architecture_citations.py
+
       - name: Run tests
         # TCIP_MIN_TESTS guards against the "missing dep silently skips ~15 files,
         # CI still green" mode; see tests/conftest.py and tests/test_core_deps.py.
