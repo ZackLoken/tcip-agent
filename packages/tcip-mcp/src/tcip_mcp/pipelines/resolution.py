@@ -54,6 +54,11 @@ VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
 # A raster export target's content identity matched the mosaic a block-calibrated bundle was
 # validated against; check_delivery_gate's own "claim_scope" dimension, never a ResolvedParam.
 VALIDATED_SAME_MOSAIC_IDENTITY = "same_mosaic_content_identity"
+CLAIM_SCOPE_REFERENCES = (VALIDATED_SAME_MOSAIC_IDENTITY,)
+"""Which references legitimately clear the claim-scope dimension, stated once for the door that
+writes one and the door that reads it back. Narrower than :data:`VALIDATED_SHIPPABLE` on purpose:
+an annotation or physical reference says nothing about which raster a bucket's predictions were
+produced on, so a sidecar recording one there clears nothing."""
 VALIDATED_FALSE = "false"
 
 # Which validated_against values legitimately clear validation for which kind of thing being
@@ -1075,6 +1080,40 @@ def reconcile_tile_size_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict
         validated = VALIDATED_EXPLICIT_GEOMETRY
     else:
         validated = VALIDATED_PERSISTED_GEOMETRY
+    return {"operative": True, "validated": validated, "per_bucket": per_bucket,
+            "unvalidated_buckets": unvalidated}
+
+
+def reconcile_claim_scope_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict:
+    """Floor the claim-scope dimension across every prediction bucket's ``operating_point.json``.
+
+    The sidecar-reading counterpart of the export-time claim-scope check, for the delivery doors
+    that assemble a phenotype from already-written buckets. A bucket whose sidecar records no
+    ``claim_scope_validated`` is skipped, the same way :func:`reconcile_tile_size_validity` skips an
+    untiled bucket: the dimension was never operative for it, so nothing here manufactures a
+    refusal over it. Once any bucket does record one, the dimension is operative for the whole
+    delivery, and a bucket whose recorded value is not a member of :data:`CLAIM_SCOPE_REFERENCES`
+    floors it to ``VALIDATED_FALSE``.
+
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets}``, the same shape
+    :func:`reconcile_tile_size_validity` returns.
+    """
+    per_bucket: dict[str, str] = {}
+    unvalidated: list[str] = []
+    refs: set[str] = set()
+    for d in pred_dirs:
+        recorded = (read_operating_point_sidecar(d) or {}).get("claim_scope_validated")
+        if recorded is None:
+            continue
+        flag = recorded if recorded in CLAIM_SCOPE_REFERENCES else VALIDATED_FALSE
+        per_bucket[str(d)] = flag
+        if flag in CLAIM_SCOPE_REFERENCES:
+            refs.add(flag)
+        else:
+            unvalidated.append(str(d))
+    if not per_bucket:
+        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
+    validated = VALIDATED_FALSE if unvalidated else sorted(refs)[0]
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
             "unvalidated_buckets": unvalidated}
 
