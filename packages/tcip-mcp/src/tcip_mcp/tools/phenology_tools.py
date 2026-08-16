@@ -338,6 +338,39 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     return items
 
 
+def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> str | None:
+    """The refusal for a stated dataset root a caller-supplied directory's own root contradicts.
+
+    Only a positive disagreement refuses: a directory the dataset layout cannot place answers
+    nothing, and a bespoke calibration over loose directories with a stated root is legitimate work.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    stated = Path(dataset_root).resolve()
+    for role, path in candidates.items():
+        derived = dataset_root_of(path)
+        if derived is not None and derived.resolve() != stated:
+            return (f"{role} {str(path)!r} sits under dataset root {str(derived.resolve())!r}, "
+                    f"while dataset_root states {str(stated)!r}. The claim, its covered locations "
+                    "and its reference are all recorded against one root, so state the root the "
+                    "calibration's own directories live under.")
+    return None
+
+
+def _agreed_checkpoint_identity(pred_dirs: list[str]) -> str | None:
+    """The checkpoint identity the calibration evidence itself carried, or ``None``.
+
+    Copied from the prediction buckets' own stamps, never re-resolved from a checkpoint file:
+    re-hashing a file proves a file with that content exists somewhere, not that these predictions
+    came from it. Buckets carrying none, or disagreeing, record the identity absent, which the
+    reader compares as absence equal to absence rather than skipping the comparison.
+    """
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    carried = {(read_operating_point_sidecar(d) or {}).get("checkpoint_sha256") for d in pred_dirs}
+    return carried.pop() if len(carried) == 1 else None
+
+
 @mcp.tool()
 @audited
 def calibrate_classifier_operating_point(
@@ -349,6 +382,7 @@ def calibrate_classifier_operating_point(
     holdout_gt_dir: str,
     holdout_pred_dir: str,
     output_dir: str,
+    dataset_root: str,
     experiment_id: str | None = None,
 ) -> dict:
     """Calibrate and validate the trait's positive-class classifier against held-out GT.
@@ -362,8 +396,14 @@ def calibrate_classifier_operating_point(
     point's own sidecar, never conflatable with it. Without this producer, a classifier-validated
     stamp can never be earned on disk, and the gate floors every caller to unvalidated forever.
 
+    A stamp that claims validation names the record it was earned from: the gate runs once through
+    ``resolution.open_validation`` over the evidence, ``seal_validation`` files the row and returns
+    the stamp with its pointer merged in, and the stamp is written last. A calibration that does not
+    clear its gate stamps unvalidated, with its failures, and earns nothing.
+
     Refuses (a plain ``{"error": ...}``) when either GT dir holds the model's own predictions
-    rather than a measurement; the pred dirs are predictions by definition and are not held to it.
+    rather than a measurement; the pred dirs are predictions by definition and are not held to it,
+    and when a GT dir's own dataset root contradicts the stated ``dataset_root``.
 
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
@@ -379,6 +419,11 @@ def calibrate_classifier_operating_point(
             split (same stems).
         holdout_gt_dir / holdout_pred_dir: Paired per-image JSON dirs for the disjoint held-out split.
         output_dir: Where to write ``classifier_operating_point.json``.
+        dataset_root: The dataset this calibration's claim hangs off, stated by the caller: the
+            record's reference locations are written against it, and it is the root a reader
+            resolves them from. Refuses when either GT dir's own layout places it under a different
+            root; loose directories the layout cannot place refuse nothing, since a calibration
+            over a bespoke reference with a stated root is legitimate.
         experiment_id: The classifier checkpoint's training-run id, if known, gates train-
             disjointness the same way the detector calibration path does. ``None`` (a foreign/
             unregistered checkpoint) skips that check rather than failing closed.
@@ -392,6 +437,10 @@ def calibrate_classifier_operating_point(
         return {"error": str(e)}
     if not spec.positive_class_name:
         return {"error": f"trait {trait_name!r} defines no positive_class_name to calibrate"}
+    disagreement = _stated_root_disagreement(
+        dataset_root, {"calibration_gt_dir": calibration_gt_dir, "holdout_gt_dir": holdout_gt_dir})
+    if disagreement:
+        return {"error": disagreement}
 
     try:
         cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
@@ -409,23 +458,45 @@ def calibrate_classifier_operating_point(
 
     from tcip_mcp.project_paths import resolve_output_path
 
-    from tcip_mcp.pipelines.resolution import write_sidecar
+    from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 
     out = resolve_output_path(output_dir)
-    write_sidecar(out, {
+    checkpoint_sha256 = _agreed_checkpoint_identity([calibration_pred_dir, holdout_pred_dir])
+    stamp = {
         "operating_point": {"classifier": {"validated_against": result["validated_against"],
                                            "value": spec.positive_class_name}},
         "validated": result["passed"],
+        "validated_by": None,
         "failures": result["failures"],
         "sweep_data": result["sweep_data"],
+        "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
         "trait": trait_name,
-    }, "classifier_operating_point")
+    }
+    if result["passed"]:
+        draft = open_validation(
+            document="classifier_operating_point",
+            # Named off the function this door reported from, so record and report share one gate.
+            evidence={"resolver": resolve_classifier_operating_point.__name__,
+                      "inputs": {"calibration_items": cal_items, "holdout_items": hold_items}},
+            trait=trait_name, checkpoint_sha256=checkpoint_sha256,
+            producing_experiment_id=experiment_id,
+            reference_inputs={
+                "dataset_root": dataset_root,
+                "label_dirs": {"calibration": calibration_gt_dir, "holdout": holdout_gt_dir},
+                "reference_buckets": {"calibration": calibration_pred_dir,
+                                      "holdout": holdout_pred_dir},
+            },
+        )
+        _, stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[],
+                                   stamp_body=stamp)
+    write_sidecar(out, stamp, "classifier_operating_point")
     return {
         "output_dir": str(out),
         "validated_against": result["validated_against"],
         "passed": result["passed"],
         "failures": result["failures"],
+        "validated_by": stamp["validated_by"],
         "n_calibration_items": len(cal_items),
         "n_holdout_items": len(hold_items),
     }
@@ -471,6 +542,7 @@ def calibrate_ordinal_regression_operating_point(
     csv_path: str,
     criterion: str,
     output_dir: str,
+    dataset_root: str,
     experiment_id: str | None = None,
     group_by: str = "tile_prefix",
     group_key_map: dict[str, str] | None = None,
@@ -494,6 +566,12 @@ def calibrate_ordinal_regression_operating_point(
     distinct from every other operating-point sidecar (see
     ``resolution.read_ordinal_operating_point_sidecar``/``read_regression_operating_point_sidecar``).
 
+    A stamp that claims validation names the record it was earned from, the same two phases the
+    classifier door goes through: ``resolution.open_validation`` runs the gate over the evidence,
+    ``seal_validation`` files the row and returns the stamp with its pointer merged in, and the
+    stamp is written last. A calibration that does not clear its gate stamps unvalidated, with its
+    failures, and earns nothing.
+
     Args:
         trait_name: The registered trait whose rank/value prediction is being calibrated.
         task: ``"ordinal"`` or ``"regression"``, dispatches which criterion toolkit, item shape and
@@ -506,6 +584,12 @@ def calibrate_ordinal_regression_operating_point(
             scientifically appropriate for this trait's calibration is a CV-scientist judgment call
             the caller makes explicitly, never a platform-prescribed default.
         output_dir: Where to write the sidecar.
+        dataset_root: The dataset this calibration's claim hangs off, stated by the caller: the
+            record's reference locations (the CSV, the images directory, the locked split) are
+            written against it, and it is the root a reader resolves them from. Refuses when the
+            images directory's own layout places it under a different root; a loose directory the
+            layout cannot place refuses nothing, since a CSV over a bespoke image set with a stated
+            root is legitimate.
         experiment_id: The checkpoint's own training-run id, if known, gates train-disjointness the
             same way the detector/classifier calibration paths do. ``None`` (a foreign/unregistered
             checkpoint) skips that check rather than failing closed.
@@ -515,6 +599,9 @@ def calibrate_ordinal_regression_operating_point(
     """
     if task not in _ORDINAL_REGRESSION_TASKS:
         return {"error": f"task must be one of {sorted(_ORDINAL_REGRESSION_TASKS)}, got {task!r}"}
+    disagreement = _stated_root_disagreement(dataset_root, {"images_dir": images_dir})
+    if disagreement:
+        return {"error": disagreement}
 
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.image_utils import list_logical_images
@@ -578,23 +665,46 @@ def calibrate_ordinal_regression_operating_point(
 
     from tcip_mcp.project_paths import resolve_output_path
 
-    from tcip_mcp.pipelines.resolution import write_sidecar
+    from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 
     out = resolve_output_path(output_dir)
-    write_sidecar(out, {
+    document = f"{task}_operating_point"
+    stamp = {
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},
         "validated": result["passed"],
+        "validated_by": None,
         "failures": result["failures"],
         "sweep_data": result["sweep_data"],
+        # No staged prediction bucket carries a checkpoint identity for this door to copy.
+        "checkpoint_sha256": None,
         "experiment_id": experiment_id,
         "trait": trait_name,
-    }, f"{task}_operating_point")
+    }
+    if result["passed"]:
+        draft = open_validation(
+            document=document,
+            # Named off the function this door reported from, so record and report share one gate.
+            evidence={"resolver": resolver.__name__,
+                      "inputs": {"criterion": criterion, "calibration_items": cal_items,
+                                 "holdout_items": hold_items}},
+            trait=trait_name, checkpoint_sha256=None, producing_experiment_id=experiment_id,
+            reference_inputs={
+                "dataset_root": dataset_root,
+                "label_csvs": {"reference": csv_path},
+                "scope_roots": {"images": images_dir},
+                "stated_values": {"split_identity": identity_hash},
+            },
+        )
+        _, stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[],
+                                   stamp_body=stamp)
+    write_sidecar(out, stamp, document)
     return {
         "output_dir": str(out),
         "validated_against": result["validated_against"],
         "passed": result["passed"],
         "failures": result["failures"],
+        "validated_by": stamp["validated_by"],
         "n_calibration_items": len(cal_items),
         "n_holdout_items": len(hold_items),
         "criterion": criterion,

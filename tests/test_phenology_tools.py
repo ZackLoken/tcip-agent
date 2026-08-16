@@ -596,7 +596,7 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
         trait_name="catkin", subject="catkin", attribute="elongation",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
     )
 
     assert res["passed"] is True, res
@@ -609,6 +609,81 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
 
     assert sidecar["operating_point"]["classifier"]["validated_against"] == VALIDATED_HELD_OUT
     assert reconcile_classifier_validity([str(tmp_path / "out")])["validated"] == VALIDATED_HELD_OUT
+
+
+def test_calibrate_classifier_operating_point_earns_a_record_a_later_bucket_binds_to(
+    tmp_path: Path,
+) -> None:
+    """The whole legitimate route for this door: no checkpoint anywhere in its inputs, four
+    directories the dataset layout cannot place, one stated dataset root. The claim it earns is a
+    real record its own stamp verifies against, and a later date's bucket from the same producing
+    run reads that stamp as validated."""
+    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_HELD_OUT,
+        bind_classifier_validity,
+        read_classifier_operating_point_sidecar,
+        reconcile_classifier_validity,
+        verify_stamp_binding,
+    )
+
+    root, out = _ds_root(tmp_path), tmp_path / "out"
+    cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
+    hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
+    calls = _one_positive_one_negative
+    _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=calls)
+    _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
+    assert dataset_root_of(cal_gt) is None and dataset_root_of(cal_pred) is None
+
+    res = calibrate_classifier_operating_point(
+        trait_name="catkin", subject="catkin", attribute="elongation",
+        calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
+        holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
+        output_dir=str(out), dataset_root=str(root), experiment_id=None,
+    )
+
+    assert res["passed"] is True, res
+    stamp = read_classifier_operating_point_sidecar(out)
+    assert stamp["checkpoint_sha256"] is None  # no bucket in the inputs carried one to copy
+    binding = verify_stamp_binding(stamp, out, document="classifier_operating_point",
+                                   trait="catkin")
+    assert binding.ok and binding.claimed, binding.note
+    assert binding.experiment_id == res["validated_by"]["experiment_id"]
+    assert binding.producing_experiment_id is None  # the calibration hangs off its own experiment
+
+    later = _bucket(tmp_path, "2026-03-09")
+    _write_preds(later, "P1_a", ["elongated"])
+    _write_op_sidecar(later, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id=None)
+    state = reconcile_classifier_validity([str(out)])["validated"]
+
+    assert state == VALIDATED_HELD_OUT
+    assert bind_classifier_validity(state, [str(out)], [str(later)], trait="catkin") == (
+        VALIDATED_HELD_OUT, "")
+
+
+def test_calibrate_classifier_operating_point_refuses_a_dataset_root_its_gt_dirs_contradict(
+    tmp_path: Path,
+) -> None:
+    """A GT directory the layout does place names its own dataset root, and recording the reference
+    against a root it does not live under would leave a reader resolving it somewhere else."""
+    ds, stated = tmp_path / "ds", tmp_path / "elsewhere"
+    cal_gt, cal_pred = ds / "annotations" / "cal", tmp_path / "cal_pred"
+    hold_gt, hold_pred = ds / "annotations" / "hold", tmp_path / "hold_pred"
+    calls = _one_positive_one_negative
+    _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=calls)
+    _write_split(hold_gt, hold_pred, prefix="hold", n_images=20, per_image_calls=calls, offset=1000)
+
+    res = calibrate_classifier_operating_point(
+        trait_name="catkin", subject="catkin", attribute="elongation",
+        calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
+        holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
+        output_dir=str(tmp_path / "out"), dataset_root=str(stated), experiment_id=None,
+    )
+
+    # Both roots, quoted the way the message quotes every path it names.
+    assert f"{str(ds.resolve())!r}" in res["error"], res
+    assert f"{str(stated.resolve())!r}" in res["error"], res
+    assert not (tmp_path / "out").exists()  # a refused calibration stamps nothing
 
 
 def test_calibrate_classifier_operating_point_refuses_genuinely_duplicated_holdout(tmp_path: Path) -> None:
@@ -627,7 +702,7 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_duplicated_holdo
         trait_name="catkin", subject="catkin", attribute="elongation",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
     )
 
     assert res["passed"] is False
@@ -657,7 +732,7 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
         trait_name="catkin", subject="catkin", attribute="elongation",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
     )
 
     assert res["passed"] is False
@@ -1053,7 +1128,7 @@ def test_calibrate_classifier_operating_point_foreign_checkpoint_stamp_still_rea
         trait_name="catkin", subject="catkin", attribute="elongation",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
     )
 
     assert res["passed"] is True, res
@@ -1086,7 +1161,7 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
         trait_name="catkin", subject="catkin", attribute="elongation",
         calibration_gt_dir=str(cal_gt), calibration_pred_dir=str(cal_pred),
         holdout_gt_dir=str(hold_gt), holdout_pred_dir=str(hold_pred),
-        output_dir=str(tmp_path / "out"), experiment_id=None,
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path), experiment_id=None,
     )
 
     assert res["passed"] is True, res
@@ -1217,7 +1292,8 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
     dataset = build_dataset("ordinal", images_dir=str(images_dir), csv_path=str(csv_path), num_ranks=3)
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("ordinal"))
     model_source = _model_source("build_bespoke_ordinal", num_ranks=3)
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    # Seeded through the trainer's own config key so this run's init and shuffling repeat.
+    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="ordinal")
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -1226,6 +1302,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
+        dataset_root=str(tmp_path),
     )
 
     assert "error" not in result, result
@@ -1263,7 +1340,8 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: P
     dataset = build_dataset("regression", images_dir=str(images_dir), csv_path=str(csv_path))
     loader = DataLoader(dataset, batch_size=5, collate_fn=task_collate("regression"))
     model_source = _model_source("build_bespoke_regressor")
-    run = create_run(_train_config(model_source), str(tmp_path / "out"))
+    # Seeded through the trainer's own config key so this run's init and shuffling repeat.
+    run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="regression")
     assert run.status == "completed", getattr(run, "error", run.status)
 
@@ -1272,6 +1350,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: P
         checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
         images_dir=str(images_dir), csv_path=str(csv_path),
         criterion="r_squared", output_dir=str(tmp_path / "calib"),
+        dataset_root=str(tmp_path),
     )
 
     assert "error" not in result, result
@@ -1294,6 +1373,85 @@ def test_calibrate_ordinal_regression_operating_point_unknown_task_returns_error
     result = calibrate_ordinal_regression_operating_point(
         trait_name="catkin", task="classification", checkpoint_path="m.pt",
         images_dir=str(tmp_path), csv_path=str(tmp_path / "x.csv"), criterion="r_squared",
-        output_dir=str(tmp_path / "calib"),
+        output_dir=str(tmp_path / "calib"), dataset_root=str(tmp_path),
     )
     assert "error" in result
+
+
+def _rank_csv(csv_path: Path, ranks: dict[str, int]) -> None:
+    csv_path.write_text("stem,rank\n" + "".join(f"{s},{r}\n" for s, r in ranks.items()),
+                        encoding="utf-8")
+
+
+def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A CSV over an images directory the dataset layout cannot place is legitimate bespoke work:
+    the stated root is what the record's locations are written against, and a root nothing else
+    contradicts refuses nothing. The predictor is a stand-in returning each image's recorded rank,
+    so what is exercised is the door's own earning path rather than a fresh model's accuracy."""
+    pytest.importorskip("torch")
+    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_HELD_OUT,
+        read_ordinal_operating_point_sidecar,
+        reconcile_ordinal_validity,
+        verify_stamp_binding,
+    )
+    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+
+    frames, out = tmp_path / "frames", tmp_path / "calib"
+    frames.mkdir()
+    ranks = {}
+    for i in range(20):
+        Image.new("RGB", (4, 4)).save(frames / f"img{i}.png")
+        ranks[f"img{i}"] = i % 3
+    csv_path = tmp_path / "ranks.csv"
+    _rank_csv(csv_path, ranks)
+    assert dataset_root_of(frames) is None
+
+    class _RecordedRanks:
+        def predict_batch(self, sources):
+            return [{"head0_ranks": [float(ranks[Path(s).stem])]} for s in sources]
+
+    monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
+                        lambda *a, **kw: _RecordedRanks())
+
+    res = calibrate_ordinal_regression_operating_point(
+        trait_name="catkin", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
+        images_dir=str(frames), csv_path=str(csv_path),
+        criterion="quadratic_weighted_kappa", output_dir=str(out),
+        dataset_root=str(tmp_path), group_by="stem",
+    )
+
+    assert res["passed"] is True, res
+    stamp = read_ordinal_operating_point_sidecar(out)
+    binding = verify_stamp_binding(stamp, out, document="ordinal_operating_point", trait="catkin")
+    assert binding.ok and binding.claimed, binding.note
+    assert binding.experiment_id == res["validated_by"]["experiment_id"]
+    assert reconcile_ordinal_validity([str(out)])["validated"] == VALIDATED_HELD_OUT
+
+
+def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its_images_contradict(
+    tmp_path: Path,
+) -> None:
+    """The images directory places itself under a dataset root, so a stated root that disagrees
+    would record the reference against a dataset it does not live under."""
+    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+
+    ds, stated = tmp_path / "ds", tmp_path / "elsewhere"
+    (ds / "images").mkdir(parents=True)
+    csv_path = tmp_path / "ranks.csv"
+    _rank_csv(csv_path, {f"img{i}": i % 3 for i in range(4)})
+
+    res = calibrate_ordinal_regression_operating_point(
+        trait_name="catkin", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
+        images_dir=str(ds / "images"), csv_path=str(csv_path),
+        criterion="quadratic_weighted_kappa", output_dir=str(tmp_path / "calib"),
+        dataset_root=str(stated),
+    )
+
+    # Both roots, quoted the way the message quotes every path it names.
+    assert f"{str(ds.resolve())!r}" in res["error"], res
+    assert f"{str(stated.resolve())!r}" in res["error"], res
+    assert not (tmp_path / "calib").exists()  # a refused calibration stamps nothing

@@ -138,7 +138,7 @@ def test_the_classifier_tool_reports_an_inadmissible_reference_as_a_refusal(tmp_
         trait_name="catkin", subject="catkin", attribute="state",
         calibration_gt_dir=str(gt_dir), calibration_pred_dir=str(pred_dir),
         holdout_gt_dir=str(gt_dir), holdout_pred_dir=str(pred_dir),
-        output_dir=str(tmp_path / "out"))
+        output_dir=str(tmp_path / "out"), dataset_root=str(tmp_path / "gt"))
 
     assert "carry a prediction score" in result.get("error", "")
 
