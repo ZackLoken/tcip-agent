@@ -181,7 +181,9 @@ def test_a_second_verdict_keeps_the_baseline_the_first_one_captured(
     assert (live.geometry.x1, live.geometry.y1,
             live.geometry.x2, live.geometry.y2) == second
 
-    assert sorted(p.name for p in (label_dir / ".original").iterdir()) == ["IMG_0000.json"]
+    # Lock files outlive writes on POSIX; only the documents are the store's contents.
+    assert sorted(p.name for p in (label_dir / ".original").glob("*.json")) == ["IMG_0000.json"]
+    assert not list((label_dir / ".original").glob("*.tmp"))
 
 
 def test_the_baseline_capture_waits_on_the_lock_its_record_is_written_under(

@@ -59,7 +59,12 @@ def _multi_source_dataset(root: Path) -> Path:
 
 
 def _tree(out_dir: Path) -> list[str]:
-    return sorted(str(p.relative_to(out_dir)).replace("\\", "/") for p in out_dir.rglob("*") if p.is_file())
+    # Lock files outlive writes on POSIX; the golden tree lists the split's real artifacts.
+    return sorted(
+        str(p.relative_to(out_dir)).replace("\\", "/")
+        for p in out_dir.rglob("*")
+        if p.is_file() and p.suffix != ".lock"
+    )
 
 
 def test_make_splits_stats_golden(tmp_path: Path):
