@@ -75,6 +75,13 @@ def deliver_orthomosaic_plant_counts(
     the identical ``export_aggregated_csv`` gate every other per-plant delivery goes through, not
     a second implementation of it.
 
+    The producer identity this returns, and the one the CSV carries, is built by the shared
+    ``delivered_provenance`` from what verification confirmed of the bucket's stamp rather than
+    copied off the stamp: a bucket naming an experiment the store cannot answer for reports its
+    producer unknown, while a bespoke bucket carrying a real checkpoint hash and no experiment keeps
+    that hash. ``validation_record`` names the record behind a validated count, and is empty
+    otherwise.
+
     Args:
         predictions_dir: The bucket ``export_predictions``'s ``raster_path`` regime persisted.
         raster_path: The same georeferenced raster the bucket's predictions were produced from
@@ -189,11 +196,20 @@ def deliver_orthomosaic_plant_counts(
 
     agg = aggregate_per_plant(records, strategy="sum", plant_id_key="plant_id", value_key="count")
 
-    provenance = {
-        "producer_model_sha256": sidecar.get("checkpoint_sha256"),
-        "experiment_id": sidecar.get("experiment_id"),
-        "produced_at": sidecar.get("produced_at"),
-    }
+    from tcip_mcp.pipelines.resolution import (
+        delivered_provenance,
+        record_delivery_binding_event,
+        reconcile_operating_point_validity,
+    )
+
+    recon = reconcile_operating_point_validity([predictions_dir])
+    provenance = delivered_provenance(
+        {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
+         "experiment_id": sidecar.get("experiment_id"),
+         "produced_at": sidecar.get("produced_at")},
+        recon["bindings"],
+        columns=("producer_model_sha256", "experiment_id", "produced_at", "validation_record"),
+    )
 
     try:
         csv_path = export_aggregated_csv(
@@ -205,6 +221,9 @@ def deliver_orthomosaic_plant_counts(
     except ValueError as exc:
         return {"error": str(exc), "n_detections": len(assignments), "n_mapped": len(mapped),
                 "n_unmapped": n_unmapped}
+
+    record_delivery_binding_event("deliver_orthomosaic_plant_counts", output_csv_path,
+                                  [predictions_dir], recon["bindings"])
 
     # The CSV's own measurement_validated column is what export_aggregated_csv's gate actually
     # stamped; read it back rather than re-deriving the same decision a second time here.
@@ -222,6 +241,7 @@ def deliver_orthomosaic_plant_counts(
         "n_mapped": len(mapped),
         "n_unmapped": n_unmapped,
         "measurement_validated": validated_stamp,
-        "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
-        "experiment_id": sidecar.get("experiment_id"),
+        "checkpoint_sha256": provenance["producer_model_sha256"],
+        "experiment_id": provenance["experiment_id"],
+        "validation_record": provenance["validation_record"],
     }

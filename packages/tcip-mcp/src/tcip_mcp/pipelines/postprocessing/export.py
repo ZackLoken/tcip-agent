@@ -137,7 +137,7 @@ def _mask_geometry_for_export(
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "operating_point_conf",
-                       "produced_at", "measurement_validated"]
+                       "produced_at", "measurement_validated", "validation_record"]
 
 
 def export_detection_csv(
@@ -170,7 +170,10 @@ def export_detection_csv(
     reconciliation. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
     CSV stamped ``validated=false``. The ``provenance`` stamp (producing checkpoint sha, experiment
     id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
-    operating point + model behind it.
+    operating point + model behind it. Those cells are built by ``delivered_provenance`` from the
+    verification the gate already ran, so a producer this delivery cannot corroborate is reported
+    unknown rather than repeated from the stamp that asserted it, and ``validation_record`` names the
+    record a reader can open to see what the claim was earned against.
 
     Args:
         image_results: List of dicts with 'image', 'count', 'boxes', etc.
@@ -187,17 +190,20 @@ def export_detection_csv(
     """
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate,
+        delivered_provenance,
+        record_delivery_binding_event,
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
     )
 
     flags: dict[str, str | None] = {"measurement": measurement_validated}
+    measurement_recon: dict = {"bindings": {}}
     if pred_dirs:
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
         # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
-        flags["measurement"] = reconcile_operating_point_validity(
-            pred_dirs, asserted=measurement_validated,
-        )["validated"]
+        measurement_recon = reconcile_operating_point_validity(
+            pred_dirs, asserted=measurement_validated)
+        flags["measurement"] = measurement_recon["validated"]
         tile_recon = reconcile_tile_size_validity(pred_dirs)
         if tile_recon["operative"]:
             flags["tile_size"] = tile_recon["validated"]
@@ -208,7 +214,8 @@ def export_detection_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
+    stamp = delivered_provenance(provenance, measurement_recon["bindings"],
+                                 columns=_PROVENANCE_COLUMNS)
     stamp["measurement_validated"] = gate.column_stamp("measurement")
     fieldnames = ["image", "detection_count", "avg_confidence"] + _PROVENANCE_COLUMNS
 
@@ -226,4 +233,6 @@ def export_detection_csv(
                 **stamp,
             })
 
+    record_delivery_binding_event("export_detection_csv", output_path, pred_dirs,
+                                  measurement_recon["bindings"])
     return output_path

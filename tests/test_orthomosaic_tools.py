@@ -419,3 +419,74 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
         trait_name="catkin_count", acknowledge_unvalidated=True)
     assert "error" in result
     assert "ModelTransformationTag" in result["error"]
+
+
+def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monkeypatch):
+    """A bucket a bespoke checkpoint produced belongs to no experiment, so its checkpoint hash
+    stands on its own and travels into the provisional delivery. The claim it carries is another
+    matter: nothing validated the operating point, so it names no validation record."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        trait_name="catkin_count", acknowledge_unvalidated=True)
+
+    assert "error" not in result
+    stamped = json.loads((bucket_dir / "operating_point.json").read_text())
+    assert result["checkpoint_sha256"] == stamped["checkpoint_sha256"]
+    assert result["experiment_id"] is None
+    assert result["validation_record"] == ""
+    row = next(csv.DictReader(out_csv.open(newline="")))
+    assert row["producer_model_sha256"] == stamped["checkpoint_sha256"]
+    assert row["validation_record"] == ""
+
+    log = (tmp_path / "proj" / ".tcip" / "audit.jsonl").read_text(encoding="utf-8")
+    emitted = [json.loads(ln) for ln in log.splitlines() if ln]
+    door = [e for e in emitted if e["tool"] == "deliver_orthomosaic_plant_counts"
+            and "verified_buckets" in e]
+    assert len(door) == 1, emitted
+    assert door[0]["verified_buckets"][str(bucket_dir)]["record"] == ""
+    assert door[0]["record_digests"] == []
+
+
+def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path, monkeypatch):
+    """The recorded route's own shape: a stamp naming a run the experiment store never held. The
+    provisional CSV says the producer is unknown instead of naming an experiment that never ran."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket_dir, stem = _run_bucket(tmp_path, monkeypatch, raster_path)
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    sidecar_path = bucket_dir / "operating_point.json"
+    stamped = json.loads(sidecar_path.read_text())
+    sidecar_path.write_text(json.dumps({**stamped, "checkpoint_sha256": "0" * 64,
+                                        "experiment_id": "exp_that_never_ran"}), encoding="utf-8")
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    result = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
+        trait_name="catkin_count", acknowledge_unvalidated=True)
+
+    assert "error" not in result
+    assert result["checkpoint_sha256"] is None
+    assert result["experiment_id"] is None
+    row = next(csv.DictReader(out_csv.open(newline="")))
+    assert row["producer_model_sha256"] == ""
+    assert row["experiment_id"] == ""
+    assert row["validation_record"] == ""

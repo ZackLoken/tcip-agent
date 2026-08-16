@@ -25,10 +25,11 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | pipeline_version | string | Pipeline that produced this result |
 | plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
 | plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in metres, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
-| producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions |
-| experiment_id | string | Experiment the producing run is recorded under |
+| producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
+| experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
 | produced_at | string | Timestamp stamped by the producing run |
 | measurement_validated | string | The reconciled validity state stamped into every row by the delivery gate |
+| validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
 
 ## Aggregation Rules
 

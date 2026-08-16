@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1534,6 +1535,121 @@ def _dataset_root_of(path: Path) -> Path | None:
     return root.resolve() if root is not None else None
 
 
+def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
+    """The checkpoint identity this experiment record answers for, or ``None`` when it records none.
+
+    Read from what the run itself filed rather than from anything a prediction bucket says: the
+    registry entry that back-references the experiment carries the hash it was registered under, and
+    the run's lineage carries the weights path that hash was taken over. Both are written together
+    by ``register_model_from_experiment``, so the second answers when the registry index sits under a
+    root this process is not reading.
+    """
+    from tcip_mcp.experiments import _read_member, lineage_key
+    from tcip_mcp.model_registry import checkpoint_sha256, read_registry_index
+    from tcip_mcp.project_paths import project_root
+
+    tag = f"experiment:{experiment_id}"
+    for entry in read_registry_index(project_root()):
+        if tag in (entry.get("tags") or []) and entry.get("sha256"):
+            return str(entry["sha256"])
+    weights = (_read_member(lineage_key(experiment_id), {}) or {}).get("model_weights")
+    return checkpoint_sha256(weights) if weights else None
+
+
+def corroborated_producer(
+    checkpoint_sha256: str | None, experiment_id: str | None
+) -> tuple[str | None, str | None]:
+    """The producing checkpoint and run a delivery may name, from what a record outside the stamp
+    confirms of them.
+
+    Validity and producer identity rest on different evidence, so an honestly unvalidated bucket
+    keeps the identity it really has. A stamp naming no experiment stands on its checkpoint hash
+    alone, which came from resolving the checkpoint and not from any validation claim. A stamp
+    naming an experiment is emitted only when that experiment exists and the checkpoint it recorded
+    is the one the stamp names, absence equal to absence; otherwise the delivery says the producer
+    is unknown rather than repeating names nothing answers for.
+    """
+    if not experiment_id:
+        return checkpoint_sha256, None
+    from tcip_mcp.experiments import experiment_exists
+
+    if not experiment_exists(experiment_id):
+        return None, None
+    if experiment_recorded_checkpoint(experiment_id) != checkpoint_sha256:
+        return None, None
+    return checkpoint_sha256, experiment_id
+
+
+def delivered_provenance(
+    asserted: Mapping[str, Any] | None,
+    bindings: Mapping[str, StampBinding],
+    *,
+    columns: Sequence[str],
+) -> dict[str, Any]:
+    """The provenance cells a delivered CSV carries, for one door's own column list.
+
+    The one builder behind every delivered producer column, so two deliverables with different
+    column lists cannot disagree on what a given column holds. ``bindings`` is one entry per bucket
+    the delivery read, as the reconciler verified them; ``asserted`` is what the stamps and the
+    producing call claimed, which is a starting point and never the last word.
+
+    ``validation_record`` names the experiment and row every bucket's claim was answered for by,
+    and is empty unless every bucket read is bound, since one cell cannot name a record for buckets
+    that have none. ``producer_model_sha256`` and ``experiment_id`` are corroborated through
+    :func:`corroborated_producer`, preferring the identity the verified records carry over the
+    identity the stamps assert. ``measurement_validated`` is the delivery gate's own stamp and is
+    left to the door that ran it.
+    """
+    values = dict(asserted or {})
+    bound = bool(bindings) and all(b.ok and b.claimed for b in bindings.values())
+    values["validation_record"] = "; ".join(sorted(
+        {f"{b.experiment_id}:{b.record_digest}" for b in bindings.values()})) if bound else ""
+
+    identities = {(b.checkpoint_sha256, b.producing_experiment_id) for b in bindings.values()}
+    if bound and len(identities) == 1:
+        checkpoint, experiment_id = next(iter(identities))
+    else:
+        checkpoint = values.get("producer_model_sha256")
+        experiment_id = values.get("experiment_id")
+    values["producer_model_sha256"], values["experiment_id"] = corroborated_producer(
+        checkpoint, experiment_id)
+    return {c: values.get(c) for c in columns}
+
+
+def record_delivery_binding_event(
+    door: str,
+    output_path: str,
+    pred_dirs: Sequence[str] | None,
+    bindings: Mapping[str, StampBinding],
+) -> None:
+    """Record what verification found for each bucket a delivery read, in that dataset's own log.
+
+    The ``@audited`` decorator records a door's arguments and its status, which is not what a later
+    reader of a delivered number needs: they need which buckets stood behind it, which of their
+    claims were answered for, and by which records. That cannot be obtained by changing the
+    decorator's inputs, so a door emits it alongside. The event files against the dataset root the
+    buckets share, since it describes records that travel with the data; a delivery whose buckets
+    share no dataset root files against the platform log instead.
+    """
+    from tcip_mcp.audit import record_event
+
+    roots = {_dataset_root_of(Path(d)) for d in (pred_dirs or [])}
+    scope = roots.pop() if len(roots) == 1 else None
+    record_event(
+        door,
+        {"output_path": output_path, "pred_dirs": list(pred_dirs or [])},
+        scope=scope,
+        verified_buckets={
+            bucket: {"verified": b.ok,
+                     "record": f"{b.experiment_id}:{b.record_digest}" if b.claimed and b.ok else "",
+                     "note": b.note}
+            for bucket, b in bindings.items()
+        },
+        record_digests=sorted({b.record_digest for b in bindings.values()
+                               if b.ok and b.claimed and b.record_digest}),
+    )
+
+
 def _validity_rank(state: str | None) -> int:
     """Floor ordering: unvalidated (0) < any shippable reference, any kind (1). ``None`` = no
     assertion (skip). Comparing rank between two states already scoped to the same dimension/param,
@@ -1561,13 +1677,16 @@ def _reconcile_validity(
     body so no delivery door can reach a validated result without it.
 
     Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, binding_notes,
-    conf, per_bucket}``.
+    bindings, conf, per_bucket}``. ``bindings`` carries one verified result per bucket read, so a
+    delivery door stamps its provenance columns from the verification this body already ran rather
+    than repeating it.
     """
     param_key, validation_kind = _DOCUMENT_PARAM[document]
     per_bucket: dict[str, str] = {}
     missing: list[str] = []
     unvalidated: list[str] = []
     binding_notes: dict[str, str] = {}
+    bindings: dict[str, StampBinding] = {}
     refs: set[str] = set()
     confs: list[float] = []
     all_validated = bool(pred_dirs)
@@ -1578,10 +1697,12 @@ def _reconcile_validity(
         if sc is None:
             missing.append(str(d))
             per_bucket[str(d)] = VALIDATED_FALSE
+            bindings[str(d)] = StampBinding(ok=True, claimed=False)
             all_validated = False
             continue
         ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
         binding = verify_stamp_binding(sc, d, document=document, digest_memo=memo)
+        bindings[str(d)] = binding
         if not binding.ok:
             binding_notes[str(d)] = binding.note
             ref = VALIDATED_FALSE
@@ -1608,6 +1729,7 @@ def _reconcile_validity(
         "missing_sidecars": missing,
         "unvalidated_buckets": unvalidated,
         "binding_notes": binding_notes,
+        "bindings": bindings,
         "conf": (confs[0] if len(set(confs)) == 1 else None),
         "per_bucket": per_bucket,
     }

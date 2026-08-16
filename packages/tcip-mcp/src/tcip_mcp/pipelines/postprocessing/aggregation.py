@@ -164,7 +164,7 @@ _STRATEGIES = {
 
 
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "produced_at",
-                       "measurement_validated"]
+                       "measurement_validated", "validation_record"]
 
 def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     """``(display_unit, linear_basis)`` a value_key implies (``area_mm2`` -> ``("mm2", "mm")``,
@@ -233,8 +233,12 @@ def export_aggregated_csv(
     Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
     authority for it: plant_id, crop, trait_name, value, units, value_key, confidence, n_images,
     pipeline_version, plant_id_source, plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS``
-    (producer_model_sha256, experiment_id, produced_at, measurement_validated) so the final per-plant
-    value is traceable to the exact model that produced it and carries its own validity stamp.
+    (producer_model_sha256, experiment_id, produced_at, measurement_validated, validation_record) so
+    the final per-plant value is traceable to the exact model that produced it and carries its own
+    validity stamp. Those cells are built by ``delivered_provenance`` from the verification the gate
+    already ran, so a producer this delivery cannot corroborate is reported unknown rather than
+    repeated from the stamp that asserted it, and ``validation_record`` names the record a reader
+    can open to see what the claim was earned against.
 
     The final per-plant CSV is a delivery door: it refuses a *bare* write (an unvalidated phenotype
     with no acknowledgement) via the shared ``check_delivery_gate`` and stamps the reconciled validity
@@ -302,6 +306,8 @@ def export_aggregated_csv(
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
         check_delivery_gate,
+        delivered_provenance,
+        record_delivery_binding_event,
         reconcile_claim_scope_validity,
         reconcile_operating_point_validity,
         reconcile_ordinal_validity,
@@ -321,14 +327,19 @@ def export_aggregated_csv(
     # the task being delivered, so this reconciles for any bucket that records one.
     claim_scope_recon = (reconcile_claim_scope_validity(pred_dirs) if pred_dirs
                          else {"operative": False, "validated": None})
+    measurement_recon: dict = {"bindings": {}}
     if pred_dirs and task == "ordinal":
-        state = reconcile_ordinal_validity(pred_dirs, asserted=measurement_validated)["validated"]
+        measurement_recon = reconcile_ordinal_validity(pred_dirs, asserted=measurement_validated)
+        state = measurement_recon["validated"]
     elif pred_dirs and task == "regression":
-        state = reconcile_regression_validity(pred_dirs, asserted=measurement_validated)["validated"]
+        measurement_recon = reconcile_regression_validity(pred_dirs, asserted=measurement_validated)
+        state = measurement_recon["validated"]
     elif pred_dirs:
         # A count trait: the measurement validity is the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
-        state = reconcile_operating_point_validity(pred_dirs, asserted=measurement_validated)["validated"]
+        measurement_recon = reconcile_operating_point_validity(
+            pred_dirs, asserted=measurement_validated)
+        state = measurement_recon["validated"]
         # The tile scale is the same operating point's other gating dimension: it scales the
         # per-image counts this per-plant value aggregates, so a tiled bucket whose tile edge has no
         # persisted or caller-stated basis is exactly as untrustworthy here as an uncalibrated conf.
@@ -356,7 +367,8 @@ def export_aggregated_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = {k: (provenance or {}).get(k) for k in _PROVENANCE_COLUMNS}
+    stamp = delivered_provenance(provenance, measurement_recon["bindings"],
+                                 columns=_PROVENANCE_COLUMNS)
     stamp["measurement_validated"] = gate.column_stamp("measurement")
     fieldnames = [
         "plant_id", "crop", "trait_name", "value", "units", "value_key",
@@ -384,4 +396,6 @@ def export_aggregated_csv(
                 **stamp,
             })
 
+    record_delivery_binding_event("export_aggregated_csv", output_path, pred_dirs,
+                                  measurement_recon["bindings"])
     return output_path
