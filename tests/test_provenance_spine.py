@@ -231,8 +231,7 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
 
     sha = _run_with_a_recorded_checkpoint(tmp_path, "expA")
     out = tmp_path / "agg.csv"
-    # A bare trait_name="count" call with no pred_dirs has no on-disk validity source, so the
-    # provisional delivery is acknowledged explicitly; the provenance stamp is unaffected by that.
+    # No pred_dirs means no on-disk validity source, so the provisional delivery is acknowledged.
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2}], str(out), trait_name="count",
         provenance={"producer_model_sha256": sha, "experiment_id": "expA",

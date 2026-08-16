@@ -785,8 +785,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, verify_stamp_binding
     from tcip_mcp.prediction_buckets import bucket_stems
 
-    # The stated root places the record, its covered buckets and its reference; a bucket that
-    # answers a different one is another dataset's evidence.
+    # A bucket answering a different root than the stated one is another dataset's evidence.
     named_root = _dataset_root_of_all(bucket_dirs)
     if named_root is not None and Path(named_root).resolve() != Path(req.dataset_root).resolve():
         raise HTTPException(
@@ -808,8 +807,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     completed = {name: data for name, data in reviewed.items() if Path(name).stem in stems}
     n = len(completed)
 
-    # Never downgrade what the verifier confirms, and treat a claim no record answers for as the
-    # assertion it is: unvalidated, and promotable over.
+    # A claim no record answers for is an assertion: unvalidated, and promotable over.
     sidecars = {d: (read_operating_point_sidecar(d) or {}) for d in bucket_dirs}
     digest_memo: dict[str, str] = {}
     bindings = {d: verify_stamp_binding(sc, d, document="operating_point", digest_memo=digest_memo)
@@ -829,8 +827,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                    "mark the images Reviewed, then try again.",
             buckets_stamped=[])
 
-    # The evidence set and the covered set are one set: a prediction document that changed since its
-    # verdicts were recorded is evidence for nothing, and one that appeared or vanished changed too.
+    # A prediction document that changed, appeared or vanished since review is evidence for nothing.
     diverged = sorted(
         name for name, data in reviewed.items()
         if any(recorded != _prediction_digest(req.pred_dir, name)
@@ -918,8 +915,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
                            and review_tiled is not None else "default")
 
-    # One spelling of the evidence, run for the breeder-facing description and handed to
-    # open_validation, which runs the same resolver itself to earn the record.
+    # One spelling of the evidence, shared by the description and open_validation's own resolver run.
     resolver_inputs = {
         "review_state": review_state,
         "only_completed": True,
@@ -1042,8 +1038,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
             if bindings[d].claimed and bindings[d].ok:
                 continue  # a mixed set: a bucket whose validation a record answers for is left alone
             Path(d).mkdir(parents=True, exist_ok=True)
-            # Sealed outside the stamp's lock: the experiment store refuses a write inside another
-            # store's open transaction.
+            # Sealed outside the stamp's lock: no store write may open inside another's transaction.
             earned = _stamp_body(sidecars[d])
             if draft is not None:
                 record_digests[d], earned = seal_validation(

@@ -323,8 +323,7 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
     assert sc["validated_reference"] == "reviewer_confirmed_annotations"
-    # The claim is earned, not asserted: a record outside the bucket answers for it, and the stamp
-    # names the trait it was earned for.
+    # The claim is earned: a record outside the bucket answers for it, under the trait it names.
     assert sc["trait"] == "catkin"
     from tcip_mcp.experiments import find_validation
     from tcip_mcp.pipelines.resolution import verify_stamp_binding
@@ -361,8 +360,7 @@ def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp
 
 
 def test_route_with_no_pred_dir_stamps_nothing_and_says_why(client, tmp_path: Path):
-    # The request carries a dataset root and no bucket at all, which is a shape the API accepts:
-    # it is answered honestly rather than refused for want of a prediction directory.
+    # A dataset root with no bucket is a shape the API accepts and answers honestly.
     proj, _ = _make_dense_reviewed_project(tmp_path)
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "catkin"})
@@ -461,8 +459,7 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
 
 
 def test_route_does_not_downgrade_a_validation_a_record_answers_for(client, tmp_path: Path):
-    # A bucket whose validation a record answers for is never re-stamped by a later Validate press:
-    # the route reports it as already validated and leaves the earned claim exactly as it stands.
+    # A later press reports already validated and leaves the earned claim as it stands.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     first = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})

@@ -768,11 +768,11 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:692` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:713` |
 | POST | `/validate_reference` | `validate_reference` | `routes/review.py:760` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1077` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1115` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1143` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1264` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1291` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1073` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1111` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1139` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1260` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1287` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1182,17 +1182,17 @@ are listed here with the rest rather than taking numbers of their own.
 - `config.json` (`config_key`, `experiments.py:113`): written by `create_experiment`,
   `experiments.py:321`, and `overwrite_config_if_pristine`, `experiments.py:376` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:893`, and `compare_experiments`, `experiments.py:946`.
+  `experiments.py:893`, and `compare_experiments`, `experiments.py:965`.
 - `status.json` (`status_key`, line 135): written by `create_experiment` (321), `update_status`
   (`experiments.py:402`), `stamp_run_identity` (`experiments.py:436`), `_touch_heartbeat`
   (`experiments.py:567`). Read by `get_experiment` (893), `reconstruct_run_status`
   (`experiments.py:512`), `resolve_experiment_dir_for_run` (`experiments.py:460`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 158): written by `create_experiment` (321) and
-  `update_lineage`, `experiments.py:793`. Read by `get_experiment` (893) and
-  `get_experiment_lineage`, `experiments.py:990`.
+  `update_lineage`, `experiments.py:812`. Read by `get_experiment` (893) and
+  `get_experiment_lineage`, `experiments.py:1009`.
 - `artifacts.json` (`artifacts_key`, line 180): written by `create_experiment` (321) and
-  `record_artifact`, `experiments.py:768`. Read by `get_experiment` (893).
+  `record_artifact`, `experiments.py:787`. Read by `get_experiment` (893).
 - `metrics.jsonl` (`metrics_key`, line 244, append-only): written by
   `log_metrics`, `experiments.py:599`. Read by `read_metrics`, `experiments.py:586`, which
   `get_experiment` (893, paginated) and `reconstruct_run_status` (512, last row only) go through.
@@ -1207,7 +1207,7 @@ are listed here with the rest rather than taking numbers of their own.
 - `validations.jsonl` (`validations_key`, line 261, append-only): the claims earned against this
   run's evidence. Written only by the module-private `_append_validation`, `experiments.py:674`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual). Read by `read_validations`, `experiments.py:699`, `find_validation`,
+  residual). Read by `read_validations`, `experiments.py:709`, `find_validation`,
   `experiments.py:714` (matching rows by recomputed `validation_digest`, `experiments.py:664`),
   and included whole by `get_experiment` (893). The one member appendable after a terminal
   state, because a validation is a statement made about a run after it ended.
@@ -1680,7 +1680,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1011` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1030` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
