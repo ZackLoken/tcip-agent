@@ -18,6 +18,7 @@ from tcip_mcp.dataset_layout import (
     image_status_path,
     normalize_status_store,
     status_bucket,
+    status_records,
     view_coverage_path,
 )
 from tcip_web.app import app
@@ -78,7 +79,9 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
     status = image_status_path(root)
     status.parent.mkdir(parents=True, exist_ok=True)
     status.write_text(
-        json.dumps({bucket: {"plot.tif": "negative", "other.tif": "complete"}}), encoding="utf-8")
+        json.dumps({bucket: status_records(
+            {"plot.tif": "negative", "other.tif": "complete"}, recorded_by="user:breeder")}),
+        encoding="utf-8")
 
     grid = client.get("/api/coverage/grid", params={"path": path, "tile_size": 50}).json()
     cell = grid["cells"][0]["name"]

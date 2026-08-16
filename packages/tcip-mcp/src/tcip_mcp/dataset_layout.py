@@ -26,6 +26,7 @@ truth for label/prediction locations: every producer and consumer resolves paths
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -286,6 +287,10 @@ def dataset_identity_key(dataset_root: str | Path) -> Key:
 def image_status_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/.tcip/state/image_status.json``: the confirmed-negatives store.
 
+    Shape: ``{bucket: {image_name: {status, recorded_by, recorded_at}}}``, bucket via
+    :func:`status_bucket`. Each record says who set the status and when, so a person's Complete and
+    a status a harvest wrote are distinguishable here rather than only in an audit log.
+
     Sibling of ``classes_path``/``dataset_identity_path``: a Complete is a fact about the dataset's
     content (what actually trains), so it travels with the dataset rather than living in whichever
     project's private ``.tcip/`` happens to be an ancestor. The single locator every writer
@@ -520,19 +525,69 @@ def bucket_subject_date(bucket: str) -> tuple[str, Optional[str]]:
     return subject, (date or None)
 
 
-def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
-    """``{bucket: {image_name: status}}``: a shape guard, shared by every reader.
+def status_of(record: object) -> Optional[str]:
+    """The status token a stored record holds, or ``None`` when the value is not one.
 
-    A bucket is ``status_bucket(subject, date)``. Anything that is not a dict of strings is not a
-    subject's confirmations and is ignored, so a malformed store yields no confirmations rather
-    than a wrong one.
+    A record is ``{"status", "recorded_by", "recorded_at"}``, all three non-empty strings: a stored
+    status says what it is, who set it and when, and a value missing any of those cannot be told
+    apart from one a function wrote unattributed. One predicate, so the readers and the writers
+    agree on what the store holds.
+    """
+    if not isinstance(record, Mapping):
+        return None
+    status = record.get("status")
+    fields = (status, record.get("recorded_by"), record.get("recorded_at"))
+    if all(isinstance(v, str) and v for v in fields):
+        return str(status)
+    return None
+
+
+def status_records(
+    statuses: Mapping[str, str], *, recorded_by: str, recorded_at: Optional[str] = None
+) -> dict[str, dict[str, str]]:
+    """One bucket's ``{image_name: status}`` as stored records, attributed to ``recorded_by``.
+
+    ``recorded_by`` names the actor the status came from under the platform's identity convention
+    (:func:`tcip_mcp.identity.user_identity` for a person, a bare name for a tool producer), so a
+    reader can tell a human's Complete from a status a function wrote without a second store to
+    consult. ``recorded_at`` defaults to the moment of this call, one timestamp across the names in
+    it. Refuses an unattributed write rather than recording a status nobody answers for.
+    """
+    if not (recorded_by or "").strip():
+        raise ValueError(
+            "an image status records who set it, so recorded_by is required; pass the person's "
+            "user:<name> identity or the writing tool's own name"
+        )
+    at = recorded_at or datetime.now(timezone.utc).isoformat()
+    return {name: {"status": status, "recorded_by": recorded_by, "recorded_at": at}
+            for name, status in statuses.items()}
+
+
+def status_confirmations(raw: object) -> dict[str, dict[str, dict[str, str]]]:
+    """``{bucket: {image_name: record}}``: the stored records whole, attribution included.
+
+    A bucket is ``status_bucket(subject, date)``. The shape guard every reader that needs to know
+    who recorded a status goes through; :func:`normalize_status_store` is its status-token
+    projection. Anything :func:`status_of` does not recognize is not a recorded status and is
+    dropped, so a malformed store yields no confirmations rather than a wrong one.
     """
     if not isinstance(raw, dict):
         return {}
     return {
-        key: {k: v for k, v in value.items() if isinstance(v, str)}
+        key: {k: dict(v) for k, v in value.items() if status_of(v) is not None}
         for key, value in raw.items() if isinstance(value, dict)
     }
+
+
+def normalize_status_store(raw: object) -> dict[str, dict[str, str]]:
+    """``{bucket: {image_name: status}}``: a shape guard, shared by every reader.
+
+    The status-token projection of :func:`status_confirmations`, which it calls rather than
+    re-deriving what counts as a stored status, for readers that decide admission and never ask
+    who recorded it.
+    """
+    return {bucket: {name: str(record["status"]) for name, record in records.items()}
+            for bucket, records in status_confirmations(raw).items()}
 
 
 CONFIRMED_NEGATIVE = "negative"
@@ -568,30 +623,69 @@ def is_confirmed_negative(status: object) -> bool:
     return status == CONFIRMED_NEGATIVE
 
 
+def _require_known_statuses(bucket: str, statuses: Iterable[Optional[str]]) -> None:
+    """Refuse a status outside :data:`IMAGE_STATUSES`, or a value that is not a stored record.
+
+    A token no reader understands is neither a confirmation nor a negative, and an unattributed
+    value is one no reader can tell from a status a function wrote, so neither reaches the store.
+    """
+    unknown = sorted({"<unattributed>" if s is None else s for s in statuses}
+                     - set(IMAGE_STATUSES))
+    if unknown:
+        raise ValueError(
+            f"image status must be one of {IMAGE_STATUSES}, recorded with who set it and when; "
+            f"refusing to record {unknown} for {bucket!r}"
+        )
+
+
+def unreadable_status_entries(raw: object) -> list[str]:
+    """``bucket/image_name`` for every stored value :func:`status_of` does not recognize.
+
+    What a read drops and a merging write would therefore delete. A caller that is about to
+    rewrite the document asks first, so a store holding statuses in some other shape is reported
+    rather than quietly emptied of them.
+    """
+    if not isinstance(raw, dict):
+        return []
+    return sorted(f"{bucket}/{name}"
+                  for bucket, value in raw.items() if isinstance(value, dict)
+                  for name, record in value.items() if status_of(record) is None)
+
+
 def record_image_statuses(
-    dataset_root: str | Path, bucket: str, statuses: Mapping[str, str]
+    dataset_root: str | Path, bucket: str, statuses: Mapping[str, str], *, recorded_by: str
 ) -> None:
     """Merge one bucket's per-image statuses into the dataset's confirmed-negative store.
 
     Merged, never replaced: a bucket is one subject on one date, and a write for one of them must
-    leave every other subject's and date's confirmations exactly as they were. Refuses a status
-    outside :data:`IMAGE_STATUSES` rather than recording a token no reader understands.
+    leave every other subject's and date's confirmations exactly as they were. ``recorded_by`` is
+    the actor this write is on behalf of, stamped onto each record by :func:`status_records`.
+
+    Refuses when the document already holds entries this reader cannot recognize, rather than
+    rewriting it without them: a merge reads the whole document and writes it back, so entries a
+    read drops are entries the write deletes, and a human's statuses are not something to lose to
+    an unrelated confirmation.
     """
-    unknown = sorted(set(statuses.values()) - set(IMAGE_STATUSES))
-    if unknown:
-        raise ValueError(
-            f"image status must be one of {IMAGE_STATUSES}; refusing to record {unknown} for "
-            f"{bucket!r}: a token no reader understands is neither a confirmation nor a negative"
-        )
+    _require_known_statuses(bucket, statuses.values())
+    records = status_records(statuses, recorded_by=recorded_by)
     key = image_status_key(dataset_root)
     with tcip_store.transaction(key) as txn:
-        store = normalize_status_store(txn.read(key, default={}))
-        store.setdefault(bucket, {}).update(statuses)
+        raw = txn.read(key, default={})
+        unreadable = unreadable_status_entries(raw)
+        if unreadable:
+            raise ValueError(
+                f"the image status store under {dataset_root} holds {len(unreadable)} entries in a "
+                f"shape this reader does not recognize, starting with {unreadable[:3]}; merging a "
+                f"write into it would delete them. Conform the store to the recorded-status shape "
+                f"({{status, recorded_by, recorded_at}}) first"
+            )
+        store = status_confirmations(raw)
+        store.setdefault(bucket, {}).update(records)
         txn.write(key, {k: dict(sorted(store[k].items())) for k in sorted(store)})
 
 
 def replace_image_status_store(
-    dataset_root: str | Path, statuses_by_bucket: Mapping[str, Mapping[str, str]]
+    dataset_root: str | Path, records_by_bucket: Mapping[str, Mapping[str, Mapping[str, str]]]
 ) -> None:
     """Write the whole confirmed-negative store for a dataset this call is producing.
 
@@ -599,11 +693,19 @@ def replace_image_status_store(
     curated review dataset): what it writes is the complete set for that output, so a leftover
     entry from an earlier materialization into the same directory must not survive as a negative
     nobody re-derived.
+
+    Takes whole records, not bare tokens: a call authoring new confirmations builds them with
+    :func:`status_records`, and a call copying another dataset's confirmations passes that
+    dataset's own records through unchanged, so who confirmed an image survives the copy instead
+    of being re-attributed to whatever wrote it last.
     """
+    for bucket, records in records_by_bucket.items():
+        _require_known_statuses(bucket, (status_of(r) for r in records.values()))
     key = image_status_key(dataset_root)
     with tcip_store.transaction(key) as txn:
-        txn.write(key, {k: dict(sorted(statuses_by_bucket[k].items()))
-                        for k in sorted(statuses_by_bucket)})
+        txn.write(key, {k: {n: dict(records_by_bucket[k][n])
+                            for n in sorted(records_by_bucket[k])}
+                        for k in sorted(records_by_bucket)})
 
 
 def stamp_image_status_digests(

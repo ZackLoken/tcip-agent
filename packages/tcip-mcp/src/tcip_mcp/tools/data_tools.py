@@ -505,6 +505,9 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     ``status_bucket(subject, None)``, since the split carries no date). Without this, every image a
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
     No subject threaded -> nothing to attribute the confirmations to, so none are carried.
+
+    Each confirmation is copied whole, so the split records who confirmed the image and when, the
+    source dataset's own answer, rather than re-attributing the human's work to the split writer.
     """
     if not subject:
         return
@@ -512,17 +515,17 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         RegistryError, attribute_schema_digest, copy_registry, read_registry,
     )
     from tcip_mcp.dataset_layout import (
-        CONFIRMED_NEGATIVE, annotation_date, classes_path, dataset_root_of,
+        annotation_date, classes_path, dataset_root_of,
         replace_image_status_store, stamp_image_status_digests, status_bucket,
     )
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_records
 
     src_dirs = {Path(p).parent for p in label_map.values()}
     if not src_dirs:
         return
-    negatives: set[str] = set()
+    negatives: dict[str, dict[str, str]] = {}
     for d in src_dirs:
-        negatives |= confirmed_negative_names(d, subject=subject, date=annotation_date(d))
+        negatives.update(confirmed_negative_records(d, subject=subject, date=annotation_date(d)))
     if not negatives:
         return
 
@@ -549,7 +552,7 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     bucket_key = status_bucket(subject, None)
     for split_name, split_stems in parts.items():
         names = {Path(image_map[s]).name for s in split_stems if s in image_map}
-        carried = {n: CONFIRMED_NEGATIVE for n in sorted(negatives & names)}
+        carried = {n: negatives[n] for n in sorted(set(negatives) & names)}
         if not carried:
             continue
         split_root = out_dir / split_name

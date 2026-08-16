@@ -18,6 +18,7 @@ from tcip_mcp.dataset_layout import (
     annotation_path,
     image_dir,
     status_bucket,
+    status_records,
 )
 from tcip_mcp.model_registry import ModelRegistry
 
@@ -43,8 +44,9 @@ def _project(tmp_path: Path) -> Path:
                               [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
     # Scoped by subject/date: a confirmation belongs to the subject it was made in.
     (state / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", "2026-02-11"): {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated",
-                                                 "IMG_C.JPG": "negative"}}))
+        {status_bucket("catkin", "2026-02-11"): status_records(
+            {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated", "IMG_C.JPG": "negative"},
+            recorded_by="user:breeder")}))
     return root
 
 
@@ -193,7 +195,8 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
     json_io.write_annotations(
         label, [Annotation(subject="catkin", geometry=BBox(2, 3, 18, 9))], 48, 32)
     (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", date): {"IMG_R.JPG": "negative"}}))
+        {status_bucket("catkin", date): status_records(
+            {"IMG_R.JPG": "negative"}, recorded_by="user:breeder")}))
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
@@ -213,8 +216,8 @@ def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
         annotation_path(root, date, "IMG_S"),
         [Annotation(subject="leaf", geometry=BBox(4, 2, 40, 11))], 48, 32)
     (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps({
-        status_bucket("catkin", date): {"IMG_S.JPG": "negative"},
-        status_bucket("leaf", date): {"IMG_S.JPG": "negative"},
+        status_bucket("catkin", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
+        status_bucket("leaf", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
     }))
 
     res = _run(root)
@@ -238,7 +241,8 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
         annotation_path(root, None, "IMG_F"),
         [Annotation(subject="catkin", geometry=BBox(3, 1, 20, 9))], 40, 24)
     (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", None): {"IMG_F.JPG": "negative"}}))
+        {status_bucket("catkin", None): status_records(
+            {"IMG_F.JPG": "negative"}, recorded_by="user:breeder")}))
 
     res = _run(root)
     assert res.returncode == 2, res.stdout

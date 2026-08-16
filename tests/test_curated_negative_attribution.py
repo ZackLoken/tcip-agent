@@ -2,10 +2,12 @@
 
 A rejection verdict is a human's statement that one subject is absent from one image, and it only
 survives into training through the dataset-native status store, keyed by subject. So every rejected
-image has to reach that store, the subject it is keyed under has to be the one the review was about,
-and a review naming several subjects has to leave its negatives unattributed rather than pick one.
-The schema stamp written beside them decides whether quarantine can ever protect them, so it has to
-be the source registry's own digest for that subject.
+image has to reach that store, the subject it is keyed under has to be the one whose absence those
+rejections actually attest, and a review that answers for no single subject has to leave its
+negatives unattributed and say so rather than pick one. Each confirmation records who established
+it and when, so a negative a harvest wrote is not read back as a person's own Complete. The schema
+stamp written beside them decides whether quarantine can ever protect them, so it has to be the
+source registry's own digest for that subject.
 """
 
 from __future__ import annotations
@@ -31,9 +33,9 @@ def _accepted(class_name: str, gt) -> dict:
             "pred_bbox_norm": None}
 
 
-def _rejected(class_name: str, pred) -> dict:
+def _rejected(class_name: str, pred, reviewed_by: str = "breeder") -> dict:
     return {"action": "rejected", "class_name": class_name, "gt_bbox_norm": None,
-            "pred_bbox_norm": pred}
+            "pred_bbox_norm": pred, "reviewed_by": reviewed_by}
 
 
 def _completed(detections: list[dict]) -> dict:
@@ -70,7 +72,9 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
     assert store_file.is_file()
     store = json.loads(store_file.read_text())
     assert list(store) == [status_bucket("catkin", None)]
-    assert store[status_bucket("catkin", None)] == {
+    bucket = store[status_bucket("catkin", None)]
+    assert sorted(bucket) == ["neg_a.png", "neg_b.png", "neg_c.png"]
+    assert {name: rec["status"] for name, rec in bucket.items()} == {
         "neg_a.png": "negative", "neg_b.png": "negative", "neg_c.png": "negative"}
 
     assert confirmed_negative_names(out / "annotations", subject="catkin") == {
@@ -118,6 +122,11 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
     assert r["subjects"] == ["catkin", "leaf"]
     assert r["subject"] is None
     assert r["hard_negative"] == 1
+
+    # The response names the image it left unconfirmed and why, rather than dropping it quietly.
+    assert r["unconfirmed_negative"] == 1
+    assert [e["image"] for e in r["unconfirmed_negatives"]] == ["neg.png"]
+    assert "no single subject" in r["unconfirmed_negatives"][0]["reason"]
 
     assert not image_status_path(out).exists()
     for subject in ("catkin", "leaf"):
@@ -182,3 +191,98 @@ def test_materialized_dataset_carries_its_own_registry_copy(tmp_path):
     copied = class_registry.read_registry(out / "classes.json")
     assert {s.name for s in copied.subjects} == {"catkin", "leaf"}
     assert attribute_schema_digest(copied, "catkin") == attribute_schema_digest(registry, "catkin")
+
+
+def test_a_rejection_of_one_subject_never_confirms_another(tmp_path):
+    """An image disputed only for another object is not this subject's confirmed negative.
+
+    The review affirmed catkins on one image and rejected a bush prediction on a second. Nothing
+    on the second image answers for catkins, so nothing may key it as a catkin negative: doing so
+    asserts an image full of catkins is empty of them.
+    """
+    src = tmp_path / "src"
+    _image(src, "catkins.png", (120, 40))
+    _image(src, "disputed_bush.png", (40, 120))
+    out = tmp_path / "out"
+    state = {"image": {
+        "catkins.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.3])]),
+        "disputed_bush.png": _completed([_rejected("bush", [0.2, 0.8, 0.6, 0.6])]),
+    }}
+
+    r = materialize_dataset(state, str(src), str(out))
+
+    assert confirmed_negative_names(out / "annotations", subject="catkin") == set()
+    assert confirmed_negative_names(out / "annotations", subject="bush") == set()
+    assert r["subject"] is None
+    assert r["verdict_subjects"] == ["bush", "catkin"]
+    assert [e["image"] for e in r["unconfirmed_negatives"]] == ["disputed_bush.png"]
+    assert r["unconfirmed_negatives"][0]["rejected_subjects"] == ["bush"]
+
+
+def test_a_stated_subject_never_claims_another_subjects_rejections(tmp_path):
+    """Keying the harvest under a subject does not make every rejected image its negative."""
+    src = tmp_path / "src"
+    _image(src, "answers_for_catkin.png", (100, 30))
+    _image(src, "answers_for_bush.png", (30, 100))
+    out = tmp_path / "out"
+    state = {"image": {
+        "answers_for_catkin.png": _completed([_rejected("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "answers_for_bush.png": _completed([_rejected("bush", [0.3, 0.3, 0.4, 0.4])]),
+    }}
+
+    r = materialize_dataset(state, str(src), str(out), subject="catkin")
+
+    assert confirmed_negative_names(out / "annotations", subject="catkin") == {
+        "answers_for_catkin.png"}
+    assert [e["image"] for e in r["unconfirmed_negatives"]] == ["answers_for_bush.png"]
+    assert "not for 'catkin'" in r["unconfirmed_negatives"][0]["reason"]
+
+    # Left in the dataset as an unconfirmed empty, which is what nobody has answered for.
+    assert json.loads((out / "annotations" / "answers_for_bush.json").read_text())[
+        "annotations"] == []
+
+
+def test_a_harvested_negative_records_who_confirmed_it_and_when(tmp_path):
+    """The reviewer whose rejections established the negative is what the store records."""
+    src = tmp_path / "src"
+    _image(src, "pos.png", (90, 60))
+    _image(src, "neg.png", (60, 90))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "neg.png": _completed([_rejected("catkin", [0.4, 0.4, 0.2, 0.2], reviewed_by="rowan")]),
+    }}
+
+    materialize_dataset(state, str(src), str(out))
+
+    record = json.loads(image_status_path(out).read_text())[status_bucket("catkin", None)]["neg.png"]
+    assert isinstance(record, dict), "a stored status is a record, not a bare token"
+    assert record["status"] == "negative"
+    assert record["recorded_by"] == "user:rowan"
+    assert record["recorded_at"].startswith("20")
+
+
+def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
+    """Two reviewers disputing one image leaves the writing tool as the honest actor."""
+    src = tmp_path / "src"
+    _image(src, "pos.png", (60, 90))
+    _image(src, "neg.png", (90, 60))
+    out = tmp_path / "out"
+    state = {"image": {
+        "pos.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.2])]),
+        "neg.png": _completed([
+            _rejected("catkin", [0.2, 0.2, 0.1, 0.1], reviewed_by="rowan"),
+            _rejected("catkin", [0.7, 0.7, 0.1, 0.1], reviewed_by="sam"),
+        ]),
+    }}
+
+    materialize_dataset(state, str(src), str(out))
+
+    record = json.loads(image_status_path(out).read_text())[status_bucket("catkin", None)]["neg.png"]
+    assert isinstance(record, dict), "a stored status is a record, not a bare token"
+    assert not record["recorded_by"].startswith("user:"), (
+        "a tool producer stays bare, so a reader can tell it from a person's own Complete")
+
+    from tcip_mcp.pipelines.feedback.materialize import MATERIALIZER_IDENTITY
+
+    assert record["recorded_by"] == MATERIALIZER_IDENTITY

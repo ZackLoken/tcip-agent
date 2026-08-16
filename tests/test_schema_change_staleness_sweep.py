@@ -93,7 +93,8 @@ def _confirm_negative_stamped(client: TestClient, root: Path, image_name: str,
 def _confirm_negative_unstamped(root: Path, image_name: str, subject: str) -> None:
     """A confirmation recorded through the status writer alone, the state a dataset is left in
     whenever the stamp transaction did not follow the status one."""
-    record_image_statuses(root, status_bucket(subject, None), {image_name: "negative"})
+    record_image_statuses(root, status_bucket(subject, None), {image_name: "negative"},
+                          recorded_by="user:breeder")
     assert not image_status_digest_path(root).is_file()
 
 
