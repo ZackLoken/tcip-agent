@@ -113,6 +113,7 @@ def _bucket(tmp_path: Path, date: str) -> Path:
 
 def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None,
+                      checkpoint_sha256: str | None = None,
                       tile_size_prov: dict | None = None) -> None:
     """The operating_point.json a calibrated export_predictions writes.
 
@@ -132,6 +133,7 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
         "operating_point": op,
         "id_map": id_map,
         "experiment_id": experiment_id,
+        "checkpoint_sha256": checkpoint_sha256,
     }
     if validated:
         write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
@@ -1316,6 +1318,9 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
     assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
     assert sidecar["validated"] == result["passed"]
     assert "sweep_data" in sidecar and sidecar["sweep_data"]["criterion"] == "quadratic_weighted_kappa"
+    from tcip_mcp.model_registry import checkpoint_sha256
+
+    assert sidecar["checkpoint_sha256"] == checkpoint_sha256(tmp_path / "out" / "model_best.pt")
 
 
 def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: Path) -> None:
@@ -1388,9 +1393,13 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     """A CSV over an images directory the dataset layout cannot place is legitimate bespoke work:
     the stated root is what the record's locations are written against, and a root nothing else
     contradicts refuses nothing. The predictor is a stand-in returning each image's recorded rank,
-    so what is exercised is the door's own earning path rather than a fresh model's accuracy."""
+    so what is exercised is the door's own earning path rather than a fresh model's accuracy.
+
+    The checkpoint is a real file, since the stamp and the record both name it by content hash."""
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.model_registry import checkpoint_sha256
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT,
         read_ordinal_operating_point_sidecar,
@@ -1408,6 +1417,8 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     csv_path = tmp_path / "ranks.csv"
     _rank_csv(csv_path, ranks)
     assert dataset_root_of(frames) is None
+    checkpoint = tmp_path / "model_best.pt"
+    checkpoint.write_bytes(b"the weights this calibration ran over")
 
     class _RecordedRanks:
         def predict_batch(self, sources):
@@ -1417,7 +1428,7 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
                         lambda *a, **kw: _RecordedRanks())
 
     res = calibrate_ordinal_regression_operating_point(
-        trait_name="catkin", task="ordinal", checkpoint_path=str(tmp_path / "model_best.pt"),
+        trait_name="catkin", task="ordinal", checkpoint_path=str(checkpoint),
         images_dir=str(frames), csv_path=str(csv_path),
         criterion="quadratic_weighted_kappa", output_dir=str(out),
         dataset_root=str(tmp_path), group_by="stem",
@@ -1429,6 +1440,13 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     assert binding.ok and binding.claimed, binding.note
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
     assert reconcile_ordinal_validity([str(out)])["validated"] == VALIDATED_HELD_OUT
+
+    # The door ran this checkpoint, so stamp and record both name it and the equality check holds.
+    sha = checkpoint_sha256(checkpoint)
+    assert stamp["checkpoint_sha256"] == sha
+    row = find_validation(res["validated_by"]["experiment_id"], res["validated_by"]["record_digest"])
+    assert row["checkpoint_sha256"] == sha
+    assert binding.checkpoint_sha256 == sha
 
 
 def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its_images_contradict(
@@ -1454,3 +1472,132 @@ def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its
     assert f"{str(ds.resolve())!r}" in res["error"], res
     assert f"{str(stated.resolve())!r}" in res["error"], res
     assert not (tmp_path / "calib").exists()  # a refused calibration stamps nothing
+
+
+# The delivered producer tail: what a phenology CSV may name, and what the delivery records.
+
+def _delivery_setup(tmp_path: Path, *, experiment_id: str | None,
+                    checkpoint_sha256: str | None) -> tuple[Path, Path, Path]:
+    """Two classified, count-validated buckets plus a mapping, ready for a phenology delivery."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["dormant"])
+    _write_preds(d2, "P1_b", ["elongated"])
+    for d in (d1, d2):
+        _write_op_sidecar(d, dataset_root=root, validated=True, id_map=ID_MAP,
+                          experiment_id=experiment_id, checkpoint_sha256=checkpoint_sha256)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin",
+                              experiment_id=experiment_id)
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    return mapping_path, d1, d2
+
+
+def _named_records(*pred_dirs: Path) -> str:
+    """The records these buckets' stamps point at, joined the way a delivered cell joins them."""
+    pointers = set()
+    for d in pred_dirs:
+        by = json.loads((d / "operating_point.json").read_text(encoding="utf-8"))["validated_by"]
+        pointers.add(f"{by['experiment_id']}:{by['record_digest']}")
+    return "; ".join(sorted(pointers))
+
+
+def _delivered_rows(out_csv: Path) -> list[dict]:
+    import csv as _csv
+
+    with out_csv.open(newline="", encoding="utf-8") as f:
+        return list(_csv.DictReader(f))
+
+
+def test_compute_phenology_names_the_record_and_producer_a_bound_bucket_earned(tmp_path: Path) -> None:
+    """A delivery every bucket of which is bound names the records that bound it and the producing
+    run those records were earned under, rather than leaving a reader to trust the stamps."""
+    from tests._binding_fixtures import record_producing_run
+
+    sha = record_producing_run(tmp_path, "exp-producer")
+    mapping_path, d1, d2 = _delivery_setup(
+        tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    res = compute_phenology(
+        trait="catkin", mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+        operating_point_conf=0.4, operating_point_validated="held_out_annotations",
+    )
+
+    assert "error" not in res, res
+    assert "validation_record" in res["columns"]
+    rows = _delivered_rows(out_csv)
+    assert rows
+    for row in rows:
+        assert row["validation_record"] == _named_records(d1, d2)
+        assert row["validation_record"] != ""
+        assert row["producer_model_sha256"] == sha
+        assert row["producer_experiment_id"] == "exp-producer"
+
+
+def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_producer_names(
+    tmp_path: Path,
+) -> None:
+    """A stamp claiming validation no record answers for floors the count, and the acknowledged
+    provisional CSV says the producer is unknown instead of repeating the names the stamp asserted
+    for itself."""
+    mapping_path, d1, d2 = _delivery_setup(
+        tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
+    for d in (d1, d2):
+        stamp = json.loads((d / "operating_point.json").read_text(encoding="utf-8"))
+        stamp["validated_by"] = {"experiment_id": "exp_that_never_ran",
+                                 "record_digest": "0" * 16}
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    res = compute_phenology(
+        trait="catkin", mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+        operating_point_conf=0.4, acknowledge_unvalidated=True,
+    )
+
+    assert "error" not in res, res
+    assert res["operating_point_validated"] == "false"
+    rows = _delivered_rows(out_csv)
+    assert rows
+    for row in rows:
+        assert row["producer_model_sha256"] == ""
+        assert row["producer_experiment_id"] == ""
+        assert row["validation_record"] == ""
+
+
+def test_compute_phenology_records_what_verification_found_in_the_datasets_own_log(
+    tmp_path: Path,
+) -> None:
+    """The delivery's audited arguments say what was asked for; this says which buckets stood behind
+    the numbers and which records answered for them, in the log that travels with the data."""
+    from tests._binding_fixtures import record_producing_run
+
+    sha = record_producing_run(tmp_path, "exp-producer")
+    mapping_path, d1, d2 = _delivery_setup(
+        tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    res = compute_phenology(
+        trait="catkin", mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
+        operating_point_conf=0.4, operating_point_validated="held_out_annotations",
+    )
+
+    assert "error" not in res, res
+    log = _ds_root(tmp_path) / ".tcip" / "audit.jsonl"
+    assert log.is_file(), "the delivery wrote nothing to the log of the dataset its buckets sit in"
+    emitted = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln]
+    events = [e for e in emitted if e["tool"] == "compute_phenology" and "verified_buckets" in e]
+    assert len(events) == 1, emitted
+    verified = events[0]["verified_buckets"]
+    assert set(verified) == {str(d1), str(d2)}
+    assert all(v["verified"] for v in verified.values())
+    assert events[0]["record_digests"], events[0]

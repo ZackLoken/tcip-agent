@@ -139,7 +139,32 @@ PROVENANCE_COLUMNS = [
     # Producing-model identity, the exact checkpoint (content hash) + run behind the counts.
     "producer_model_sha256",
     "producer_experiment_id",
+    # Which experiment and row answered for the buckets' claims, empty when any read bucket is unbound.
+    "validation_record",
 ]
+
+
+def delivered_provenance_cells(asserted, bindings) -> dict:
+    """The producer tail's cells for a phenology delivery, from the bindings the reconciler verified.
+
+    Both phenology delivery doors call this instead of writing a stamp's self-declared names, so a
+    bucket whose validation claim no record answers for cannot put producer names into a delivered
+    phenology CSV, and a delivery every bucket of which is bound names the records that bound it.
+
+    The values come from ``resolution.delivered_provenance``, the one builder behind every delivered
+    producer column. Only the spelling differs: this schema calls the producing run
+    ``producer_experiment_id`` where the aggregate schemas call it ``experiment_id``, and it is the
+    same run, corroborated the same way, in both.
+    """
+    from tcip_mcp.pipelines.resolution import delivered_provenance
+
+    values = delivered_provenance(
+        asserted, bindings,
+        columns=("producer_model_sha256", "experiment_id", "validation_record"))
+    return {"producer_model_sha256": values["producer_model_sha256"],
+            "producer_experiment_id": values["experiment_id"],
+            "validation_record": values["validation_record"]}
+
 
 # The per-(plant, date) columns ``per_plant_series`` produces, before the provenance tail.
 CURVE_MEASUREMENT_COLUMNS = [

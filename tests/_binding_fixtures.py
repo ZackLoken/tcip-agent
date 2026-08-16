@@ -10,6 +10,7 @@ merged in.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,31 @@ def write_bound_sidecar(
         stamp, document=document, dataset_root=dataset_root, pred_dirs=covered, **record)
     write_sidecar(pred_dir, bound, document)
     return bound
+
+
+PRODUCER_WEIGHTS = b"the weights a producing run filed under the experiment its predictions name"
+PRODUCER_CHECKPOINT_SHA256 = hashlib.sha256(PRODUCER_WEIGHTS).hexdigest()
+"""The content hash of those weights, so a fixture's stamp and a byte golden name one identity."""
+
+
+def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
+    """File the run a bucket's stamp names as its producer, and return the checkpoint hash it filed.
+
+    A delivered producer column is emitted only where something outside the prediction bucket
+    corroborates the identity the stamp asserts: the experiment has to exist, and the checkpoint it
+    recorded has to be the one the stamp names. A fixture that wants the populated case has to leave
+    both behind, which is what a completed training run leaves behind for itself.
+    """
+    from tcip_mcp.experiments import create_experiment, experiment_exists, update_lineage
+    from tcip_mcp.model_registry import checkpoint_sha256
+
+    ckpt = Path(weights_dir) / "model_best.pt"
+    ckpt.parent.mkdir(parents=True, exist_ok=True)
+    ckpt.write_bytes(PRODUCER_WEIGHTS)
+    if not experiment_exists(experiment_id):
+        create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
+    update_lineage(experiment_id, model_weights=str(ckpt))
+    return checkpoint_sha256(ckpt)
 
 
 # --- the export doors: a stand-in run whose validated count they can actually earn a record for ---
