@@ -18,23 +18,12 @@ import time
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 FRONTEND = REPO_ROOT / "packages/tcip-web/frontend"
 
-MYPY_PATHS = [
-    "packages/tcip-store/src",
-    "packages/tcip-annotation/src",
-    "packages/tcip-mcp/src",
-    "packages/tcip-web/src",
-    "scripts",
-    "tests",
-]
-"""The paths CI type-checks, from the repo root. `mypy .` instead fails outright on a
-duplicate-module clash (scripts are both direct files and scripts.<name> imports), checking
-nothing, so the invocation has to be path-based and match CI to mean anything."""
-
 NPM = shutil.which("npm") or "npm"
 
 STAGES = [
     ("ruff", ["ruff", "check", "."], REPO_ROOT),
-    ("mypy", ["mypy", *MYPY_PATHS], REPO_ROOT),
+    # bare mypy reads its roots from mypy.ini's files list, the same source CI uses.
+    ("mypy", ["mypy"], REPO_ROOT),
     ("pytest", ["pytest", "tests/", "-n", "auto", "--tb=short", "-q"], REPO_ROOT),
     ("npm-format-check", [NPM, "run", "format:check"], FRONTEND),
     ("npm-lint", [NPM, "run", "lint"], FRONTEND),
