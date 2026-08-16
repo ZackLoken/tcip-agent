@@ -3,17 +3,45 @@
  * surfaces as a thrown Error carrying the backend's `detail`, instead of being
  * silently parsed as if it were a success body (which yielded `undefined` fields and
  * crashed callers on the next render). Callers catch and route errors to a toast.
+ *
+ * A backend refusal carries `detail` as either a string or an object. `decodeRefusal` reads a
+ * non-2xx body once and is the only place either shape is turned into an error, so a path that
+ * reads its own body (a blob download) branches on the same object a JSON call would see rather
+ * than stringifying it to `[object Object]`.
  */
+
+/** A refusal whose `detail` is an object, kept parsed so a caller can branch on its own fields. */
+export class StructuredRefusalError extends Error {
+  readonly detail: Record<string, unknown>;
+  readonly status: number;
+
+  constructor(detail: Record<string, unknown>, status: number, message: string) {
+    super(message);
+    this.name = "StructuredRefusalError";
+    this.detail = detail;
+    this.status = status;
+  }
+}
+
+export async function decodeRefusal(r: Response, fallback = ""): Promise<Error> {
+  let detail: unknown;
+  try {
+    detail = ((await r.json()) as { detail?: unknown })?.detail;
+  } catch {
+    /* non-JSON error body */
+  }
+  const status = fallback || `${r.status} ${r.statusText}`;
+  if (typeof detail === "object" && detail !== null) {
+    const parsed = detail as Record<string, unknown>;
+    const message = typeof parsed.message === "string" ? parsed.message : "";
+    return new StructuredRefusalError(parsed, r.status, message || status);
+  }
+  return new Error((typeof detail === "string" ? detail : "") || status);
+}
 
 export async function asJson<T>(r: Response): Promise<T> {
   if (!r.ok) {
-    let detail = "";
-    try {
-      detail = ((await r.json()) as { detail?: string })?.detail ?? "";
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new Error(detail || `${r.status} ${r.statusText}`);
+    throw await decodeRefusal(r);
   }
   return (await r.json()) as T;
 }

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "@/api/client";
-import { resultsApi } from "@/api/inference";
+import { StructuredRefusalError } from "@/api/http";
+import { resultsApi, STATEMENT_FIELDS, type OperationalizationRecord } from "@/api/inference";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 
@@ -41,6 +42,8 @@ beforeEach(() => {
     milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
     invalid_specs: [],
   });
+  // The operationalization panel loads with the tab; a test about anything else has no records.
+  vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [] });
 });
 
 afterEach(() => {
@@ -380,5 +383,222 @@ describe("ResultsTab onset table validity marker", () => {
     );
     expect(marker).toHaveTextContent(">");
     expect(screen.queryByTitle("Interpolated between two observed dates.")).not.toBeInTheDocument();
+  });
+});
+
+describe("ResultsTab operationalization records", () => {
+  // Every field the record_seen hash covers is non-empty here, so the row's rendering of each one
+  // is asserted against the hashed set itself rather than against a chosen subset.
+  const COUNT_RECORD: OperationalizationRecord = {
+    trait: "subject_b_total",
+    delivery_kind: "per_plant_count_aggregate",
+    statement: "Every isolated object of the subject on a plant, summed over that plant's images.",
+    mechanism: "The detector's objects at the operating point the calibration holdout fixed.",
+    measured_subject: "subject_b",
+    delivered_phenotypes: ["subject_b_count"],
+    delivered_value_keys: ["n_objects"],
+    stated_by: "state_trait_operationalization",
+    stated_at: "2026-02-01T10:00:00+00:00",
+    relayed_note: "Answered in the packing shed rather than in the browser.",
+    confirmed_by: null,
+    confirmed_at: null,
+    identity_from_request: null,
+    confirmed_current: false,
+    superseded: [],
+    delivers: [{ name: "subject_b_count", definition: "objects counted per plant" }],
+    record_seen: "hash-of-the-displayed-record",
+  };
+
+  function rowFor(record: OperationalizationRecord) {
+    return screen.findByTestId(`operationalization-${record.trait}::${record.delivery_kind}`);
+  }
+
+  it("shows every field a confirmation covers", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+
+    render(<ResultsTab />);
+    const row = await rowFor(COUNT_RECORD);
+
+    for (const field of STATEMENT_FIELDS) {
+      const value = COUNT_RECORD[field];
+      expect(
+        within(row).getByText(Array.isArray(value) ? value.join(", ") : value),
+      ).toBeInTheDocument();
+    }
+    // The crop vocabulary's own wording for what the trait delivers, beside the statement.
+    expect(within(row).getByText(/objects counted per plant/)).toBeInTheDocument();
+  });
+
+  it("lists a record whose delivery kind this tab computes no view for", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+
+    render(<ResultsTab />);
+    const row = await rowFor(COUNT_RECORD);
+
+    expect(within(row).getByText("per_plant_count_aggregate")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /confirm this record/i })).toBeEnabled();
+  });
+
+  it("confirms with the record_seen hash of what was displayed", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+    const confirmSpy = vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_fields: { count_objective: "every visible object" },
+    });
+    vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
+      ...COUNT_RECORD,
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_current: true,
+    });
+
+    render(<ResultsTab />);
+    const row = await rowFor(COUNT_RECORD);
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(confirmSpy.mock.calls[0][0]).toEqual({
+      project_root: "C:/proj",
+      trait: "subject_b_total",
+      delivery_kind: "per_plant_count_aggregate",
+      record_seen: "hash-of-the-displayed-record",
+      confirmed: true,
+    });
+    expect(await within(row).findByText(/confirmed by user:breeder/i)).toBeInTheDocument();
+  });
+
+  it("re-renders what is on file when the record moved since it was displayed", async () => {
+    const MOVED: OperationalizationRecord = {
+      ...COUNT_RECORD,
+      statement: "Only the objects on the plant's own leader, summed over that plant's images.",
+      record_seen: "hash-of-the-record-on-file",
+    };
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+    vi.spyOn(resultsApi, "confirmOperationalization").mockRejectedValue(
+      new StructuredRefusalError(
+        { message: "the operationalization moved since it was read", record: MOVED },
+        409,
+        "the operationalization moved since it was read",
+      ),
+    );
+
+    render(<ResultsTab />);
+    const row = await rowFor(COUNT_RECORD);
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    expect(await within(row).findByText(MOVED.statement)).toBeInTheDocument();
+    expect(within(row).queryByText(COUNT_RECORD.statement)).not.toBeInTheDocument();
+    expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
+  });
+
+  it("routes a refusal by its kind even when its text reads like the calibration one", async () => {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: ["2026-01-01"],
+      subjects: ["subject_a"],
+      model_names: ["baseline"],
+      subjects_by_date: {},
+      models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+    });
+    vi.spyOn(resultsApi, "perPlantCurves").mockRejectedValue(
+      new StructuredRefusalError(
+        {
+          kind: "operationalization",
+          state: 2,
+          trait: "subject_a",
+          delivery_kind: "state_crossing_dates",
+          message: "an unvalidated number is not what this refusal is about",
+        },
+        400,
+        "an unvalidated number is not what this refusal is about",
+      ),
+    );
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+
+    expect(
+      await screen.findByText(/an unvalidated number is not what this refusal is about/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /ask the agent to calibrate this/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /show provisional numbers/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a structured refusal from the CSV download instead of stringifying it", async () => {
+    const VALIDATED_EVIDENCE = {
+      validated: { operating_point: "validated_held_out", classifier: "validated_held_out" },
+      provisional: false,
+      validity_detail: {},
+      positive_class_assessed: true,
+    };
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: ["2026-01-01"],
+      subjects: ["subject_a"],
+      model_names: ["baseline"],
+      subjects_by_date: {},
+      models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+    });
+    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
+      rows: [
+        {
+          plant_id: "P1",
+          accession: null,
+          date: "2026-01-01",
+          n_images: 1,
+          n_total: 10,
+          n_positive: 3,
+          n_unclassified: 0,
+          n_missing: 0,
+          ratio: 0.3,
+        },
+      ],
+      n_plants: 1,
+      positive_class_id: 1,
+      ...VALIDATED_EVIDENCE,
+    });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED_EVIDENCE });
+    // exportCsv is left unmocked: the refusal has to survive its own blob path, not a stub.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        json: async () => ({
+          detail: {
+            kind: "operationalization",
+            state: 2,
+            trait: "subject_a",
+            delivery_kind: "state_crossing_dates",
+            message: "stated but not confirmed by the breeder",
+          },
+        }),
+      } as Response),
+    );
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(screen.getByText("2026-01-01")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /compute curves/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /curves csv/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /curves csv/i }));
+
+    expect(await screen.findByText(/stated but not confirmed by the breeder/)).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+    // The calibration flow answers a different refusal family and must not be offered for this one.
+    expect(
+      screen.queryByRole("button", { name: /ask the agent to calibrate this/i }),
+    ).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });

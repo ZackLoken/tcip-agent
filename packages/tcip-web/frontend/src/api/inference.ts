@@ -1,6 +1,6 @@
 /** Inference + Results API helpers for the Inference and Results tabs. */
 
-import { getJson, postJson, wsUrl } from "@/api/http";
+import { decodeRefusal, getJson, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 
 /**
@@ -180,6 +180,118 @@ export interface PhenologyResponse<Row> {
   positive_class_id?: number | null;
 }
 
+/** One entry of what a trait delivers, in the crop vocabulary's own wording, never paraphrased. */
+export interface DeliveredPhenotypeDefinition {
+  name: string;
+  definition: string;
+}
+
+/** A field a confirmation covered whose live value has moved since, with both values. */
+export interface OperationalizationSupersession {
+  field: string;
+  confirmed_value: unknown;
+  current_value: unknown;
+}
+
+/**
+ * What a trait's delivered number means for one delivery kind, as the browser reads it.
+ *
+ * The agent states the record and the breeder confirms it; nothing here is authored in the GUI.
+ * `confirmed_current` and `superseded` are computed by the backend from the same comparison the
+ * delivery doors run, never re-derived here. `record_seen` is the content hash the confirmation
+ * posts back, so a click lands on the text that was displayed.
+ */
+export interface OperationalizationRecord {
+  trait: string;
+  delivery_kind: string;
+  statement: string;
+  mechanism: string;
+  measured_subject: string;
+  delivered_phenotypes: string[];
+  delivered_value_keys: string[];
+  stated_by: string;
+  stated_at: string;
+  relayed_note: string;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  identity_from_request: boolean | null;
+  confirmed_current: boolean;
+  superseded: OperationalizationSupersession[];
+  delivers: DeliveredPhenotypeDefinition[];
+  record_seen: string;
+}
+
+export type StatementField =
+  | "statement"
+  | "mechanism"
+  | "measured_subject"
+  | "delivered_phenotypes"
+  | "delivered_value_keys"
+  | "stated_by"
+  | "stated_at"
+  | "relayed_note";
+
+/**
+ * Every field the `record_seen` hash covers, in the order a surface shows them.
+ *
+ * The one list the confirmation surface renders from, so a field a click authorizes cannot be a
+ * field the breeder was never shown. Mirrors the record module's own STATEMENT_FIELDS.
+ */
+export const STATEMENT_FIELDS: readonly StatementField[] = [
+  "statement",
+  "mechanism",
+  "measured_subject",
+  "delivered_phenotypes",
+  "delivered_value_keys",
+  "stated_by",
+  "stated_at",
+  "relayed_note",
+];
+
+export interface OperationalizationConfirmation {
+  confirmed_by: string;
+  confirmed_at: string;
+  identity_from_request: boolean;
+  confirmed_fields: Record<string, unknown>;
+}
+
+export interface ConfirmOperationalizationBody {
+  project_root: string;
+  trait: string;
+  delivery_kind: string;
+  user?: string;
+  confirmed?: boolean;
+  record_seen: string;
+}
+
+/** A delivery door's refusal that a trait's delivered number has no confirmed meaning. */
+export interface OperationalizationRefusal {
+  kind: "operationalization";
+  state: number | null;
+  trait: string;
+  delivery_kind: string;
+  message: string;
+}
+
+/**
+ * The operationalization refusal a thrown error carries, or null for every other failure.
+ *
+ * Read by kind off the parsed detail, so this family can never be matched by the prose regex the
+ * unvalidated-evidence refusal still dispatches on.
+ */
+export function operationalizationRefusalOf(e: unknown): OperationalizationRefusal | null {
+  if (!(e instanceof StructuredRefusalError)) return null;
+  const detail = e.detail;
+  if (detail.kind !== "operationalization") return null;
+  return {
+    kind: "operationalization",
+    state: typeof detail.state === "number" ? detail.state : null,
+    trait: String(detail.trait ?? ""),
+    delivery_kind: String(detail.delivery_kind ?? ""),
+    message: typeof detail.message === "string" ? detail.message : e.message,
+  };
+}
+
 export const resultsApi = {
   registeredModels: (project_path: string) =>
     getJson<{ models: RegisteredModel[] }>(
@@ -217,6 +329,23 @@ export const resultsApi = {
   onsetDates: (body: PhenologyRequest) =>
     postJson<PhenologyResponse<OnsetRow>>(ROUTES.postResultsOnsetDates, body),
 
+  // Every operationalization record this project holds. The key is a trait plus a delivery kind,
+  // so the surface enumerates what exists rather than selecting from a fixed list of kinds.
+  operationalizations: (project_root: string) =>
+    getJson<{ records: OperationalizationRecord[] }>(
+      `${ROUTES.getResultsOperationalizations}?project_root=${encodeURIComponent(project_root)}`,
+    ),
+
+  operationalization: (project_root: string, trait: string, delivery_kind: string) =>
+    getJson<OperationalizationRecord>(
+      `${ROUTES.getResultsOperationalization}?project_root=${encodeURIComponent(project_root)}` +
+        `&trait=${encodeURIComponent(trait)}&delivery_kind=${encodeURIComponent(delivery_kind)}`,
+    ),
+
+  // Refuses with 409 when the record moved since it was displayed, carrying what is on file now.
+  confirmOperationalization: (body: ConfirmOperationalizationBody) =>
+    postJson<OperationalizationConfirmation>(ROUTES.postResultsOperationalizationConfirm, body),
+
   // The server computes what it exports: this sends the inputs a phenology measurement is derived from
   // plus which computation to run, never a table of rows: sending rows would let the caller
   // control both the columns and any accompanying kind declaration, so the backend could no
@@ -234,15 +363,9 @@ export const resultsApi = {
       body: JSON.stringify({ ...body, acknowledge_unvalidated: false, payload, filename }),
     });
     if (!resp.ok) {
-      // Surface the server's actual reason instead of discarding the response body.
-      let detail = `export_csv failed: ${resp.status}`;
-      try {
-        const body = (await resp.json()) as { detail?: string };
-        if (body.detail) detail = body.detail;
-      } catch {
-        // response body wasn't JSON, keep the status-only message
-      }
-      throw new Error(detail);
+      // The same decoder every JSON call uses, so a structured refusal reaches this door parsed
+      // rather than stringified.
+      throw await decodeRefusal(resp, `export_csv failed: ${resp.status}`);
     }
     return await resp.blob();
   },

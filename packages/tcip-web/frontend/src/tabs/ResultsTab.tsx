@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -11,19 +11,248 @@ import {
 } from "recharts";
 
 import { api } from "@/api/client";
+import { StructuredRefusalError } from "@/api/http";
 import {
+  operationalizationRefusalOf,
   resultsApi,
+  STATEMENT_FIELDS,
+  type OperationalizationRecord,
+  type OperationalizationRefusal,
   type PhenologyRequest,
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
+  type StatementField,
 } from "@/api/inference";
+import { DisclosureChevron } from "@/components/CollapsibleSection";
+import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
 import { useStore } from "@/store";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {
   date: string;
   [plantId: string]: number | string | null;
+}
+
+const STATEMENT_FIELD_LABELS: Record<StatementField, string> = {
+  statement: "What the number means",
+  mechanism: "How the platform decides it",
+  measured_subject: "Measured subject",
+  delivered_phenotypes: "Delivered phenotypes",
+  delivered_value_keys: "Delivered value keys",
+  stated_by: "Recorded through",
+  stated_at: "Recorded at",
+  relayed_note: "Relayed note",
+};
+
+/** One record, addressed by the pair its store is keyed on. */
+function recordKey(record: { trait: string; delivery_kind: string }): string {
+  return `${record.trait}::${record.delivery_kind}`;
+}
+
+function statementFieldText(record: OperationalizationRecord, field: StatementField): string {
+  const value = record[field];
+  if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "none";
+  return value.trim() === "" ? "none" : value;
+}
+
+function supersededValueText(value: unknown): string {
+  if (value === null || value === undefined) return "nothing";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+/**
+ * The record a 409 carries, or null when the failure is anything else.
+ *
+ * The confirm route answers a moved record with what is on file now, so the row can re-render the
+ * text the breeder has to read before their click means anything.
+ */
+function movedRecordFrom(e: unknown): OperationalizationRecord | null {
+  if (!(e instanceof StructuredRefusalError) || e.status !== 409) return null;
+  const record = (e.detail as { record?: unknown }).record;
+  return record && typeof (record as { record_seen?: unknown }).record_seen === "string"
+    ? (record as OperationalizationRecord)
+    : null;
+}
+
+// The breeder cannot author a record from the GUI: the agent states it and they confirm it. A
+// correction is a message to the agent, and it says nothing about what the number should mean.
+function correctionRequest(record: OperationalizationRecord): string {
+  return (
+    `The operationalization on record for the "${record.trait}" trait's ${record.delivery_kind} ` +
+    `delivery is not what I mean. On record: ${record.statement} Decided by: ${record.mechanism} ` +
+    `Measured subject: ${record.measured_subject}. What should change: `
+  );
+}
+
+function OperationalizationRow({
+  record,
+  refused,
+  busy,
+  note,
+  onConfirm,
+}: {
+  record: OperationalizationRecord;
+  refused: boolean;
+  busy: boolean;
+  note: string | null;
+  onConfirm: (record: OperationalizationRecord) => void;
+}) {
+  const { request, setRequest } = useEditableAgentRequest(correctionRequest(record));
+  const [correcting, setCorrecting] = useState(false);
+
+  const delivers =
+    record.delivers.map((d) => `${d.name}: ${d.definition}`).join("; ") ||
+    "nothing this project's crop vocabulary defines";
+
+  return (
+    <li
+      className={`rounded border p-3 ${refused ? "border-tcip-fp" : "border-tcip-border"}`}
+      data-testid={`operationalization-${recordKey(record)}`}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-[12px]">{record.trait}</span>
+        <span className="text-[11px] text-tcip-muted">{record.delivery_kind}</span>
+        <span
+          className={`ml-auto text-[11px] ${record.confirmed_current ? "text-tcip-muted" : "text-tcip-fp"}`}
+        >
+          {record.confirmed_by && record.confirmed_current
+            ? `Confirmed by ${record.confirmed_by} on ${record.confirmed_at}`
+            : record.confirmed_by
+              ? `Confirmed by ${record.confirmed_by} on ${record.confirmed_at}, no longer current`
+              : "Not confirmed"}
+        </span>
+      </div>
+      {record.confirmed_by && (
+        <div className="text-[11px] text-tcip-muted">
+          {record.identity_from_request
+            ? "That name came with the confirming request."
+            : "That name came from the backend's own environment, not from the confirming request."}
+        </div>
+      )}
+      <p className="mt-1 text-[11px] text-tcip-muted">Delivers {delivers}</p>
+      <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[11px]">
+        {STATEMENT_FIELDS.map((field) => (
+          <Fragment key={field}>
+            <dt className="text-tcip-muted">{STATEMENT_FIELD_LABELS[field]}</dt>
+            <dd>{statementFieldText(record, field)}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      {record.superseded.length > 0 && (
+        <div className="mt-2 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
+          <div>Changed since this was confirmed:</div>
+          <ul className="mt-1 list-disc pl-4">
+            {record.superseded.map((s) => (
+              <li key={s.field}>
+                {s.field}: confirmed as {supersededValueText(s.confirmed_value)}, now{" "}
+                {supersededValueText(s.current_value)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {note && <div className="mt-2 text-[11px] text-tcip-fp">{note}</div>}
+      <div className="mt-2 flex items-center gap-2">
+        {!record.confirmed_current && (
+          <button
+            className="tcip-btn-primary text-[11px]"
+            onClick={() => onConfirm(record)}
+            disabled={busy}
+          >
+            {busy ? "Confirming…" : "Confirm this record"}
+          </button>
+        )}
+        <button
+          className="tcip-btn text-[11px]"
+          aria-expanded={correcting}
+          onClick={() => setCorrecting((open) => !open)}
+        >
+          <DisclosureChevron open={correcting} />
+          Send a correction to the agent
+        </button>
+      </div>
+      {correcting && (
+        <div className="mt-2 flex flex-col gap-1">
+          <textarea
+            className="tcip-input h-20 w-full resize-none text-[11px] leading-4"
+            value={request}
+            onChange={(e) => setRequest(e.target.value)}
+            spellCheck={true}
+            aria-label={`Correction for ${record.trait}, ${record.delivery_kind}`}
+          />
+          <button
+            className="tcip-btn self-start text-[11px]"
+            onClick={() => useStore.getState().sendToAgentTerminal(request)}
+            disabled={!request.trim()}
+          >
+            Send to the agent
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function OperationalizationPanel({
+  records,
+  loadError,
+  refusal,
+  busyKey,
+  notes,
+  onConfirm,
+}: {
+  records: OperationalizationRecord[];
+  loadError: string | null;
+  refusal: OperationalizationRefusal | null;
+  busyKey: string | null;
+  notes: Record<string, string>;
+  onConfirm: (record: OperationalizationRecord) => void;
+}) {
+  return (
+    <div className="tcip-panel p-4">
+      <div className="tcip-heading mb-1">What the delivered numbers mean</div>
+      <p className="mb-3 text-[11px] text-tcip-muted">
+        The agent records what each delivered number means and how the platform decides it. A
+        delivery waits until you confirm the record it would ship under. Read what is on file, then
+        confirm it or send the agent a correction.
+      </p>
+      {refusal && (
+        <div className="mb-3 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
+          <div>
+            A delivery for the {refusal.trait} trait's {refusal.delivery_kind} number is waiting on
+            a confirmed record of what that number means.
+          </div>
+          <div className="mt-1 text-tcip-muted">{refusal.message}</div>
+        </div>
+      )}
+      {loadError && <div className="mb-3 text-[11px] text-tcip-fp">{loadError}</div>}
+      {records.length === 0 ? (
+        <div className="text-[11px] text-tcip-muted">
+          Nothing is recorded for this project yet. The agent records one before a delivery can ship
+          under it.
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {records.map((record) => (
+            <OperationalizationRow
+              key={recordKey(record)}
+              record={record}
+              refused={
+                refusal !== null &&
+                refusal.trait === record.trait &&
+                refusal.delivery_kind === record.delivery_kind
+              }
+              busy={busyKey === recordKey(record)}
+              note={notes[recordKey(record)] || null}
+              onConfirm={onConfirm}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -81,6 +310,15 @@ export function ResultsTab() {
   const [validity, setValidity] = useState<Record<string, string>>({});
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
 
+  // What this project's delivered numbers are recorded to mean, listed rather than selected: the
+  // records are keyed by trait plus delivery kind, including kinds this tab computes no view for.
+  const [operationalizations, setOperationalizations] = useState<OperationalizationRecord[]>([]);
+  const [operationalizationsError, setOperationalizationsError] = useState<string | null>(null);
+  const [operationalizationRefusal, setOperationalizationRefusal] =
+    useState<OperationalizationRefusal | null>(null);
+  const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
+  const [confirmNotes, setConfirmNotes] = useState<Record<string, string>>({});
+
   // The trait a delivery is computed for, resolved from this project's own registered traits
   // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
   // error, not a silent guess) when there are zero, offered as a choice when there are several.
@@ -121,6 +359,67 @@ export function ResultsTab() {
         );
       });
   }, [projectRoot]);
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    void resultsApi
+      .operationalizations(projectRoot)
+      .then((res) => {
+        setOperationalizations(res.records);
+        setOperationalizationsError(null);
+      })
+      .catch((e) => {
+        setOperationalizations([]);
+        setOperationalizationsError(
+          `Could not load what this project's delivered numbers mean: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [projectRoot]);
+
+  const replaceOperationalization = useCallback((record: OperationalizationRecord) => {
+    setOperationalizations((prev) =>
+      prev.map((r) => (recordKey(r) === recordKey(record) ? record : r)),
+    );
+  }, []);
+
+  const confirmOperationalization = useCallback(
+    async (record: OperationalizationRecord) => {
+      if (!projectRoot) return;
+      const key = recordKey(record);
+      setConfirmingKey(key);
+      setConfirmNotes((prev) => ({ ...prev, [key]: "" }));
+      try {
+        await resultsApi.confirmOperationalization({
+          project_root: projectRoot,
+          trait: record.trait,
+          delivery_kind: record.delivery_kind,
+          record_seen: record.record_seen,
+          confirmed: true,
+        });
+        replaceOperationalization(
+          await resultsApi.operationalization(projectRoot, record.trait, record.delivery_kind),
+        );
+      } catch (e) {
+        const moved = movedRecordFrom(e);
+        if (moved) {
+          replaceOperationalization(moved);
+          setConfirmNotes((prev) => ({
+            ...prev,
+            [key]:
+              "This record changed since it was shown. Read what is on file above, then confirm that.",
+          }));
+        } else {
+          setConfirmNotes((prev) => ({
+            ...prev,
+            [key]: `Could not confirm: ${e instanceof Error ? e.message : String(e)}`,
+          }));
+        }
+      } finally {
+        setConfirmingKey(null);
+      }
+    },
+    [projectRoot, replaceOperationalization],
+  );
 
   const refreshDatasetTree = useCallback(() => {
     if (!datasetRoot) return;
@@ -193,6 +492,7 @@ export function ResultsTab() {
     }
     setLoading(true);
     setError(null);
+    setOperationalizationRefusal(null);
     try {
       const predsMap: Record<string, string> = {};
       for (const d of dates) {
@@ -228,6 +528,14 @@ export function ResultsTab() {
         setOnset(onsetRes.rows ?? []);
       }
     } catch (e) {
+      // A refusal naming its own kind is routed by that kind, before any prose is read.
+      const refusal = operationalizationRefusalOf(e);
+      if (refusal) {
+        setOperationalizationRefusal(refusal);
+        setCurves([]);
+        setOnset([]);
+        return;
+      }
       // The server refuses unvalidated evidence by default. Surface why, plus the one-click way to
       // see the numbers anyway (clearly marked provisional), so an uncalibrated operating point is
       // a signposted next step rather than a dead end.
@@ -255,6 +563,12 @@ export function ResultsTab() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
+      // The download door refuses through the same structured family, so it lands in the panel.
+      const refusal = operationalizationRefusalOf(e);
+      if (refusal) {
+        setOperationalizationRefusal(refusal);
+        return;
+      }
       useStore
         .getState()
         .pushToast(`CSV export failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -446,6 +760,15 @@ export function ResultsTab() {
           </div>
         )}
       </div>
+
+      <OperationalizationPanel
+        records={operationalizations}
+        loadError={operationalizationsError}
+        refusal={operationalizationRefusal}
+        busyKey={confirmingKey}
+        notes={confirmNotes}
+        onConfirm={(record) => void confirmOperationalization(record)}
+      />
 
       {trait && !hasMilestones && (
         <div className="tcip-panel p-4 flex flex-col gap-2">
