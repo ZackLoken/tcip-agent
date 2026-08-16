@@ -91,7 +91,7 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
         100, 100)
     json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # confirmed negative
 
-    coco = assemble_coco(labels, images, subject=CATKIN, attribute="elongation", id_map=id_map)
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, attribute="elongation", id_map=id_map)
     # img1's empty file is not human-confirmed negative -> excluded (treated as unannotated)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
     assert len(coco["annotations"]) == 2
@@ -113,7 +113,7 @@ def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
     (state / "image_status.json").write_text(_json.dumps({"catkin": status_records(
         {"img0.jpg": "negative", "img1.jpg": "partial"}, recorded_by="user:breeder")}))
     _reg, id_map = _reg_id_map()
-    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}  # human-confirmed only
 
 
@@ -127,7 +127,7 @@ def test_assemble_coco_skips_stem_without_image(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
     json_io.write_annotations(labels / "orphan.json", [_box(5, 5, 9, 9)], 100, 100)  # no image
 
-    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
     assert [im["file_name"] for im in coco["images"]] == ["img0.jpg"]
 
 
@@ -148,7 +148,7 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
         json_io.write_annotations(labels / f"{stem}.json", [_box(10, 10, 30, 30)] * (i + 1), 100, 100)
 
     _reg, id_map = _resolve_registry_id_map(labels, CATKIN, None)
-    shared_coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)  # over all 4 stems
+    shared_coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)  # over all 4 stems
 
     train_ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
                              subject=CATKIN, coco_data=shared_coco, label_format="coco",
@@ -248,7 +248,7 @@ def test_instance_seg_rasterizes_a_two_ring_instance_into_one_mask(tmp_path, via
     kwargs = {"subject": CATKIN}
     if via == "coco":
         _reg, id_map = _reg_id_map()
-        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
         kwargs["id_map"] = id_map
 
     ds = InstanceSegDataset(str(images), str(labels), **kwargs)
@@ -284,7 +284,7 @@ def test_assemble_coco_keeps_both_rings_of_an_instance(tmp_path):
     json_io.write_annotations(labels / "img0.json", [_multi_poly([LOBE_A, LOBE_B])], 100, 100)
 
     _reg, id_map = _reg_id_map()
-    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
     (ann,) = coco["annotations"]
     assert ann["segmentation"] == [
         [10.0, 10.0, 30.0, 10.0, 30.0, 30.0, 10.0, 30.0],
@@ -333,7 +333,7 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
     kwargs = {"images_dir": str(images), "labels_dir": str(labels), "subject": CATKIN}
     if label_format == "coco":
         _reg, id_map = _reg_id_map()
-        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+        kwargs["coco_data"] = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
         kwargs["label_format"] = "coco"
     elif label_format:
         kwargs["label_format"] = label_format
@@ -440,7 +440,7 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
 
     _reg, id_map = _reg_id_map()
     # The assembled COCO carries the real names, so to_coco_dataset can match the store.
-    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {f"IMG_0001{ext}", f"IMG_0002{ext}"}
 
     ds = build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
@@ -515,8 +515,8 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
     (state / "image_status.json").write_text(json.dumps(
         {"catkin": status_records({"shared.jpg": "negative"}, recorded_by="user:breeder")}))
 
-    assert confirmed_negative_names(labels, subject="catkin") == {"shared.jpg"}
-    assert confirmed_negative_names(labels, subject="bush") == set()
+    assert confirmed_negative_names(labels, subject="catkin", date=None) == {"shared.jpg"}
+    assert confirmed_negative_names(labels, subject="bush", date=None) == set()
     assert sorted(build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
                                 subject="catkin").stems) == ["ann", "shared"]
     assert build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
@@ -540,7 +540,7 @@ def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
         {"catkin": status_records({"a.jpg": "negative"}, recorded_by="user:breeder")}))
 
     with pytest.raises(ValueError, match="needs an explicit subject"):
-        confirmed_negative_names(labels, subject=None)
+        confirmed_negative_names(labels, subject=None, date=None)
 
 
 def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
@@ -559,7 +559,7 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
     (state / "image_status.json").write_text(json.dumps(
         {"catkin": status_records({"a.jpg": "complete"}, recorded_by="user:breeder")}))
 
-    assert confirmed_negative_names(labels, subject=None) == set()
+    assert confirmed_negative_names(labels, subject=None, date=None) == set()
 
 
 def test_split_tree_carries_its_confirmed_negatives(tmp_path):
@@ -588,7 +588,7 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
     for split in ("train", "val", "test"):
         d = out / split / "labels"
         if d.is_dir():
-            carried |= confirmed_negative_names(d, subject="catkin")
+            carried |= confirmed_negative_names(d, subject="catkin", date=None)
     assert carried, "the split tree lost every human-confirmed negative"
 
 
@@ -677,9 +677,9 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
         json.dumps({CATKIN: {"a.jpg": "stale-digest"}}))
 
     _, id_map = _reg_id_map()
-    _, counts_json = trainable_stems(str(labels), str(images), subject=CATKIN)
-    coco = assemble_coco(labels, images, subject=CATKIN, id_map=id_map)
-    _, counts_coco = trainable_stems(str(labels), str(images), subject=CATKIN, coco=coco)
+    _, counts_json = trainable_stems(str(labels), str(images), subject=CATKIN, date=None)
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+    _, counts_coco = trainable_stems(str(labels), str(images), subject=CATKIN, date=None, coco=coco)
 
     assert counts_json["quarantined_stale_definition"] == 1
     assert counts_json == counts_coco

@@ -121,7 +121,7 @@ def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_pat
     write_registry(root / "classes.json", _severity_registry("ordinal"))
 
     quarantined: set[str] = set()
-    admitted = confirmed_negative_names(labels_dir, subject="leaf", quarantined_out=quarantined)
+    admitted = confirmed_negative_names(labels_dir, subject="leaf", date=None, quarantined_out=quarantined)
     assert admitted == set()
     assert quarantined == {"img_001.jpg"}, (
         "a type-only redefinition is a schema change; admitting the old confirmation trains an "

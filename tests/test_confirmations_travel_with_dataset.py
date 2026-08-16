@@ -106,7 +106,7 @@ def test_confirmed_negative_names_ignores_an_unrelated_ancestor_store(tmp_path):
 
     _confirm_negative(unrelated_ancestor, "catkin", "img_002.jpg")  # a foreign, ancestor-only store
 
-    got = confirmed_negative_names(labels_dir, subject="catkin")
+    got = confirmed_negative_names(labels_dir, subject="catkin", date=None)
     assert got == set(), (
         "a store found by walking up to an unrelated ancestor must never be silently borrowed, "
         "even when the dataset itself has no confirmations of its own"
@@ -134,7 +134,7 @@ def test_quarantine_excludes_a_confirmation_stamped_under_a_since_changed_schema
     )))
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin",
+    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
                                    quarantined_out=quarantined)
     assert got == set()
     assert quarantined == {"img_001.jpg"}
@@ -153,7 +153,7 @@ def test_quarantine_does_not_fire_when_schema_is_unchanged(tmp_path):
     _confirm_negative(root, "catkin", "img_001.jpg", digest=digest)
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin",
+    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
                                    quarantined_out=quarantined)
     assert got == {"img_001.jpg"}
     assert quarantined == set()
@@ -171,7 +171,7 @@ def test_unstamped_confirmation_is_admitted_not_quarantined(tmp_path):
     _confirm_negative(root, "catkin", "img_001.jpg")  # no digest= kwarg -> no sidecar written
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin",
+    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
                                    quarantined_out=quarantined)
     assert got == {"img_001.jpg"}
     assert quarantined == set()
@@ -195,7 +195,7 @@ def test_trainable_stems_reports_quarantined_stale_definition(tmp_path):
                  values=("dormant", "elongating", "elongated")),
     )))
 
-    stems, counts = trainable_stems(root / "annotations", root / "images", subject="catkin")
+    stems, counts = trainable_stems(root / "annotations", root / "images", subject="catkin", date=None)
     assert stems == []
     assert counts["quarantined_stale_definition"] == 1
     assert counts["skipped_unconfirmed_empty"] == 0
@@ -229,7 +229,7 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
     _confirm_negative(root, "catkin", "img_002.jpg", digest=new_digest)
 
     quarantined: set[str] = set()
-    got = confirmed_negative_names(root / "annotations", subject="catkin",
+    got = confirmed_negative_names(root / "annotations", subject="catkin", date=None,
                                    quarantined_out=quarantined)
     assert got == {"img_002.jpg"}, "img_002 was stamped fresh and must be admitted"
     assert quarantined == {"img_001.jpg"}, (

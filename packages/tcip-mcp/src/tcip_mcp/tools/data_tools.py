@@ -506,6 +506,12 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
     No subject threaded -> nothing to attribute the confirmations to, so none are carried.
 
+    A split partitions whatever the source dataset holds, across every capture date at once, and
+    lands it in one undated bucket. So the source side reads every bucket the store names this
+    subject under, the keys writers actually stated, rather than a date derived from each label
+    directory's path: a confirmation recorded under a key that does not spell the directory it sits
+    in is still the human's, and deriving the key would drop it.
+
     Each confirmation is copied whole, so the split records who confirmed the image and when, the
     source dataset's own answer, rather than re-attributing the human's work to the split writer.
     """
@@ -515,17 +521,17 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
         RegistryError, attribute_schema_digest, copy_registry, read_registry,
     )
     from tcip_mcp.dataset_layout import (
-        annotation_date, classes_path, dataset_root_of,
+        classes_path, dataset_root_of,
         replace_image_status_store, stamp_image_status_digests, status_bucket,
     )
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_records
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_records_every_date
 
     src_dirs = {Path(p).parent for p in label_map.values()}
     if not src_dirs:
         return
     negatives: dict[str, dict[str, str]] = {}
-    for d in src_dirs:
-        negatives.update(confirmed_negative_records(d, subject=subject, date=annotation_date(d)))
+    for d in sorted(src_dirs):
+        negatives.update(confirmed_negative_records_every_date(d, subject=subject))
     if not negatives:
         return
 

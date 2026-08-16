@@ -110,7 +110,7 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
         "confirmed_empty.jpg": "negative",
     }, recorded_by="user:breeder")}))
 
-    assert confirmed_negative_names(labels, subject=CATKIN) == {"confirmed_empty.jpg"}
+    assert confirmed_negative_names(labels, subject=CATKIN, date=None) == {"confirmed_empty.jpg"}
 
     ds = DetectionDataset(str(images), str(labels), subject=CATKIN)
     assert sorted(ds.stems) == ["confirmed_empty", "worked"]

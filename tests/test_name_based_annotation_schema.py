@@ -47,7 +47,7 @@ def test_registry_decodes_its_own_labels(tmp_path):
         [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
     id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", id_map=id_map)
+    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
 
     # The COCO categories are the assign_class_ids map, and every emitted annotation decodes back to
     # the name its label carried: the registry reads its own labels without guessing.
@@ -74,7 +74,7 @@ def test_geometryless_annotation_roundtrips_and_marks_image_annotated(tmp_path):
     assert len(back) == 1 and back[0].subject == "catkin" and back[0].geometry is None
 
     id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", id_map=id_map)
+    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
     # The image is annotated (it carries a subject annotation), so it is present as an image and is
     # not collapsed to an empty negative; the geometry-less label just has no detection target.
     assert [im["file_name"] for im in coco["images"]] == ["img_001.jpg"]
@@ -97,7 +97,7 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
             [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 640, 480)
 
     id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", id_map=id_map)
+    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
                        subject="catkin")
 
@@ -317,9 +317,9 @@ def test_geometryless_only_image_is_not_a_trainable_stem_on_either_path(tmp_path
     json_io.write_annotations(labels_dir / "geomless.json", [Annotation(subject="catkin")], 640, 480)
 
     id_map = class_registry.assign_class_ids(registry, "catkin")
-    coco = assemble_coco(labels_dir, images_dir, subject="catkin", id_map=id_map)
-    stems_direct, _ = trainable_stems(labels_dir, images_dir, subject="catkin")          # coco=None path
-    stems_coco, _ = trainable_stems(labels_dir, images_dir, subject="catkin", coco=coco)  # COCO path
+    coco = assemble_coco(labels_dir, images_dir, subject="catkin", date=None, id_map=id_map)
+    stems_direct, _ = trainable_stems(labels_dir, images_dir, subject="catkin", date=None)          # coco=None path
+    stems_coco, _ = trainable_stems(labels_dir, images_dir, subject="catkin", date=None, coco=coco)  # COCO path
 
     assert stems_direct == stems_coco == ["boxed"]  # the two paths agree; geomless-only is dropped
 

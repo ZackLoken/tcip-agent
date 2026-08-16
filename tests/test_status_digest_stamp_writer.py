@@ -79,10 +79,10 @@ def test_a_schema_change_quarantines_only_the_subject_it_touched(
     labels = dataset / "annotations"
     catkin_quarantined: set[str] = set()
     catkin_admitted = confirmed_negative_names(
-        labels, subject="catkin", quarantined_out=catkin_quarantined)
+        labels, subject="catkin", date=None, quarantined_out=catkin_quarantined)
     bush_quarantined: set[str] = set()
     bush_admitted = confirmed_negative_names(
-        labels, subject="bush", quarantined_out=bush_quarantined)
+        labels, subject="bush", date=None, quarantined_out=bush_quarantined)
 
     assert catkin_admitted == set()
     assert catkin_quarantined == {"img_alpha.jpg"}
@@ -103,7 +103,7 @@ def test_a_later_confirmation_in_the_same_bucket_does_not_revive_a_stale_one(
 
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(
-        dataset / "annotations", subject="catkin", quarantined_out=quarantined)
+        dataset / "annotations", subject="catkin", date=None, quarantined_out=quarantined)
     assert admitted == {"img_gamma.jpg"}
     assert quarantined == {"img_alpha.jpg"}
 
@@ -131,7 +131,7 @@ def test_a_bulk_write_stamps_only_the_statuses_it_applied(
 
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(
-        dataset / "annotations", subject="catkin", quarantined_out=quarantined)
+        dataset / "annotations", subject="catkin", date=None, quarantined_out=quarantined)
     assert admitted == {"img_two.jpg"}
     assert quarantined == {"img_one.jpg"}
 
@@ -148,6 +148,6 @@ def test_a_confirmation_made_with_no_registry_present_is_still_admitted(
     _confirm_negative(client, tmp_path, "img_solo.jpg", "catkin")
 
     quarantined: set[str] = set()
-    admitted = confirmed_negative_names(labels, subject="catkin", quarantined_out=quarantined)
+    admitted = confirmed_negative_names(labels, subject="catkin", date=None, quarantined_out=quarantined)
     assert admitted == {"img_solo.jpg"}
     assert quarantined == set()
