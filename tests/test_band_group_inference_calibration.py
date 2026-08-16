@@ -100,7 +100,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
 
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
-    bundle, dataset_hash, n_excluded = _calibrate_operating_point(
+    bundle, dataset_hash, n_excluded, _evidence = _calibrate_operating_point(
         predictor, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=TILE, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.5, postprocess="nms", cross_tile_nms=None, max_dets=100,

@@ -57,20 +57,24 @@ def _fake_predictor(monkeypatch):
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
 
-def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeypatch):
+def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_verdicts(
+    tmp_path, monkeypatch,
+):
+    """A bucket that is not the canonical predictions/<model>/<date> shape but still sits inside a
+    dataset is guarded against that dataset's verdict store, and redirects by its last segment."""
     from pathlib import Path
 
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
-    # export_predictions resolves the review state via the pinned project root.
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project_root))
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    dataset_root = tmp_path / "dataset"
+    images_dir = dataset_root / "images" / "2026-01-01"
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
 
-    out = tmp_path / "preds"
-    out.mkdir()
+    out = dataset_root / "predictions" / "preds"
+    out.mkdir(parents=True)
     # A prediction file already sits in the bucket, and a human verdict is recorded against it.
     (out / "img.json").write_text(
         json.dumps({"image": "img", "width": 100, "height": 100, "annotations": []}))
@@ -79,7 +83,7 @@ def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeyp
 
     from tcip_mcp.prediction_buckets import bucket_key_of
 
-    engine = ReviewEngine(project_root / ".tcip" / "state")
+    engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="img.png", img_width=100, img_height=100,
                         preds=[Annotation(subject="catkin", geometry=BBox(10.0, 10.0, 30.0, 30.0),
                                           score=0.9)])
@@ -100,9 +104,42 @@ def test_export_predictions_redirects_when_bucket_has_verdicts(tmp_path, monkeyp
     # Default: redirect to a fresh @r2 bucket; the reviewed bucket is left intact.
     res = export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
     assert res["bucket_redirected"] is True
+    assert res["verdict_guard_operative"] is True
     assert Path(res["output_dir"]).name == "preds@r2"
     assert (Path(res["output_dir"]) / "img.json").is_file()
     assert json.loads((out / "img.json").read_text())["annotations"] == []  # untouched
+
+
+def test_export_predictions_writes_a_bucket_under_no_dataset_root_and_says_the_guard_is_off(
+    tmp_path, monkeypatch,
+):
+    """A bucket outside any dataset has no verdict store to be guarded against, so the export is
+    written where it was asked for and the response says the guarantee is absent, naming the
+    layout that carries it. Refusing the write would reject legitimate exploratory work."""
+    from pathlib import Path
+
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+
+    images_dir = tmp_path / "captures"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+
+    _fake_predictor(monkeypatch)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out = tmp_path / "scratch_preds"
+    res = export_predictions(str(ckpt), str(images_dir), str(out), tile=False)
+
+    assert "error" not in res, res
+    assert Path(res["output_dir"]) == out
+    assert res["bucket_redirected"] is False
+    assert res["verdict_guard_operative"] is False
+    assert "predictions" in res["note"]  # the canonical layout is named as the path to the guard
+    assert (out / "img.json").is_file()
 
 
 def _canonical_bucket_with_a_verdict(tmp_path, monkeypatch) -> tuple:

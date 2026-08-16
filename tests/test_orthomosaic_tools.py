@@ -207,9 +207,9 @@ def test_export_predictions_raster_refuses_when_tile_size_has_no_real_basis(tmp_
 def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
     """A bucket with a recorded review verdict is never silently overwritten, the same
     immutability the images_dir regime already enforces, shared rather than reimplemented."""
-    project_root = tmp_path / "proj"
-    (project_root / ".tcip" / "state").mkdir(parents=True)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project_root))
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
 
     raster_path = tmp_path / "mosaic.tif"
     _write_geo_raster(raster_path)
@@ -217,7 +217,9 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
 
     from tcip_mcp.tools.inference_tools import export_predictions
 
-    out_dir = tmp_path / "preds"
+    # Inside a dataset, where the verdicts that freeze a bucket are recorded.
+    dataset_root = tmp_path / "dataset"
+    out_dir = dataset_root / "predictions" / "preds"
     first = export_predictions(
         ckpt, output_dir=str(out_dir), raster_path=str(raster_path), conf_threshold=0.0,
         tile_size=TILE)
@@ -228,7 +230,7 @@ def test_export_predictions_raster_bucket_immutability(tmp_path, monkeypatch):
 
     from tcip_mcp.prediction_buckets import bucket_key_of
 
-    engine = ReviewEngine(project_root / ".tcip" / "state")
+    engine = ReviewEngine(dataset_root / ".tcip" / "state")
     ctx = ReviewContext(img_name="mosaic", img_width=64, img_height=64,
                         preds=[Annotation(subject="0", geometry=BBox(1.0, 1.0, 5.0, 5.0), score=0.9)])
     det = ReviewDetection(det_type="fp", class_name="0", conf=0.9, iou=None, gt_idx=None,

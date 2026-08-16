@@ -635,7 +635,7 @@ def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
-    bundle, _dh, _n_excluded = itools._calibrate_operating_point(
+    bundle, _dh, _n_excluded, _evidence = itools._calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -681,7 +681,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     stub = _CalStub()
     stub.config = {"data": {"subject": "catkin", "attribute": "state"}}
 
-    _bundle, _dh, n_excluded = itools._calibrate_operating_point(
+    _bundle, _dh, n_excluded, _evidence = itools._calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -751,7 +751,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     # the registry when `subject` was set) would have raised the ValueError
     # test_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
     # succeed, using only the recorded map.
-    bundle, _dh, n_excluded = itools._calibrate_operating_point(
+    bundle, _dh, n_excluded, _evidence = itools._calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,

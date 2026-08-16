@@ -71,12 +71,15 @@ def inference_call(tmp_path, monkeypatch):
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
         forwarded.update(kwargs)
-        bundle = resolve_operating_point(
-            trait, dataset_hash="d", calibration_records=_calibration_records(),
-            tiled=kwargs["tile"], tile_size=kwargs["tile_size"],
-            cross_tile_nms=kwargs["cross_tile_nms"], max_dets=kwargs["max_dets"],
-        )
-        return bundle, "d", 0
+        inputs = {
+            "dataset_hash": "d", "calibration_records": _calibration_records(),
+            "tiled": kwargs["tile"], "tile_size": kwargs["tile_size"],
+            "cross_tile_nms": kwargs["cross_tile_nms"], "max_dets": kwargs["max_dets"],
+        }
+        bundle = resolve_operating_point(trait, **inputs)
+        evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                    "reference_inputs": {"label_dirs": {"calibration": labels}}}
+        return bundle, "d", 0, evidence
 
     monkeypatch.setattr(predictor_module, "build_predictor", _stub_build_predictor)
     monkeypatch.setattr(inference_tools, "_calibrate_operating_point", _spy_calibrate)

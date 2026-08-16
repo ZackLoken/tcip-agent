@@ -134,7 +134,7 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
     images_dir, labels_dir = _hesitant_detector_dataset(tmp_path / "ds")
     stub = _HesitantDetectorStub()
 
-    bundle, _dh, n_excluded = itools._calibrate_operating_point(
+    bundle, _dh, n_excluded, _evidence = itools._calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,

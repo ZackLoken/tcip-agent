@@ -181,13 +181,17 @@ def resolve_block_calibration_records(
     predictor: Any, *, checkpoint_path: str, trait_name: str, experiment_id: str | None,
     global_nms_iou: float, tile_batch_size: int = 96, postprocess: str = "nms",
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST, seed: int = 0,
-) -> tuple[Any, dict]:
+) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved
-    calibration/test regions. Returns ``(bundle, provenance)``: ``bundle`` is the same
+    calibration/test regions. Returns ``(bundle, provenance, evidence)``: ``bundle`` is the same
     :class:`~tcip_mcp.pipelines.resolution.ResolvedBundle` shape every calibration path returns;
     ``provenance`` carries the resolved ``dataset_root``/``stem``/``training_raster_path``/
     ``spatial_manifest`` (for the caller's own claim-scope check against the actual export target)
-    plus ``density_uniformity_flags``.
+    plus ``density_uniformity_flags``; ``evidence`` is the resolver this ran, the arguments it ran
+    over and the reserved regions they came from, which is what an export door earning a validation
+    record for a validated block-calibrated count reopens the gate with. The arguments are the same
+    dict passed to ``resolve_operating_point`` here, never a second assembly of them; the trait and
+    the producing run are left out because they are ``open_validation``'s own arguments.
 
     ``experiment_id`` unresolved (``None``, or given but not found) refuses outright, unlike the
     ordinary image-set calibration path's legitimate "foreign checkpoint, skip the disjointness
@@ -416,14 +420,15 @@ def resolve_block_calibration_records(
     from tcip_mcp.pipelines.resolution import dataset_hash
 
     dh = dataset_hash(labels_dir)
-    bundle = resolve_operating_point(
-        trait_name, dataset_hash=dh, calibration_records=cal_records, holdout_records=test_records,
-        tiled=True, tiled_source="default", cross_tile_nms=None, max_dets=density_cap,
-        max_dets_derived_from=(
+    resolver_inputs = {
+        "dataset_hash": dh, "calibration_records": cal_records, "holdout_records": test_records,
+        "tiled": True, "tiled_source": "default", "cross_tile_nms": None, "max_dets": density_cap,
+        "max_dets_derived_from": (
             "~1.5x p99 GT objects/image, pooled across all calibration+test bands"),
-        experiment_id=experiment_id, staged_conf_floor=applied.get("score_thresh"),
-        cal_rects=cal_rects, hold_rects=test_rects,
-    )
+        "staged_conf_floor": applied.get("score_thresh"),
+        "cal_rects": cal_rects, "hold_rects": test_rects,
+    }
+    bundle = resolve_operating_point(trait_name, experiment_id=experiment_id, **resolver_inputs)
     attach_spatial_split_kind_provenance(bundle, spatial)
 
     provenance = {
@@ -433,7 +438,18 @@ def resolve_block_calibration_records(
         "block_scale_source": scale_source, "k_cal": k_cal, "k_test": k_test,
         "cal_gt_counts": cal_gt_counts, "test_gt_counts": test_gt_counts,
     }
-    return bundle, provenance
+    evidence = {
+        "resolver": "resolve_operating_point",
+        "inputs": resolver_inputs,
+        "reference_inputs": {
+            "label_dirs": {"reserved_regions": str(labels_dir)},
+            "scope_roots": {"training_mosaic": str(dataset_root)},
+            "stated_values": {"stem": stem, "calibration_region": list(cal_rect),
+                              "test_region": list(test_rect), "block_scale_px": buffer_px,
+                              "block_scale_source": scale_source, "k_cal": k_cal, "k_test": k_test},
+        },
+    }
+    return bundle, provenance, evidence
 
 
 def _band_records(
