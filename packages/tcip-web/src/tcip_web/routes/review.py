@@ -120,6 +120,19 @@ def _resolve_producer_identity_for_dir(pred_dir: Optional[str]) -> Optional[dict
     }
 
 
+def _bucket_of_dir(pred_dir: Optional[str]) -> str:
+    """The verdict store's key for the prediction bucket dir this request names, through the one
+    spelling the immutability guard also uses. No dir is a review with no bucket at all."""
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
+    return bucket_key_of(pred_dir)
+
+
+def _bucket_of_file(pred_path: Optional[str]) -> str:
+    """Same, from a per-image prediction file path: the bucket dir is its parent."""
+    return _bucket_of_dir(str(Path(pred_path).parent) if pred_path else None)
+
+
 def _resolve_producer_identity(pred_path: Optional[str]) -> Optional[dict]:
     """Same as :func:`_resolve_producer_identity_for_dir`, from a per-image prediction file path
     (``ActionPayload.pred_path``): the bucket dir is its parent, used only as the lookup key to
@@ -325,6 +338,7 @@ def _matches_response(
     engine: ReviewEngine,
     image_name: str,
     *,
+    bucket: str,
     filter_type: str,
     filter_class: str,
 ) -> MatchesResponse:
@@ -336,7 +350,7 @@ def _matches_response(
     )
     out_dets: list[Detection] = []
     for d in dets:
-        entry = engine.find_reviewed_entry(d, ctx)
+        entry = engine.find_reviewed_entry(bucket, d, ctx)
         out_dets.append(Detection(
             det_type=d.det_type,
             class_name=d.class_name,
@@ -358,7 +372,7 @@ def _matches_response(
         detections=out_dets,
         gt=[_ann_dict(a) for a in ctx.gt],
         preds=[_ann_dict(a) for a in ctx.preds],
-        image_status=engine.get_image_review_status(image_name),
+        image_status=engine.get_image_review_status(bucket, image_name),
     )
 
 
@@ -372,7 +386,7 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
         subject=req.subject, attribute=req.attribute,
     )
     return _matches_response(
-        ctx, matches, engine, req.image_name,
+        ctx, matches, engine, req.image_name, bucket=_bucket_of_file(req.pred_path),
         filter_type=req.filter_type, filter_class=req.filter_class,
     )
 
@@ -525,8 +539,9 @@ def record_action(payload: ActionPayload) -> dict:
         norm_ctx = work
     producer_identity = _resolve_producer_identity(payload.pred_path)
     class_id = _resolve_verdict_class_id(payload.pred_path, payload.class_name)
+    bucket = _bucket_of_file(payload.pred_path)
     engine.record_detection_action(
-        det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
+        bucket, det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
         producer_identity=producer_identity, conf_threshold=payload.conf_threshold,
         class_id=class_id,
     )
@@ -551,7 +566,7 @@ def record_action(payload: ActionPayload) -> dict:
         iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
         subject=payload.subject, attribute=payload.attribute,
     )
-    engine.check_image_review_complete(payload.image_name, matches)
+    engine.check_image_review_complete(bucket, payload.image_name, matches)
     _audit(payload.project_root, "gui_review_action", {
         "image_name": payload.image_name,
         "det_type": payload.det_type,
@@ -562,12 +577,12 @@ def record_action(payload: ActionPayload) -> dict:
     # Return the fresh matches this verdict just recomputed (gt_idx/pred_idx rebuilt against the
     # written GT), so the client installs them without a second /matches round-trip.
     fresh = _matches_response(
-        work, matches, engine, payload.image_name,
+        work, matches, engine, payload.image_name, bucket=bucket,
         filter_type=payload.filter_type, filter_class=payload.filter_class,
     )
     return {
         "status": "ok",
-        "image_status": engine.get_image_review_status(payload.image_name),
+        "image_status": engine.get_image_review_status(bucket, payload.image_name),
         "annotation_status": annotation_status,
         "matches": fresh,
     }
@@ -590,6 +605,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     _guard_path(payload.gt_path)
     _guard_path(payload.pred_dir)
     engine = _get_engine(payload.project_root)
+    bucket = _bucket_of_dir(payload.pred_dir)
     if payload.completed:
         producer_identity = _resolve_producer_identity_for_dir(payload.pred_dir)
         # A zero-verdict Complete is FN-adjudication-covered only when it is a genuine negative:
@@ -603,10 +619,11 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
         if payload.pred_dir:
             pred_file = Path(payload.pred_dir) / f"{Path(payload.image_name).stem}.json"
             is_negative = not _has_objects(pred_file)
-        engine.mark_image_reviewed(payload.image_name, producer_identity=producer_identity,
+        engine.mark_image_reviewed(bucket, payload.image_name,
+                                   producer_identity=producer_identity,
                                    adjudication_covered=is_negative)
     else:
-        engine.unmark_image_reviewed(payload.image_name)
+        engine.unmark_image_reviewed(bucket, payload.image_name)
     # Derive the annotation status from the GT file on disk: the client's matches snapshot can be
     # stale or null mid-navigation and once wrote negatives for annotated frames. A present file
     # with no annotations of any subject is an empty (negative) record.
@@ -620,7 +637,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     })
     return {
         "status": "ok",
-        "image_status": engine.get_image_review_status(payload.image_name),
+        "image_status": engine.get_image_review_status(bucket, payload.image_name),
         "annotation_status": annotation_status,
     }
 
@@ -728,9 +745,11 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     stems = bucket_stems(*bucket_dirs)
     engine = _get_engine(req.project_root)
+    # The verdicts recorded against the bucket being promoted, so a stem that exists under two
+    # buckets contributes only what was reviewed here.
     completed = {
         name: data
-        for name, data in engine.raw_state.get("image", {}).items()
+        for name, data in engine.image_states(_bucket_of_dir(req.pred_dir)).items()
         if Path(name).stem in stems and data.get("img_status") == "completed"
     }
     n = len(completed)
@@ -909,7 +928,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 @router.get("/image_status")
 def get_image_status(project_root: str, image_name: str) -> dict:
     engine = _get_engine(project_root)
-    return {"status": engine.get_image_review_status(image_name)}
+    # This route names no prediction bucket, so it answers across every bucket the image was
+    # reviewed under rather than picking one.
+    return {"status": engine.image_status_across_buckets(image_name)}
 
 
 class ImageStatusesResponse(BaseModel):

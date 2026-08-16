@@ -168,7 +168,9 @@ def check_state(root: Path, findings: list) -> None:
     stems = _image_stems(root)
     shard_dir = state / "review"
     if shard_dir.is_dir():
-        for shard in shard_dir.glob("*.json"):
+        # Shards sit one directory deep per prediction bucket, and directly here for a review
+        # that named no bucket.
+        for shard in shard_dir.rglob("*.json"):
             payload = _load(shard) or {}
             img = payload.get("img_name", shard.stem)
             if Path(img).stem not in stems:

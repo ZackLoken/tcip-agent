@@ -25,6 +25,13 @@ from tcip_mcp.pipelines.feedback import review_to_records
 IMG_NAME = "IMG_0501.JPG"
 IMG_W, IMG_H = 1200, 500
 PRODUCER = {"checkpoint_sha256": "e3b0c44298fc1c14", "experiment_id": "exp-catkin-07"}
+# The prediction bucket the session reviewed, as prediction_buckets.bucket_key_of spells one.
+BUCKET = "predictions/exp-catkin-07/2026-02-11"
+
+
+def review_state(engine: ReviewEngine) -> dict:
+    """The reviewed bucket's state in the shape the calibration adapter reads."""
+    return {"image": engine.image_states(BUCKET)}
 
 
 @pytest.fixture
@@ -57,13 +64,13 @@ def _review_a_whole_image(engine: ReviewEngine, ctx: ReviewContext, *, class_id:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     for det in engine.build_detection_list(ctx, matches):
         engine.record_detection_action(
-            det, ctx,
+            BUCKET, det, ctx,
             action="rejected" if det.det_type == "fp" else "accepted",
             producer_identity=PRODUCER,
             conf_threshold=0.25,
             class_id=class_id,
         )
-    assert engine.check_image_review_complete(ctx.img_name, matches) is True
+    assert engine.check_image_review_complete(BUCKET, ctx.img_name, matches) is True
 
 
 def test_reference_boxes_come_back_at_the_pixel_sizes_they_were_reviewed_at(
@@ -76,7 +83,7 @@ def test_reference_boxes_come_back_at_the_pixel_sizes_they_were_reviewed_at(
     _review_a_whole_image(engine, ctx)
 
     records = review_to_records(
-        engine.raw_state,
+        review_state(engine),
         bucket_identities=[PRODUCER],
         image_dims={IMG_NAME: (IMG_W, IMG_H)},
     )
@@ -112,7 +119,7 @@ def test_a_verdict_carries_the_identity_fields_the_reference_reads(
     engine = ReviewEngine(state_dir=tmp_path, current_user="alice")
     _review_a_whole_image(engine, ctx)
 
-    entries = engine.raw_state["image"][IMG_NAME]["detections"]
+    entries = engine.image_states(BUCKET)[IMG_NAME]["detections"]
     assert len(entries) == 4
     for entry in entries:
         assert entry["det_status"] == "reviewed"
@@ -124,7 +131,7 @@ def test_a_verdict_carries_the_identity_fields_the_reference_reads(
 
     # A verdict recorded against one model must not build another model's reference.
     other = review_to_records(
-        engine.raw_state,
+        review_state(engine),
         bucket_identities=[{"checkpoint_sha256": "0000000000000000",
                             "experiment_id": "exp-other-01"}],
         image_dims={IMG_NAME: (IMG_W, IMG_H)},
@@ -140,12 +147,12 @@ def test_an_unresolvable_class_identity_refuses_the_whole_reference(
     engine = ReviewEngine(state_dir=tmp_path, current_user="alice")
     _review_a_whole_image(engine, ctx, class_id=None)
 
-    entries = engine.raw_state["image"][IMG_NAME]["detections"]
+    entries = engine.image_states(BUCKET)[IMG_NAME]["detections"]
     assert [e["class_id"] for e in entries] == [None, None, None, None]
 
     with pytest.raises(ValueError, match="can't be tied to a class this prediction bucket"):
         review_to_records(
-            engine.raw_state,
+            review_state(engine),
             bucket_identities=[PRODUCER],
             image_dims={IMG_NAME: (IMG_W, IMG_H)},
         )

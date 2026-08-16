@@ -169,12 +169,20 @@ def _entry(action, cid, gt, pred, conf, *, producer_identity=_IDENTITY, conf_thr
             "producer_identity": producer_identity, "conf_threshold": conf_threshold}
 
 
-def _write_shard(review_dir: Path, name: str, detections: list, *, gt_preexisting: bool = True) -> None:
-    review_dir.mkdir(parents=True, exist_ok=True)
-    (review_dir / f"{name}.json").write_text(
-        json.dumps({"img_name": name, "state": {"img_status": "completed",
-                                                 "gt_preexisting": gt_preexisting,
-                                                 "detections": detections}}),
+def _write_shard(review_dir: Path, bucket_dir: Path, name: str, detections: list, *,
+                 gt_preexisting: bool = True) -> None:
+    """One completed image's shard, filed under the prediction bucket it was reviewed on."""
+    from tcip_annotation.review_engine import bucket_dirname
+    from tcip_mcp.prediction_buckets import bucket_key_of
+
+    bucket = bucket_key_of(bucket_dir)
+    shard_dir = review_dir / bucket_dirname(bucket)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    (shard_dir / f"{name}.json").write_text(
+        json.dumps({"bucket": bucket, "img_name": name,
+                    "state": {"img_status": "completed",
+                              "gt_preexisting": gt_preexisting,
+                              "detections": detections}}),
         encoding="utf-8")
 
 
@@ -209,18 +217,18 @@ def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _I
     scoped reference; some tests pass a deliberately different one to reproduce the mismatch)."""
     proj = tmp_path / "proj"
     review_dir = proj / ".tcip" / "state" / "review"
+    pred_dir = proj / "predictions" / "model" / "2026-01-01" / "detect"
     lo = 0.05 if floored else 0.8
-    _write_shard(review_dir, "A.jpg", [
+    _write_shard(review_dir, pred_dir, "A.jpg", [
         _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
                producer_identity=producer_identity),
         _entry("rejected", 0, None, [0.75, 0.75, 0.05, 0.05], lo,
                producer_identity=producer_identity)], gt_preexisting=gt_preexisting)
-    _write_shard(review_dir, "B.jpg", [
+    _write_shard(review_dir, pred_dir, "B.jpg", [
         _entry("accepted", 0, [0.25, 0.25, 0.05, 0.05], [0.25, 0.25, 0.05, 0.05], 0.9,
                producer_identity=producer_identity),
         _entry("accepted", 0, [0.5, 0.5, 0.05, 0.05], [0.5, 0.5, 0.05, 0.05], lo,
                producer_identity=producer_identity)], gt_preexisting=gt_preexisting)
-    pred_dir = proj / "predictions" / "model" / "2026-01-01" / "detect"
     pred_dir.mkdir(parents=True, exist_ok=True)
     for stem in ("A", "B"):
         (pred_dir / f"{stem}.json").write_text(json.dumps({"objects": []}), encoding="utf-8")
@@ -254,7 +262,7 @@ def _make_dense_reviewed_project(tmp_path: Path, *, n_images: int = 6, gt_preexi
         name = chr(ord("A") + i)
         x = 0.05 + 0.1 * i
         gt1, gt2 = [x, 0.2, 0.05, 0.05], [x, 0.6, 0.05, 0.05]
-        _write_shard(review_dir, f"{name}.jpg", [
+        _write_shard(review_dir, pred_dir, f"{name}.jpg", [
             _entry("accepted", 0, gt1, gt1, 0.9, producer_identity=producer_identity,
                    conf_threshold=conf_threshold),
             _entry("accepted", 0, gt2, gt2, 0.9, producer_identity=producer_identity,
@@ -371,10 +379,11 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
     # `class_id` field would otherwise default to category_id 1 for every entry.
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
     review_dir = Path(proj) / ".tcip" / "state" / "review"
-    shard = json.loads((review_dir / "A.jpg.json").read_text(encoding="utf-8"))
+    shard_path = next(iter(sorted(review_dir.rglob("A.jpg.json"))))
+    shard = json.loads(shard_path.read_text(encoding="utf-8"))
     for entry in shard["state"]["detections"]:
         entry["class_id"] = None
-    (review_dir / "A.jpg.json").write_text(json.dumps(shard), encoding="utf-8")
+    shard_path.write_text(json.dumps(shard), encoding="utf-8")
 
     resp = client.post("/api/review/validate_reference", json={
         "project_root": proj, "trait": "catkin", "pred_dir": pred_dir})

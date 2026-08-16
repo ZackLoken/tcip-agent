@@ -264,10 +264,12 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 # ── Prediction-bucket immutability ──────────────────────────────────────────
 
 
-def _record_verdict(root: Path, img_name: str) -> None:
+def _record_verdict(root: Path, model: str, date: str, img_name: str) -> None:
     """Record one human verdict against ``img_name`` in the dataset's review state, so the
     prediction bucket holding its predictions counts as reviewed."""
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
+
+    from tcip_mcp.prediction_buckets import bucket_key_of
 
     engine = ReviewEngine(root / ".tcip" / "state")
     ctx = ReviewContext(
@@ -278,7 +280,8 @@ def _record_verdict(root: Path, img_name: str) -> None:
         det_type="fp", class_name="catkin", conf=0.8, iou=None, gt_idx=None,
         pred_idx=0, bbox=(288.0, 216.0, 352.0, 264.0),
     )
-    engine.record_detection_action(det, ctx, action="accepted")
+    engine.record_detection_action(
+        bucket_key_of(prediction_dir(root, model, date)), det, ctx, action="accepted")
 
 
 _BOX = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
@@ -292,7 +295,7 @@ def test_stage_proposals_redirects_when_bucket_has_verdicts(tmp_path: Path) -> N
     first = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
     assert first["bucket"] == "claude" and first["bucket_redirected"] is False
 
-    _record_verdict(root, "IMG_0001.jpg")  # a human reviews claude's prediction
+    _record_verdict(root, "claude", date, "IMG_0001.jpg")  # a human reviews claude's prediction
 
     # The reviewed bucket is now immutable: a re-stage lands in a fresh @r2 bucket and says so.
     second = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
@@ -314,7 +317,7 @@ def test_stage_proposals_overwrite_refused_when_bucket_has_verdicts(tmp_path: Pa
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
     stage_proposals(str(root), "claude", date, "IMG_0001", _BOX)
-    _record_verdict(root, "IMG_0001.jpg")
+    _record_verdict(root, "claude", date, "IMG_0001.jpg")
 
     res = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX, overwrite=True)
     assert "error" in res

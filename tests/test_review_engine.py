@@ -18,11 +18,21 @@ from tcip_annotation import (
     compute_classified_trait_matches,
     compute_matches,
 )
+from tcip_annotation.review_engine import bucket_dirname
+
+# The prediction bucket these verdicts are recorded against, spelled the way
+# prediction_buckets.bucket_key_of spells one: relative to the dataset root.
+BUCKET = "predictions/baseline/2026-02-11"
 
 
 @pytest.fixture
 def engine(tmp_path: Path) -> ReviewEngine:
     return ReviewEngine(state_dir=tmp_path, current_user="alice")
+
+
+@pytest.fixture
+def bucket_dir(tmp_path: Path) -> Path:
+    return tmp_path / "review" / bucket_dirname(BUCKET)
 
 
 @pytest.fixture
@@ -74,82 +84,86 @@ def _unordered_matches(ctx: ReviewContext) -> dict:
 def test_initial_state_is_empty(engine: ReviewEngine, tmp_path: Path) -> None:
     assert engine.raw_state == {}
     assert engine.shard_dir == tmp_path / "review"
-    assert not engine.is_image_reviewed("IMG_0133.JPG")
-    assert engine.get_image_review_status("IMG_0133.JPG") == "not_started"
+    assert not engine.is_image_reviewed(BUCKET, "IMG_0133.JPG")
+    assert engine.get_image_review_status(BUCKET, "IMG_0133.JPG") == "not_started"
 
 
 def test_persistence_round_trip(tmp_path: Path) -> None:
     eng1 = ReviewEngine(tmp_path)
-    eng1.mark_image_reviewed("IMG_0001.JPG")
+    eng1.mark_image_reviewed(BUCKET, "IMG_0001.JPG")
     eng2 = ReviewEngine(tmp_path)
-    assert eng2.is_image_reviewed("IMG_0001.JPG")
+    assert eng2.is_image_reviewed(BUCKET, "IMG_0001.JPG")
 
 
 def test_save_review_state_writes_the_canonical_record_spelling(
-    engine: ReviewEngine, tmp_path: Path
+    engine: ReviewEngine, bucket_dir: Path
 ) -> None:
     """A shard is spelled the way every record is, so a breeder who opens one and a reader
     that parses one meet the same document."""
     from tcip_store import RECORD_JSON
 
-    engine.mark_image_reviewed("IMG_0133.JPG")
-    raw = (tmp_path / "review" / "IMG_0133.JPG.json").read_bytes()
+    engine.mark_image_reviewed(BUCKET, "IMG_0133.JPG")
+    raw = (bucket_dir / "IMG_0133.JPG.json").read_bytes()
 
     assert raw == RECORD_JSON.encode(RECORD_JSON.decode(raw))
-    assert engine.raw_state["image"]["IMG_0133.JPG"]["img_status"] == "completed"
+    assert engine.raw_state["verdicts"][(BUCKET, "IMG_0133.JPG")]["img_status"] == "completed"
 
 
-def test_verdict_writes_only_its_own_shard(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
+def test_verdict_writes_only_its_own_shard(
+    engine: ReviewEngine, ctx: ReviewContext, bucket_dir: Path
+) -> None:
     """A verdict on one image must not touch another image's shard file (O(dets on this
     image), not O(all-reviewed))."""
-    engine.mark_image_reviewed("IMG_OTHER.JPG")
-    other_shard = tmp_path / "review" / "IMG_OTHER.JPG.json"
+    engine.mark_image_reviewed(BUCKET, "IMG_OTHER.JPG")
+    other_shard = bucket_dir / "IMG_OTHER.JPG.json"
     before = other_shard.stat().st_mtime_ns
 
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
-    engine.record_detection_action(dets[0], ctx, action="accepted")
+    engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")
 
-    assert (tmp_path / "review" / "IMG_0133.JPG.json").is_file()
+    assert (bucket_dir / "IMG_0133.JPG.json").is_file()
     assert other_shard.stat().st_mtime_ns == before  # untouched
 
 
 def test_verdict_calls_shard_writer_exactly_once(
     engine: ReviewEngine, ctx: ReviewContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, str]] = []
     orig = ReviewEngine._save_image
 
-    def spy(self: ReviewEngine, img_name: str) -> None:
-        calls.append(img_name)
-        orig(self, img_name)
+    def spy(self: ReviewEngine, bucket: str, img_name: str) -> None:
+        calls.append((bucket, img_name))
+        orig(self, bucket, img_name)
 
     monkeypatch.setattr(ReviewEngine, "_save_image", spy)
 
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
-    engine.record_detection_action(dets[0], ctx, action="accepted")
-    assert calls == [ctx.img_name]  # exactly one shard write, for the touched image only
+    engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")
+    assert calls == [(BUCKET, ctx.img_name)]  # exactly one shard write, for the touched image only
 
 
-def test_verdicts_across_images_produce_one_shard_each(engine: ReviewEngine, ctx: ReviewContext) -> None:
+def test_verdicts_across_images_produce_one_shard_each(
+    engine: ReviewEngine, ctx: ReviewContext, bucket_dir: Path
+) -> None:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
-    engine.record_detection_action(dets[0], ctx, action="accepted")
-    engine.mark_image_reviewed("IMG_0200.JPG")
+    engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")
+    engine.mark_image_reviewed(BUCKET, "IMG_0200.JPG")
 
-    shards = sorted(p.name for p in engine.shard_dir.glob("*.json"))
+    shards = sorted(p.name for p in bucket_dir.glob("*.json"))
     assert shards == ["IMG_0133.JPG.json", "IMG_0200.JPG.json"]
     # Each shard holds only its own image's data.
-    assert engine.raw_state["image"]["IMG_0133.JPG"]["detections"]
-    assert engine.raw_state["image"]["IMG_0200.JPG"]["detections"] == []
+    assert engine.raw_state["verdicts"][(BUCKET, "IMG_0133.JPG")]["detections"]
+    assert engine.raw_state["verdicts"][(BUCKET, "IMG_0200.JPG")]["detections"] == []
 
 
 def test_raw_state_round_trips_through_reload(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     for det in dets:
-        engine.record_detection_action(det, ctx, action="accepted")
+        engine.record_detection_action(BUCKET, det, ctx, action="accepted")
     before = engine.raw_state
 
     reloaded = ReviewEngine(state_dir=tmp_path)
@@ -158,26 +172,27 @@ def test_shard_key_with_separator_round_trips(tmp_path: Path) -> None:
     """A key bearing a path separator survives a save/reload without mutation (the shard filename
     is sanitized, but the true key is read back from the payload)."""
     eng = ReviewEngine(tmp_path)
-    eng.mark_image_reviewed("sub/img.jpg")
+    eng.mark_image_reviewed(BUCKET, "sub/img.jpg")
     before = eng.raw_state
 
     reloaded = ReviewEngine(state_dir=tmp_path)
     assert reloaded.raw_state == before
-    assert reloaded.is_image_reviewed("sub/img.jpg")
+    assert reloaded.is_image_reviewed(BUCKET, "sub/img.jpg")
 
 
 def test_shard_keys_colliding_after_sanitization_stay_distinct(tmp_path: Path) -> None:
     """'a/b.jpg' and 'a_b.jpg' sanitize to the same base but must not share a shard or merge state."""
     eng = ReviewEngine(tmp_path)
-    eng.mark_image_reviewed("a/b.jpg")       # completed
-    eng.mark_image_reviewed("a_b.jpg")
-    eng.unmark_image_reviewed("a_b.jpg")     # -> not_started (no detections)
-    assert len(list(eng.shard_dir.glob("*.json"))) == 2  # two distinct files, no clobber
+    eng.mark_image_reviewed(BUCKET, "a/b.jpg")       # completed
+    eng.mark_image_reviewed(BUCKET, "a_b.jpg")
+    eng.unmark_image_reviewed(BUCKET, "a_b.jpg")     # -> not_started (no detections)
+    assert len(list(eng.shard_dir.rglob("*.json"))) == 2  # two distinct files, no clobber
 
     reloaded = ReviewEngine(state_dir=tmp_path)
-    assert set(reloaded.raw_state["image"]) == {"a/b.jpg", "a_b.jpg"}  # keys preserved, not merged
-    assert reloaded.is_image_reviewed("a/b.jpg")
-    assert not reloaded.is_image_reviewed("a_b.jpg")
+    # keys preserved, not merged
+    assert set(reloaded.raw_state["verdicts"]) == {(BUCKET, "a/b.jpg"), (BUCKET, "a_b.jpg")}
+    assert reloaded.is_image_reviewed(BUCKET, "a/b.jpg")
+    assert not reloaded.is_image_reviewed(BUCKET, "a_b.jpg")
 
 
 def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext) -> None:
@@ -247,10 +262,10 @@ def test_record_and_find_reviewed(engine: ReviewEngine, ctx: ReviewContext) -> N
     target = next(d for d in dets if d.det_type == "tp")
 
     # Before recording: not found
-    assert engine.find_reviewed_entry(target, ctx) is None
+    assert engine.find_reviewed_entry(BUCKET, target, ctx) is None
 
-    engine.record_detection_action(target, ctx, action="accepted")
-    entry = engine.find_reviewed_entry(target, ctx)
+    engine.record_detection_action(BUCKET, target, ctx, action="accepted")
+    entry = engine.find_reviewed_entry(BUCKET, target, ctx)
     assert entry is not None
     assert entry["action"] == "accepted"
     assert entry["match_type"] == "TP"
@@ -262,13 +277,13 @@ def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> 
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     target = dets[0]
-    engine.record_detection_action(target, ctx, action="accepted")
-    engine.record_detection_action(target, ctx, action="rejected")
-    entry = engine.find_reviewed_entry(target, ctx)
+    engine.record_detection_action(BUCKET, target, ctx, action="accepted")
+    engine.record_detection_action(BUCKET, target, ctx, action="rejected")
+    entry = engine.find_reviewed_entry(BUCKET, target, ctx)
     assert entry is not None
     assert entry["action"] == "rejected"
     # Should still be exactly one entry, not two
-    img_data = engine.raw_state["image"][ctx.img_name]
+    img_data = engine.raw_state["verdicts"][(BUCKET, ctx.img_name)]
     assert len(img_data["detections"]) == 1
 
 
@@ -280,8 +295,8 @@ def test_record_stamps_missed_object_attested_for_a_genuine_new_attestation(
     # stamped from that call-site fact directly, not reconstructed later from bbox geometry.
     det = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
                           gt_idx=None, pred_idx=None, bbox=(10, 10, 20, 20))
-    engine.record_detection_action(det, ctx, action="edited")
-    entry = engine.raw_state["image"][ctx.img_name]["detections"][0]
+    engine.record_detection_action(BUCKET, det, ctx, action="edited")
+    entry = engine.raw_state["verdicts"][(BUCKET, ctx.img_name)]["detections"][0]
     assert entry["missed_object_attested"] is True
 
 
@@ -297,8 +312,8 @@ def test_record_does_not_mistake_an_existing_fn_rejection_for_a_missed_object_at
     fn_det = next(d for d in dets if d.det_type == "fn")
     assert fn_det.gt_idx is not None and fn_det.pred_idx is None  # a real, indexed FN
 
-    engine.record_detection_action(fn_det, ctx, action="rejected")
-    entry = engine.find_reviewed_entry(fn_det, ctx)
+    engine.record_detection_action(BUCKET, fn_det, ctx, action="rejected")
+    entry = engine.find_reviewed_entry(BUCKET, fn_det, ctx)
     assert entry is not None
     assert entry["pred_bbox_norm"] is None and entry["gt_bbox_norm"] is not None  # the ambiguous shape
     assert entry["missed_object_attested"] is False
@@ -310,7 +325,7 @@ def test_build_detection_list_never_hides_reviewed(engine: ReviewEngine, ctx: Re
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     before = len(dets)
-    engine.record_detection_action(dets[0], ctx, action="accepted")
+    engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")
     after = engine.build_detection_list(ctx, matches)
     assert len(after) == before  # the accepted detection is still walkable
 
@@ -319,8 +334,8 @@ def test_get_all_image_statuses(engine: ReviewEngine, ctx: ReviewContext) -> Non
     assert engine.get_all_image_statuses() == {}  # nothing touched yet
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
-    engine.record_detection_action(dets[0], ctx, action="accepted")  # -> "started"
-    engine.mark_image_reviewed("IMG_OTHER.JPG")  # -> "completed"
+    engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")  # -> "started"
+    engine.mark_image_reviewed(BUCKET, "IMG_OTHER.JPG")  # -> "completed"
     statuses = engine.get_all_image_statuses()
     assert statuses[ctx.img_name] == "started"
     assert statuses["IMG_OTHER.JPG"] == "completed"
@@ -331,12 +346,12 @@ def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -
     dets = engine.build_detection_list(ctx, matches)
     # Accept each detection one at a time
     for det in dets[:-1]:
-        engine.record_detection_action(det, ctx, action="accepted")
-    assert engine.check_image_review_complete(ctx.img_name, matches) is False
+        engine.record_detection_action(BUCKET, det, ctx, action="accepted")
+    assert engine.check_image_review_complete(BUCKET, ctx.img_name, matches) is False
 
-    engine.record_detection_action(dets[-1], ctx, action="accepted")
-    assert engine.check_image_review_complete(ctx.img_name, matches) is True
-    assert engine.is_image_reviewed(ctx.img_name)
+    engine.record_detection_action(BUCKET, dets[-1], ctx, action="accepted")
+    assert engine.check_image_review_complete(BUCKET, ctx.img_name, matches) is True
+    assert engine.is_image_reviewed(BUCKET, ctx.img_name)
 
 
 def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -> None:
@@ -429,13 +444,13 @@ def test_check_image_review_complete_ignores_a_coverage_only_sweep_entry(
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     sweep_det = ReviewDetection(det_type="sweep", class_name="", conf=None, iou=None,
                                 gt_idx=None, pred_idx=None, bbox=(0, 0, ctx.img_width, ctx.img_height))
-    engine.record_detection_action(sweep_det, ctx, action="swept")
-    assert engine.check_image_review_complete(ctx.img_name, matches) is False
+    engine.record_detection_action(BUCKET, sweep_det, ctx, action="swept")
+    assert engine.check_image_review_complete(BUCKET, ctx.img_name, matches) is False
 
     dets = engine.build_detection_list(ctx, matches)
     for det in dets:
-        engine.record_detection_action(det, ctx, action="accepted")
-    assert engine.check_image_review_complete(ctx.img_name, matches) is True
+        engine.record_detection_action(BUCKET, det, ctx, action="accepted")
+    assert engine.check_image_review_complete(BUCKET, ctx.img_name, matches) is True
 
 
 def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
@@ -506,8 +521,8 @@ def test_persisted_verdict_boxes_scale_width_by_image_width(
     dets = engine.build_detection_list(unordered_ctx, matches, filter_type="tp")
     strongest = next(d for d in dets if d.conf == pytest.approx(0.90))
 
-    engine.record_detection_action(strongest, unordered_ctx, action="accepted")
-    entry = engine.raw_state["image"][unordered_ctx.img_name]["detections"][0]
+    engine.record_detection_action(BUCKET, strongest, unordered_ctx, action="accepted")
+    entry = engine.raw_state["verdicts"][(BUCKET, unordered_ctx.img_name)]["detections"][0]
 
     assert entry["gt_bbox_norm"] == pytest.approx([0.666667, 0.68, 0.166667, 0.32], abs=1e-6)
     assert entry["pred_bbox_norm"] == pytest.approx([0.67, 0.688, 0.166667, 0.32], abs=1e-6)
@@ -530,20 +545,20 @@ def test_gt_preexisting_keeps_the_state_from_before_the_review_session(
     )
     first = ReviewDetection(det_type="fp", class_name="catkin", conf=0.77, iou=None,
                             gt_idx=None, pred_idx=0, bbox=(200, 60, 320, 140))
-    engine.record_detection_action(first, empty, action="rejected")
-    assert engine.raw_state["image"]["IMG_0900.JPG"]["gt_preexisting"] is False
+    engine.record_detection_action(BUCKET, first, empty, action="rejected")
+    assert engine.raw_state["verdicts"][(BUCKET, "IMG_0900.JPG")]["gt_preexisting"] is False
 
     # The reviewer then draws a missed object, so the session's own ctx now carries ground truth.
     authored = replace(empty, gt=[Annotation(subject="catkin", geometry=BBox(600, 200, 720, 300))])
     second = ReviewDetection(det_type="fn", class_name="catkin", conf=None, iou=None,
                              gt_idx=0, pred_idx=None, bbox=(600, 200, 720, 300))
-    engine.record_detection_action(second, authored, action="accepted")
-    assert engine.raw_state["image"]["IMG_0900.JPG"]["gt_preexisting"] is False
+    engine.record_detection_action(BUCKET, second, authored, action="accepted")
+    assert engine.raw_state["verdicts"][(BUCKET, "IMG_0900.JPG")]["gt_preexisting"] is False
 
     # An image that genuinely did have ground truth before review still records True.
     dets = engine.build_detection_list(unordered_ctx, _unordered_matches(unordered_ctx))
-    engine.record_detection_action(dets[0], unordered_ctx, action="accepted")
-    assert engine.raw_state["image"][unordered_ctx.img_name]["gt_preexisting"] is True
+    engine.record_detection_action(BUCKET, dets[0], unordered_ctx, action="accepted")
+    assert engine.raw_state["verdicts"][(BUCKET, unordered_ctx.img_name)]["gt_preexisting"] is True
 
 
 def test_verdict_count_matches_bucket_stems_against_extensioned_log_keys(
@@ -558,13 +573,13 @@ def test_verdict_count_matches_bucket_stems_against_extensioned_log_keys(
     matches = _unordered_matches(unordered_ctx)
     dets = engine.build_detection_list(unordered_ctx, matches)
     for det in dets[:3]:
-        engine.record_detection_action(det, unordered_ctx, action="accepted")
-    assert len(engine.raw_state["image"][unordered_ctx.img_name]["detections"]) == 3
+        engine.record_detection_action(BUCKET, det, unordered_ctx, action="accepted")
+    assert len(engine.raw_state["verdicts"][(BUCKET, unordered_ctx.img_name)]["detections"]) == 3
 
-    assert engine.verdict_count_for_images(["IMG_0501"]) == 3
-    assert engine.verdict_count_for_images(["IMG_0501", "IMG_9999"]) == 3
-    assert engine.verdict_count_for_images(["IMG_9999"]) == 0
-    assert engine.verdict_count_for_images([]) == 0
+    assert engine.verdict_count_for_images(BUCKET, ["IMG_0501"]) == 3
+    assert engine.verdict_count_for_images(BUCKET, ["IMG_0501", "IMG_9999"]) == 3
+    assert engine.verdict_count_for_images(BUCKET, ["IMG_9999"]) == 0
+    assert engine.verdict_count_for_images(BUCKET, []) == 0
 
 
 def test_completion_gate_counts_every_detection_not_only_the_filtered_ones(
@@ -579,17 +594,17 @@ def test_completion_gate_counts_every_detection_not_only_the_filtered_ones(
     tp_only = engine.build_detection_list(unordered_ctx, matches, filter_type="tp")
     assert len(tp_only) == 2
     for det in tp_only:
-        engine.record_detection_action(det, unordered_ctx, action="accepted")
-    assert engine.check_image_review_complete(unordered_ctx.img_name, matches) is False
-    assert engine.get_image_review_status(unordered_ctx.img_name) == "started"
+        engine.record_detection_action(BUCKET, det, unordered_ctx, action="accepted")
+    assert engine.check_image_review_complete(BUCKET, unordered_ctx.img_name, matches) is False
+    assert engine.get_image_review_status(BUCKET, unordered_ctx.img_name) == "started"
 
     for det in engine.build_detection_list(unordered_ctx, matches, filter_type="fp"):
-        engine.record_detection_action(det, unordered_ctx, action="rejected")
-    assert engine.check_image_review_complete(unordered_ctx.img_name, matches) is False
+        engine.record_detection_action(BUCKET, det, unordered_ctx, action="rejected")
+    assert engine.check_image_review_complete(BUCKET, unordered_ctx.img_name, matches) is False
 
     for det in engine.build_detection_list(unordered_ctx, matches, filter_type="fn"):
-        engine.record_detection_action(det, unordered_ctx, action="accepted")
-    assert engine.check_image_review_complete(unordered_ctx.img_name, matches) is True
+        engine.record_detection_action(BUCKET, det, unordered_ctx, action="accepted")
+    assert engine.check_image_review_complete(BUCKET, unordered_ctx.img_name, matches) is True
 
 
 def test_an_attested_miss_stays_attested_when_keyed_to_the_authored_geometry(
@@ -609,12 +624,12 @@ def test_an_attested_miss_stays_attested_when_keyed_to_the_authored_geometry(
         unordered_ctx,
         gt=[*unordered_ctx.gt, Annotation(subject="catkin", geometry=BBox(*drawn))],
     )
-    engine.record_detection_action(
+    engine.record_detection_action(BUCKET,
         det, unordered_ctx, action="edited",
         norm_det=replace(det, gt_idx=len(authored.gt) - 1), norm_ctx=authored,
     )
 
-    entry = engine.raw_state["image"][unordered_ctx.img_name]["detections"][0]
+    entry = engine.raw_state["verdicts"][(BUCKET, unordered_ctx.img_name)]["detections"][0]
     assert entry["missed_object_attested"] is True
     assert entry["pred_bbox_norm"] is None
     assert entry["gt_bbox_norm"] == pytest.approx([0.466667, 0.28, 0.1, 0.16], abs=1e-6)
@@ -633,21 +648,21 @@ def test_a_shard_write_that_fails_to_land_is_refused_out_loud(
     """
     matches = _unordered_matches(unordered_ctx)
     dets = engine.build_detection_list(unordered_ctx, matches)
-    engine.record_detection_action(dets[0], unordered_ctx, action="accepted")
+    engine.record_detection_action(BUCKET, dets[0], unordered_ctx, action="accepted")
 
     def refuse(src, dst, **kwargs):
         raise OSError("shard swap refused")
 
     monkeypatch.setattr(os, "replace", refuse)
     with pytest.raises(OSError, match="shard swap refused"):
-        engine.record_detection_action(dets[1], unordered_ctx, action="rejected")
+        engine.record_detection_action(BUCKET, dets[1], unordered_ctx, action="rejected")
     monkeypatch.undo()
 
-    assert sorted(p.name for p in engine.shard_dir.glob("*.json")) == ["IMG_0501.JPG.json"]
-    assert [p.name for p in engine.shard_dir.iterdir() if p.suffix == ".tmp"] == []
+    assert sorted(p.name for p in engine.shard_dir.rglob("*.json")) == ["IMG_0501.JPG.json"]
+    assert [p.name for p in engine.shard_dir.rglob("*") if p.suffix == ".tmp"] == []
 
     reloaded = ReviewEngine(state_dir=tmp_path)
-    persisted = reloaded.raw_state["image"][unordered_ctx.img_name]["detections"]
+    persisted = reloaded.raw_state["verdicts"][(BUCKET, unordered_ctx.img_name)]["detections"]
     assert len(persisted) == 1
     assert persisted[0]["action"] == "accepted"
     assert persisted[0]["det_status"] == "reviewed"

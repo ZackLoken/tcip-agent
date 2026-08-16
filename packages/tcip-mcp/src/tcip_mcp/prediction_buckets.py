@@ -79,9 +79,32 @@ def review_state_dir_of(root: str | Path) -> Path:
     return Path(root, ".tcip", "state")
 
 
-def verdict_count(review_state_dir: Path | str, names: Iterable[str]) -> int:
-    """Review verdicts recorded against ``names`` (image stems). 0 when the store holds no
-    verdicts at all: no engine is created for a never-reviewed dataset."""
+def bucket_key_of(bucket_dir: str | Path | None) -> str:
+    """The verdict store's key for the prediction bucket at ``bucket_dir``.
+
+    The one spelling of a bucket's identity in that store, so the reviewer recording a verdict and
+    the immutability guard counting it name the same bucket. A bucket inside a dataset is named by
+    its path relative to that dataset's root, the same relative form the count document's covered
+    buckets use, so verdicts follow a dataset that moves. A directory under no dataset root has no
+    such anchor and is named by its own resolved path. No directory at all is
+    :data:`~tcip_annotation.review_engine.NO_BUCKET`, the key for a ground-truth-only review.
+    """
+    from tcip_annotation.review_engine import NO_BUCKET
+
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    if not bucket_dir:
+        return NO_BUCKET
+    d = Path(bucket_dir)
+    root = dataset_root_of(d)
+    if root is None:
+        return d.resolve().as_posix()
+    return d.relative_to(root).as_posix()
+
+
+def verdict_count(review_state_dir: Path | str, bucket: str, names: Iterable[str]) -> int:
+    """Review verdicts recorded against ``names`` (image stems) on ``bucket``. 0 when the store
+    holds no verdicts at all: no engine is created for a never-reviewed dataset."""
     import tcip_store
 
     from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE, ReviewEngine
@@ -89,7 +112,7 @@ def verdict_count(review_state_dir: Path | str, names: Iterable[str]) -> int:
     d = Path(review_state_dir)
     if not tcip_store.keys(REVIEW_VERDICTS_STORE, str(d)):
         return 0
-    return ReviewEngine(d).verdict_count_for_images(names)
+    return ReviewEngine(d).verdict_count_for_images(bucket, names)
 
 
 class BucketHasVerdicts(Exception):
@@ -115,10 +138,15 @@ class BucketResolution:
 
 
 def _bucket_verdicts(review_state_dir: Path | str, dirs: list[Path]) -> int:
-    stems = bucket_stems(*dirs)
-    if not stems:  # empty (or missing) bucket: nothing was ever reviewed there
-        return 0
-    return verdict_count(review_state_dir, stems)
+    # Counted per directory under that directory's own bucket key: a namesake image reviewed under
+    # another bucket must not freeze this one.
+    total = 0
+    for d in dirs:
+        stems = bucket_stems(d)
+        if not stems:  # empty (or missing) bucket: nothing was ever reviewed there
+            continue
+        total += verdict_count(review_state_dir, bucket_key_of(d), stems)
+    return total
 
 
 def resolve_writable_bucket(

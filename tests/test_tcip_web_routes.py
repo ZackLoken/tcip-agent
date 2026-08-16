@@ -526,6 +526,13 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
 # ── /api/review ─────────────────────────────────────────────────────────
 
 
+def _shard(state_dir: Path, shard_name: str) -> Path:
+    """The one review shard written for ``shard_name``, wherever its bucket directory put it."""
+    found = sorted((state_dir / "review").rglob(shard_name))
+    assert len(found) == 1, found
+    return found[0]
+
+
 def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
@@ -613,7 +620,7 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
     )
     assert resp.status_code == 200
     # the image's review shard should now exist (per-image file, not one whole-state file)
-    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
     assert shard_path.exists()
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["action"] == "accepted"  # payload wraps {img_name, state}
@@ -644,7 +651,7 @@ def test_review_action_resolves_class_id_from_bucket_id_map(
         pred_path=str(pred), det_type="tp", class_name="elongated", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["class_id"] == 1  # resolved via the bucket's id_map
 
@@ -675,7 +682,7 @@ def test_review_action_records_unresolvable_class_id_as_none(
         pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["class_id"] is None
 
@@ -698,7 +705,7 @@ def test_review_action_no_sidecar_records_unresolvable_class_id(
         pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
+    shard_path = _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json")
     data = json.loads(shard_path.read_text(encoding="utf-8"))
     assert data["state"]["detections"][0]["class_id"] is None
 
@@ -836,8 +843,8 @@ def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path
     assert resp.status_code == 400
     assert "no annotations path" in resp.json()["detail"]
     # The refused verdict must not have been recorded as reviewed.
-    shard_path = project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json"
-    if shard_path.exists():
+    review_dir = project_root / ".tcip" / "state" / "review"
+    for shard_path in review_dir.rglob("IMG_0000.JPG.json"):
         data = json.loads(shard_path.read_text(encoding="utf-8"))
         assert not data.get("state", {}).get("detections")
 
@@ -944,7 +951,7 @@ def test_review_action_records_subject_name_and_reviewer(
         },
     )
     assert resp.status_code == 200
-    entry = json.loads((state / "review" / "IMG_0000.JPG.json").read_text())["state"]["detections"][0]
+    entry = json.loads(_shard(state, "IMG_0000.JPG.json").read_text())["state"]["detections"][0]
     assert entry["class_name"] == "catkin"  # real name, straight from the annotation's subject
     assert entry["reviewed_by"]  # non-empty reviewer
 
@@ -957,6 +964,7 @@ def _verdicted_launch_dataset(tmp_path: Path, monkeypatch) -> tuple[Path, Path, 
     """
     from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
     from tcip_mcp.dataset_layout import image_dir, prediction_dir
+    from tcip_mcp.prediction_buckets import bucket_key_of
 
     platform_root = tmp_path / "platform"
     (platform_root / ".tcip" / "state").mkdir(parents=True)
@@ -981,7 +989,7 @@ def _verdicted_launch_dataset(tmp_path: Path, monkeypatch) -> tuple[Path, Path, 
                                           score=0.9)])
     det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
-    engine.record_detection_action(det, ctx, action="accepted")
+    engine.record_detection_action(bucket_key_of(out), det, ctx, action="accepted")
     return dataset_root, ckpt, date
 
 
@@ -1285,7 +1293,8 @@ def test_review_subject_names_flow_from_annotations(
             },
         )
         assert resp.status_code == 200
-        shard = json.loads((project_root / ".tcip" / "state" / "review" / "IMG_0000.JPG.json").read_text())
+        shard = json.loads(
+            _shard(project_root / ".tcip" / "state", "IMG_0000.JPG.json").read_text())
         return shard["state"]["detections"][0]["class_name"]
 
     assert _class_name_for("catkin") == "catkin"

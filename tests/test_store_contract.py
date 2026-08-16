@@ -921,8 +921,9 @@ REGISTERED = {
         "predictions/live/2026-03-04/a_1.json"),
     "review_verdicts": Registered(
         {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
-        lambda root: review_engine.review_verdict_key(_review_state_dir(root), "a_1.jpg"),
-        ".tcip/state/review/a_1.jpg.json", scope_of=_review_state_dir),
+        lambda root: review_engine.review_verdict_key(
+            _review_state_dir(root), "predictions", "a_1.jpg"),
+        ".tcip/state/review/predictions/a_1.jpg.json", scope_of=_review_state_dir),
     "canvas_meta": Registered(
         {"schema_version": 1, "tab": "annotate", "image": "ü.jpg"},
         lambda root: canvas.canvas_meta_key(str(root)), ".tcip/state/canvas_live.json"),
@@ -1303,18 +1304,31 @@ def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_code
 
 
 def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(tmp_path):
-    """An image key carrying a separator is one filename, and the key recoverable from that
-    filename places the very same file."""
+    """An image key carrying a separator is one filename, a bucket key carrying separators is one
+    directory, and the keys recoverable from that path place the very same file."""
     state_dir = _review_state_dir(tmp_path)
     engine = review_engine.ReviewEngine(state_dir, current_user="ü")
-    key = review_engine.review_verdict_key(state_dir, "a/b.jpg")
+    key = review_engine.review_verdict_key(state_dir, "predictions/live/2026-03-04", "a/b.jpg")
     locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
 
     placed = locator.relative_path(str(state_dir), key.parts)
-    assert Path(state_dir, *placed.parts) == engine._shard_path("a/b.jpg")
+    assert Path(state_dir, *placed.parts) == engine._shard_path(*key.parts)
+    assert len(placed.parts) == 3  # review/<one bucket dir>/<one shard file>
     recovered = locator.parts_from(placed)
     assert recovered != key.parts
     assert locator.relative_path(str(state_dir), recovered) == placed
+
+
+def test_a_verdict_with_no_prediction_bucket_places_its_shard_under_the_review_dir(tmp_path):
+    """A ground-truth-only review names no bucket, and its shard sits directly under ``review/``
+    rather than in a directory standing in for one."""
+    state_dir = _review_state_dir(tmp_path)
+    key = review_engine.review_verdict_key(state_dir, review_engine.NO_BUCKET, "a_1.jpg")
+    locator = ts.get_descriptor(review_engine.REVIEW_VERDICTS_STORE).locator
+
+    placed = locator.relative_path(str(state_dir), key.parts)
+    assert placed == PurePosixPath("review/a_1.jpg.json")
+    assert locator.parts_from(placed) == key.parts
 
 
 # ── conditional blob writes ─────────────────────────────────────────────────────

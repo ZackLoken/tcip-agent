@@ -12,8 +12,14 @@ GUI-free:
     concurrent sessions.
 
 The only state the engine holds between calls is the persisted review log, one JSON
-shard per image under ``<state_dir>/review/`` (a verdict rewrites only its own image's
-shard, not the whole cross-image log), and a small spatial-hash cache for fast lookups.
+shard per (prediction bucket, image) under ``<state_dir>/review/`` (a verdict rewrites only its
+own shard, not the whole cross-image log), and a small spatial-hash cache for fast lookups.
+
+A verdict is recorded against the prediction bucket the reviewer was looking at, so two dates of
+a camera that reuses filenames keep separate verdicts. The bucket is a caller-supplied key this
+package stores verbatim and never derives: it resolves no layout of its own (the platform spells
+one bucket key, ``tcip_mcp.prediction_buckets.bucket_key_of``). ``NO_BUCKET`` (``"."``) is the
+key for a review carrying no prediction bucket at all, which is a ground-truth-only review.
 """
 
 from __future__ import annotations
@@ -78,40 +84,66 @@ REVIEW_SHARD_DIRNAME = "review"
 _LOOKUP_QUANT = 500
 _LOOKUP_TOLERANCE = 0.002
 _SHARD_SUFFIX = ".json"
+_PATH_HOSTILE = '\\/:*?"<>|'
+# A bucket key is a relative path of at least one segment, so "." names no bucket without
+# being able to collide with one, and the store refuses an empty key field.
+NO_BUCKET = "."
+
+
+def _sanitized(key: str) -> str:
+    """``key`` with path-hostile characters folded to ``_``, hash-suffixed when that changed it.
+
+    Sanitizing can collide distinct keys ('a/b.jpg' vs 'a_b.jpg'); a short stable hash of the
+    true key keeps their files distinct. The key itself lives in the payload.
+    """
+    safe = key
+    for ch in _PATH_HOSTILE:
+        safe = safe.replace(ch, "_")
+    if safe != key:
+        safe = f"{safe}.{hashlib.sha1(key.encode('utf-8')).hexdigest()[:8]}"
+    return safe
 
 
 def shard_filename(img_name: str) -> str:
-    """The single filename an image key is stored under.
+    """The single filename an image key is stored under."""
+    return f"{_sanitized(img_name)}{_SHARD_SUFFIX}"
 
-    Sanitizing separators can collide distinct keys ('a/b.jpg' vs 'a_b.jpg'); a short stable
-    hash of the true key keeps their shard files distinct. The key itself lives in the payload.
+
+def bucket_dirname(bucket: str) -> str:
+    """The single directory name one bucket's shards are stored under.
+
+    A bucket key is a relative path whose separators are part of the key, and it is folded into
+    one directory name rather than mirrored as a tree: one sanitizing rule then covers image keys
+    and bucket keys alike, and the shard path stays short enough for the platforms this runs on.
+    :data:`NO_BUCKET` names no directory, so a review carrying no prediction bucket keeps its
+    shard directly under ``review/``.
     """
-    safe = img_name.replace("\\", "_").replace("/", "_")
-    if safe != img_name:
-        safe = f"{safe}.{hashlib.sha1(img_name.encode('utf-8')).hexdigest()[:8]}"
-    return f"{safe}{_SHARD_SUFFIX}"
+    return _sanitized(bucket)
 
 
 @dataclass(frozen=True)
 class _ShardLocator:
-    """Places one image's verdict shard, carrying the filename sanitizing the layout needs.
+    """Places one (bucket, image) verdict shard, carrying the sanitizing the layout needs.
 
-    The recoverable key from a path is the sanitized filename, which places that same file.
-    An image key that had to be sanitized is not recoverable from the path and does not need
-    to be: the true key is stored inside the payload, which is what reload reads it from.
+    The recoverable key from a path is the sanitized bucket directory and filename, which place
+    that same file. A key that had to be sanitized is not recoverable from the path and does not
+    need to be: the true keys are stored inside the payload, which is what reload reads them from.
     """
 
     def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
-        (img_name,) = parts
-        return PurePosixPath(REVIEW_SHARD_DIRNAME, shard_filename(img_name))
+        bucket, img_name = parts
+        return PurePosixPath(
+            REVIEW_SHARD_DIRNAME, bucket_dirname(bucket), shard_filename(img_name)
+        )
 
     def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
         segments = relative_path.parts
-        if len(segments) != 2 or segments[0] != REVIEW_SHARD_DIRNAME:
+        if not 2 <= len(segments) <= 3 or segments[0] != REVIEW_SHARD_DIRNAME:
             return None
-        if not segments[1].endswith(_SHARD_SUFFIX):
+        if not segments[-1].endswith(_SHARD_SUFFIX):
             return None
-        return (segments[1][: -len(_SHARD_SUFFIX)],)
+        bucket = segments[1] if len(segments) == 3 else NO_BUCKET
+        return (bucket, segments[-1][: -len(_SHARD_SUFFIX)])
 
 
 REVIEW_VERDICTS_STORE = "review_verdicts"
@@ -120,7 +152,7 @@ register_store(
     StoreDescriptor(
         name=REVIEW_VERDICTS_STORE,
         kind="record",
-        key_fields=("image",),
+        key_fields=("bucket", "image"),
         codec=RECORD_JSON,
         concurrency="cas",
         enumerable=True,
@@ -129,14 +161,17 @@ register_store(
 )
 
 
-def review_verdict_key(state_dir: str | Path, img_name: str) -> Key:
-    """One image's review verdicts.
+def review_verdict_key(state_dir: str | Path, bucket: str, img_name: str) -> Key:
+    """One image's review verdicts under one prediction bucket.
+
+    Keyed by the bucket as well as the image, so a filename a camera reuses across two dates
+    holds one set of verdicts per bucket instead of one shared set.
 
     ``cas``: a shard is rewritten from an engine's cached aggregate state, and a second
     engine on the same state dir holds its own copy, so an unconditional write drops the
     verdicts the other one recorded.
     """
-    return Key(REVIEW_VERDICTS_STORE, str(state_dir), (img_name,))
+    return Key(REVIEW_VERDICTS_STORE, str(state_dir), (bucket, img_name))
 
 
 LABEL_BASELINES_STORE = "label_baselines"
@@ -186,8 +221,8 @@ class ReviewEngine:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.current_user = current_user
         self._review_state: dict = {}
-        self._shard_versions: dict[str, Version] = {}
-        self._reviewed_lookup: tuple[str, dict, dict] = ("", {}, {})
+        self._shard_versions: dict[tuple[str, str], Version] = {}
+        self._reviewed_lookup: tuple[tuple[str, str], dict, dict] = ((NO_BUCKET, ""), {}, {})
         self.load_review_state()
 
     # ── Persistence ───────────────────────────────────────────────────────
@@ -196,12 +231,15 @@ class ReviewEngine:
     def shard_dir(self) -> Path:
         return self.state_dir / REVIEW_SHARD_DIRNAME
 
-    def _shard_path(self, img_name: str) -> Path:
-        relative = _SHARD_LOCATOR.relative_path(str(self.state_dir), (img_name,))
+    def _shard_path(self, bucket: str, img_name: str) -> Path:
+        relative = _SHARD_LOCATOR.relative_path(str(self.state_dir), (bucket, img_name))
         return Path(self.state_dir, *relative.parts)
 
+    def _verdicts(self) -> dict:
+        return self._review_state.get("verdicts", {})
+
     def load_review_state(self) -> None:
-        per_image: dict = {}
+        verdicts: dict = {}
         self._shard_versions = {}
         for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(self.state_dir)):
             try:
@@ -210,52 +248,68 @@ class ReviewEngine:
                 logger.exception("Could not load review shard %s", key.parts[-1])
                 continue
             payload = stored.value
-            # The true image key is stored inside the payload, so a sanitized/hash-suffixed filename
-            # never mutates or merges keys on reload.
-            img_name, state = payload.get("img_name"), payload.get("state")
-            if img_name is None or state is None:
-                img_name, state = key.parts[-1], payload
-            per_image[img_name] = state
-            self._shard_versions[img_name] = stored.version
-        self._review_state = {"image": per_image} if per_image else {}
+            # The true bucket and image keys are stored inside the payload, so a sanitized/
+            # hash-suffixed path never mutates or merges keys on reload.
+            bucket, img_name = payload.get("bucket"), payload.get("img_name")
+            state = payload.get("state")
+            if bucket is None or img_name is None or state is None:
+                bucket, img_name, state = key.parts[0], key.parts[1], payload
+            verdicts[(bucket, img_name)] = state
+            self._shard_versions[(bucket, img_name)] = stored.version
+        self._review_state = {"verdicts": verdicts} if verdicts else {}
         self._invalidate_reviewed_lookup()
 
-    def _save_image(self, img_name: str) -> None:
-        """Persist only ``img_name``'s shard: O(detections on that image), not O(all-reviewed).
+    def _save_image(self, bucket: str, img_name: str) -> None:
+        """Persist only this (bucket, image)'s shard: O(detections on that image), not
+        O(all-reviewed).
 
         Compare-and-set against the version this engine last saw. A refusal is raised, never
         logged and dropped: this engine rewrites the shard whole from its own cached aggregate,
         so a shard that moved underneath it would otherwise have another reviewer's verdicts
         silently overwritten, and a contended shard would be reported to the reviewer as saved.
         """
-        img_data = self._review_state.get("image", {}).get(img_name)
+        img_data = self._verdicts().get((bucket, img_name))
         if img_data is None:
             return
-        # Store the true key alongside the state so reload reconstructs it from the payload, not
-        # the (possibly sanitized) filename.
-        self._shard_versions[img_name] = tcip_store.replace(
-            review_verdict_key(self.state_dir, img_name),
-            {"img_name": img_name, "state": img_data},
-            expect=self._shard_versions.get(img_name, Version.ABSENT),
+        # Store the true keys alongside the state so reload reconstructs them from the payload,
+        # not the (possibly sanitized) path.
+        self._shard_versions[(bucket, img_name)] = tcip_store.replace(
+            review_verdict_key(self.state_dir, bucket, img_name),
+            {"bucket": bucket, "img_name": img_name, "state": img_data},
+            expect=self._shard_versions.get((bucket, img_name), Version.ABSENT),
         )
 
     def save_review_state(self) -> None:
-        """Flush every image's shard. The per-verdict callers use :meth:`_save_image`
+        """Flush every shard. The per-verdict callers use :meth:`_save_image`
         instead, to touch only the image that changed; this is for migration / tests
         that want the whole in-memory state written out."""
-        for img_name in list(self._review_state.get("image", {})):
-            self._save_image(img_name)
+        for bucket, img_name in list(self._verdicts()):
+            self._save_image(bucket, img_name)
 
     @property
     def raw_state(self) -> dict:
-        """Expose the raw review_state dict. Mainly for tests / audit."""
+        """Expose the raw review_state dict, keyed ``(bucket, image)``. Mainly for tests / audit."""
         return self._review_state
+
+    def reviewed_buckets(self) -> list[str]:
+        """Every prediction bucket this store holds verdicts or completions for, sorted.
+
+        The explicit enumeration for a consumer that legitimately spans buckets, so it asks which
+        buckets exist rather than reading one bucket's entries as if they were the whole store.
+        """
+        return sorted({bucket for bucket, _ in self._verdicts()})
+
+    def image_states(self, bucket: str) -> dict[str, dict]:
+        """One bucket's image-name to review-state map: the shape the verdict readers consume."""
+        return {img: data for (b, img), data in self._verdicts().items() if b == bucket}
 
     # ── Image-level status ────────────────────────────────────────────────
 
-    def mark_image_reviewed(self, img_name: str, *, producer_identity: Optional[dict] = None,
+    def mark_image_reviewed(self, bucket: str, img_name: str, *,
+                            producer_identity: Optional[dict] = None,
                             adjudication_covered: Optional[bool] = None) -> None:
-        """Mark ``img_name`` fully reviewed (e.g. a confirmed negative / bulk-accept).
+        """Mark ``img_name`` fully reviewed under ``bucket`` (e.g. a confirmed negative /
+        bulk-accept).
 
         ``producer_identity``: the resolved producing-bucket fact (``checkpoint_sha256``/
         ``experiment_id``), a plain dict the caller resolves (this package never looks one up
@@ -271,64 +325,72 @@ class ReviewEngine:
         bulk-accept dilute a real reference's statistics. ``None`` (the default) leaves any existing
         stamp untouched.
         """
-        per_image = self._review_state.setdefault("image", {})
-        img_data = per_image.setdefault(
-            img_name, {"img_status": "completed", "detections": []}
+        verdicts = self._review_state.setdefault("verdicts", {})
+        img_data = verdicts.setdefault(
+            (bucket, img_name), {"img_status": "completed", "detections": []}
         )
         img_data["img_status"] = "completed"
         if producer_identity is not None:
             img_data["producer_identity"] = producer_identity
         if adjudication_covered is not None:
             img_data["adjudication_covered"] = adjudication_covered
-        self._save_image(img_name)
+        self._save_image(bucket, img_name)
 
-    def unmark_image_reviewed(self, img_name: str) -> None:
+    def unmark_image_reviewed(self, bucket: str, img_name: str) -> None:
         """Reverse a manual mark: back to started (verdicts kept) or not_started."""
-        per_image = self._review_state.setdefault("image", {})
-        img_data = per_image.get(img_name)
+        img_data = self._verdicts().get((bucket, img_name))
         if not img_data:
             return
         img_data["img_status"] = "started" if img_data.get("detections") else "not_started"
-        self._save_image(img_name)
+        self._save_image(bucket, img_name)
 
-    def is_image_reviewed(self, img_name: str) -> bool:
-        per_image = self._review_state.get("image", {})
-        img_data = per_image.get(img_name)
+    def is_image_reviewed(self, bucket: str, img_name: str) -> bool:
+        img_data = self._verdicts().get((bucket, img_name))
         if not img_data:
             return False
         return img_data.get("img_status") == "completed"
 
-    def get_image_review_status(self, img_name: str) -> str:
+    def get_image_review_status(self, bucket: str, img_name: str) -> str:
         """Return ``"completed"``, ``"started"``, or ``"not_started"``."""
-        per_image = self._review_state.get("image", {})
-        img_data = per_image.get(img_name)
+        img_data = self._verdicts().get((bucket, img_name))
         if not img_data:
             return "not_started"
         return img_data.get("img_status", "not_started")
 
-    def verdict_count_for_images(self, names: Iterable[str]) -> int:
-        """Total recorded verdicts (accept/reject/edit detection entries) across ``names``,
-        matched by image stem so a prediction bucket's ``<stem>.json`` files line up with the
-        review log's image-name keys. Backs prediction-bucket immutability: a bucket whose
-        images carry verdicts must not be silently overwritten by a re-run."""
+    def verdict_count_for_images(self, bucket: str, names: Iterable[str]) -> int:
+        """Total recorded verdicts (accept/reject/edit detection entries) on ``bucket`` across
+        ``names``, matched by image stem so a prediction bucket's ``<stem>.json`` files line up
+        with the review log's image-name keys. Backs prediction-bucket immutability: a bucket
+        whose images carry verdicts must not be silently overwritten by a re-run. Scoped to the
+        one bucket, so a namesake image reviewed under another bucket never freezes this one."""
         wanted = {Path(n).stem for n in names}
         if not wanted:
             return 0
-        per_image = self._review_state.get("image", {})
         total = 0
-        for img_name, data in per_image.items():
-            if Path(img_name).stem in wanted:
+        for (b, img_name), data in self._verdicts().items():
+            if b == bucket and Path(img_name).stem in wanted:
                 total += len(data.get("detections", []))
         return total
 
     def get_all_image_statuses(self) -> dict[str, str]:
-        """Review status for every image the engine has state for (untouched images are
-        absent, the caller defaults them to ``"not_started"``). Backs the image-level
-        Reviewed/Unreviewed navigation filter, batch-fetched once per dataset."""
-        per_image = self._review_state.get("image", {})
-        return {
-            name: data.get("img_status", "not_started") for name, data in per_image.items()
-        }
+        """Review status for every image the engine has state for, across every bucket (untouched
+        images are absent, the caller defaults them to ``"not_started"``). Backs the image-level
+        Reviewed/Unreviewed navigation filter, batch-fetched once per dataset, which asks whether
+        an image has review progress at all rather than progress under one bucket. An image
+        reviewed under several buckets reports the furthest status any of them reached."""
+        rank = {"not_started": 0, "started": 1, "completed": 2}
+        statuses: dict[str, str] = {}
+        for (_bucket, name), data in self._verdicts().items():
+            status = data.get("img_status", "not_started")
+            if rank.get(status, 0) >= rank.get(statuses.get(name, "not_started"), 0):
+                statuses[name] = status
+        return statuses
+
+    def image_status_across_buckets(self, img_name: str) -> str:
+        """``img_name``'s furthest review status across every bucket, for the caller that asks
+        about an image without naming a bucket. The single-image counterpart of
+        :meth:`get_all_image_statuses`, sharing its precedence rule by calling it."""
+        return self.get_all_image_statuses().get(img_name, "not_started")
 
     # ── Bounding-box helpers ──────────────────────────────────────────────
 
@@ -404,13 +466,12 @@ class ReviewEngine:
     # ── Reviewed-entry spatial hash ───────────────────────────────────────
 
     def _invalidate_reviewed_lookup(self) -> None:
-        self._reviewed_lookup = ("", {}, {})
+        self._reviewed_lookup = ((NO_BUCKET, ""), {}, {})
 
-    def _build_reviewed_lookup(self, img_name: str) -> None:
-        per_image = self._review_state.get("image", {})
-        img_data = per_image.get(img_name)
+    def _build_reviewed_lookup(self, bucket: str, img_name: str) -> None:
+        img_data = self._verdicts().get((bucket, img_name))
         if not img_data:
-            self._reviewed_lookup = (img_name, {}, {})
+            self._reviewed_lookup = ((bucket, img_name), {}, {})
             return
         reviewed_dets = img_data.get("detections", [])
         pred_map: dict = {}
@@ -424,14 +485,16 @@ class ReviewEngine:
             if e_gt:
                 qk = (round(e_gt[0] * _LOOKUP_QUANT), round(e_gt[1] * _LOOKUP_QUANT))
                 gt_map.setdefault(qk, []).append(entry)
-        self._reviewed_lookup = (img_name, pred_map, gt_map)
+        self._reviewed_lookup = ((bucket, img_name), pred_map, gt_map)
 
-    def find_reviewed_entry(self, det: ReviewDetection, ctx: ReviewContext) -> Optional[dict]:
-        """Return the reviewed-entry dict for ``det`` on this image, if any."""
+    def find_reviewed_entry(
+        self, bucket: str, det: ReviewDetection, ctx: ReviewContext
+    ) -> Optional[dict]:
+        """Return the reviewed-entry dict for ``det`` on this image under ``bucket``, if any."""
         if not ctx.img_name:
             return None
-        if self._reviewed_lookup[0] != ctx.img_name:
-            self._build_reviewed_lookup(ctx.img_name)
+        if self._reviewed_lookup[0] != (bucket, ctx.img_name):
+            self._build_reviewed_lookup(bucket, ctx.img_name)
         _, pred_map, gt_map = self._reviewed_lookup
 
         if det.det_type in ("tp", "fp"):
@@ -542,6 +605,7 @@ class ReviewEngine:
 
     def record_detection_action(
         self,
+        bucket: str,
         det: ReviewDetection,
         ctx: ReviewContext,
         action: str,
@@ -552,7 +616,11 @@ class ReviewEngine:
         conf_threshold: Optional[float] = None,
         class_id: Optional[int] = None,
     ) -> None:
-        """Log an accept / reject / edit action for a detection.
+        """Log an accept / reject / edit action for a detection, against ``bucket``.
+
+        ``bucket``: the prediction bucket key the reviewer was looking at (:data:`NO_BUCKET` when
+        the review carries no predictions), stored verbatim; it scopes the verdict, so a filename
+        two dates share keeps one set of verdicts per bucket.
 
         ``norm_det``/``norm_ctx`` override the geometry the entry is stored under. An
         edited verdict rewrites the GT bbox, so the entry must be keyed to the post-edit
@@ -594,10 +662,10 @@ class ReviewEngine:
         ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once written, so geometry alone cannot tell
         "a genuinely new missed object was attested" apart from "a pre-existing FN was adjudicated".
         """
-        per_image = self._review_state.setdefault("image", {})
-        is_first_verdict = ctx.img_name not in per_image
-        img_data = per_image.setdefault(
-            ctx.img_name, {"img_status": "started", "detections": []}
+        verdicts = self._review_state.setdefault("verdicts", {})
+        is_first_verdict = (bucket, ctx.img_name) not in verdicts
+        img_data = verdicts.setdefault(
+            (bucket, ctx.img_name), {"img_status": "started", "detections": []}
         )
         if is_first_verdict:
             img_data["gt_preexisting"] = bool(ctx.gt)
@@ -620,7 +688,7 @@ class ReviewEngine:
             "class_id": class_id,
         }
 
-        existing = self.find_reviewed_entry(det, ctx)
+        existing = self.find_reviewed_entry(bucket, det, ctx)
         if existing:
             idx = img_data["detections"].index(existing)
             img_data["detections"][idx] = entry
@@ -632,9 +700,9 @@ class ReviewEngine:
         if img_data.get("img_status") == "not_started":
             img_data["img_status"] = "started"
 
-        self._save_image(ctx.img_name)
+        self._save_image(bucket, ctx.img_name)
 
-    def check_image_review_complete(self, img_name: str, matches: dict) -> bool:
+    def check_image_review_complete(self, bucket: str, img_name: str, matches: dict) -> bool:
         """If every detection on the image has been reviewed, mark it complete.
 
         Returns ``True`` if the image is now in the completed state.
@@ -647,8 +715,7 @@ class ReviewEngine:
         if total == 0:
             return False
 
-        per_image = self._review_state.get("image", {})
-        img_data = per_image.get(img_name)
+        img_data = self._verdicts().get((bucket, img_name))
         if not img_data:
             return False
 
@@ -662,7 +729,7 @@ class ReviewEngine:
         )
         if reviewed_count >= total:
             img_data["img_status"] = "completed"
-            self._save_image(img_name)
+            self._save_image(bucket, img_name)
             return True
         return False
 

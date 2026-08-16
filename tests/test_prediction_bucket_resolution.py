@@ -8,12 +8,12 @@ from tcip_annotation import Annotation, BBox
 from tcip_annotation.review_engine import ReviewContext, ReviewDetection, ReviewEngine
 
 from tcip_mcp.dataset_layout import models_with_predictions, prediction_dir
-from tcip_mcp.prediction_buckets import resolve_prediction_bucket
+from tcip_mcp.prediction_buckets import bucket_key_of, resolve_prediction_bucket
 
 DATE = "2026-02-11"
 
 
-def _record_verdict(review_state_dir, stem: str) -> None:
+def _record_verdict(review_state_dir, bucket_dir, stem: str) -> None:
     review_state_dir.mkdir(parents=True, exist_ok=True)
     engine = ReviewEngine(review_state_dir)
     ctx = ReviewContext(
@@ -24,7 +24,7 @@ def _record_verdict(review_state_dir, stem: str) -> None:
     )
     det = ReviewDetection(det_type="fp", class_name="catkin", conf=0.9, iou=None, gt_idx=None,
                           pred_idx=0, bbox=(10.0, 10.0, 30.0, 30.0))
-    engine.record_detection_action(det, ctx, action="accepted")
+    engine.record_detection_action(bucket_key_of(bucket_dir), det, ctx, action="accepted")
 
 
 def _write_bucket(dataset_root, model: str, stem: str):
@@ -49,7 +49,7 @@ def test_verdicted_bucket_redirects_to_a_discoverable_model_named_sibling(tmp_pa
     dataset_root = tmp_path / "data"
     review_state_dir = tmp_path / "state"
     _write_bucket(dataset_root, "baseline", "img")
-    _record_verdict(review_state_dir, "img")
+    _record_verdict(review_state_dir, prediction_dir(dataset_root, "baseline", DATE), "img")
 
     bucket, resolution = resolve_prediction_bucket(
         dataset_root, "baseline", DATE, review_state_dir=review_state_dir
