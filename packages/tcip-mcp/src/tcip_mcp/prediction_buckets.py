@@ -10,11 +10,12 @@ bucket through here: with verdicts present the default writes are redirected to 
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
+from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES, dataset_hash
 
 
 def bucket_stems(*dirs: Path | str) -> set[str]:
@@ -30,8 +31,45 @@ def bucket_stems(*dirs: Path | str) -> set[str]:
     return stems
 
 
+def bucket_content_digest(*dirs: Path | str, memo: dict[str, str] | None = None) -> str:
+    """Content identity of the prediction files held in the given bucket dir(s).
+
+    :func:`~tcip_mcp.pipelines.resolution.dataset_hash` over each directory's enumerated stems, so a
+    replaced file, an added one and a deleted one all change the digest. The sidecar exclusion is
+    inherited from :func:`bucket_stems` rather than restated, so a stamp written for a new dimension
+    can never make the digest vouch for itself. Several directories (a prediction bucket's detect and
+    segment dirs) combine in sorted directory order, so the caller's argument order does not matter.
+
+    ``memo`` is a caller-owned dict, keyed by resolved directory, that lives for the span of one
+    delivery: a bucket read several times inside one delivery is hashed once, and a call that passes
+    a fresh dict (or none) reads every prediction file again. There is deliberately no cross-call
+    cache: recomputation is what detects a replacement whose size and timestamp were restored.
+    """
+    if not dirs:
+        raise ValueError("bucket_content_digest needs at least one bucket directory to hash")
+
+    digests: list[str] = []
+    for d in sorted(Path(x).resolve() for x in dirs):
+        key = str(d)
+        if memo is not None and key in memo:
+            digests.append(memo[key])
+            continue
+        digest = dataset_hash(d, stems=sorted(bucket_stems(d)))
+        if memo is not None:
+            memo[key] = digest
+        digests.append(digest)
+
+    if len(digests) == 1:
+        return digests[0]
+    h = hashlib.sha256()
+    for digest in digests:
+        h.update(digest.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
 def review_state_dir_of(root: str | Path) -> Path:
-    """``<root>/.tcip/state``: the review-verdict store for the dataset (or project) at ``root``.
+    """``<root>/.tcip/state``: the review-verdict store for the dataset at ``root``.
 
     The one derivation of where verdicts live, so the immutability guard that counts them and the
     :class:`~tcip_annotation.ReviewEngine` that records them address the same store instead of each
