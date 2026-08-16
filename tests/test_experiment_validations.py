@@ -212,3 +212,34 @@ def test_a_calibration_config_restating_an_identity_field_is_refused(tmp_path):
     )
     assert config["trait"] == "catkin_50per_date"
     assert config["operator_note"] == "run from the ordinal door"
+
+def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_row(tmp_path):
+    """The record both mutate is a platform-scoped experiment member, so the rows land in the
+    platform log where a reviewer enumerating validations looks first."""
+    import json as _json
+
+    from tcip_mcp.experiments import (
+        _append_validation, create_experiment, ensure_calibration_experiment,
+    )
+
+    experiment_id = "exp-026-black-locust-raceme-det"
+    create_experiment(experiment_id, TRAINING_CONFIG)
+    digest = _append_validation(experiment_id, _row())["record_digest"]
+
+    calibration_id = ensure_calibration_experiment(
+        document="classifier_operating_point", checkpoint_sha256=None,
+        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        config={"notes": "first calibration"},
+    )
+    ensure_calibration_experiment(
+        document="classifier_operating_point", checkpoint_sha256=None,
+        reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
+        config={"notes": "repeat resolves, creates nothing"},
+    )
+
+    rows = [_json.loads(line) for line in
+            (tmp_path / ".tcip" / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    appended = [r for r in rows if r.get("tool") == "experiment_validation_recorded"]
+    assert [r["arguments"]["record_digest"] for r in appended] == [digest]
+    created = [r for r in rows if r.get("tool") == "calibration_experiment_created"]
+    assert [r["arguments"]["experiment_id"] for r in created] == [calibration_id]

@@ -693,7 +693,17 @@ def _append_validation(experiment_id: str, body: dict[str, Any]) -> dict[str, An
 
     # No terminal-state check: a validation is a statement made about a run after it ended.
     store.append(validations_key(experiment_id), body)
-    return {"experiment_id": experiment_id, "record_digest": validation_digest(body)}
+    digest = validation_digest(body)
+    try:
+        from tcip_mcp.audit import record_event
+
+        # Platform log: the record this mutates is a platform-scoped experiment member.
+        record_event("experiment_validation_recorded",
+                     {"experiment_id": experiment_id, "document": body["document"],
+                      "trait": body["trait"], "record_digest": digest})
+    except Exception:
+        logger.debug("could not audit validation append", exc_info=True)
+    return {"experiment_id": experiment_id, "record_digest": digest}
 
 
 def read_validations(
@@ -761,7 +771,16 @@ def ensure_calibration_experiment(
 
     experiment_id = f"calibration_{_content_digest(identity)}"
     # create_experiment's create-only refusal is the existence check; a repeat names this same calibration.
-    create_experiment(experiment_id, {**identity, **config})
+    created = create_experiment(experiment_id, {**identity, **config})
+    if "error" not in created:
+        try:
+            from tcip_mcp.audit import record_event
+
+            # Platform log: the experiment record lives at the platform root.
+            record_event("calibration_experiment_created",
+                         {"experiment_id": experiment_id, "document": document, "trait": trait})
+        except Exception:
+            logger.debug("could not audit calibration experiment creation", exc_info=True)
     return experiment_id
 
 
