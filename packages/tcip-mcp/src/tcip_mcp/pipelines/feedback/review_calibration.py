@@ -375,6 +375,7 @@ def resolve_operating_point_from_review(
     review_state: dict,
     trait_name: str,
     *,
+    scope_root: str | Path,
     bucket_identities: list[dict],
     image_dims: dict[str, tuple[int, int]] | None = None,
     only_completed: bool = True,
@@ -405,6 +406,12 @@ def resolve_operating_point_from_review(
     regardless, and any divergence is surfaced on the bundle's conf sweep, not just logged
     (``attach_split_policy_provenance``).
 
+    ``scope_root`` (required, no default): the root the locked split is stored under, the dataset
+    root the reviewed records themselves live under (the one the verdict store was opened on).
+    Passed rather than resolved here, and never defaulted to the platform root, which adopting a
+    project repins mid-life: the same verdicts would then resolve a different lock and be re-cut
+    into a fresh split. See ``pipelines.data.splits.cal_holdout_lock_key``.
+
     ``bucket_identities`` (required, no default): threaded straight to
     ``review_to_records``, see there for the scoping/fail-closed semantics. There is no
     legitimate call to this function without a target bucket; a caller who genuinely has none must
@@ -433,7 +440,7 @@ def resolve_operating_point_from_review(
     stems = sorted(by_id)
     annotation_counts = {s: len(by_id[s].get("gt", [])) for s in stems}
     locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash=ref_hash, annotation_counts=annotation_counts,
+        stems, identity_hash=ref_hash, scope_root=scope_root, annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
     )
     cal_records = [by_id[s] for s in locked["calibration"] if s in by_id]

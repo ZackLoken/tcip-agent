@@ -431,7 +431,7 @@ def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
     }}
     bundle = resolve_operating_point_from_review(
         review_state, "catkin", tiled=True, group_by="stem", experiment_id="exp_review",
-        bucket_identities=[_IDENTITY])
+        bucket_identities=[_IDENTITY], scope_root=tmp_path)
     td = bundle.get("conf").sweep["train_disjointness"]
     assert td["leaked_groups"] == ["srcA"]  # matched despite the .jpg extension on the review id
     assert bundle.get("conf").validated_against == "false"
@@ -526,38 +526,41 @@ def test_sweep_summary_surfaces_split_policy_divergence():
 # a locked split can't go stale silently, and a corrupt lock refuses.
 # ===========================================================================
 
-def test_stale_locked_stem_refuses_cleanly():
+def test_stale_locked_stem_refuses_cleanly(tmp_path):
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
 
     stems_full = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
-    resolve_locked_cal_holdout_split(stems_full, identity_hash="stale-test", seed=1)
+    resolve_locked_cal_holdout_split(
+        stems_full, identity_hash="stale-test", scope_root=tmp_path, seed=1)
 
     # One stem's image/label vanished since the lock was drawn.
     stems_now = ["a_0_0", "a_0_1", "b_0_0"]
     with pytest.raises(ValueError, match="no longer present"):
-        resolve_locked_cal_holdout_split(stems_now, identity_hash="stale-test", seed=1)
+        resolve_locked_cal_holdout_split(
+            stems_now, identity_hash="stale-test", scope_root=tmp_path, seed=1)
 
 
-def test_corrupt_lock_file_refuses_instead_of_silent_redraw():
+def test_corrupt_lock_file_refuses_instead_of_silent_redraw(tmp_path):
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path, resolve_locked_cal_holdout_split
 
-    lock_path = cal_holdout_lock_path("corrupt-test")
+    lock_path = cal_holdout_lock_path("corrupt-test", scope_root=tmp_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("{not valid json", encoding="utf-8")
 
     with pytest.raises(ValueError, match="corrupt"):
-        resolve_locked_cal_holdout_split(["a_0_0", "b_0_0"], identity_hash="corrupt-test", seed=1)
+        resolve_locked_cal_holdout_split(
+            ["a_0_0", "b_0_0"], identity_hash="corrupt-test", scope_root=tmp_path, seed=1)
 
     # force_redraw=True is the deliberate, audited path past the corrupt file, but its
     # redraw_history honestly starts fresh (nothing recoverable from an unreadable file).
     redrawn = resolve_locked_cal_holdout_split(
-        ["a_0_0", "b_0_0"], identity_hash="corrupt-test", seed=1, force_redraw=True,
-        timestamp="2026-01-01T00:00:00Z")
+        ["a_0_0", "b_0_0"], identity_hash="corrupt-test", scope_root=tmp_path, seed=1,
+        force_redraw=True, timestamp="2026-01-01T00:00:00Z")
     assert len(redrawn["redraw_history"]) == 1
     assert redrawn["redraw_history"][0]["old_content_hash"] is None
 
 
-def test_a_dataset_identity_cannot_place_a_lock_outside_the_artifact_store():
+def test_a_dataset_identity_cannot_place_a_lock_outside_the_artifact_store(tmp_path):
     """An identity names one lock, so an identity spelled as a path locks nothing elsewhere.
 
     A lock written outside the artifact store is a held-out split no later call would find,
@@ -569,18 +572,19 @@ def test_a_dataset_identity_cannot_place_a_lock_outside_the_artifact_store():
 
     with pytest.raises(BadKey):
         resolve_locked_cal_holdout_split(
-            ["a_0_0", "b_0_0"], identity_hash="../escaped-identity", seed=1)
+            ["a_0_0", "b_0_0"], identity_hash="../escaped-identity", scope_root=tmp_path, seed=1)
 
 
-def test_a_first_draw_locks_a_split_an_ordinary_identity_can_read_back():
+def test_a_first_draw_locks_a_split_an_ordinary_identity_can_read_back(tmp_path):
     """The refusal above must leave the ordinary path intact: draw once, read the same split."""
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
 
     first = resolve_locked_cal_holdout_split(
-        ["a_0_0", "a_0_1", "b_0_0", "b_0_1"], identity_hash="d41d8cd98f00b204", seed=1,
-        timestamp="2026-01-01T00:00:00Z")
+        ["a_0_0", "a_0_1", "b_0_0", "b_0_1"], identity_hash="d41d8cd98f00b204",
+        scope_root=tmp_path, seed=1, timestamp="2026-01-01T00:00:00Z")
     again = resolve_locked_cal_holdout_split(
-        ["a_0_0", "a_0_1", "b_0_0", "b_0_1"], identity_hash="d41d8cd98f00b204", seed=1)
+        ["a_0_0", "a_0_1", "b_0_0", "b_0_1"], identity_hash="d41d8cd98f00b204",
+        scope_root=tmp_path, seed=1)
 
     assert first["calibration"] and first["holdout"]
     assert again["calibration"] == first["calibration"]
@@ -618,7 +622,8 @@ def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
     (images_dir / "b_0_1.png").unlink()  # labeled but no image
 
     result = force_redraw_cal_holdout_split(
-        labels_dir=str(labels_dir), images_dir=str(images_dir), seed=1,
+        dataset_root=str(tmp_path / "ds"), labels_dir=str(labels_dir),
+        images_dir=str(images_dir), seed=1,
         reason="labels-intersect-images coverage test")
     assert "error" not in result
     all_new = result["new_membership"]["calibration"] + result["new_membership"]["holdout"]
@@ -644,6 +649,38 @@ def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
     policy = bundle.get("conf").sweep["split_policy"]
     assert policy["seed"] == 7
     assert policy["holdout_ratio"] == pytest.approx(0.75)  # not the 0/0.5 defaults
+
+
+def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_path, monkeypatch):
+    """The count-calibration door reads one lock for a labeled dir, before and after an adoption.
+
+    Adopting a project repins the platform state root inside a live process. A lock scoped to that
+    root reads as absent once it moves, so a second calibration over the same labels cuts a fresh
+    holdout and the held-out claim rests on a split the first pass never held back.
+    """
+    import shutil
+
+    import tcip_mcp.tools.inference_tools as itools
+
+    stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
+    images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
+    kwargs = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
+                  global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None)
+    # Each root carries the trait spec an adopted project of its own would hold.
+    for root in (tmp_path / "before_adoption", tmp_path / "adopted_project"):
+        shutil.copytree(tmp_path / ".tcip", root / ".tcip")
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "before_adoption"))
+    first, _dh, _n_excluded, _evidence = itools._calibrate_operating_point(
+        _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=1, **kwargs)
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "adopted_project"))
+    second, _dh2, _n_excluded2, _evidence2 = itools._calibrate_operating_point(
+        _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=2, **kwargs)
+
+    assert first.get("conf").sweep["split_policy"]["seed"] == 1
+    assert second.get("conf").sweep["split_policy"]["seed"] == 1
+    assert second.get("conf").sweep["split_policy_divergence"]["requested"]["seed"] == 2
 
 
 # ===========================================================================

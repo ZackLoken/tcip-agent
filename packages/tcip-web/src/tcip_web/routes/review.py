@@ -846,6 +846,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     try:
         bundle = resolve_operating_point_from_review(
             review_state, req.trait, only_completed=True, experiment_id=review_experiment_id,
+            # The root _get_engine opened the verdict store on, so the lock travels with them.
+            scope_root=req.project_root,
             bucket_identities=bucket_identities, staged_conf_floor=staged_conf_floor,
             tile_size=review_tile_size, tile_size_source=review_tile_size_source,
             tiled=review_tiled, tiled_source=review_tiled_source)

@@ -83,7 +83,8 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     from scripts.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
-              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images")])
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path)])
     assert rc == 0
 
     # ---- MCP path ----
@@ -149,7 +150,8 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
     from scripts.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
-              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images")])
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path)])
     assert rc == 0
     # The script's build_predictor call carries the shared cap constant, not the framework
     # default (100/300) that would otherwise truncate the 0.01-floored calibration pass.
@@ -212,7 +214,8 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     from scripts.calibrate_operating_point import main
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
-              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images")])
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path)])
     assert rc == 0
     applied_cap = _Model.detector.roi_heads.detections_per_img
     assert applied_cap == 100  # derive_max_dets_from_counts([2, 2]) floor

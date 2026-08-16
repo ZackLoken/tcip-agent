@@ -58,8 +58,11 @@ delivery metric (see `evaluate_model`'s own docstring for the full precedence).
 A validated operating point calibrates against a locked calibration/holdout split
 (`resolve_locked_cal_holdout_split`): the split draws once, on first use, and every later call
 reuses it, so the delivery gate can't silently pass by drawing a different, weaker holdout after
-the fact. Redrawing a locked split is a real, audited decision, never automatic:
-`force_redraw_cal_holdout_split(labels_dir=..., reason=...)` is the tool for it. `reason` is
+the fact. The lock lives under the dataset root of the labels or records the split was drawn over,
+so it travels with that data and survives adopting a project mid-session. Redrawing a locked split
+is a real, audited decision, never automatic:
+`force_redraw_cal_holdout_split(dataset_root=..., labels_dir=..., reason=...)` is the tool for it,
+and `dataset_root` is that same root, so the redraw replaces the lock the calibration reads. `reason` is
 required and non-empty; every redraw, including the old split's membership, is appended to the
 lock's `redraw_history` so a redraw-until-it-passes pattern stays visible on review.
 

@@ -1073,8 +1073,8 @@ REGISTERED = {
     "cal_holdout_split_lock": Registered(
         {"identity_hash": LOCK_IDENTITY, "calibration": ["a_1"], "holdout": ["b_2"], "seed": 0,
          "redraw_history": []},
-        lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY),
-        f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json", pin=_pin_platform_root),
+        lambda root: splits.cal_holdout_lock_key(LOCK_IDENTITY, scope_root=root),
+        f".tcip/artifacts/cal_holdout_split_{LOCK_IDENTITY}.json"),
     "hpo_sweep_manifest": Registered(
         {"study_name": STUDY, "status": "running", "n_trials": 2,
          "param_space": {"lr": [0.1, 0.01]}},

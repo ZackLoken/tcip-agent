@@ -44,8 +44,6 @@ from tcip_store import (
     store,
 )
 
-from tcip_mcp.project_paths import project_root
-
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
@@ -671,8 +669,14 @@ register_store(
 )
 
 
-def cal_holdout_lock_key(identity_hash: str) -> Key:
-    """A dataset identity's locked calibration/holdout split.
+def cal_holdout_lock_key(identity_hash: str, *, scope_root: str | Path) -> Key:
+    """A dataset identity's locked calibration/holdout split, under the root it was drawn over.
+
+    ``scope_root`` is required and has no default. The lock is evidence about one dataset (which
+    of its images were held back), so it travels with that data. A root this function resolved for
+    itself would be the process-wide platform root, which adopting a project repins mid-life: a
+    lock drawn before the adoption and read after resolves under a different scope, reads as
+    absent, and is redrawn, which is the silent re-cut this lock exists to prevent.
 
     ``last_writer_wins`` rather than compare-and-set: a redraw is the only write that reads
     first, and it is also the deliberate recovery for a lock whose bytes do not decode, which
@@ -684,13 +688,33 @@ def cal_holdout_lock_key(identity_hash: str) -> Key:
             f"dataset identity {identity_hash!r} is not a single name: an identity carrying a "
             "path separator would address a lock outside the artifact store"
         )
-    return Key(CAL_HOLDOUT_LOCK_STORE, str(project_root().resolve()), (identity_hash,))
+    return Key(CAL_HOLDOUT_LOCK_STORE, str(Path(scope_root).resolve()), (identity_hash,))
 
 
-def cal_holdout_lock_path(identity_hash: str) -> Path:
-    """Where a dataset identity's locked cal/holdout split lives on disk."""
-    key = cal_holdout_lock_key(identity_hash)
-    return project_root().joinpath(*_CalHoldoutLockLocator().relative_path("", key.parts).parts)
+def cal_holdout_lock_path(identity_hash: str, *, scope_root: str | Path) -> Path:
+    """Where a dataset identity's locked cal/holdout split lives on disk under ``scope_root``.
+
+    Placed by the store's own locator under the key's own scope, never by a second reconstruction
+    of either, so this answers the path the seam reads and writes rather than a parallel one.
+    """
+    key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
+    return Path(key.scope, *_CalHoldoutLockLocator().relative_path(key.scope, key.parts).parts)
+
+
+def cal_holdout_scope_root(labels_dir: str | Path) -> Path:
+    """The root a labeled directory's locked cal/holdout split is scoped to.
+
+    The dataset root the labels live under, so the lock travels with the data the split was drawn
+    over. A directory the dataset layout cannot place is its own anchor, the answer
+    ``prediction_buckets.bucket_key_of`` already gives a bucket under no dataset root, so a
+    calibration over a loose labeled directory still gets a scope that survives a project adoption.
+    The calibration door and the redraw tool both resolve the scope through this, so a redraw
+    addresses the lock the calibration wrote instead of drawing one nothing reads.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    root = dataset_root_of(labels_dir)
+    return (root if root is not None else Path(labels_dir)).resolve()
 
 
 def label_image_stems(
@@ -738,6 +762,7 @@ def resolve_locked_cal_holdout_split(
     stems: Sequence[str],
     *,
     identity_hash: str,
+    scope_root: str | Path,
     annotation_counts: dict[str, int] | None = None,
     group_by: str = "tile_prefix",
     group_key_map: dict[str, str] | None = None,
@@ -779,6 +804,12 @@ def resolve_locked_cal_holdout_split(
     itself the deliberate fix for a corrupt lock, so it proceeds past a corrupt file rather than
     also being blocked by it, redraw history just can't be recovered from what couldn't be read.
 
+    ``scope_root`` is required and has no default: it is the root the lock is stored under, the
+    dataset root of the labels or records the split was drawn over. See
+    :func:`cal_holdout_lock_key` for why a root this layer resolved for itself would make the
+    never-a-silent-re-cut guarantee above violable, and :func:`cal_holdout_scope_root` for the
+    derivation a caller holding a labeled directory uses.
+
     ``timestamp`` is threaded in from the caller (this pipeline layer does not call
     ``datetime.now()`` itself, matching the rest of the codebase's tool-boundary convention) and
     is only meaningful when a new draw actually happens (first draw, or ``force_redraw=True``).
@@ -788,7 +819,7 @@ def resolve_locked_cal_holdout_split(
     / ``unlocked_stems`` report fields above when a lock already existed.
     """
     group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-    lock_key = cal_holdout_lock_key(identity_hash)
+    lock_key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
     try:
         existing = store.read(lock_key, default=None)
     except DecodeError as exc:
