@@ -155,5 +155,5 @@ class TestGridGeometry:
         assert len(cells) == geometry["cols"] * geometry["rows"]
 
     def test_tile_size_is_required(self):
-        with pytest.raises(TypeError):
-            grid_geometry(100, 80)
+        with pytest.raises(TypeError, match="'tile_size'"):
+            grid_geometry(100, 80)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to tile_size

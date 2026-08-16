@@ -40,7 +40,12 @@ def test_fingerprint_reuses_dataset_hash_for_labels(tmp_path, monkeypatch):
     _make_dataset(tmp_path)
     calls = []
     real = resolution.dataset_hash
-    monkeypatch.setattr(resolution, "dataset_hash", lambda *a, **k: calls.append(a) or real(*a, **k))
+
+    def recording_dataset_hash(*a, **k):
+        calls.append(a)
+        return real(*a, **k)
+
+    monkeypatch.setattr(resolution, "dataset_hash", recording_dataset_hash)
     fp = dataset_fingerprint(tmp_path)
     assert fp is not None
     assert calls, "dataset_fingerprint must call dataset_hash for its label term, not re-implement it"

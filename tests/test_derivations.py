@@ -194,7 +194,7 @@ def test_derive_sliver_frac_raises_valueerror_on_malformed_char_sizes():
     with pytest.raises(ValueError, match="char_sizes"):
         derive_sliver_frac(None)
     with pytest.raises(ValueError, match="not numeric"):
-        derive_sliver_frac(["abc", 1.0, 2.0, 3.0, 4.0])
+        derive_sliver_frac(["abc", 1.0, 2.0, 3.0, 4.0])  # type: ignore[list-item]  # the non-numeric entry is the subject of the refusal
 
 
 def test_derive_block_scale_px_gt_object_spacing_floored_at_tile_size():

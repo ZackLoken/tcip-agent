@@ -354,10 +354,12 @@ class TestWholeFrameDefaultIsUnaffected:
         from tcip_mcp.tools import vision_tools
 
         called = []
-        monkeypatch.setattr(
-            vision_tools, "_offset_candidates",
-            lambda candidates, origin: called.append((candidates, origin)) or candidates,
-        )
+
+        def recording_offset_candidates(candidates, origin):
+            called.append((candidates, origin))
+            return candidates
+
+        monkeypatch.setattr(vision_tools, "_offset_candidates", recording_offset_candidates)
 
         class OneBoxProposer:
             def propose(self, image_path, **params):

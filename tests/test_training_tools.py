@@ -179,7 +179,7 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     lbls = tmp_path / "labels"
     imgs.mkdir()
     lbls.mkdir()
-    base_cfg = {
+    base_cfg: dict[str, dict[str, object]] = {
         "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
                          "builder_kwargs": {"num_classes": 1}, "task": "detection"},
         "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
@@ -738,9 +738,12 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
 
     monkeypatch.chdir(tmp_path)
     seen = []
-    monkeypatch.setattr(
-        training_tools, "preflight_config",
-        lambda config, smoke=False: seen.append(config) or {"valid": False, "issues": ["stub"]})
+
+    def stub_preflight(config, smoke=False):
+        seen.append(config)
+        return {"valid": False, "issues": ["stub"]}
+
+    monkeypatch.setattr(training_tools, "preflight_config", stub_preflight)
 
     result = training_tools.launch_training({"model_source": {"builder": "m:f"}})
 

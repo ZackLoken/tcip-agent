@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import numpy as np
@@ -842,48 +843,6 @@ class TestAcceptProposalsTool:
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-# Layer 2: Integration tests â€” full pipeline with mocked SAM candidates
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-
-
-MOCK_CANDIDATES = [
-    {
-        "candidate_id": 0,
-        "bbox": [50.0, 40.0, 200.0, 180.0],
-        "area": 21000,
-        "score": 0.93,
-        "engine": "sam",
-        "engine_meta": {"stability_score": 0.96, "predicted_iou": 0.93},
-        "rings": [[
-            (50, 40), (200, 40), (200, 180), (50, 180),
-        ]],
-    },
-    {
-        "candidate_id": 1,
-        "bbox": [300.0, 250.0, 450.0, 400.0],
-        "area": 15000,
-        "score": 0.88,
-        "engine": "sam",
-        "engine_meta": {"stability_score": 0.91, "predicted_iou": 0.88},
-        "rings": [[
-            (300, 250), (450, 250), (450, 400), (300, 400),
-        ]],
-    },
-    {
-        "candidate_id": 2,
-        "bbox": [500.0, 100.0, 600.0, 200.0],
-        "area": 8000,
-        "score": 0.80,
-        "engine": "sam",
-        "engine_meta": {"stability_score": 0.85, "predicted_iou": 0.80},
-        "rings": [[
-            (500, 100), (600, 100), (600, 200), (500, 200),
-        ]],
-    },
-]
-
-
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # Layer 3: SAM integration tests (skipped when SAM is not installed)
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
@@ -1060,7 +1019,7 @@ class TestFullSamPipeline:
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
-MOCK_CANDIDATES = [
+MOCK_CANDIDATES: list[dict[str, Any]] = [
     {
         "candidate_id": 0,
         "bbox": [50.0, 40.0, 200.0, 180.0],
@@ -1114,10 +1073,10 @@ class TestCandidateCacheRoundTrip:
             assert abs(orig["score"] - restored["score"]) < 1e-6
             assert abs(orig["engine_meta"]["stability_score"]
                        - restored["engine_meta"]["stability_score"]) < 1e-6
-            # Every ring, every vertex â€” JSON turns tuples into lists
+            # Every ring, every vertex: JSON turns tuples into lists
             assert len(orig["rings"]) == len(restored["rings"])
-            for o_ring, r_ring in zip(orig["rings"], restored["rings"]):
-                for (ox, oy), rp in zip(o_ring, r_ring):
+            for o_ring, r_ring in zip(orig["rings"], restored["rings"], strict=True):
+                for (ox, oy), rp in zip(o_ring, r_ring, strict=True):
                     rx, ry = rp if isinstance(rp, (list, tuple)) else (rp["x"], rp["y"])
                     assert abs(ox - rx) < 1e-6
                     assert abs(oy - ry) < 1e-6
