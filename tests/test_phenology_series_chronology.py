@@ -255,7 +255,7 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
 # -- the delivered CSV ----------------------------------------------------
 
 
-@pytest.mark.usefixtures("seed_catkin_trait_spec")
+@pytest.mark.usefixtures("seed_catkin_operationalization")
 def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path):
     """A plant already at half its catkins on the first capture ships that date with its bound, so a
     breeder reading the CSV can tell an upper bound from a date the observations measured. The later

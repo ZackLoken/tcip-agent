@@ -457,9 +457,11 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
     """The same guard on the delivery doors must leave a legitimate request reaching the door.
 
     A missing plant mapping under an admitted root reports the missing mapping, which is the door
-    answering rather than the guard refusing.
+    answering rather than the guard refusing. The trait is stated and confirmed here so the answer
+    comes from the door itself rather than from the precondition standing in front of it.
     """
     fx.write_spec(tmp_path, fx.CROSSING_SPEC)
+    fx.seed_confirmed_crossing(tmp_path, fx.CROSSING_TRAIT)
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
 
     resp = client.post(

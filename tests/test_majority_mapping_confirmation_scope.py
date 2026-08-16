@@ -45,14 +45,24 @@ PISTILLATE_SPEC = {
 
 
 def _write_specs(project_root: Path) -> None:
+    """Register both traits and give each a confirmed crossing record, so both can deliver.
+
+    The marker under test travels with a delivered CSV, so each trait needs the confirmed meaning
+    the delivery door requires before it will produce one. The two are independent: what a record
+    covers is the crossing measurement, never the majority alias the marker qualifies.
+    """
     import yaml
 
     from tcip_mcp import traits
+
+    from tests._operationalization_fixtures import seed_confirmed_crossing
 
     specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
     specs_dir.mkdir(parents=True, exist_ok=True)
     for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
         (specs_dir / f"{spec['name']}.yml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+    for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
+        seed_confirmed_crossing(project_root, spec["name"])
 
 
 def _predictions(root: Path, positive_class: str, id_map: dict, *, trait: str) -> tuple[Path, dict]:

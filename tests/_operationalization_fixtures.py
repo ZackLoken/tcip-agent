@@ -4,6 +4,10 @@ Two traits, deliberately not the ones the first pilot uses: a crossing trait del
 dates and a count trait delivering a stem count, both real names in the crop vocabulary. A rail
 shaped around one trait's vocabulary is the failure this platform keeps guarding against, so the
 fixtures a rail's own tests run on name something else.
+
+:func:`seed_confirmed_crossing` is the other half: it takes whatever trait a test registered and
+gives it a confirmed record, for the many modules whose subject is a delivery rather than the
+precondition standing in front of it.
 """
 
 from __future__ import annotations
@@ -11,6 +15,8 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 from typing import Any
+
+from tcip_store import Version
 
 from tcip_mcp import operationalization as op
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec
@@ -118,3 +124,37 @@ def confirm(
 
 def resolve(project_root: Path, trait: str, delivery_kind: str) -> op.ResolvedOperationalization:
     return op.resolve_trait_and_record(trait, delivery_kind, project_root=project_root)
+
+
+def schema_basis() -> op.OperationalizationBasis:
+    """A proof-of-precondition token for a test whose subject is the CSV writer's column schema.
+
+    ``write_phenology_csv`` demands the basis a passing check returned, because it is handed a spec
+    object rather than a project it could read the record from. A test about which columns reach
+    the file has neither a project nor a record, so it produces the token directly.
+    """
+    return op.OperationalizationBasis(record_version=Version.ABSENT, constituting={})
+
+
+def seed_confirmed_crossing(project_root: Path, trait: str, **overrides: Any) -> dict[str, Any]:
+    """State and confirm a crossing operationalization for a trait already registered at this root.
+
+    What a test needs when its subject is a delivery rather than the precondition: the crossing
+    doors refuse without a confirmed record, so a module whose subject predates that rail seeds one
+    and keeps testing what it was written to test. The delivered phenotypes come from the
+    registered spec's own ``delivers``, so this works for any trait a test authors.
+    """
+    from tcip_mcp.traits import get_trait_for
+
+    spec = get_trait_for(trait, project_root)
+    fields: dict[str, Any] = {
+        "statement": f"the date each plant reached the state {trait} scores in the field",
+        "mechanism": f"the calibrated {spec.positive_class_name} classifier over one plant's objects",
+        "measured_subject": trait,
+        "delivered_phenotypes": list(spec.delivers),
+    }
+    fields.update(overrides)
+    record = op.state_operationalization(
+        project_root, trait, op.STATE_CROSSING_DATES, **fields
+    )
+    return confirm(project_root, trait, op.STATE_CROSSING_DATES, record)

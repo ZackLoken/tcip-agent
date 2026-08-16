@@ -23,7 +23,7 @@ from tcip_web.app import app
 
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
 PLANTS = (
     ("PLOT1", "AccA", 43.20000, -90.00000),
