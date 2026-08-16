@@ -607,13 +607,21 @@ def replace_image_status_store(
 
 
 def stamp_image_status_digests(
-    dataset_root: str | Path, bucket: str, image_names: Iterable[str], digest: str
-) -> None:
-    """Record ``digest`` against each of ``image_names`` in ``bucket``, merging into what is there.
+    dataset_root: str | Path, bucket: str, image_names: Iterable[str], digest: str,
+    *, only_unstamped: bool = False,
+) -> list[str]:
+    """Record ``digest`` against each of ``image_names`` in ``bucket``, merging into what is there,
+    and return the names this call stamped.
 
     Stamped per image and merged, for the reason :func:`image_status_digest_path` states: a
     bucket-wide or whole-document write would drop another image's stamp and un-quarantine a
     confirmation made under a since-changed schema that nobody re-reviewed.
+
+    ``only_unstamped`` leaves an image that already carries a stamp exactly as it is, for a caller
+    recording after the fact which schema a confirmation was made under: the stamp the writer set at
+    confirmation time is the direct evidence, and overwriting it with a later reconstruction would
+    re-date a confirmation nobody re-reviewed. The read and the write share one transaction, so a
+    stamp landing between them is seen rather than clobbered.
     """
     key = image_status_digest_key(dataset_root)
     with tcip_store.transaction(key) as txn:
@@ -623,10 +631,15 @@ def stamp_image_status_digests(
         bucket_stamps = stamps.get(bucket)
         if not isinstance(bucket_stamps, dict):
             bucket_stamps = {}
-        for name in image_names:
+        stamped = [name for name in image_names
+                   if not (only_unstamped and isinstance(bucket_stamps.get(name), str))]
+        if not stamped:
+            return stamped  # nothing to record: leave the document, and its absence, untouched
+        for name in stamped:
             bucket_stamps[name] = digest
         stamps[bucket] = dict(sorted(bucket_stamps.items()))
         txn.write(key, dict(sorted(stamps.items())))
+    return stamped
 
 
 def prediction_root(dataset_root: str | Path) -> Path:
