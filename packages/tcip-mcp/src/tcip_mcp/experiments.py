@@ -8,6 +8,7 @@ Stores experiment state in .tcip/experiments/<experiment_id>/:
   status.json, current state and timestamps
   split.json, the train/val membership, seed and dataset identity a metric is reproducible with
   env.json, the library versions, seed and model kind behind a reproducible run
+  validations.jsonl, the claims earned against this run's evidence (append-only)
 
 This module declares the record's members, so it is also the one place they are addressed:
 every reader and writer takes a key from a constructor here rather than composing a path of
@@ -17,6 +18,8 @@ being members of it (checkpoints, TensorBoard logs, a bespoke run's source snaps
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -241,6 +244,27 @@ register_store(
 def metrics_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     """The run's epoch-by-epoch metrics, one entry per row, append only."""
     return _member_key(EXPERIMENT_METRICS_STORE, experiment_id, "metrics", root)
+
+
+EXPERIMENT_VALIDATIONS_STORE = "experiment_validations"
+register_store(
+    StoreDescriptor(
+        name=EXPERIMENT_VALIDATIONS_STORE,
+        kind="log",
+        key_fields=("experiment_id", "document"),
+        codec=LOG_JSON,
+        locator=_MEMBER_LOG,
+    )
+)
+
+
+def validations_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
+    """The claims earned against this run's evidence, one row per claim, append only.
+
+    A re-validation appends rather than rewriting, so the member holds the whole history and
+    a stamp names the one row it was minted from.
+    """
+    return _member_key(EXPERIMENT_VALIDATIONS_STORE, experiment_id, "validations", root)
 
 
 # Once a run reaches a terminal state its record is immutable (experiments are immutable). The lock
@@ -606,6 +630,141 @@ def log_metrics(
     return {"experiment_id": experiment_id, "epoch": epoch, "logged": True}
 
 
+_VALIDATION_FIELDS = (
+    "document",
+    "trait",
+    "claim",
+    "validated_against",
+    "checkpoint_sha256",
+    "producing_experiment_id",
+    "reference_identity",
+    "covered_buckets",
+    "dataset_root",
+    "recorded_at",
+)
+"""Every field a validation row carries. All required, none defaulted.
+
+A claim reads as provenance only when all of it is there: what was claimed, for which trait,
+against which reference, produced by which checkpoint and run, over which content, and when.
+A field a writer could omit would be a field a reader could not compare.
+"""
+
+
+def _content_digest(value: dict[str, Any]) -> str:
+    """A mapping's content identity: sha256 over its canonical JSON, first 16 hex characters.
+
+    Canonical spelling because the digest is an agreement between separate processes: a writer
+    and every later reader must spell the same mapping the same way to compute the same
+    identity. The width matches the platform's other content identities.
+    """
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def validation_digest(body: dict[str, Any]) -> str:
+    """The content identity of a validation row.
+
+    Pure: a reader recomputes it from a row it read, which is what lets a stamp name one
+    specific row rather than an experiment in general. It is not stored in the row, since a
+    row carrying its own digest would be vouching for itself.
+    """
+    return _content_digest(body)
+
+
+def _append_validation(experiment_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Append one earned claim to this experiment's validations log.
+
+    Module-private: a validation is earned by running the gate over the evidence, so the only
+    caller is the primitive that ran it, and there is no supported appender a caller can hand
+    a verdict to. The storage seam's own generic append against this key stays reachable and
+    is a stated residual rather than something this module closes.
+
+    The row is checked against ``_VALIDATION_FIELDS`` first: a missing field is refused, never
+    filled in, because a defaulted provenance field is a claim nobody made.
+    """
+    check_json_value(body, path="validation")
+    if not experiment_exists(experiment_id):
+        return {"error": f"Experiment not found: {experiment_id}"}
+
+    missing = [field for field in _VALIDATION_FIELDS if field not in body]
+    if missing:
+        return {"error": f"Validation record is missing {', '.join(missing)}; every field of a "
+                         f"record is required and none has a default."}
+
+    # No terminal-state check: a validation is a statement made about a run after it ended.
+    store.append(validations_key(experiment_id), body)
+    return {"experiment_id": experiment_id, "record_digest": validation_digest(body)}
+
+
+def read_validations(
+    experiment_id: str, *, root: Path | str | None = None
+) -> list[dict[str, Any]]:
+    """Every claim this experiment has earned, in order, oldest first.
+
+    A repeated validation of one claim appends a second row rather than replacing the first,
+    so the history is the whole list and a stamp names one row of it.
+    """
+    page = store.read_log(validations_key(experiment_id, root=root))
+    if page.corrupt:
+        logger.warning("experiment %s validations log has %d undecodable entries",
+                       experiment_id, len(page.corrupt))
+    return [dict(record) for record in page.records]
+
+
+def find_validation(
+    experiment_id: str, digest: str, *, root: Path | str | None = None
+) -> dict[str, Any] | None:
+    """The row whose own content identity is ``digest``, or ``None`` when no row has it.
+
+    The identity is recomputed from each stored row rather than read off it, so a row answers
+    for the content it actually holds.
+    """
+    for row in read_validations(experiment_id, root=root):
+        if validation_digest(row) == digest:
+            return row
+    return None
+
+
+def ensure_calibration_experiment(
+    *,
+    document: str,
+    checkpoint_sha256: str | None,
+    reference_identity: dict[str, Any],
+    trait: str,
+    config: dict[str, Any],
+) -> str:
+    """The experiment a calibration's claims hang off, created when it does not exist yet.
+
+    A claim is earned against a real experiment record, and a door that calibrated predictions
+    no experiment produced (a bespoke or unregistered checkpoint) holds none. The id is derived
+    from the same content that constitutes the claim's identity, so a second calibration of the
+    same document, checkpoint, reference and trait resolves to the same experiment and agrees
+    with its config by construction rather than by comparison.
+
+    ``config`` is the free text describing the calibration. The identity fields are written
+    here from the arguments the id was derived from, so a config restating one is refused
+    rather than left free to contradict the id.
+    """
+    identity = {
+        "document": document,
+        "checkpoint_sha256": checkpoint_sha256,
+        "reference_identity": reference_identity,
+        "trait": trait,
+    }
+    restated = sorted(set(config) & set(identity))
+    if restated:
+        raise ValueError(
+            f"calibration config restates {', '.join(restated)}: those fields are written from "
+            "the content the experiment id is derived from, so a second spelling of them could "
+            "disagree with the id itself"
+        )
+
+    experiment_id = f"calibration_{_content_digest(identity)}"
+    # create_experiment's create-only refusal is the existence check; a repeat names this same calibration.
+    create_experiment(experiment_id, {**identity, **config})
+    return experiment_id
+
+
 def record_artifact(
     experiment_id: str,
     name: str,
@@ -738,7 +897,8 @@ def get_experiment(
 
     ``metrics`` can be paginated for long runs: ``metrics_offset`` skips epochs and
     ``metrics_limit`` caps how many are returned; ``n_epochs`` is always the true total.
-    Defaults return all metrics.
+    Defaults return all metrics. ``validations`` is the whole claim history, unpaginated:
+    a run earns few claims where it logs many epochs.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -757,6 +917,7 @@ def get_experiment(
     result["n_epochs"] = len(rows)
     result["metrics"] = rows[metrics_offset:end]
     result["metrics_offset"] = metrics_offset
+    result["validations"] = read_validations(experiment_id)
 
     return result
 
