@@ -345,7 +345,7 @@ export const api = {
     // response can't land after (and clobber) a newer one when sliders are dragged.
     matches: (
       body: {
-        project_root: string;
+        dataset_root: string;
         image_name: string;
         image_path: string;
         gt_path?: string | null;
@@ -364,7 +364,7 @@ export const api = {
       }),
 
     action: (body: {
-      project_root: string;
+      dataset_root: string;
       image_name: string;
       image_path: string;
       gt_path?: string | null;
@@ -404,7 +404,7 @@ export const api = {
       }),
 
     markComplete: (body: {
-      project_root: string;
+      dataset_root: string;
       image_name: string;
       gt_path?: string | null;
       // The prediction bucket loaded for this image: a confirmed negative carries zero verdicts,
@@ -422,15 +422,16 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
-    backupLabels: (project_root: string, label_dirs: string[]) =>
+    // Its files land in the label directory, but its root opens the review engine: dataset-scoped.
+    backupLabels: (dataset_root: string, label_dirs: string[]) =>
       call<{ status: string; files_backed_up: number }>(ROUTES.postReviewBackupLabels, {
         method: "POST",
-        body: JSON.stringify({ project_root, label_dirs }),
+        body: JSON.stringify({ dataset_root, label_dirs }),
       }),
 
     // Promote a completed review into a validation reference for its (model, trait, date). Runs the
     // same disjoint + count-bias gate the backend uses and returns an honest validated / not-yet result.
-    validateReference: (body: { project_root: string; trait: string; pred_dir?: string | null }) =>
+    validateReference: (body: { dataset_root: string; trait: string; pred_dir?: string | null }) =>
       call<{
         validated: boolean;
         reference: string | null;
@@ -454,11 +455,11 @@ export const api = {
     // Batch review status + detection presence for a whole (subject, date): drives the image-level
     // Reviewed/Unreviewed nav filter and lets the tab skip images with nothing to review.
     imageStatuses: (params: {
-      project_root: string;
+      dataset_root: string;
       gt_dir?: string | null;
       pred_dir?: string | null;
     }) => {
-      const qs = new URLSearchParams({ project_root: params.project_root });
+      const qs = new URLSearchParams({ dataset_root: params.dataset_root });
       if (params.gt_dir) qs.set("gt_dir", params.gt_dir);
       if (params.pred_dir) qs.set("pred_dir", params.pred_dir);
       return call<{ statuses: Record<string, ReviewImageStatus>; detection_stems: string[] }>(
@@ -470,7 +471,7 @@ export const api = {
     // confidence_triage/auto-accept-as-GT strategy, which stays agent-only) as a background job;
     // poll launchPriorityQueue's job_id via priorityQueueJob until status is a terminal value.
     launchPriorityQueue: (body: {
-      project_root: string;
+      dataset_root: string;
       checkpoint_path: string;
       images_dir: string;
       method?: string;
