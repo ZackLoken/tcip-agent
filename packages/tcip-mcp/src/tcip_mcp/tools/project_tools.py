@@ -92,7 +92,7 @@ def upsert_dataset(project_root: str | Path, entry: dict) -> None:
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="dataset_root")
 def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> dict:
     """Record a dataset's identity so a delivered number can be traced to the exact data behind it.
 
