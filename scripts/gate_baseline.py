@@ -19,12 +19,16 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 FRONTEND = REPO_ROOT / "packages/tcip-web/frontend"
 
 MYPY_PATHS = [
+    "packages/tcip-store/src",
     "packages/tcip-annotation/src",
     "packages/tcip-mcp/src",
     "packages/tcip-web/src",
+    "scripts",
+    "tests",
 ]
-"""The paths CI type-checks. `mypy .` instead fails outright on a duplicate-module clash in
-scripts/, checking nothing, so the invocation has to match CI to mean anything."""
+"""The paths CI type-checks, from the repo root. `mypy .` instead fails outright on a
+duplicate-module clash (scripts are both direct files and scripts.<name> imports), checking
+nothing, so the invocation has to be path-based and match CI to mean anything."""
 
 NPM = shutil.which("npm") or "npm"
 
