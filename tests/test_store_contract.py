@@ -31,6 +31,7 @@ from tcip_mcp import (
     dataset_layout,
     experiments,
     model_registry,
+    operationalization,
     project_status,
     traits,
     web_client,
@@ -787,6 +788,7 @@ REPORT_UNDER_TEST = "20260304T120000Z_missing_tool_a1b2"
 RETROSPECTIVE_UNDER_TEST = "project_under_test"
 PROPOSAL_STEM = "a_1"
 TRAIT_UNDER_TEST = "trait_under_test"
+DELIVERY_KIND_UNDER_TEST = "state_crossing_dates"
 EXPERIMENT = "exp_042"
 STUDY = "hpo_1a2b3c4d"
 TRIAL_DIR = "trial_00000"
@@ -848,6 +850,18 @@ def _trait_spec_key(root: Path) -> ts.Key:
 
 def _trait_specs_scope(root: Path) -> Path:
     return traits.trait_specs_dir(root)
+
+
+def _operationalization_key(root: Path) -> ts.Key:
+    return operationalization.operationalization_key(
+        operationalization.operationalizations_scope(root),
+        TRAIT_UNDER_TEST,
+        DELIVERY_KIND_UNDER_TEST,
+    )
+
+
+def _operationalizations_scope(root: Path) -> Path:
+    return operationalization.operationalizations_scope(root)
 
 
 def _pin_platform_root(root: Path, monkeypatch) -> None:
@@ -1166,6 +1180,19 @@ REGISTERED = {
         lambda root: experiments.validations_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/validations.jsonl", pin=_pin_platform_root,
         scope_of=lambda root: Path(experiments.experiments_scope())),
+    # what one trait's delivered number means, for one delivery kind
+    "trait_operationalizations": Registered(
+        {"trait": TRAIT_UNDER_TEST, "delivery_kind": DELIVERY_KIND_UNDER_TEST,
+         "statement": "the date each büsch reached the measured state",
+         "mechanism": "the calibrated state classifier over isolated catkins",
+         "measured_subject": "catkin", "delivered_phenotypes": ["measure_one"],
+         "delivered_value_keys": [], "stated_by": "state_trait_operationalization",
+         "stated_at": "2026-03-04T12:00:00+00:00", "relayed_note": "",
+         "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
+         "identity_from_request": True, "confirmed_fields": {"milestone_on": "positive_fraction"}},
+        _operationalization_key,
+        f".tcip/state/trait_operationalizations/{TRAIT_UNDER_TEST}/{DELIVERY_KIND_UNDER_TEST}.json",
+        scope_of=_operationalizations_scope),
 }
 
 CODEC_EXEMPT = {
