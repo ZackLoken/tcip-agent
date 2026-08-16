@@ -269,3 +269,28 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
     assert not (tmp_path / ".tcip" / "experiments").exists()
     out = capsys.readouterr().out
     assert '"conf"' in out
+
+def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monkeypatch, tmp_path):
+    """The labels dir is this script's measurement reference, so the admissibility rail fires
+    before any model or dataset work begins."""
+    import json as _json
+
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    (labels / "a.json").write_text(_json.dumps({
+        "image": "a", "width": 100, "height": 100,
+        "annotations": [{"subject": "catkin", "bbox": [1, 1, 5, 5], "created_by": "claude"}],
+    }), encoding="utf-8")
+
+    def _never(*a, **kw):
+        raise AssertionError("the rail must refuse before the predictor is built")
+
+    monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _never)
+
+    from scripts.calibrate_operating_point import main
+
+    with pytest.raises(ValueError) as refused:
+        main(["--checkpoint", "x.pt", "--trait", "catkin",
+              "--labels-dir", str(labels), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path)])
+    assert "created_by" in str(refused.value) or "claude" in str(refused.value)

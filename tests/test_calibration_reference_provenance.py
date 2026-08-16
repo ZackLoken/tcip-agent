@@ -8,6 +8,11 @@ reference reads (the detection calibration's labels dir and the classifier calib
 refuse such a directory whole rather than validating against it, while ordinary ground truth,
 ground truth a person authored, and a prediction a reviewer accepted all still calibrate.
 
+Dropping the score off that output does not change what it is: ground truth an agent authored,
+with no reviewer's accepted_by, is the model answering for itself under a different key, so the
+rail reads authorship as well as the score. An unattributed label, a person's label, and an
+agent's label a reviewer confirmed all remain admissible.
+
 Also covers the conf-floor mismatch reaching the delivered issue list: it is provenance, not a
 gate, so it travels with a run's ``shippable_issues`` without changing whether that run validated.
 """
@@ -149,6 +154,51 @@ def test_a_mixed_reference_refuses_whole_rather_than_calibrating_on_its_clean_su
     images_dir, labels_dir = _reference(
         tmp_path / "ds", stems,
         lambda s: [_hand_annotation()] + ([_prediction()] if s == "src0_0_0" else []))
+
+    with pytest.raises(ValueError, match="1 of 9 annotations"):
+        _calibrate(labels_dir, images_dir)
+
+
+# --- the reference reads refuse ground truth an agent authored and nobody ruled on ------------
+
+def test_detection_calibration_refuses_ground_truth_an_agent_authored_that_nobody_ruled_on(tmp_path):
+    """The same output with its score dropped: no reviewer took responsibility for any of it, so
+    the model is still the only thing standing behind the reference."""
+    stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
+    images_dir, labels_dir = _reference(
+        tmp_path / "ds", stems,
+        lambda s: [_hand_annotation(created_by=PRODUCER, created_at="2026-01-01T00:00:00+00:00")])
+
+    with pytest.raises(ValueError) as exc:
+        _calibrate(labels_dir, images_dir)
+
+    message = str(exc.value)
+    assert "8 of 8 annotations" in message
+    assert PRODUCER in message  # the refusal names the authorship it is refusing
+    assert "no human has adjudicated is not a calibration or holdout reference" in message
+    assert "review-confirmation loop" in message  # the lighter alternative, named
+
+
+def test_the_reference_rail_reads_a_bare_tool_name_as_a_machine_author(tmp_path):
+    """A tool producer stays bare under the identity convention, so a bare author is a machine
+    author rather than a person whose prefix was left off."""
+    _images, labels_dir = _reference(tmp_path / "ds", ["a"],
+                                     lambda s: [_hand_annotation(created_by="sam")])
+
+    with pytest.raises(ValueError) as exc:
+        json_io.require_reference_ground_truth(labels_dir)
+
+    assert "authored by sam" in str(exc.value)
+
+
+def test_one_agent_authored_record_refuses_the_whole_reference(tmp_path):
+    """The authorship rule keeps the score rule's shape: calibrating on the admissible subset
+    would validate against a reference nobody chose."""
+    stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
+    images_dir, labels_dir = _reference(
+        tmp_path / "ds", stems,
+        lambda s: [_hand_annotation()] + ([_hand_annotation(created_by="sam")]
+                                          if s == "src0_0_0" else []))
 
     with pytest.raises(ValueError, match="1 of 9 annotations"):
         _calibrate(labels_dir, images_dir)

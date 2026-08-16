@@ -64,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from torch.utils.data import DataLoader
 
+    from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.splits import count_label_lines, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.inference.predictor import build_predictor
@@ -78,6 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     # than leaving the framework default (torchvision 100/300) in place: this value is superseded
     # below, once this split's density is known, by the set_detector_operating_point call that
     # actually governs the collection pass ("detector-cap censoring").
+    # --labels-dir is this script's measurement reference, so it clears the one admissibility rail.
+    require_reference_ground_truth(args.labels_dir)
+
     predictor = build_predictor(checkpoint_path=args.checkpoint, device=args.device,
                                 max_dets=DEFAULT_MAX_DETS)
     tile_size = getattr(predictor, "train_tile_size", None)
