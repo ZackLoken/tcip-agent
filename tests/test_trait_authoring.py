@@ -402,6 +402,7 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
     return mapping_path, d1, d2
 
 
+@pytest.mark.usefixtures("seed_catkin_operationalization")
 def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.tools.phenology_tools import compute_phenology
@@ -434,6 +435,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     assert "catkin_elongation_provisional" in phenology.phenology_csv_columns(get_trait("catkin"))
 
 
+@pytest.mark.usefixtures("seed_catkin_operationalization")
 def test_compute_phenology_refuses_when_class_id_unresolvable(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 

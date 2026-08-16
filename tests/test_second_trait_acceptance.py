@@ -70,6 +70,10 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         ],
     }
     (specs_dir / "currant_bloom.yml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+    # A second trait needs its own confirmed meaning too: nothing about the record is catkin-shaped.
+    from tests._operationalization_fixtures import seed_confirmed_crossing
+
+    seed_confirmed_crossing(tmp_path, "currant_bloom")
 
 
 def _currant_bloom_fixture(

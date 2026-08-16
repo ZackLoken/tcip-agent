@@ -29,9 +29,11 @@ import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-_MCP_SRC = Path(__file__).resolve().parents[1] / "packages" / "tcip-mcp" / "src"
-if str(_MCP_SRC) not in sys.path:
-    sys.path.insert(0, str(_MCP_SRC))
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_MCP_SRC = _REPO_ROOT / "packages" / "tcip-mcp" / "src"
+for _path in (_MCP_SRC, _REPO_ROOT):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 from PIL import Image  # noqa: E402
 
@@ -112,38 +114,26 @@ def _stem(plot: str, date: str) -> str:
 
 
 def _author_catkin_trait_spec(root: Path) -> None:
-    """Write a real catkin trait spec into ``<root>/.tcip/state/trait_specs/``, the way any
-    project authors one (there are no built-in traits, see ``tcip_mcp.traits``). Field values are
-    the crops.yml-grounded definition ``tests/_trait_fixtures.CATKIN`` also uses, not invented here."""
+    """Register the catkin trait under ``root`` and record a confirmed meaning for its delivery.
+
+    The spec is ``tests/_trait_fixtures.CATKIN`` itself rather than a copy of its field values, so
+    a change to that definition cannot leave this smoke run exercising a stale one. The crossing
+    door refuses a trait whose delivered number has no breeder-confirmed meaning, so this states
+    one and confirms it through the same two writers a real project goes through.
+    """
     import dataclasses
 
     import yaml
 
-    from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec
+    from tests._operationalization_fixtures import seed_confirmed_crossing
+    from tests._trait_fixtures import CATKIN
 
-    spec = TraitSpec(
-        name="catkin",
-        count_objective=COUNT_UNBIASED,
-        localization=CENTER_MATCH,
-        localization_tolerance="half_class_avg_size",
-        localization_tolerance_frac=0.5,
-        positive_class_name="elongated",
-        milestone_fractions=(0.05, 0.50, 0.95),
-        milestone_on="positive_fraction",
-        majority_milestone="95per",
-        majority_provisional=True,
-        phenology_prefix="catkin",
-        majority_label="elongation",
-        sliver_policy="class_avg_size",
-        sliver_frac=0.5,
-        delivers=("catkin_05per_date", "catkin_50per_date", "catkin_95per_date", "catkin_elongation_date"),
-        notes="Bloom = fraction of a plant's catkins that are elongated. Elongated is a texture call "
-              "(frilled/salt-and-peppery), never a bbox-ratio proxy.",
-    )
     specs_dir = root / ".tcip" / "state" / "trait_specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
-    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()}
+    data = {k: (list(v) if isinstance(v, tuple) else v)
+            for k, v in dataclasses.asdict(CATKIN).items()}
     (specs_dir / "catkin.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    seed_confirmed_crossing(root, CATKIN.name)
 
 
 def main() -> int:

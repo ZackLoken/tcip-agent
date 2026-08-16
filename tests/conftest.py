@@ -107,6 +107,20 @@ def seed_catkin_trait_spec(tmp_path: Path, _pin_platform_root):
     (specs_dir / "catkin.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
+@pytest.fixture
+def seed_catkin_operationalization(tmp_path: Path, seed_catkin_trait_spec):
+    """Give the seeded catkin spec a confirmed ``state_crossing_dates`` record in the same root.
+
+    The crossing delivery doors refuse a trait whose delivered number has no breeder-confirmed
+    meaning, so a test whose subject is the delivery itself seeds one here and goes on testing what
+    it was written to test. Requested alongside ``seed_catkin_trait_spec`` rather than autouse, for
+    the same reason that one is not: a test of the refusal needs the root without a record in it.
+    """
+    from tests._operationalization_fixtures import seed_confirmed_crossing
+
+    seed_confirmed_crossing(tmp_path, "catkin")
+
+
 #: The single detection subject the canonical test dataset declares (``data_dir``).
 DATA_DIR_SUBJECT = "catkin"
 

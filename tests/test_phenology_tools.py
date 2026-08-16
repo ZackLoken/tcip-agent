@@ -29,9 +29,9 @@ from tcip_mcp.tools.phenology_tools import (
 )
 from tests._binding_fixtures import write_bound_sidecar
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits, and no unstated delivery: seed_catkin_operationalization (conftest.py) writes a
+# real catkin.yml plus the confirmed crossing record the delivery doors require into this root.
+pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
 
 def _plant_csv(path: Path) -> None:

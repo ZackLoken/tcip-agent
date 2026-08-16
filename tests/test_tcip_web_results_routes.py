@@ -12,9 +12,9 @@ from tcip_annotation.state import Annotation, BBox
 
 from tcip_web.app import app
 
-# No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
-# catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
-pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+# No built-in traits, and no unstated delivery: seed_catkin_operationalization (conftest.py) writes a
+# real catkin.yml plus the confirmed crossing record the delivery doors require into this root.
+pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
 
 @pytest.fixture
@@ -87,10 +87,19 @@ def _phenology_fixture(
     through every door with and without the evidence that qualifies them. A validated bucket earns a
     genuine validation record (:mod:`tests._binding_fixtures`) rather than asserting one, since a
     stamp that claims validated is refused unless a record outside the bucket answers for it.
+
+    The trait and its confirmed operationalization are registered in the very root this body names,
+    because that is the root the doors resolve both from. A caller passing a subdirectory gets a
+    project that is whole, rather than one whose spec lives somewhere else.
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     from tests._binding_fixtures import write_bound_sidecar
+    from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
+    from tests._trait_fixtures import CATKIN
+
+    write_spec(tmp_path, CATKIN)
+    seed_confirmed_crossing(tmp_path, CATKIN.name)
 
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
