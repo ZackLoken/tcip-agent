@@ -438,7 +438,7 @@ class TestInferenceToolOutputSchema:
         assert op["tiled_source"] == "explicit"
 
     def test_export_predictions_writes_one_file_per_image_carrying_that_images_detections(
-        self, tmp_path: Path, monkeypatch,
+        self, tmp_path: Path, monkeypatch, seed_catkin_trait_spec,
     ) -> None:
         """A prediction bucket holds one file per image the pass saw, named for that image's own
         stem and holding that image's own detections.
@@ -448,7 +448,7 @@ class TestInferenceToolOutputSchema:
         as correct.
         """
         import tcip_mcp.tools.inference_tools as itools
-        from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+        from tests._binding_fixtures import calibrated_run_fields
 
         def _boxes(n: int) -> list[list[float]]:
             return [[10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0] for i in range(1, n + 1)]
@@ -462,13 +462,12 @@ class TestInferenceToolOutputSchema:
         monkeypatch.setattr(itools, "run_inference", lambda **kw: {
             "results": results, "image_count": len(results),
             "total_detections": sum(counts.values()), "id_map": None,
-            "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
-            "validated": True, "conf_source": "calibration",
-            "checkpoint_sha256": "0f1e2d3c4b5a", "experiment_id": "exp_row_block",
-            "produced_at": "2026-01-01T00:00:00Z"})
+            "checkpoint_sha256": "0f1e2d3c4b5a", "produced_at": "2026-01-01T00:00:00Z",
+            **calibrated_run_fields(labels_dir=tmp_path, tiled=False)})
 
-        out = tmp_path / "preds"
-        res = itools.export_predictions("m.pt", images_dir=str(tmp_path), output_dir=str(out))
+        out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
+        res = itools.export_predictions("m.pt", images_dir=str(tmp_path), output_dir=str(out),
+                                        trait="catkin")
 
         assert "error" not in res, res
         assert res["image_count"] == len(counts)
@@ -501,8 +500,10 @@ class TestInferenceToolOutputSchema:
             "validated": True, "conf_source": "calibration"})
 
         out_csv = tmp_path / "block_counts.csv"
+        # No predictions_dir: the CSV is the provisional one but still carries each measured count.
         res = itools.tabulate_counts("m.pt", str(tmp_path), str(out_csv),
-                                     trait="catkin", calibration_labels_dir=str(tmp_path))
+                                     trait="catkin", calibration_labels_dir=str(tmp_path),
+                                     acknowledge_unvalidated=True)
 
         assert "error" not in res, res
         assert res["csv_path"] == str(out_csv)

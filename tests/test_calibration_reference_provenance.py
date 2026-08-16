@@ -161,7 +161,7 @@ def test_hand_annotated_ground_truth_still_calibrates(tmp_path):
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _reference(tmp_path / "ds", stems, lambda s: [_hand_annotation()])
 
-    bundle, dataset_hash, n_excluded = _calibrate(labels_dir, images_dir)
+    bundle, dataset_hash, n_excluded, _evidence = _calibrate(labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
     assert dataset_hash and n_excluded == 0
@@ -175,7 +175,7 @@ def test_ground_truth_a_person_authored_still_calibrates(tmp_path):
         lambda s: [_hand_annotation(created_by="user:breeder",
                                     created_at="2026-01-01T00:00:00+00:00")])
 
-    bundle, _dataset_hash, _n_excluded = _calibrate(labels_dir, images_dir)
+    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
 
@@ -190,7 +190,7 @@ def test_a_prediction_a_reviewer_accepted_still_calibrates(tmp_path):
                                     accepted_by="user:breeder",
                                     accepted_at="2026-01-02T00:00:00+00:00")])
 
-    bundle, _dataset_hash, _n_excluded = _calibrate(labels_dir, images_dir)
+    bundle, _dataset_hash, _n_excluded, _evidence = _calibrate(labels_dir, images_dir)
 
     assert bundle.get("conf") is not None
 
@@ -228,12 +228,17 @@ def _floor_mismatched_bundle():
 
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [0] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9)
-    return resolve_operating_point("catkin", dataset_hash="H", calibration_records=cal,
-                                   holdout_records=hold, tiled=False, staged_conf_floor=0.001)
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+            miss_pattern=miss, fp_pattern=fp, score=0.9),
+        "holdout_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
+            miss_pattern=miss, fp_pattern=fp, score=0.9),
+        "tiled": False, "staged_conf_floor": 0.001,
+    }
+    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
 
 
 class _OneDetectionStub(_CalStub):
@@ -247,11 +252,15 @@ class _OneDetectionStub(_CalStub):
                 for p in paths]
 
 
-def _run_with_bundle(tmp_path, monkeypatch, bundle):
+def _run_with_bundle(tmp_path, monkeypatch, calibration):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    bundle, inputs = calibration
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _OneDetectionStub())
     image = tmp_path / "capture.png"
     _save_png(image)
@@ -267,11 +276,11 @@ def test_a_conf_floor_mismatch_reaches_the_delivered_issues_without_changing_the
 ):
     """The mismatch is provenance about the reference, not a reason to refuse: it has to be
     readable at the delivery surface, and the run it describes still validates."""
-    bundle = _floor_mismatched_bundle()
+    bundle, inputs = _floor_mismatched_bundle()
     assert bundle.get("conf").sweep["conf_floor_mismatch"] is True
     assert "conf_floor_mismatch" not in (bundle.get("conf").sweep["failures"] or [])
 
-    r = _run_with_bundle(tmp_path, monkeypatch, bundle)
+    r = _run_with_bundle(tmp_path, monkeypatch, (bundle, inputs))
 
     assert "error" not in r, r
     assert any("low-conf tail" in issue for issue in r["shippable_issues"]), r["shippable_issues"]
@@ -286,15 +295,20 @@ def test_a_reference_without_the_mismatch_carries_no_such_issue(tmp_path, monkey
 
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    bundle = resolve_operating_point("catkin", dataset_hash="H", calibration_records=cal,
-                                     holdout_records=hold, tiled=False, staged_conf_floor=0.01)
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "holdout_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "tiled": False, "staged_conf_floor": 0.01,
+    }
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
     assert bundle.get("conf").sweep["conf_floor_mismatch"] is False
 
-    r = _run_with_bundle(tmp_path, monkeypatch, bundle)
+    r = _run_with_bundle(tmp_path, monkeypatch, (bundle, inputs))
 
     assert r["shippable_issues"] == []
     assert r["validated"] is True

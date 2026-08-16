@@ -217,7 +217,7 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -253,7 +253,7 @@ def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(t
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    _bundle, prov = resolve_block_calibration_records(
+    _bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -273,7 +273,7 @@ def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    _bundle, prov = resolve_block_calibration_records(
+    _bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -306,7 +306,7 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -408,7 +408,7 @@ def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: P
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -449,6 +449,71 @@ def test_export_predictions_raster_block_calibration_admits_and_uncaps_max_dets(
     assert "spatial_manifest" not in sidecar["block_calibration"]
 
 
+def test_export_predictions_raster_earns_the_record_behind_a_validated_block_calibrated_count(
+    tmp_path: Path, monkeypatch,
+):
+    """The raster door's own admit case for a validated count: when the block calibration's own
+    bundle is shippable and the export target is the mosaic it was calibrated against, the bucket
+    is stamped validated and the stamp names a record the reader's verification confirms.
+
+    The band passes over this fixture's small synthetic mosaic do not clear a held-out reference,
+    so the bundle they resolve is stood in for by one resolved over a dense reference that does,
+    with the evidence behind it, which is what the door reopens the gate over.
+    """
+    from tests._dense_op_fixtures import dense_records
+
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    import tcip_mcp.pipelines.block_calibration as block_calibration_module
+
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    real_resolve = block_calibration_module.resolve_block_calibration_records
+    n_images = 20
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(n_images=n_images, objects_per_image=80,
+                                             id_prefix="c", fp_pattern=[1] * n_images, score=0.9,
+                                             fp_score=0.05),
+        "holdout_records": dense_records(n_images=n_images, objects_per_image=80, id_prefix="h",
+                                         shift=5.0, fp_pattern=[1] * n_images, score=0.9,
+                                         fp_score=0.05),
+        "tiled": True, "staged_conf_floor": 0.01,
+    }
+
+    def _held_out_block_calibration(*args, **kwargs):
+        _bundle, prov, _evidence = real_resolve(*args, **kwargs)
+        bundle = resolve_operating_point("catkin", experiment_id=exp["experiment_id"], **inputs)
+        evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                    "reference_inputs": {"label_dirs": {"reserved_regions": str(exp["labels_dir"])},
+                                         "stated_values": {"stem": exp["stem"]}}}
+        return bundle, prov, evidence
+
+    monkeypatch.setattr(
+        block_calibration_module, "resolve_block_calibration_records", _held_out_block_calibration)
+
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_HELD_OUT, read_operating_point_sidecar, reconcile_operating_point_validity,
+        verify_stamp_binding,
+    )
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = exp["root"] / "predictions" / "baseline" / "2026-01-01"
+    result = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        experiment_id=exp["experiment_id"])
+
+    assert "error" not in result, result
+    assert result["validated"] is True
+    stamp = read_operating_point_sidecar(out_dir)
+    assert verify_stamp_binding(stamp, out_dir, document="operating_point", trait="catkin").ok
+    assert reconcile_operating_point_validity([str(out_dir)])["validated"] == VALIDATED_HELD_OUT
+
+
 def test_export_predictions_raster_applies_a_legitimate_zero_cross_tile_nms(
     tmp_path: Path, monkeypatch,
 ):
@@ -469,11 +534,11 @@ def test_export_predictions_raster_applies_a_legitimate_zero_cross_tile_nms(
     real_resolve = block_calibration_module.resolve_block_calibration_records
 
     def _zeroed_cross_tile_nms(*args, **kwargs):
-        bundle, prov = real_resolve(*args, **kwargs)
+        bundle, prov, evidence = real_resolve(*args, **kwargs)
         bundle.params["cross_tile_nms"] = ResolvedParam(
             "cross_tile_nms", 0.0, source="derived", derived_from="test override: forced zero",
             requires_validation=False)
-        return bundle, prov
+        return bundle, prov, evidence
 
     monkeypatch.setattr(
         block_calibration_module, "resolve_block_calibration_records", _zeroed_cross_tile_nms)
@@ -682,7 +747,7 @@ def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3,
                                 max_dets=constructed_max_dets)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -722,7 +787,7 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
     constructed_threshold = 0.4
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=constructed_threshold, nms_iou=0.3, max_dets=1000)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -826,7 +891,7 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    bundle, _prov = resolve_block_calibration_records(
+    bundle, _prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -888,7 +953,7 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 
@@ -950,7 +1015,7 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
 
     predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
-    bundle, prov = resolve_block_calibration_records(
+    bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3)
 

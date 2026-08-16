@@ -98,3 +98,58 @@ def write_bound_sidecar(
         stamp, document=document, dataset_root=dataset_root, pred_dirs=covered, **record)
     write_sidecar(pred_dir, bound, document)
     return bound
+
+
+# --- the export doors: a stand-in run whose validated count they can actually earn a record for ---
+
+def calibrated_run_fields(
+    trait: str = "catkin",
+    *,
+    labels_dir: str | Path,
+    identity: str = "evidence-for-a-standin-run",
+    tiled: bool = False,
+    tile_size: int | None = None,
+    tile_size_source: str = "default",
+) -> dict:
+    """The fields a calibrated run's result carries for a delivery door to earn its record from.
+
+    A test standing in for the inference pass still has to leave behind what the door reopens the
+    gate over, or the door has nothing to earn with and says so. This resolves a real held-out
+    operating point over a dense synthetic reference, files the evidence beside its sweep exactly
+    where a calibrated run files it, and hands back the result fields that carry it. The producing
+    experiment is ``None``, the ordinary bespoke-checkpoint case, so the door earns through a
+    created calibration experiment.
+    """
+    from tcip_store import store
+
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.tools.inference_tools import confidence_sweep_key
+    from tests._dense_op_fixtures import dense_records
+
+    n_images, objects = 20, 80
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(n_images=n_images, objects_per_image=objects,
+                                             id_prefix="c", fp_pattern=[1] * n_images, score=0.9,
+                                             fp_score=0.05),
+        "holdout_records": dense_records(n_images=n_images, objects_per_image=objects,
+                                         id_prefix="h", shift=5.0, fp_pattern=[1] * n_images,
+                                         score=0.9, fp_score=0.05),
+        "tiled": tiled,
+        "tile_size": tile_size,
+        "tile_size_source": tile_size_source,
+        "staged_conf_floor": 0.01,
+    }
+    bundle = resolve_operating_point(trait, experiment_id=None, **inputs)
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
+    store.replace(confidence_sweep_key(identity), {"calibration_evidence": evidence})
+    return {
+        "operating_point": bundle.to_provenance()["operating_point"],
+        "validated": True,
+        "conf_source": "calibration",
+        "dataset_hash": "H",
+        "shippable_issues": [],
+        "experiment_id": None,
+        "calibration_evidence_key": identity,
+    }

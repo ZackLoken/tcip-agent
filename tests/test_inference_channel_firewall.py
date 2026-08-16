@@ -46,26 +46,35 @@ def _rgb_image(tmp_path):
 
 
 def _held_out_bundle():
-    """A conf resolved from a dense reference that passes its own held-out gate."""
+    """A conf resolved from a dense reference that passes its own held-out gate, with the
+    resolver arguments behind it."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tests._dense_op_fixtures import dense_records
 
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    return resolve_operating_point("catkin", dataset_hash="H", calibration_records=cal,
-                                   holdout_records=hold, tiled=False, staged_conf_floor=0.01)
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "holdout_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "tiled": False, "staged_conf_floor": 0.01,
+    }
+    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
 
 
 def _run(tmp_path, monkeypatch, in_chans):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
 
-    bundle = _held_out_bundle()
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    bundle, inputs = _held_out_bundle()
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda **kw: _ChannelStub(in_chans))
     ckpt = tmp_path / "m.pt"

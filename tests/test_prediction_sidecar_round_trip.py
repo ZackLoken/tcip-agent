@@ -38,41 +38,53 @@ class _BucketStub:
                 for p in paths]
 
 
-def _held_out_bundle(*, tiled: bool, tile_size: int | None = None,
-                     tile_size_source: str = "default"):
+def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
+                          tile_size_source: str = "default"):
+    """The calibrated bundle plus the resolver arguments behind it, the pair a real calibration
+    hands its caller so a delivery door can reopen the same gate."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tests._dense_op_fixtures import dense_records
 
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE,
-                        fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp,
-                         score=CONF_FROM_THE_DENSE_REFERENCE, fp_score=0.05)
-    return resolve_operating_point(
-        "catkin", dataset_hash="H", calibration_records=cal, holdout_records=hold,
-        tiled=tiled, tile_size=tile_size, tile_size_source=tile_size_source,
-        staged_conf_floor=0.01)
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+            miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE, fp_score=0.05),
+        "holdout_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
+            miss_pattern=miss, fp_pattern=fp, score=CONF_FROM_THE_DENSE_REFERENCE, fp_score=0.05),
+        "tiled": tiled,
+        "tile_size": tile_size,
+        "tile_size_source": tile_size_source,
+        "staged_conf_floor": 0.01,
+    }
+    return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
 
 
-def _export(tmp_path, monkeypatch, *, bundle, tile, tile_size=None):
+def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
 
     from PIL import Image
 
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
+    dataset_root = tmp_path / "dataset"
+    images_dir = dataset_root / "images" / "2026-03-01"
+    images_dir.mkdir(parents=True)
     Image.new("RGB", (160, 120), color=(70, 90, 110)).save(images_dir / "capture_a.png")
 
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    bundle, inputs = calibration
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _BucketStub())
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     result = itools.export_predictions(
-        str(ckpt), images_dir=str(images_dir), output_dir=str(tmp_path / "bucket"),
+        str(ckpt), images_dir=str(images_dir),
+        output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
         device="cpu", tile=tile, tile_size=tile_size, trait="catkin",
         calibration_labels_dir=str(images_dir))
     assert "error" not in result, result
@@ -86,7 +98,8 @@ def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp
         VALIDATED_HELD_OUT, read_operating_point_sidecar, reconcile_operating_point_validity,
     )
 
-    result = _export(tmp_path, monkeypatch, bundle=_held_out_bundle(tiled=False), tile=False)
+    result = _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False),
+                     tile=False)
     bucket = result["output_dir"]
 
     assert read_operating_point_sidecar(bucket) is not None
@@ -98,6 +111,95 @@ def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp
     assert reconciled["conf"] == pytest.approx(CONF_FROM_THE_DENSE_REFERENCE)
 
 
+def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_claim(
+    tmp_path, monkeypatch,
+):
+    """The stamp a validated export writes names a row outside the bucket, and the reader's own
+    verification of that binding passes against the bucket as it was actually written."""
+    from tcip_mcp.pipelines.resolution import (
+        read_operating_point_sidecar, verify_stamp_binding, well_formed_validated_by,
+    )
+
+    result = _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False),
+                     tile=False)
+    bucket = result["output_dir"]
+
+    stamp = read_operating_point_sidecar(bucket)
+    assert well_formed_validated_by(stamp) is not None
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait="catkin")
+    assert binding.ok is True
+    assert binding.claimed is True
+    assert binding.note == ""
+
+
+def test_a_checkpoint_no_registry_knows_still_exports_and_earns_its_own_calibration_record(
+    tmp_path, monkeypatch,
+):
+    """Producing predictions from a bespoke checkpoint is never refused, and a validated count from
+    one is earned against an experiment created for the calibration, with the producing run
+    recorded as absent rather than invented."""
+    from tcip_mcp.experiments import experiment_exists, find_validation
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    result = _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False),
+                     tile=False)
+    bucket = Path(result["output_dir"])
+
+    assert (bucket / "capture_a.json").is_file()  # the predictions themselves, never refused
+    pointer = read_operating_point_sidecar(bucket)["validated_by"]
+    assert experiment_exists(pointer["experiment_id"])
+    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    assert row["producing_experiment_id"] is None
+    assert row["trait"] == "catkin"
+    assert list(row["covered_buckets"]) == ["predictions/baseline/2026-03-01"]
+
+
+def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_path, monkeypatch):
+    """The publication order fails closed at every partial state: files written and no stamp is a
+    bucket that delivers nothing, which is the safe direction."""
+    import tcip_mcp.pipelines.resolution as resolution
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_operating_point_validity
+
+    def _die(*a, **kw):
+        raise RuntimeError("the process died between the prediction files and the record")
+
+    monkeypatch.setattr(resolution, "seal_validation", _die)
+    with pytest.raises(RuntimeError):
+        _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False), tile=False)
+
+    bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
+    assert (bucket / "capture_a.json").is_file()
+    assert not (bucket / "operating_point.json").exists()
+    assert reconcile_operating_point_validity([str(bucket)])["validated"] == VALIDATED_FALSE
+
+
+def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, monkeypatch):
+    """The other partial state: the row is appended and inert, because nothing points at it, and
+    the bucket still floors."""
+    import tcip_mcp.pipelines.resolution as resolution
+
+    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_operating_point_validity
+
+    sealed: dict = {}
+    real_seal = resolution.seal_validation
+
+    def _seal_then_die(draft, **kw):
+        digest, body = real_seal(draft, **kw)
+        sealed.update(body["validated_by"])
+        raise RuntimeError("the process died between the record and the stamp")
+
+    monkeypatch.setattr(resolution, "seal_validation", _seal_then_die)
+    with pytest.raises(RuntimeError):
+        _export(tmp_path, monkeypatch, calibration=_held_out_calibration(tiled=False), tile=False)
+
+    bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
+    assert find_validation(sealed["experiment_id"], sealed["record_digest"]) is not None
+    assert not (bucket / "operating_point.json").exists()
+    assert reconcile_operating_point_validity([str(bucket)])["validated"] == VALIDATED_FALSE
+
+
 def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monkeypatch):
     """A tiled bucket's tile scale is readable back as the operative, explicitly-stated basis it
     was written at, the dimension a multi-bucket delivery floors itself against."""
@@ -105,8 +207,8 @@ def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monk
         VALIDATED_EXPLICIT_GEOMETRY, reconcile_tile_size_validity,
     )
 
-    bundle = _held_out_bundle(tiled=True, tile_size=64, tile_size_source="explicit")
-    result = _export(tmp_path, monkeypatch, bundle=bundle, tile=True, tile_size=64)
+    calibration = _held_out_calibration(tiled=True, tile_size=64, tile_size_source="explicit")
+    result = _export(tmp_path, monkeypatch, calibration=calibration, tile=True, tile_size=64)
     bucket = result["output_dir"]
 
     reconciled = reconcile_tile_size_validity([bucket])

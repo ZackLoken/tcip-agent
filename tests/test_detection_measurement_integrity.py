@@ -685,18 +685,29 @@ def test_default_path_unchanged(tmp_path, monkeypatch):
     assert "sweep_summary" not in r  # provenance shape unchanged on the default path
 
 
-def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
-    import tcip_mcp.tools.inference_tools as itools
-    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+def _stand_in_calibration(monkeypatch, itools, labels_dir, **overrides):
+    """Stand in for the calibration pass, returning what it returns: the resolved bundle, its
+    dataset identity, no excluded stems, and the evidence a delivery door reopens the gate over."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     cal, hold = _good_dense_cal_holdout()
+    inputs = {"dataset_hash": "H", "calibration_records": cal, "holdout_records": hold,
+              "staged_conf_floor": 0.01, **overrides}
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
+    return bundle
+
+
+def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
+    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+
     # tiled=False: this test's real run_inference call below is tile=False (tile_size only
     # gates a bundle when tiled, so the mocked bundle must match the real regime it stands in for).
-    bundle = resolve_operating_point("catkin", dataset_hash="H",
-                                     calibration_records=cal, holdout_records=hold,
-                                     tiled=False, staged_conf_floor=0.01)
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
     monkeypatch.chdir(tmp_path)  # sweep artifact under .tcip/artifacts
@@ -723,13 +734,8 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
 
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    cal, hold = _good_dense_cal_holdout()
-    bundle = resolve_operating_point("catkin", tiled=True, dataset_hash="H",
-                                     calibration_records=cal, holdout_records=hold,
-                                     staged_conf_floor=0.01)
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=True)
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
     monkeypatch.chdir(tmp_path)
@@ -762,17 +768,12 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
 
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    cal, hold = _good_dense_cal_holdout()
     # tiled=False here matches the real tile=False the export_predictions call below makes: an
     # operating point resolved as if the run always tiles (resolve_operating_point's own tiled
     # default) would carry a gating tile_size dimension that the actual untiled call never runs
     # at, and the delivery gate now refuses on exactly that kind of mismatch.
-    bundle = resolve_operating_point("catkin", dataset_hash="H",
-                                     calibration_records=cal, holdout_records=hold,
-                                     staged_conf_floor=0.01, tiled=False)
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
     stub = _CalStub()
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
     monkeypatch.chdir(tmp_path)
@@ -781,9 +782,9 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
     ckpt.write_bytes(b"x")
     _one_image(tmp_path)  # written directly under images_dir=tmp_path; export_predictions globs it
 
-    out = itools.export_predictions(str(ckpt), images_dir=str(tmp_path), output_dir="out",
-                                    device="cpu", tile=False, trait="catkin",
-                                    calibration_labels_dir=str(tmp_path))
+    out = itools.export_predictions(
+        str(ckpt), images_dir=str(tmp_path), output_dir="dataset/predictions/baseline/2026-01-01",
+        device="cpu", tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
     assert "error" not in out, out
     sidecar = json.loads((Path(out["output_dir"]) / "operating_point.json").read_text())
     assert sidecar["sweep_path"]
@@ -805,10 +806,13 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     img = _one_image(tmp_path)
     json_io.write_annotations(str(tmp_path / f"{Path(img).stem}.json"),
                               [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
-    bundle = resolve_operating_point("catkin", tiled=True, dataset_hash="H",
-                                     calibration_records=_op_records("c"),
-                                     holdout_records=_op_records("h", shift=3.0))
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    inputs = {"tiled": True, "dataset_hash": "H", "calibration_records": _op_records("c"),
+              "holdout_records": _op_records("h", shift=3.0)}
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
 
@@ -827,14 +831,9 @@ def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch)
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    cal, hold = _good_dense_cal_holdout()
     # tiled=False: matches the real run_inference call below (tile=False).
-    bundle = resolve_operating_point("catkin", dataset_hash="H",
-                                     calibration_records=cal, holdout_records=hold,
-                                     tiled=False, staged_conf_floor=0.01)
-    monkeypatch.setattr(itools, "_calibrate_operating_point", lambda *a, **k: (bundle, "H", 0))
+    _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
     monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
     monkeypatch.chdir(tmp_path)
 
@@ -951,34 +950,41 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
     assert "tile_size" in r["error"]
 
 
-def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch):
+def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_trait_spec):
     import json
     import tcip_mcp.tools.inference_tools as itools
 
+    from tests._binding_fixtures import calibrated_run_fields
+
     img = _one_image(tmp_path)
-    fake_op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
 
     def _fake_run_inference(**kw):
         return {
             "results": [{"image": img, "width": 100, "height": 100,
                          "boxes": [], "scores": [], "labels": [], "count": 0}],
-            "operating_point": fake_op, "validated": True, "conf_source": "calibration",
-            "shippable_issues": [],
+            **calibrated_run_fields(labels_dir=tmp_path, tiled=False),
         }
 
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
-    out_dir = tmp_path / "out"
+    out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     r = itools.export_predictions(str(ckpt), str(tmp_path), str(out_dir), trait="catkin",
                                   calibration_labels_dir=str(tmp_path))
+    assert "error" not in r, r
     stamp = json.loads((out_dir / "operating_point.json").read_text())
     assert stamp["validated"] is True                       # not hardcoded False
     assert r["validated"] is True and r["conf_source"] == "calibration"
 
 
-def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None):
-    """Run tabulate_counts against a stubbed run_inference returning ``op``/``validated``."""
+def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None,
+                          acknowledge=False):
+    """Run tabulate_counts against a stubbed run_inference returning ``op``/``validated``.
+
+    The dimension under test here is which reference the conf param itself recorded. With no
+    ``predictions_dir`` these counts rest on no bucket anyone can re-read, so a caller wanting the
+    CSV to be delivered at all acknowledges it as provisional.
+    """
     import tcip_mcp.tools.inference_tools as itools
 
     def _fake_run_inference(**kw):
@@ -993,16 +999,18 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
     monkeypatch.setattr(
         itools, "export_detection_csv",
-        lambda results, path, provenance=None, measurement_validated=None,
+        lambda results, path, provenance=None, measurement_validated=None, pred_dirs=None,
         acknowledge_unvalidated=False: str(path))
     return itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
-                                  trait="catkin", calibration_labels_dir=str(tmp_path))
+                                  trait="catkin", calibration_labels_dir=str(tmp_path),
+                                  acknowledge_unvalidated=acknowledge)
 
 
 def test_tabulate_counts_carries_operating_point(tmp_path, monkeypatch):
     captured: dict = {}
     op = {"conf": {"value": 0.6, "validated_against": "held_out_annotations"}}
-    r = _tabulate_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured)
+    r = _tabulate_counts_over(monkeypatch, tmp_path, op, validated=True, captured=captured,
+                              acknowledge=True)
     assert captured["trait"] == "catkin"                    # calibration threaded through
     assert captured["calibration_labels_dir"] == str(tmp_path)
     assert r["validated"] is True and r["conf_source"] == "calibration"
@@ -1032,6 +1040,6 @@ def test_tabulate_counts_never_launders_a_bare_validated_bool_into_a_reference(t
     ok = _tabulate_counts_over(
         monkeypatch, tmp_path,
         {"conf": {"value": 0.6, "validated_against": "reviewer_confirmed_annotations"}},
-        validated=True)
+        validated=True, acknowledge=True)
     assert "error" not in ok
     assert ok["operating_point_validated"] == "reviewer_confirmed_annotations"

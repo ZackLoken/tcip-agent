@@ -308,7 +308,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
                 "validated": False, "conf_source": "default"}
 
     def _fake_export(results, path, provenance=None, measurement_validated=None,
-                     acknowledge_unvalidated=False):
+                     pred_dirs=None, acknowledge_unvalidated=False):
         captured["measurement_validated"] = measurement_validated
         captured["acknowledge_unvalidated"] = acknowledge_unvalidated
         return str(path)
@@ -354,7 +354,18 @@ def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(t
     assert not (tmp_path / "o.csv").exists()
 
 
-def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):
+def _capture_csv_stamp(monkeypatch, itools, captured):
+    """Stand in for the CSV writer, keeping the validity stamp and buckets the door handed it."""
+    monkeypatch.setattr(
+        itools, "export_detection_csv",
+        lambda results, path, provenance=None, measurement_validated=None, pred_dirs=None,
+        acknowledge_unvalidated=False: (
+            captured.update(mv=measurement_validated, pred_dirs=pred_dirs) or str(path)))
+
+
+def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(
+    tmp_path, monkeypatch, seed_catkin_trait_spec,
+):
     """The rail must admit valid work, not only reject invalid work: a tile_size genuinely derived
     from the checkpoint's persisted training geometry ships cleanly, same as a validated conf."""
     import tcip_mcp.tools.inference_tools as itools
@@ -362,35 +373,61 @@ def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeyp
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
     captured = {}
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference_with(
-        conf_ref=VALIDATED_HELD_OUT,
-        tile_size_prov={"value": 224, "requires_validation": True,
-                        "validation_kind": "geometry",
-                        "validated_against": VALIDATED_PERSISTED_GEOMETRY}))
-    monkeypatch.setattr(
-        itools, "export_detection_csv",
-        lambda results, path, provenance=None, measurement_validated=None,
-        acknowledge_unvalidated=False: (captured.update(mv=measurement_validated) or str(path)))
+    monkeypatch.setattr(itools, "run_inference", lambda **kw: _earned_run_inference_result(
+        tmp_path, tiled=True, tile_size=224, tile_size_source="derived"))
+    _capture_csv_stamp(monkeypatch, itools, captured)
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
-                               trait="catkin", calibration_labels_dir=str(tmp_path))
-    assert "error" not in r
+                               trait="catkin", calibration_labels_dir=str(tmp_path),
+                               predictions_dir=str(bucket))
+    assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert captured["mv"] == VALIDATED_HELD_OUT  # the CSV stamp reflects the fully-cleared gate
+    assert captured["pred_dirs"] == [str(bucket)]  # and is reconciled against the bucket it wrote
 
 
-def test_tabulate_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatch):
+def test_tabulate_counts_never_gates_tile_size_when_untiled(
+    tmp_path, monkeypatch, seed_catkin_trait_spec,
+):
     """An untiled run's tile_size is never operative: it must not manufacture a refusal just
     because the run's own bundle happens to carry a non-gating tile_size entry."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference_with(
-        conf_ref=VALIDATED_HELD_OUT,
-        tile_size_prov={"value": None, "requires_validation": False,
-                        "validation_kind": None, "validated_against": None}))
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
-                               trait="catkin", calibration_labels_dir=str(tmp_path))
-    assert "error" not in r
+    captured = {}
+    monkeypatch.setattr(itools, "run_inference",
+                        lambda **kw: _earned_run_inference_result(tmp_path, tiled=False))
+    _capture_csv_stamp(monkeypatch, itools, captured)
+    r = itools.tabulate_counts(
+        "m.pt", str(tmp_path), str(tmp_path / "o.csv"), trait="catkin",
+        calibration_labels_dir=str(tmp_path),
+        predictions_dir=str(tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"))
+    assert "error" not in r, r
     assert r["tile_size_validated"] is None  # never entered the gate at all
+
+
+def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_csv(
+    tmp_path, monkeypatch, seed_catkin_trait_spec,
+):
+    """A count read off one in-memory pass rests on nothing a reviewer can re-read, so the CSV is
+    refused unless it is acknowledged as provisional, and the acknowledged one is stamped false
+    however clean the operating point behind it was."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    captured = {}
+    monkeypatch.setattr(itools, "run_inference",
+                        lambda **kw: _earned_run_inference_result(tmp_path, tiled=False))
+    _capture_csv_stamp(monkeypatch, itools, captured)
+    refused = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+                                     trait="catkin", calibration_labels_dir=str(tmp_path))
+    assert "predictions_dir" in refused["error"]
+    assert refused["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself was fine
+
+    provisional = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+                                         trait="catkin", calibration_labels_dir=str(tmp_path),
+                                         acknowledge_unvalidated=True)
+    assert "error" not in provisional, provisional
+    assert provisional["predictions_dir"] is None
+    assert captured["mv"] == VALIDATED_FALSE
 
 
 def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_despite_valid_conf(
@@ -407,10 +444,7 @@ def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_desp
         conf_ref=VALIDATED_HELD_OUT,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
-    monkeypatch.setattr(
-        itools, "export_detection_csv",
-        lambda results, path, provenance=None, measurement_validated=None,
-        acknowledge_unvalidated=False: (captured.update(mv=measurement_validated) or str(path)))
+    _capture_csv_stamp(monkeypatch, itools, captured)
     r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
                                trait="catkin", calibration_labels_dir=str(tmp_path),
                                acknowledge_unvalidated=True)
@@ -433,6 +467,24 @@ def _fake_run_inference_result(*, conf_ref, tile_size_prov=None):
     }
 
 
+def _earned_run_inference_result(tmp_path, **calibration):
+    """A stand-in run that left behind the evidence a door earns its validation record from.
+
+    A door cannot stamp a validated bucket from a bare assertion that the run validated, so a test
+    exercising the validated path resolves a real operating point and files its evidence.
+    """
+    from tests._binding_fixtures import calibrated_run_fields
+
+    return {
+        "results": [{"image": "a.png", "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                     "count": 1}],
+        "image_count": 1, "total_detections": 1, "id_map": None,
+        "checkpoint_sha256": "deadbeef", "produced_at": "2026-01-01T00:00:00Z",
+        **calibrated_run_fields(labels_dir=tmp_path, **calibration),
+    }
+
+
 def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_conf(tmp_path, monkeypatch):
     """The delivery door that actually persists a prediction bucket must refuse a fabricated tile
     scale the same way tabulate_counts/compute_phenology/export_aggregated_csv already do:
@@ -451,20 +503,19 @@ def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_con
     assert not out.exists()
 
 
-def test_export_predictions_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):
+def test_export_predictions_ships_when_tile_size_has_a_real_basis(
+    tmp_path, monkeypatch, seed_catkin_trait_spec,
+):
     """The rail must admit valid work, not only reject invalid work."""
     import tcip_mcp.tools.inference_tools as itools
 
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _fake_run_inference_result(
-        conf_ref=VALIDATED_HELD_OUT,
-        tile_size_prov={"value": 224, "requires_validation": True,
-                        "validation_kind": "geometry",
-                        "validated_against": VALIDATED_PERSISTED_GEOMETRY}))
-    out = tmp_path / "preds"
-    r = itools.export_predictions("m.pt", str(tmp_path), str(out))
-    assert "error" not in r
+    monkeypatch.setattr(itools, "run_inference", lambda **kw: _earned_run_inference_result(
+        tmp_path, tiled=True, tile_size=224, tile_size_source="derived"))
+    out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    r = itools.export_predictions("m.pt", str(tmp_path), str(out), trait="catkin")
+    assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
     sidecar = json.loads((out / "operating_point.json").read_text())
@@ -472,18 +523,18 @@ def test_export_predictions_ships_when_tile_size_has_a_real_basis(tmp_path, monk
     assert sidecar["validated"] is True
 
 
-def test_export_predictions_never_gates_tile_size_when_untiled(tmp_path, monkeypatch):
+def test_export_predictions_never_gates_tile_size_when_untiled(
+    tmp_path, monkeypatch, seed_catkin_trait_spec,
+):
     """An untiled run's tile_size is never operative: it must not manufacture a refusal just
     because the run's own bundle happens to carry a non-gating tile_size entry."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _fake_run_inference_result(
-        conf_ref=VALIDATED_HELD_OUT,
-        tile_size_prov={"value": None, "requires_validation": False,
-                        "validation_kind": None, "validated_against": None}))
-    out = tmp_path / "preds"
-    r = itools.export_predictions("m.pt", str(tmp_path), str(out))
-    assert "error" not in r
+    monkeypatch.setattr(itools, "run_inference",
+                        lambda **kw: _earned_run_inference_result(tmp_path, tiled=False))
+    out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    r = itools.export_predictions("m.pt", str(tmp_path), str(out), trait="catkin")
+    assert "error" not in r, r
     assert r["tile_size_validated"] is None
     assert r["validated"] is True
 
