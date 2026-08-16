@@ -12,8 +12,7 @@ from tcip_annotation.state import Annotation, BBox
 
 from tcip_web.app import app
 
-# No built-in traits, and no unstated delivery: seed_catkin_operationalization (conftest.py) writes a
-# real catkin.yml plus the confirmed crossing record the delivery doors require into this root.
+# seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
 

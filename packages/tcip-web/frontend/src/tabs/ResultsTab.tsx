@@ -76,8 +76,7 @@ function movedRecordFrom(e: unknown): OperationalizationRecord | null {
     : null;
 }
 
-// The breeder cannot author a record from the GUI: the agent states it and they confirm it. A
-// correction is a message to the agent, and it says nothing about what the number should mean.
+// The agent states, the breeder confirms; a correction is a message that proposes no meaning.
 function correctionRequest(record: OperationalizationRecord): string {
   return (
     `The operationalization on record for the "${record.trait}" trait's ${record.delivery_kind} ` +
@@ -310,8 +309,7 @@ export function ResultsTab() {
   const [validity, setValidity] = useState<Record<string, string>>({});
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
 
-  // What this project's delivered numbers are recorded to mean, listed rather than selected: the
-  // records are keyed by trait plus delivery kind, including kinds this tab computes no view for.
+  // Listed rather than selected: records are keyed by trait plus kind, including uncomputed kinds.
   const [operationalizations, setOperationalizations] = useState<OperationalizationRecord[]>([]);
   const [operationalizationsError, setOperationalizationsError] = useState<string | null>(null);
   const [operationalizationRefusal, setOperationalizationRefusal] =
