@@ -57,6 +57,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `export_predictions` | Export predictions as per-image JSON (COCO-shaped). A bucket (`output_dir`) with review verdicts is immutable; the export redirects to a fresh `<dir>@r2` bucket (see the response's `output_dir`); `overwrite=True` forces in-place but is refused when verdicts exist |
 | `run_inference` | Run batch inference on images |
 | `compute_phenology` | Per-plant bloom CSV (05/50/95-per-date) from classified preds + plant mapping; its own column schema; see `phenology` skill |
+| `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a persisted whole-raster prediction bucket plus plant-locations CSV(s); georeferences the boxes, assigns them to plants, and delivers through `export_aggregated_csv`, so it inherits the same gate and provenance columns; refuses a bucket that cannot vouch for the caller's raster |
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
 `tabulate_counts` produces a different, per-image `image, detection_count,
