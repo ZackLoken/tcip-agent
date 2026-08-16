@@ -55,6 +55,7 @@ _EXPECTED_DENY = {
     "Edit(tsconfig.json)",
     "Edit(.gitignore)",
     "Edit(README.md)",
+    "Edit(.tcip/state/trait_operationalizations/**)",
     "Bash(rm:*)",
     "Bash(rmdir:*)",
     "Bash(git push:*)",
