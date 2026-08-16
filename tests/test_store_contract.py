@@ -1153,6 +1153,18 @@ REGISTERED = {
         lambda root: plant_mapping.plant_mapping_key(
             _plant_mapping_dir(root) / "plant_mapping.json"),
         ".tcip/state/plant_mapping.json", scope_of=_plant_mapping_dir),
+    # the experiment record's validation member
+    "experiment_validations": Registered(
+        {"document": "operating_point", "trait": "catkin_50per_date",
+         "claim": {"operating_point": {"conf": {"value": 0.42}}},
+         "validated_against": "held_out_annotations", "checkpoint_sha256": "0" * 64,
+         "producing_experiment_id": EXPERIMENT,
+         "reference_identity": {"calibration_dataset_hash": "9f2c1b0a4d6e8f31"},
+         "covered_buckets": {"predictions/live/2026-03-04": "7f3a1b9c2d4e5f60"},
+         "dataset_root": "dü", "recorded_at": "2026-03-04T12:00:00+00:00"},
+        lambda root: experiments.validations_key(EXPERIMENT),
+        f".tcip/experiments/{EXPERIMENT}/validations.jsonl", pin=_pin_platform_root,
+        scope_of=lambda root: Path(experiments.experiments_scope())),
 }
 
 CODEC_EXEMPT = {

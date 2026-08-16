@@ -1170,40 +1170,47 @@ entry of its own: it calls `record_event` with a `source` of `"gui"` and the sco
 belongs to, and `tests/test_audit_row_core_field_agreement.py:26` runs a real route and a real
 platform write against one log and holds the two rows to the same core fields.
 
-## 10-15. `.tcip/experiments/<experiment_id>/`, seven sub-formats
+## 10-15. `.tcip/experiments/<experiment_id>/`, eight sub-formats
 
 Path root: `.tcip/experiments/<experiment_id>/`, resolved via `experiments_dir()`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:50`, against the pinned platform state root. Each
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:48`, against the pinned platform state root. Each
 member is a store of its own with its own key constructor beside it, and every writer and reader
-below addresses the member through that key rather than composing a path. Seven members are
-declared; the numbered range 10-15 carries six of them, and `env.json` is the seventh, listed
-here with the rest rather than taking a number of its own.
+below addresses the member through that key rather than composing a path. Eight members are
+declared; the numbered range 10-15 carries six of them, and `env.json` and `validations.jsonl`
+are listed here with the rest rather than taking numbers of their own.
 
-- `config.json` (`config_key`, `experiments.py:110`): written by `create_experiment`,
-  `experiments.py:297`, and `overwrite_config_if_pristine`, `experiments.py:352` (rewrites only
+- `config.json` (`config_key`, `experiments.py:113`): written by `create_experiment`,
+  `experiments.py:321`, and `overwrite_config_if_pristine`, `experiments.py:376` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:734`, and `compare_experiments`, `experiments.py:785`.
-- `status.json` (`status_key`, line 132): written by `create_experiment` (297), `update_status`
-  (`experiments.py:378`), `stamp_run_identity` (`experiments.py:412`), `_touch_heartbeat`
-  (`experiments.py:543`). Read by `get_experiment` (734), `reconstruct_run_status`
-  (`experiments.py:488`), `resolve_experiment_dir_for_run` (`experiments.py:436`). `state` is
+  `experiments.py:893`, and `compare_experiments`, `experiments.py:946`.
+- `status.json` (`status_key`, line 135): written by `create_experiment` (321), `update_status`
+  (`experiments.py:402`), `stamp_run_identity` (`experiments.py:436`), `_touch_heartbeat`
+  (`experiments.py:567`). Read by `get_experiment` (893), `reconstruct_run_status`
+  (`experiments.py:512`), `resolve_experiment_dir_for_run` (`experiments.py:460`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
-- `lineage.json` (`lineage_key`, line 155): written by `create_experiment` (297) and
-  `update_lineage`, `experiments.py:634`. Read by `get_experiment` (734) and
-  `get_experiment_lineage`, `experiments.py:829`.
-- `artifacts.json` (`artifacts_key`, line 177): written by `create_experiment` (297) and
-  `record_artifact`, `experiments.py:609`. Read by `get_experiment` (734).
-- `metrics.jsonl` (`metrics_key`, line 241, the record's one append-only member): written by
-  `log_metrics`, `experiments.py:575`. Read by `read_metrics`, `experiments.py:562`, which
-  `get_experiment` (734, paginated) and `reconstruct_run_status` (488, last row only) go through.
-- `env.json` (`env_key`, line 199): the library versions, seed and model kind a run is
+- `lineage.json` (`lineage_key`, line 158): written by `create_experiment` (321) and
+  `update_lineage`, `experiments.py:793`. Read by `get_experiment` (893) and
+  `get_experiment_lineage`, `experiments.py:990`.
+- `artifacts.json` (`artifacts_key`, line 180): written by `create_experiment` (321) and
+  `record_artifact`, `experiments.py:768`. Read by `get_experiment` (893).
+- `metrics.jsonl` (`metrics_key`, line 244, append-only): written by
+  `log_metrics`, `experiments.py:599`. Read by `read_metrics`, `experiments.py:586`, which
+  `get_experiment` (893, paginated) and `reconstruct_run_status` (512, last row only) go through.
+- `env.json` (`env_key`, line 202): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
   reads it back; it is provenance a reviewer reads directly.
-- `split.json` (`split_key`, line 220): written by `training_tools._persist_split_manifest`,
+- `split.json` (`split_key`, line 223): written by `training_tools._persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:1249`. Read by `read_split_manifest`,
-  `experiments.py:850`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
+  `experiments.py:1011`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from.
+- `validations.jsonl` (`validations_key`, line 261, append-only): the claims earned against this
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:674`
+  (no public raw appender; the storage seam's generic append remains reachable and is a stated
+  residual). Read by `read_validations`, `experiments.py:699`, `find_validation`,
+  `experiments.py:714` (matching rows by recomputed `validation_digest`, `experiments.py:664`),
+  and included whole by `get_experiment` (893). The one member appendable after a terminal
+  state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
 verdict `both-sides-one-implementation`, `phase0_implementation: mixed`:
@@ -1500,14 +1507,14 @@ Phase 3 verdict: single.
 ## S07. Experiment record .tcip/experiments/<id>/
 
 Must agree: three processes agree on the experiment directory layout and immutability rules for each file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:55` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:58` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py` (config patch goes through `store.transaction(config_key(...))`; every member writer takes its target from the experiments module's accessors).
 Phase 3 verdict: single.
 
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:575` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:599` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -1662,7 +1669,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:850` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1011` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
