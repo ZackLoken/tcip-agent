@@ -3,12 +3,13 @@
 The confidence operating point is the phenotype for a count trait, so it must be derived per
 dataset and validated against held-out ground truth, never pinned. This script runs one
 low-threshold model pass over a disjoint calibration/holdout split of a labeled dir, resolves the
-count-unbiased operating point, checks its held-out count bias, and persists the full provenance +
-sweep to ``.tcip/experiments/<id>/operating_point.json`` for inspection and lineage.
+count-unbiased operating point, checks its held-out count bias, and prints the full provenance and
+sweep for inspection. It writes nothing: a validated claim is minted only by the audited doors,
+and a script writing into the experiment record would route that mutation around the audit log.
 
 It is a script (not a new MCP tool) per CLAUDE.md: the audited count is produced at ``run_inference``
 (which now accepts ``trait`` + ``calibration_labels_dir`` to resolve the same operating point inline);
-this is the offline producer for inspecting the sweep and recording the bundle.
+this is the offline inspector for the sweep behind that resolution.
 
 Usage:
     python scripts/calibrate_operating_point.py \
@@ -37,8 +38,7 @@ def main(argv: list[str] | None = None) -> int:
                              "labels' dataset root, or the labels dir itself when the dataset "
                              "layout places it under none.")
     parser.add_argument("--experiment-id", default=None,
-                        help="Experiment id to persist under (.tcip/experiments/<id>/). "
-                             "Defaults to a hash-tagged id.")
+                        help="Producing experiment id recorded in the printed provenance.")
     parser.add_argument("--val-ratio", type=float, default=0.5,
                         help="Holdout fraction of the labeled split (disjoint by stem). Only takes "
                              "effect on the first calibration call for this labels_dir's GT identity"
@@ -73,7 +73,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
-    from tcip_mcp.project_paths import project_root
 
     # Match the MCP path's own initial predictor construction exactly (DEFAULT_MAX_DETS) rather
     # than leaving the framework default (torchvision 100/300) in place: this value is superseded
@@ -154,18 +153,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     attach_split_policy_provenance(bundle, locked)
 
-    exp_id = args.experiment_id or f"opcal_{args.trait}_{dh}"
-    out_dir = project_root() / ".tcip" / "experiments" / exp_id
-    out_dir.mkdir(parents=True, exist_ok=True)
     provenance = bundle.to_provenance()
     provenance["sweep"] = bundle.get("conf").sweep
-    out_path = out_dir / "operating_point.json"
-    out_path.write_text(json.dumps(provenance, indent=2), encoding="utf-8")
 
     conf = bundle.get("conf")
     print(f"trait={args.trait} dataset_hash={dh}")
     print(f"conf={conf._raw:.4f} validated_against={conf.validated_against} shippable={bundle.is_shippable}")
-    print(f"persisted -> {out_path}")
+    print(json.dumps(provenance, indent=2))
     return 0
 
 

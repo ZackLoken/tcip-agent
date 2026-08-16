@@ -220,3 +220,52 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     applied_cap = _Model.detector.roi_heads.detections_per_img
     assert applied_cap == 100  # derive_max_dets_from_counts([2, 2]) floor
     assert applied_cap != DEFAULT_MAX_DETS
+
+def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path, capsys):
+    """The script inspects a sweep; minting or replacing a validated claim belongs to the audited
+    doors, so a run leaves the experiment directory exactly as it found it."""
+
+    class _Predictor:
+        def __init__(self):
+            self.model = SimpleNamespace(detector=SimpleNamespace(
+                roi_heads=SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)))
+            self.device = "cpu"
+            self.train_tile_size = None
+            self.train_overlap = None
+            self.score_threshold = 0.5
+
+    monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
+                        lambda **kw: _Predictor())
+
+    class _Probe:
+        stems = ["a", "b"]
+
+    monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
+                        lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
+    monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
+    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.records_over_loader",
+                        lambda model, loader, device, task: [])
+
+    def _resolve_op(trait_name, **kw):
+        from tcip_mcp.pipelines.resolution import ResolvedBundle, derived
+        conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations",
+                       derived_from="x", validated_against="false", sweep={})
+        return ResolvedBundle(trait=trait_name, dataset_hash=kw.get("dataset_hash"),
+                              params={"conf": conf})
+
+    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.resolve_operating_point", _resolve_op)
+    monkeypatch.setattr("tcip_mcp.pipelines.operating_point.attach_split_policy_provenance",
+                        lambda b, locked: None)
+    monkeypatch.setattr("tcip_mcp.project_paths.project_root", lambda: tmp_path)
+
+    from scripts.calibrate_operating_point import main
+
+    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path)])
+    assert rc == 0
+    assert not (tmp_path / ".tcip" / "experiments").exists()
+    out = capsys.readouterr().out
+    assert '"conf"' in out
