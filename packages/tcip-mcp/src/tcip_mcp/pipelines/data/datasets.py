@@ -199,7 +199,7 @@ def dir_label_format(labels_dir) -> str | None:
 
 
 def trainable_stems(
-    labels_dir, images_dir, stems=None, *, subject: str | None = None, date=None,
+    labels_dir, images_dir, stems=None, *, subject: str | None = None, date,
     coco: dict | None = None,
     attribute: str | None = None, id_map: dict[str, int] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
@@ -223,6 +223,10 @@ def trainable_stems(
     the confirmation can no longer be trusted as-is, a different situation from nobody ever having
     looked, and one a reproduce-a-number chain must be able to tell apart (see
     ``confirmed_negative_names``'s quarantine logic).
+
+    ``date`` states which capture date's confirmations this partition may admit, ``None`` for a
+    tree that carries no date, and is passed through to ``confirmed_negative_names`` as the bucket
+    key rather than recovered from ``labels_dir``.
 
     ``skipped_incomplete_attribute`` is the whole-image attribute-completeness rail: with
     ``attribute`` set, an image carrying any instance never assessed for it has incomplete ground
@@ -391,8 +395,52 @@ def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[boo
     return True, any(a.subject == subject and _is_target(a) for a in anns)
 
 
+def _raw_status_store(labels_dir) -> object:
+    """The dataset's stored image statuses as written, or ``{}`` when there is nothing to read.
+
+    The one read of ``image_status_path`` behind every function here, so the enumeration of a
+    subject's buckets and the records taken from them come from the same document and the same
+    answer to a store that is absent or will not parse.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of, image_status_path
+
+    root = dataset_root_of(labels_dir)
+    if root is None:
+        return {}
+    status_file = image_status_path(root)
+    if not status_file.is_file():
+        return {}
+    try:
+        return json.loads(status_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def confirmed_negative_records_every_date(
+    labels_dir, *, subject: str, quarantined_out: set[str] | None = None,
+) -> dict[str, dict[str, str]]:
+    """This subject's confirmed negatives from every bucket the store names it under, by image name.
+
+    For a consumer whose own output carries no capture date and therefore folds a whole dataset's
+    confirmations into one bucket (``make_splits(materialize=True)``). The dates come from
+    :func:`~tcip_mcp.dataset_layout.bucket_dates_for_subject`, the keys writers actually stated, so
+    no bucket is missed and none is invented; each one is then read through
+    :func:`confirmed_negative_records`, quarantine included, rather than by a second reader.
+
+    An image name confirmed under more than one date resolves to the last date's record, which is
+    the same merge a caller reading each date itself would perform.
+    """
+    from tcip_mcp.dataset_layout import bucket_dates_for_subject
+
+    out: dict[str, dict[str, str]] = {}
+    for date in bucket_dates_for_subject(_raw_status_store(labels_dir), subject):
+        out.update(confirmed_negative_records(
+            labels_dir, subject=subject, date=date, quarantined_out=quarantined_out))
+    return out
+
+
 def confirmed_negative_names(
-    labels_dir, *, subject: str | None, date=None, quarantined_out: set[str] | None = None,
+    labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
 ) -> set[str]:
     """Image names a human marked negative (empty + Complete) for this subject.
 
@@ -404,7 +452,7 @@ def confirmed_negative_names(
 
 
 def confirmed_negative_records(
-    labels_dir, *, subject: str | None, date=None, quarantined_out: set[str] | None = None,
+    labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Image names a human marked negative for this subject, each with the record that says so.
 
@@ -417,6 +465,13 @@ def confirmed_negative_records(
     be an ancestor, and returns only the ``status_bucket(subject, date)`` bucket. A confirmation is
     a human's statement about one subject on one image; a store keyed by image name alone re-applies
     it to subjects they never looked at, so an image full of bushes trains as "contains no bushes".
+
+    ``date`` is the capture date the confirmation was recorded under, and it is stated by the
+    caller, ``None`` for a tree that genuinely carries no date (a materialized split's ``labels/``,
+    a curated review dataset's flat ``annotations/``). It is never recovered from ``labels_dir``:
+    the key a writer stated and the date a path happens to spell are two different facts, and
+    substituting one for the other reads a bucket nobody wrote under, either dropping a human's
+    confirmations or answering with another date's. A bucket nothing wrote to is empty here.
 
     A negative is quarantined, excluded from the return value, only when the dataset's
     ``image_status_digest.json`` sidecar carries an explicit stamp for that image (not merely its
@@ -440,23 +495,14 @@ def confirmed_negative_records(
     """
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        annotation_date, classes_path, dataset_root_of, image_status_digest_path,
-        image_status_path, is_confirmed_negative, status_confirmations, status_bucket, status_of,
+        classes_path, dataset_root_of, image_status_digest_path,
+        is_confirmed_negative, status_confirmations, status_bucket, status_of,
     )
 
-    if date is None:
-        date = annotation_date(labels_dir)
     root = dataset_root_of(labels_dir)
     if root is None:
         return {}
-    status_file = image_status_path(root)
-    if not status_file.is_file():
-        return {}
-    try:
-        raw = json.loads(status_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    statuses = status_confirmations(raw)
+    statuses = status_confirmations(_raw_status_store(labels_dir))
     if not subject:
         # Refuse only when there is something to lose: a store with confirmed negatives this
         # run might be entitled to. Silently returning none would drop the human's work.
@@ -473,7 +519,7 @@ def confirmed_negative_records(
     bucket_key = status_bucket(subject, date)
     bucket = statuses.get(bucket_key)
     if not bucket:
-        return {}  # this subject has no confirmations yet
+        return {}  # nothing was ever written under the key this caller stated
     negatives = {name: r for name, r in bucket.items() if is_confirmed_negative(status_of(r))}
     if not negatives:
         return negatives
@@ -518,7 +564,7 @@ def confirmed_negative_records(
 
 def assemble_coco(
     labels_dir, images_dir, stems=None, *, subject: str, attribute: str | None = None,
-    id_map: dict[str, int], date=None,
+    id_map: dict[str, int], date,
 ) -> dict:
     """Assemble a dataset-level COCO dict from the name-based per-image JSON, scoped to ``subject``.
 
@@ -527,7 +573,9 @@ def assemble_coco(
     the run's ``assign_class_ids`` map; this is the single delegation to ``json_io.to_coco_dataset``,
     so the COCO categories, the loader targets, and the contract dims all rest on one name→id map.
     Stems whose image is missing are skipped. This is how per-image JSON reaches training: a COCO the
-    ``label_format='coco'`` path consumes.
+    ``label_format='coco'`` path consumes. ``date`` is the confirmation bucket's own date, stated by
+    the caller and passed straight through, so the assembled COCO's negatives and the partition's
+    come from one key.
     """
     from tcip_annotation import json_io
 
@@ -1462,12 +1510,16 @@ def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
 
 
 def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | None,
-                             id_map: dict[str, int]) -> None:
+                             id_map: dict[str, int], date) -> None:
     """Route a name-based per-image-JSON label dir onto the assembled-COCO path for training/eval.
 
     No-op when the caller pinned a format or already supplied COCO data. The single ``id_map`` is
     threaded into ``assemble_coco`` (and thus the one ``to_coco_dataset`` call), so the assembled
     categories rest on the same name→id derivation as the loader targets and the contract dims.
+
+    ``date`` is the caller's own, the same one the dataset class hands ``trainable_stems``, so the
+    assembled COCO and the partition that consumes it read one confirmation bucket rather than two
+    keys that can disagree.
     """
     if kwargs.get("coco_data") is not None or kwargs.get("coco_json") or kwargs.get("label_format"):
         return
@@ -1478,7 +1530,7 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
     if dir_label_format(labels_dir) == "json" and images_dir:
         kwargs["coco_data"] = assemble_coco(
             labels_dir, images_dir, stems=kwargs.get("stems"),
-            subject=subject, attribute=attribute, id_map=id_map)
+            subject=subject, attribute=attribute, id_map=id_map, date=date)
         kwargs["label_format"] = "coco"
 
 
@@ -1545,6 +1597,11 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
     ``num_channels`` is derived by probing one sample raster when the caller does not pin it, so a
     multi-band input threads its real band count through ``in_chans`` instead of defaulting to RGB.
 
+    ``date`` names the capture date whose confirmed negatives this build may admit, the same key
+    the GUI recorded them under, and reaches both the assembled COCO and the partition unchanged.
+    A run over ``annotations/<date>/`` states that date; ``None`` (the default) is the key a tree
+    that carries no date was written under, and no date is ever recovered from the labels path.
+
     ``dataset_source`` is the bespoke seam (mirrors ``model_source``): when given, an agent-supplied
     importable builder produces the dataset for a task the known loaders don't cover. The known
     loaders stay the default; the ``Unknown task`` error below is still raised for a bad known-task
@@ -1576,7 +1633,8 @@ def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Da
             _registry, id_map = _resolve_registry_id_map(kwargs["labels_dir"], subject, attribute)
             kwargs["id_map"] = id_map
             kwargs["num_classes"] = len(id_map)
-            _autoresolve_json_labels(kwargs, subject=subject, attribute=attribute, id_map=id_map)
+            _autoresolve_json_labels(kwargs, subject=subject, attribute=attribute, id_map=id_map,
+                                     date=kwargs.get("date"))
         elif has_coco and kwargs.get("num_classes") is None:
             coco = kwargs.get("coco_data")
             if isinstance(coco, dict):

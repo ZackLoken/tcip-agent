@@ -89,7 +89,7 @@ def test_an_image_finished_with_content_never_reads_back_as_a_confirmed_negative
     }
 
     _store(client, root, "catkin", derived)
-    negatives = confirmed_negative_names(root / "annotations", subject="catkin")
+    negatives = confirmed_negative_names(root / "annotations", subject="catkin", date=None)
     assert negatives == {"img_bush.jpg", "img_blank.jpg"}
     assert "img_catkins.jpg" not in negatives
     assert _read_back(client, root, "catkin")["img_catkins.jpg"] == "complete"
@@ -105,8 +105,8 @@ def test_one_image_is_a_negative_for_one_subject_and_finished_for_another(
     for subject in ("catkin", "bush"):
         _store(client, root, subject, _derive(client, root, subject, images, images))
 
-    assert confirmed_negative_names(root / "annotations", subject="catkin") == {"img_bush.jpg"}
-    assert confirmed_negative_names(root / "annotations", subject="bush") == {"img_catkins.jpg"}
+    assert confirmed_negative_names(root / "annotations", subject="catkin", date=None) == {"img_bush.jpg"}
+    assert confirmed_negative_names(root / "annotations", subject="bush", date=None) == {"img_catkins.jpg"}
     assert _read_back(client, root, "catkin")["img_catkins.jpg"] == "complete"
     assert _read_back(client, root, "bush")["img_bush.jpg"] == "complete"
 

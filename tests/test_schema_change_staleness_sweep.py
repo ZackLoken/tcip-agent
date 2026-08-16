@@ -108,7 +108,7 @@ def _stamps(root: Path, subject: str) -> dict:
 def _read_negatives(root: Path, subject: str) -> tuple[set[str], set[str]]:
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(
-        root / "annotations", subject=subject, quarantined_out=quarantined)
+        root / "annotations", subject=subject, date=None, quarantined_out=quarantined)
     return admitted, quarantined
 
 

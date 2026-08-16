@@ -1274,7 +1274,7 @@ def run_full_frame_evaluation(
     tile_size: int | None = None, overlap: float | None = None,
     global_nms_iou: float = DEFAULT_NMS_IOU,
     max_dets: int = DEFAULT_MAX_DETS, postprocess: str = "nms", device: str | None = None,
-    trait: str | None = None,
+    trait: str | None = None, date: str | None = None,
 ) -> dict:
     """Delivery-grade detection eval: tiled inference reconstructed to full frame,
     matched to full-frame GT.
@@ -1302,12 +1302,16 @@ def run_full_frame_evaluation(
     at all has no persisted overlap analog, which is a legitimate fact, not a missing derivation;
     only ``tile_size``'s absence changes the object count's scale.
 
+    ``date`` is the capture date the GT's confirmed negatives were recorded under, the key the
+    same negative rail reads them by. It is stated by the caller, never taken from ``labels_dir``:
+    a key a writer stated and a date a path spells are different facts, and a delivery-grade number
+    scored against a set that silently lost its human-confirmed empties is a wrong number.
+
     This is a box metric (``iou_type="bbox"``): it requests boxes-only tiled inference
     (``predict_tiled(require_masks=False)``), so an instance_seg checkpoint is gated here on its
     boxes/counts, never on its masks. A mask-quality gate is separate work; do not report this
     number as one.
     """
-    from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_geometry
     from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
@@ -1338,7 +1342,6 @@ def run_full_frame_evaluation(
     tile_size, overlap = resolved_tile, resolved_overlap
 
     img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
-    _lbl_date = annotation_date(lbl_dir)
     # The GT category ids come from the run's single assign_class_ids map, read through the same
     # loader-side reader (_json_det_targets), so delivery-grade GT never diverges from what trained.
     # No try/except here: _resolve_registry_id_map's only exception is its own deliberate
@@ -1356,7 +1359,7 @@ def run_full_frame_evaluation(
 
     names = image_name_map(img_dir)
     if lbl_dir.is_dir():
-        keep, sample_counts = trainable_stems(lbl_dir, img_dir, subject=subject, date=_lbl_date)
+        keep, sample_counts = trainable_stems(lbl_dir, img_dir, subject=subject, date=date)
         paths = [img_dir / names[s] for s in keep if s in names]
     else:
         # No label store, so no rail to apply and no ground truth either. Filtering to nothing here

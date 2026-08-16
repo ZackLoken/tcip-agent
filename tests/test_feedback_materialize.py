@@ -124,5 +124,5 @@ def test_hard_negatives_survive_into_training(tmp_path):
     materialize_dataset(state, str(src), str(out))
 
     labels_out = out / "annotations"
-    assert confirmed_negative_names(labels_out, subject="catkin") == {"imgB.png"}
+    assert confirmed_negative_names(labels_out, subject="catkin", date=None) == {"imgB.png"}
     assert json.loads((labels_out / "imgB.json").read_text())["annotations"] == []

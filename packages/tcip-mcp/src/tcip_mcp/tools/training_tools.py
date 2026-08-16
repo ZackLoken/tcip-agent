@@ -1311,10 +1311,15 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
 
     One definition shared by the training path and the preflight smoke, so the batch the contract
     is proved against is built from the same keys as the batch the run will train on.
+
+    ``data.date`` is the capture date the run's confirmed negatives were recorded under, threaded
+    so the build reads the bucket the GUI wrote instead of one taken from the labels path. A run
+    over ``annotations/<date>/`` sets it; a tree that carries no date leaves it unset.
     """
     if task in ("detection", "instance_seg"):
         kw = {"images_dir": data_cfg.get("images_dir", ""),
-              "labels_dir": data_cfg.get("labels_dir", "")}
+              "labels_dir": data_cfg.get("labels_dir", ""),
+              "date": data_cfg.get("date")}
         # The run's subject (and optional attribute): required to read name-based labels and to
         # derive the single assign_class_ids map. Threaded so every train/val build uses one map.
         if data_cfg.get("subject"):
@@ -1701,7 +1706,8 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 _subject, _attribute = src.get("subject"), src.get("attribute")
                 _reg, _id_map = _resolve_registry_id_map(_labels, _subject, _attribute)
                 build_src["coco_data"] = assemble_coco(
-                    _labels, _images, subject=_subject, attribute=_attribute, id_map=_id_map)
+                    _labels, _images, subject=_subject, attribute=_attribute, id_map=_id_map,
+                    date=src.get("date"))
                 build_src["label_format"] = "coco"
                 build_src["num_classes"] = len(_id_map)
 
@@ -1885,6 +1891,7 @@ def evaluate_model(
     trait: str | None = None,
     subject: str | None = None,
     attribute: str | None = None,
+    date: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
@@ -1939,6 +1946,10 @@ def evaluate_model(
         subject: Name-based GT scope. Caller-supplied wins; else resolved from the producing
             run's own config so the eval reads GT through the same id map the run trained with.
         attribute: Attribute scope for the same name-based GT resolution as ``subject``.
+        date: The capture date this split's confirmed negatives were recorded under, the bucket
+            key the delivery-grade path reads them by. A GT dir under ``annotations/<date>/``
+            states that date; a split tree or a curated dataset carries none and leaves this
+            unset. It is never recovered from ``labels_dir``.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -1991,7 +2002,7 @@ def evaluate_model(
                 conf_threshold=conf_threshold, iou_threshold=iou_threshold,
                 tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
                 global_nms_iou=global_nms_iou, postprocess=postprocess,
-                max_dets=resolved_max_dets, trait=trait,
+                max_dets=resolved_max_dets, trait=trait, date=date,
             )
         except ValueError as exc:
             return {"error": str(exc)}
@@ -2009,7 +2020,7 @@ def evaluate_model(
     # always failed here). labels_dir doubles as the CSV path for the non-geometry tasks, the same
     # single "wherever this task's GT lives" slot it already serves for masks_dir/semantic_seg.
     data_cfg = {"images_dir": images_dir, "labels_dir": labels_dir, "masks_dir": labels_dir,
-                "csv_path": labels_dir, "subject": subject, "attribute": attribute}
+                "csv_path": labels_dir, "subject": subject, "attribute": attribute, "date": date}
     ds_kwargs = _dataset_source_kwargs(task, data_cfg)
     try:
         dataset = build_dataset(task, **ds_kwargs, tiling=tiling)

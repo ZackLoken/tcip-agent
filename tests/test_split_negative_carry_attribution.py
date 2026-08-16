@@ -129,7 +129,7 @@ def test_carried_confirmation_round_trips_through_the_confirmed_negative_reader(
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
-    recovered = confirmed_negative_names(out / holder / "labels", subject=SUBJECT)
+    recovered = confirmed_negative_names(out / holder / "labels", subject=SUBJECT, date=None)
 
     assert recovered == {f"{NEGATIVE_STEM}.jpg"}
 
@@ -180,3 +180,65 @@ def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Pat
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
     assert (out / holder / "classes.json").read_bytes() == (root / "classes.json").read_bytes()
+
+def _dataset_with_disagreeing_key(root: Path, *, labels_date: str | None,
+                                  bucket_date: str | None) -> Path:
+    """One confirmed negative recorded under ``bucket_date`` while the labels path spells
+    ``labels_date``: the two facts a reader must never substitute for each other."""
+    from PIL import Image
+
+    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.dataset_layout import record_image_statuses
+
+    images_dir = root / "images" / labels_date if labels_date else root / "images"
+    labels_dir = root / "annotations" / labels_date if labels_date else root / "annotations"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name=SUBJECT, description="a hazelnut catkin"),
+    )))
+    for i, stem in enumerate(POPULATED_STEMS):
+        Image.new("RGB", (96, 64), (90, 120, 60)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject=SUBJECT, geometry=BBox(5 + 3 * k, 7, 25 + 3 * k, 51))
+             for k in range(i + 1)],
+            96, 64,
+        )
+    Image.new("RGB", (96, 64), (90, 120, 60)).save(images_dir / f"{NEGATIVE_STEM}.jpg")
+    json_io.write_annotations(labels_dir / f"{NEGATIVE_STEM}.json", [], 96, 64, keep_empty=True)
+    record_image_statuses(root, status_bucket(SUBJECT, bucket_date),
+                          {f"{NEGATIVE_STEM}.jpg": "negative"}, recorded_by=CONFIRMED_BY)
+    return root
+
+
+def _carried_negative(tmp_path: Path, *, labels_date: str | None,
+                      bucket_date: str | None) -> dict:
+    root = _dataset_with_disagreeing_key(tmp_path / "ds", labels_date=labels_date,
+                                         bucket_date=bucket_date)
+    out = tmp_path / "splits"
+    result = make_splits(
+        str(root), output_path=str(out), materialize=True, subject=SUBJECT,
+        train_ratio=0.5, val_ratio=0.25, test_ratio=0.25, seed=3,
+    )
+    assert "error" not in result
+    holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
+    stored = json.loads(image_status_path(out / holder).read_text(encoding="utf-8"))
+    return stored.get(status_bucket(SUBJECT, None), {})
+
+
+def test_a_confirmation_under_a_dated_bucket_survives_a_dateless_labels_path(tmp_path: Path):
+    """The split reads the keys writers stated, so a confirmation recorded under a date the
+    labels path does not spell is still the human's and still carries."""
+    carried = _carried_negative(tmp_path, labels_date=None, bucket_date="2026-02-11")
+
+    assert list(carried) == [f"{NEGATIVE_STEM}.jpg"]
+    assert carried[f"{NEGATIVE_STEM}.jpg"]["recorded_by"] == CONFIRMED_BY
+
+
+def test_a_confirmation_under_an_undated_bucket_survives_a_dated_labels_path(tmp_path: Path):
+    """The reverse direction: an undated confirmation is not shadowed by a date the path spells."""
+    carried = _carried_negative(tmp_path, labels_date="2026-03-01", bucket_date=None)
+
+    assert list(carried) == [f"{NEGATIVE_STEM}.jpg"]
+    assert carried[f"{NEGATIVE_STEM}.jpg"]["recorded_by"] == CONFIRMED_BY

@@ -77,7 +77,7 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
     assert {name: rec["status"] for name, rec in bucket.items()} == {
         "neg_a.png": "negative", "neg_b.png": "negative", "neg_c.png": "negative"}
 
-    assert confirmed_negative_names(out / "annotations", subject="catkin") == {
+    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == {
         "neg_a.png", "neg_b.png", "neg_c.png"}
 
     # No source registry to stamp against, so nothing is stamped, and an unstamped confirmation is
@@ -101,8 +101,8 @@ def test_explicit_subject_outranks_the_derived_one(tmp_path):
     assert r["subjects"] == ["catkin"]
     assert json.loads((out / "curated_manifest.json").read_text())["subject"] == "bush"
 
-    assert confirmed_negative_names(out / "annotations", subject="bush") == {"neg.png"}
-    assert confirmed_negative_names(out / "annotations", subject="catkin") == set()
+    assert confirmed_negative_names(out / "annotations", subject="bush", date=None) == {"neg.png"}
+    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
 
 
 def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
@@ -130,7 +130,7 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
 
     assert not image_status_path(out).exists()
     for subject in ("catkin", "leaf"):
-        assert confirmed_negative_names(out / "annotations", subject=subject) == set()
+        assert confirmed_negative_names(out / "annotations", subject=subject, date=None) == set()
 
     # The image is still in the dataset, as an unconfirmed empty rather than a mis-keyed negative.
     assert json.loads((out / "annotations" / "neg.json").read_text())["annotations"] == []
@@ -165,7 +165,7 @@ def test_negative_stamps_match_the_source_registry_schema(tmp_path):
 
     quarantined: set[str] = set()
     admitted = confirmed_negative_names(
-        out / "annotations", subject="catkin", quarantined_out=quarantined)
+        out / "annotations", subject="catkin", date=None, quarantined_out=quarantined)
     assert admitted == {"neg_a.png", "neg_b.png"}
     assert quarantined == set()
 
@@ -211,8 +211,8 @@ def test_a_rejection_of_one_subject_never_confirms_another(tmp_path):
 
     r = materialize_dataset(state, str(src), str(out))
 
-    assert confirmed_negative_names(out / "annotations", subject="catkin") == set()
-    assert confirmed_negative_names(out / "annotations", subject="bush") == set()
+    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
+    assert confirmed_negative_names(out / "annotations", subject="bush", date=None) == set()
     assert r["subject"] is None
     assert r["verdict_subjects"] == ["bush", "catkin"]
     assert [e["image"] for e in r["unconfirmed_negatives"]] == ["disputed_bush.png"]
@@ -232,7 +232,7 @@ def test_a_stated_subject_never_claims_another_subjects_rejections(tmp_path):
 
     r = materialize_dataset(state, str(src), str(out), subject="catkin")
 
-    assert confirmed_negative_names(out / "annotations", subject="catkin") == {
+    assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == {
         "answers_for_catkin.png"}
     assert [e["image"] for e in r["unconfirmed_negatives"]] == ["answers_for_bush.png"]
     assert "not for 'catkin'" in r["unconfirmed_negatives"][0]["reason"]

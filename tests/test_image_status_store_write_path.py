@@ -185,7 +185,7 @@ def test_the_gui_route_records_the_person_whose_confirmation_it_is(
     assert record["recorded_at"]
 
     (tmp_path / "annotations").mkdir(parents=True, exist_ok=True)
-    assert confirmed_negative_names(tmp_path / "annotations", subject="catkin") == {
+    assert confirmed_negative_names(tmp_path / "annotations", subject="catkin", date=None) == {
         "IMG_0009.JPG"}
 
 
