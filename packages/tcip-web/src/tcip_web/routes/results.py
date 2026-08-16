@@ -198,12 +198,15 @@ class _PhenologyMeasurement:
     """One trait's per-plant phenology measurement plus the on-disk evidence that qualifies it."""
 
     def __init__(
-        self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path
+        self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
+        basis,
     ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
         # The guarded, resolved root every later write and audit entry resolves from.
         self.project_root = project_root
+        # What the precondition rested on, re-checked before this measurement reaches a caller.
+        self.basis = basis
 
     @property
     def positive_class_assessed(self) -> bool:
@@ -236,7 +239,16 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     refusal surface later on Download. Rows come from the canonical ``per_plant_phenology`` (the same
     function ``compute_phenology`` delivers from) rather than a second aggregation loop, so the two
     surfaces cannot diverge.
+
+    The spec and the operationalization record come from one call against the guarded root, so the
+    two can never be read from different projects, and the precondition runs before anything else
+    this door does: a breeder must not see a curve on screen that Download would then refuse.
     """
+    from tcip_mcp.operationalization import (
+        STATE_CROSSING_DATES,
+        check_operationalization,
+        resolve_trait_and_record,
+    )
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
         check_delivery_gate,
@@ -244,13 +256,18 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
     )
-    from tcip_mcp.traits import TraitUnknownError, get_trait
+    from tcip_mcp.traits import TraitUnknownError
 
     root = _guarded_project_root(payload.project_root)
     try:
-        spec = get_trait(payload.trait)
+        spec, record, _specs_dir = resolve_trait_and_record(
+            payload.trait, STATE_CROSSING_DATES, project_root=root)
     except TraitUnknownError as e:
         raise HTTPException(400, str(e)) from e
+
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    if not stated.ok:
+        raise HTTPException(400, stated.as_detail())
 
     _guard(payload.mapping_path, *payload.predictions_by_date.values())
     mapping = plant_mapping.load_mapping(Path(payload.mapping_path))
@@ -293,7 +310,29 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         positive_class_name=spec.positive_class_name, spec=spec,
     )
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, payload.predictions_by_date)
-    return _PhenologyMeasurement(spec, plants, validity, gate, positive_class_id, root)
+    return _PhenologyMeasurement(
+        spec, plants, validity, gate, positive_class_id, root, stated.basis)
+
+
+def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
+    """Refuse when the confirmation this measurement was produced under moved while it was produced.
+
+    Called immediately before a response body is composed and before the export door writes its
+    file, so a withdrawal or a spec edit mid-delivery leaves nothing delivered and nothing written.
+    Two keys in two stores cannot be read atomically together, so this closes that window instead.
+    """
+    from tcip_mcp.operationalization import (
+        STATE_CROSSING_DATES,
+        check_operationalization,
+        resolve_trait_and_record,
+    )
+
+    spec, record, _specs_dir = resolve_trait_and_record(
+        trait, STATE_CROSSING_DATES, project_root=measurement.project_root)
+    check = check_operationalization(
+        spec, record, STATE_CROSSING_DATES, basis=measurement.basis)
+    if not check.ok:
+        raise HTTPException(400, check.as_detail())
 
 
 def _refusal(measurement: _PhenologyMeasurement) -> str:
@@ -347,6 +386,7 @@ def per_plant_curves(payload: PhenologyPayload) -> dict:
     measurement = _measure_phenology(payload)
     if not measurement.gate.ok:
         raise HTTPException(400, _refusal(measurement))
+    _still_stated(measurement, payload.trait)
     return {
         "rows": measurement.curve_rows(),
         "n_plants": len(measurement.plants["rows"]),
@@ -369,6 +409,7 @@ def onset_dates(payload: PhenologyPayload) -> dict:
     measurement = _measure_phenology(payload)
     if not measurement.gate.ok:
         raise HTTPException(400, _refusal(measurement))
+    _still_stated(measurement, payload.trait)
     return {"rows": measurement.milestone_rows(), **_disclosure(measurement)}
 
 
@@ -445,6 +486,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
+    _still_stated(measurement, payload.trait)
     # The browser download lands wherever the breeder's browser puts it; the delivery itself
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
     saved_path = measurement.project_root / "results_export" / Path(filename).name

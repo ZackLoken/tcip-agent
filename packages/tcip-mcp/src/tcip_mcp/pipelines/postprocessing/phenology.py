@@ -22,7 +22,8 @@ text, flagged provisional (``TraitSpec.majority_provisional``) until confirmed; 
 mapping in the spec if the breeder rules otherwise. ``positive_onset_date`` (the first date
 any positive-state observation appears) is a separate helper, not the delivered trait.
 
-This module is pure (stdlib only, plus ``resolution.py`` which is itself torch-free): it consumes
+This module is pure (stdlib only, plus ``resolution.py`` and ``operationalization.py``, both of
+which are themselves torch-free): it consumes
 prediction buckets and never touches pixels or model machinery. A prediction file's ``.subject``
 carries the classifier's own decoded call (see ``count_by_class``'s docstring for the full
 schema-vs-GT distinction). If the bucket
@@ -38,6 +39,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
+
+from tcip_mcp.operationalization import OperationalizationBasis
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -490,14 +493,34 @@ def per_plant_phenology(
             "n_images_unmapped": n_images_unmapped}
 
 
-def write_phenology_csv(rows: list[dict], out_path: Path, spec, stamp: dict | None = None) -> str:
+def write_phenology_csv(
+    rows: list[dict],
+    out_path: Path,
+    spec,
+    stamp: dict | None = None,
+    *,
+    basis: OperationalizationBasis | None,
+) -> str:
     """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
 
     Emits exactly ``phenology_csv_columns(spec)``, a stamp key absent from that spec-derived set
     raises rather than being silently dropped: ``extrasaction="ignore"`` alone would silently
     discard a stray/mistyped provenance key with no signal. ``stamp`` (the
     operating point + validation status) is written into every row so the phenotype is traceable.
+
+    ``basis`` is what a passing ``check_operationalization`` returned, and it is required: this
+    writer takes a spec object rather than a trait name and a project root, so it cannot read the
+    record itself without becoming a second resolver beside ``resolve_trait_and_record``. Demanding
+    the proof its caller already produced keeps one implementation of the precondition and closes
+    the direct call that would otherwise write a delivered phenotype nobody defined.
     """
+    if not isinstance(basis, OperationalizationBasis):
+        raise ValueError(
+            "write_phenology_csv writes a delivered phenotype, so it requires the basis a passing "
+            "check_operationalization returned for this trait's state_crossing_dates delivery. "
+            "compute_phenology produces one and is the primitive to call; this writer cannot read "
+            "the record itself, because it is given a trait spec rather than a project to read from."
+        )
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     stamp = stamp or {}

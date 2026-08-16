@@ -29,6 +29,7 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology  # noqa: E402
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E402
+from tests._operationalization_fixtures import schema_basis  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 
 
@@ -376,7 +377,8 @@ def test_write_phenology_csv_raises_on_unknown_stamp_key(tmp_path):
     import pytest
 
     with pytest.raises(ValueError):
-        phenology.write_phenology_csv([], tmp_path / "out.csv", CATKIN, stamp={"bogus_key": "x"})
+        phenology.write_phenology_csv([], tmp_path / "out.csv", CATKIN,
+                                     stamp={"bogus_key": "x"}, basis=schema_basis())
 
 
 def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
@@ -391,7 +393,7 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
     assert milestones["catkin_05per_date_bound"] == "left_censored"
 
     row = {"plant_id": "P1", "n_dates": 2, "n_observed_dates": 2, **milestones}
-    out = phenology.write_phenology_csv([row], tmp_path / "out.csv", CATKIN)
+    out = phenology.write_phenology_csv([row], tmp_path / "out.csv", CATKIN, basis=schema_basis())
     written = Path(out).read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     values = written.splitlines()[1].split(",")
@@ -563,7 +565,7 @@ def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
     # must reach the CSV too.
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 1,
           "n_dates_unclassified": 0, "n_dates_missing_images": 0}
-    out = phenology.write_phenology_csv([row], tmp_path / "out.csv", CATKIN)
+    out = phenology.write_phenology_csv([row], tmp_path / "out.csv", CATKIN, basis=schema_basis())
     written = Path(out).read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     assert "n_observed_dates" in header
