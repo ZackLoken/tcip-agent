@@ -18,7 +18,7 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_mcp import class_registry
 from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject
-from tcip_mcp.dataset_layout import image_status_digest_path, image_status_path, status_bucket
+from tcip_mcp.dataset_layout import image_status_digest_path, status_bucket
 
 
 def _write_image(images_dir: Path, stem: str, size=(64, 64)) -> None:
@@ -34,14 +34,13 @@ def _write_registry(root: Path, *subjects: Subject) -> ClassRegistry:
 
 def _confirm_negative(root: Path, subject: str, image_name: str, *, date=None,
                       digest: str | None = None) -> None:
-    """Merges into any existing store (like the real write routes do) rather than overwriting, so a
-    test can confirm several images into the same bucket across separate calls."""
+    """Confirms through the writer the real routes call, so the stored shape is theirs and a test
+    can confirm several images into the same bucket across separate calls."""
+    from tcip_mcp.dataset_layout import CONFIRMED_NEGATIVE, record_image_statuses
+
     bucket = status_bucket(subject, date)
-    status_path = image_status_path(root)
-    status_path.parent.mkdir(parents=True, exist_ok=True)
-    store = json.loads(status_path.read_text()) if status_path.is_file() else {}
-    store.setdefault(bucket, {})[image_name] = "negative"
-    status_path.write_text(json.dumps(store))
+    record_image_statuses(root, bucket, {image_name: CONFIRMED_NEGATIVE},
+                          recorded_by="user:breeder")
     if digest is not None:
         digest_path = image_status_digest_path(root)
         stamps = json.loads(digest_path.read_text()) if digest_path.is_file() else {}

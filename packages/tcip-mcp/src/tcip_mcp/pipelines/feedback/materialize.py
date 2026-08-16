@@ -27,8 +27,9 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import (
-    CONFIRMED_NEGATIVE, annotation_root, image_root, label_filename,
+    CONFIRMED_NEGATIVE, annotation_root, image_root, label_filename, status_records,
 )
+from tcip_mcp.identity import user_identity
 from tcip_mcp.pipelines.feedback.verdicts import decode_verdict
 
 if TYPE_CHECKING:
@@ -70,10 +71,18 @@ def curated_manifest_path(output_dir: str | Path) -> Path:
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
     """Partition per-image review verdicts into positives / hard-negatives / skip.
 
-    Returns ``{img_name: {"positives": [(class_name, cx, cy, w, h)],
-    "rejected_count": int, "status": "positive"|"hard_negative"|"skip"}}``.
+    Returns ``{img_name: {"positives": [(class_name, cx, cy, w, h)], "rejected_count": int,
+    "rejected_subjects": [class_name], "subjects": [class_name], "reviewers": [name],
+    "status": "positive"|"hard_negative"|"skip"}}``.
     A detection's box is ``gt_bbox_norm or pred_bbox_norm`` (the fallback handles
     accepted-FP entries that carry only a predicted box); ``class_name`` is the subject.
+
+    ``rejected_subjects`` is what the image's rejections actually answer for, so a caller keying
+    negatives can check that against the subject it is keying them under: a count of rejections
+    says an image was disputed, never which object was found absent. ``subjects`` is every subject
+    any verdict on the image names, rejections included, which is what a review's own subject is
+    derived from. ``reviewers`` is who recorded the rejections, for attributing what they
+    established. A verdict naming no subject contributes to neither set: it answers for nothing.
     """
     result: dict[str, dict] = {}
     for img_name, img_data in review_state.get("image", {}).items():
@@ -81,15 +90,28 @@ def partition_review_verdicts(review_state: dict, *, only_completed: bool = Fals
             continue
         positives: list[tuple] = []
         rejected = 0
+        rejected_subjects: set[str] = set()
+        subjects: set[str] = set()
+        reviewers: set[str] = set()
         for entry in img_data.get("detections", []):
             verdict = decode_verdict(entry)
+            if verdict.class_name:
+                subjects.add(verdict.class_name)
             if verdict.is_positive:
                 if verdict.affirmed_box is not None:
                     positives.append((verdict.class_name, *verdict.affirmed_box))
             elif verdict.is_rejection:
                 rejected += 1
+                if verdict.class_name:
+                    rejected_subjects.add(verdict.class_name)
+                if verdict.reviewed_by:
+                    reviewers.add(verdict.reviewed_by)
         status = "positive" if positives else ("hard_negative" if rejected else "skip")
-        result[img_name] = {"positives": positives, "rejected_count": rejected, "status": status}
+        result[img_name] = {
+            "positives": positives, "rejected_count": rejected,
+            "rejected_subjects": sorted(rejected_subjects), "subjects": sorted(subjects),
+            "reviewers": sorted(reviewers), "status": status,
+        }
     return result
 
 
@@ -121,6 +143,51 @@ def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h:
     write_annotations(str(path), anns, img_w, img_h, keep_empty=True)
 
 
+MATERIALIZER_IDENTITY = "materialize_review_dataset"
+"""The actor stamped on a confirmation this harvest wrote and no one reviewer answers for.
+
+Bare, under the platform's identity convention (a person is ``user:<name>``), so a reader can see
+that a function transcribed this negative from a review rather than a person recording it in the
+GUI. It names the audited tool call the write happened under, which is where the arguments and the
+verdict store it read are recorded.
+"""
+
+
+def _attribute_negatives(
+    negative_verdicts: dict[str, dict], neg_subject: str | None, verdict_subjects: set[str],
+) -> tuple[dict[str, dict[str, str]], list[dict]]:
+    """Split rejected-only images into the confirmations to write and the ones nobody may claim.
+
+    An image is confirmed negative for ``neg_subject`` only when its own rejections name that
+    subject. Every other one is returned in the second list with what its rejections did answer
+    for, so the caller can say which images were left unconfirmed and why instead of keying them
+    under a subject no verdict on them mentions.
+
+    A confirmation is attributed to the reviewer whose rejections established it when the image's
+    rejections name exactly one, and to :data:`MATERIALIZER_IDENTITY` when they name none or
+    several, which is the honest answer where no single person answers for the image.
+    """
+    confirmed: dict[str, dict[str, str]] = {}
+    unconfirmed: list[dict] = []
+    for name, info in negative_verdicts.items():
+        rejected_subjects = info["rejected_subjects"]
+        if neg_subject and neg_subject in rejected_subjects:
+            reviewers = info["reviewers"]
+            recorded_by = (user_identity(reviewers[0]) if len(reviewers) == 1
+                           else MATERIALIZER_IDENTITY)
+            confirmed.update(status_records({name: CONFIRMED_NEGATIVE}, recorded_by=recorded_by))
+            continue
+        if neg_subject:
+            reason = (f"its rejections answer for {rejected_subjects or 'no subject'}, not for "
+                      f"{neg_subject!r}, the subject this materialization keys negatives under")
+        else:
+            reason = (f"the verdicts name {sorted(verdict_subjects)}, so no single subject the "
+                      f"negatives could be keyed under; state one to attribute them")
+        unconfirmed.append({"image": name, "rejected_subjects": rejected_subjects,
+                            "reason": reason})
+    return confirmed, sorted(unconfirmed, key=lambda e: e["image"])
+
+
 def materialize_dataset(
     review_state: dict,
     source_images_dir: str,
@@ -136,10 +203,20 @@ def materialize_dataset(
     """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
     ``subject`` is the object the review was about (the confirmed negatives are keyed under it). When
-    omitted it is derived from the verdicts' own class names (single-subject reviews). ``producer_model``
-    (best-effort) records the model whose predictions the human reviewed, for traceability.
+    omitted it is derived from every subject the verdicts name, rejections included, and answers only
+    when they name exactly one. ``producer_model`` (best-effort) records the model whose predictions
+    the human reviewed, for traceability.
+
+    A rejected-only image becomes a confirmed negative only when its own rejections answer for that
+    subject. One whose rejections answer for another subject, or for none, is materialized as an
+    unconfirmed empty label and named in ``unconfirmed_negatives`` with why: keying it under the
+    subject at hand would assert the human found that object absent on an image they never gave a
+    verdict about, which is how an image full of one object reaches training as a zero-box sample of
+    it.
     """
     partition = partition_review_verdicts(review_state, only_completed=only_completed)
+    verdict_subjects = {s for info in partition.values() for s in info["subjects"]}
+    neg_subject = subject or (next(iter(verdict_subjects)) if len(verdict_subjects) == 1 else None)
     out = Path(output_dir)
     images_out = image_root(out)
     labels_out = annotation_root(out)
@@ -147,9 +224,11 @@ def materialize_dataset(
     labels_out.mkdir(parents=True, exist_ok=True)
 
     place = shutil.copy2 if copy_files else os.symlink
-    counts = {"positive": 0, "hard_negative": 0, "skipped": 0, "total_boxes": 0, "missing_images": 0}
+    counts = {"positive": 0, "hard_negative": 0, "skipped": 0, "total_boxes": 0,
+              "missing_images": 0, "unconfirmed_negative": 0}
     subjects: set[str] = set()
     manifest_images: list[dict] = []
+    negative_verdicts: dict[str, dict] = {}
 
     for img_name, info in partition.items():
         status = info["status"]
@@ -190,27 +269,24 @@ def materialize_dataset(
             counts["positive"] += 1
             counts["total_boxes"] += len(info["positives"])
             subjects.update(name for (name, *_rest) in info["positives"])
-        else:  # hard_negative -> confirmed-negative JSON ({"annotations": []})
+        else:  # hard_negative -> empty label file, confirmed below only for the subject it answers for
             write_annotations(str(label_path), [], img_w, img_h, keep_empty=True)
             counts["hard_negative"] += 1
+            negative_verdicts[record_name] = info
 
         manifest_images.append({
             "image": record_name, "status": status, "n_boxes": len(info["positives"]),
-            "rejected_count": info["rejected_count"], "label": str(label_path),
+            "rejected_count": info["rejected_count"],
+            "rejected_subjects": info["rejected_subjects"], "label": str(label_path),
         })
 
-    # Hard negatives here come from explicit human rejection verdicts, so mark them in the output's
-    # own status store under the review's subject: training only trusts human-confirmed negatives,
-    # never bare empty files (someone may have emptied a label mid-work). The subject is threaded
-    # (or the single subject the verdicts name); with none, negatives can't be attributed and are
-    # left as unconfirmed empties rather than mis-keyed.
-    negatives = {e["image"]: CONFIRMED_NEGATIVE
-                 for e in manifest_images if e["status"] == "hard_negative"}
-    neg_subject = subject or (next(iter(subjects)) if len(subjects) == 1 else None)
-    if negatives and neg_subject:
+    # Training trusts a human-confirmed negative, never a bare empty file (a label may be emptied mid-work).
+    negatives, unconfirmed = _attribute_negatives(negative_verdicts, neg_subject, verdict_subjects)
+    counts["unconfirmed_negative"] = len(unconfirmed)
+    if negatives:
         from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket
 
-        bucket_key = status_bucket(neg_subject, None)
+        bucket_key = status_bucket(neg_subject or "", None)
         replace_image_status_store(out, {bucket_key: negatives})
 
         # Give the materialized dataset its own registry copy + a fresh per-image schema stamp, so
@@ -244,6 +320,8 @@ def materialize_dataset(
         "subject": neg_subject,
         "counts": counts,
         "subjects": sorted(subjects),
+        "verdict_subjects": sorted(verdict_subjects),
+        "unconfirmed_negatives": unconfirmed,
         "images": manifest_images,
     }
     tcip_store.replace(curated_manifest_key(out), manifest)
@@ -251,6 +329,8 @@ def materialize_dataset(
     return {
         **counts,
         "subjects": sorted(subjects),
+        "verdict_subjects": sorted(verdict_subjects),
+        "unconfirmed_negatives": unconfirmed,
         "subject": neg_subject,
         "output_dir": str(out),
         "structure": f"{out}/images/ + {out}/annotations/",

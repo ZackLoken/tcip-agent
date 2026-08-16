@@ -29,7 +29,9 @@ from tcip_mcp.class_registry import (
     registry_to_dict,
     write_registry,
 )
-from tcip_mcp.dataset_layout import image_status_digest_path, image_status_path, status_bucket
+from tcip_mcp.dataset_layout import (
+    image_status_digest_path, image_status_path, status_bucket, status_records,
+)
 
 
 def _severity_registry(attr_type: str) -> ClassRegistry:
@@ -112,7 +114,8 @@ def test_confirmation_is_quarantined_when_an_attribute_type_is_redefined(tmp_pat
     bucket = status_bucket("leaf", None)
     status_path = image_status_path(root)
     status_path.parent.mkdir(parents=True, exist_ok=True)
-    status_path.write_text(json.dumps({bucket: {"img_001.jpg": "negative"}}))
+    status_path.write_text(json.dumps(
+        {bucket: status_records({"img_001.jpg": "negative"}, recorded_by="user:breeder")}))
     image_status_digest_path(root).write_text(json.dumps({bucket: {"img_001.jpg": old_digest}}))
 
     write_registry(root / "classes.json", _severity_registry("ordinal"))

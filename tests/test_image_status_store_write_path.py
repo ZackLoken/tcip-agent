@@ -124,11 +124,69 @@ def test_a_status_the_readers_do_not_understand_is_refused_before_it_reaches_the
     from tcip_mcp.dataset_layout import IMAGE_STATUSES, record_image_statuses
 
     with pytest.raises(ValueError, match="reviewed"):
-        record_image_statuses(tmp_path, "catkin", {"A.JPG": "reviewed"})
+        record_image_statuses(tmp_path, "catkin", {"A.JPG": "reviewed"}, recorded_by="user:ada")
     assert not image_status_path(tmp_path).exists()
 
-    record_image_statuses(tmp_path, "catkin", {f"{s}.JPG": s for s in IMAGE_STATUSES})
+    record_image_statuses(tmp_path, "catkin", {f"{s}.JPG": s for s in IMAGE_STATUSES},
+                          recorded_by="user:ada")
     assert _on_disk(tmp_path)["catkin"] == {f"{s}.JPG": s for s in IMAGE_STATUSES}
+
+
+def test_a_status_with_no_actor_behind_it_is_refused(tmp_path: Path) -> None:
+    """A status nobody is recorded as setting cannot be told from one a function wrote, so the
+    writer refuses it rather than storing an unattributable confirmation."""
+    from tcip_mcp.dataset_layout import record_image_statuses
+
+    with pytest.raises(ValueError, match="recorded_by"):
+        record_image_statuses(tmp_path, "catkin", {"A.JPG": "negative"}, recorded_by="")
+    assert not image_status_path(tmp_path).exists()
+
+
+def test_a_merge_refuses_rather_than_deleting_entries_it_cannot_read(tmp_path: Path) -> None:
+    """A merge rewrites the whole document, so entries the reader drops are entries it deletes.
+
+    The writer refuses instead, naming how many are at stake: a store written in some other shape
+    holds human statuses, and losing them to an unrelated confirmation is not a recoverable error.
+    """
+    from tcip_mcp.dataset_layout import record_image_statuses
+
+    store = image_status_path(tmp_path)
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(json.dumps({"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}),
+                     encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not recognize"):
+        record_image_statuses(tmp_path, "catkin", {"NEW.JPG": "negative"},
+                              recorded_by="user:breeder")
+
+    still_there = json.loads(store.read_text(encoding="utf-8"))
+    assert still_there == {"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}
+
+
+def test_the_gui_route_records_the_person_whose_confirmation_it_is(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A Complete-with-nothing posted from the GUI reads back as a negative and says who made it.
+
+    The identity convention marks a person as ``user:<name>``, so a breeder's own confirmation is
+    distinguishable from one a harvest transcribed without consulting a second store.
+    """
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
+
+    body = {"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+            "image_name": "IMG_0009.JPG", "status": "negative", "subject": "catkin",
+            "user": "rowan"}
+    assert client.post("/api/classes/image_status", json=body).status_code == 200
+
+    stored = json.loads(image_status_path(tmp_path).read_text(encoding="utf-8"))
+    record = stored["catkin"]["IMG_0009.JPG"]
+    assert record["status"] == "negative"
+    assert record["recorded_by"] == "user:rowan"
+    assert record["recorded_at"]
+
+    (tmp_path / "annotations").mkdir(parents=True, exist_ok=True)
+    assert confirmed_negative_names(tmp_path / "annotations", subject="catkin") == {
+        "IMG_0009.JPG"}
 
 
 def test_a_materialized_output_carries_only_the_negatives_that_run_derived(tmp_path: Path) -> None:
@@ -137,10 +195,13 @@ def test_a_materialized_output_carries_only_the_negatives_that_run_derived(tmp_p
     Writing into a directory an earlier run already used replaces its store rather than folding
     into it: a leftover name nobody re-derived would otherwise keep training as an empty image.
     """
-    from tcip_mcp.dataset_layout import replace_image_status_store
+    from tcip_mcp.dataset_layout import replace_image_status_store, status_records
 
-    replace_image_status_store(tmp_path, {"catkin": {"OLD.JPG": "negative"}})
-    replace_image_status_store(tmp_path, {"catkin": {"NEW.JPG": "negative"}})
+    def negatives(*names: str) -> dict:
+        return status_records(dict.fromkeys(names, "negative"), recorded_by="a_materializer")
+
+    replace_image_status_store(tmp_path, {"catkin": negatives("OLD.JPG")})
+    replace_image_status_store(tmp_path, {"catkin": negatives("NEW.JPG")})
 
     assert _on_disk(tmp_path) == {"catkin": {"NEW.JPG": "negative"}}
 

@@ -29,6 +29,10 @@ Box = tuple[float, float, float, float]
 class Verdict:
     """One decoded verdict entry.
 
+    ``reviewed_by`` is the bare name of the person who recorded this verdict, as the engine stamped
+    it, or ``""`` when the store holds none: a consumer that attributes what the verdict established
+    reads it here rather than reaching into the entry itself.
+
     Boxes are the stored normalized centre form ``(cx, cy, w, h)``, or ``None`` when the entry
     carries no usable box under that key. ``affirmed_box`` is the ground-truth box when the entry
     has one and the predicted box otherwise, which is what carries an accepted false positive (it
@@ -39,6 +43,7 @@ class Verdict:
 
     action: str | None
     class_name: str
+    reviewed_by: str
     gt_box: Box | None
     pred_box: Box | None
     affirmed_box: Box | None
@@ -73,6 +78,7 @@ def decode_verdict(entry: Mapping) -> Verdict:
     return Verdict(
         action=entry.get("action"),
         class_name=str(entry.get("class_name", "")),
+        reviewed_by=str(entry.get("reviewed_by") or "").strip(),
         gt_box=_box(raw_gt),
         pred_box=_box(raw_pred),
         affirmed_box=_box(raw_gt or raw_pred),

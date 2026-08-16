@@ -170,7 +170,10 @@ frames → they accept on the canvas → only then does it become GT. See
 - Coverage: fraction of images with labels
 - Negatives: a training negative is an empty label file (`"annotations": []`) plus a human
   Complete on that image, recorded as the status token `"negative"` in
-  `.tcip/state/image_status.json`, scoped to the subject. `to_coco_dataset` silently skips an
+  `.tcip/state/image_status.json`, scoped to the subject. Each entry there is a record, not a bare
+  token: it carries `recorded_by` and `recorded_at`, so a person's own Complete is legible against
+  one a review harvest transcribed. Write through `record_image_statuses` /
+  `replace_image_status_store` rather than by hand. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
   `python scripts/doctor.py <root>` flags every empty-label/status disagreement. Never delete

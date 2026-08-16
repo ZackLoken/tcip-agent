@@ -396,6 +396,22 @@ def confirmed_negative_names(
 ) -> set[str]:
     """Image names a human marked negative (empty + Complete) for this subject.
 
+    The name projection of :func:`confirmed_negative_records`, which it calls rather than reading
+    the store a second time, for the admission decisions that need only the names.
+    """
+    return set(confirmed_negative_records(
+        labels_dir, subject=subject, date=date, quarantined_out=quarantined_out))
+
+
+def confirmed_negative_records(
+    labels_dir, *, subject: str | None, date=None, quarantined_out: set[str] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Image names a human marked negative for this subject, each with the record that says so.
+
+    A record is the store's own ``{status, recorded_by, recorded_at}``, returned whole so a caller
+    copying these confirmations into another dataset carries who confirmed them rather than
+    re-attributing them to itself.
+
     Reads the dataset-native ``image_status_path``, a sibling of ``classes.json``, so confirmations
     travel with the dataset rather than living in whichever project's private ``.tcip/`` happened to
     be an ancestor, and returns only the ``status_bucket(subject, date)`` bucket. A confirmation is
@@ -417,38 +433,38 @@ def confirmed_negative_names(
     ``quarantined_stale_definition`` count.
 
     ``subject`` must be threaded explicitly; there is no per-subject label directory to recover
-    it from. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this **refuses
-    loudly** rather than returning nothing: a silent empty would drop every hard negative the review
+    it from. When ``subject`` is unthreaded and the dataset holds confirmed negatives, this refuses
+    loudly rather than returning nothing: a silent empty would drop every hard negative the review
     loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
-    it returns an empty set.
+    it returns nothing.
     """
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
         annotation_date, classes_path, dataset_root_of, image_status_digest_path,
-        image_status_path, is_confirmed_negative, normalize_status_store, status_bucket,
+        image_status_path, is_confirmed_negative, status_confirmations, status_bucket, status_of,
     )
 
     if date is None:
         date = annotation_date(labels_dir)
     root = dataset_root_of(labels_dir)
     if root is None:
-        return set()
+        return {}
     status_file = image_status_path(root)
     if not status_file.is_file():
-        return set()
+        return {}
     try:
         raw = json.loads(status_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return set()
-    statuses = normalize_status_store(raw)
+        return {}
+    statuses = status_confirmations(raw)
     if not subject:
         # Refuse only when there is something to lose: a store with confirmed negatives this
         # run might be entitled to. Silently returning none would drop the human's work.
         has_negatives = any(
-            is_confirmed_negative(s) for b in statuses.values() for s in b.values()
+            is_confirmed_negative(status_of(r)) for b in statuses.values() for r in b.values()
         )
         if not has_negatives:
-            return set()
+            return {}
         raise ValueError(
             f"confirmed_negative_names needs an explicit subject to read the negative bucket "
             f"for {labels_dir}, and this dataset has human-confirmed negatives that would be "
@@ -457,8 +473,8 @@ def confirmed_negative_names(
     bucket_key = status_bucket(subject, date)
     bucket = statuses.get(bucket_key)
     if not bucket:
-        return set()  # this subject has no confirmations yet
-    negatives = {name for name, s in bucket.items() if is_confirmed_negative(s)}
+        return {}  # this subject has no confirmations yet
+    negatives = {name: r for name, r in bucket.items() if is_confirmed_negative(status_of(r))}
     if not negatives:
         return negatives
 
@@ -489,14 +505,14 @@ def confirmed_negative_names(
     # Per-image, not per-bucket: a bucket holds every image ever touched under this subject/date, so
     # a later, unrelated write to the same bucket must never resurrect a different image's stale,
     # never-re-reviewed confirmation just because the bucket as a whole got re-stamped.
-    trusted: set[str] = set()
-    for name in negatives:
+    trusted: dict[str, dict[str, str]] = {}
+    for name, record in negatives.items():
         stamped = stamped_by_image.get(name)
         if isinstance(stamped, str) and stamped != current_digest:
             if quarantined_out is not None:
                 quarantined_out.add(name)
         else:
-            trusted.add(name)
+            trusted[name] = record
     return trusted
 
 

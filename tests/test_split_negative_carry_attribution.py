@@ -25,6 +25,7 @@ from tcip_mcp.tools.data_tools import make_splits
 DATE = "2-11-26"
 SUBJECT = "catkin"
 NEGATIVE_STEM = "plotF_0_0"
+CONFIRMED_BY = "user:breeder"
 POPULATED_STEMS = ("plotA_0_0", "plotB_0_0", "plotC_0_0", "plotD_0_0", "plotE_0_0")
 
 
@@ -55,11 +56,10 @@ def _dataset_with_one_confirmed_negative(root: Path) -> Path:
     Image.new("RGB", (96, 64), (90, 120, 60)).save(images_dir / f"{NEGATIVE_STEM}.jpg")
     json_io.write_annotations(labels_dir / f"{NEGATIVE_STEM}.json", [], 96, 64, keep_empty=True)
 
-    store = image_status_path(root)
-    store.parent.mkdir(parents=True, exist_ok=True)
-    store.write_text(json.dumps(
-        {status_bucket(SUBJECT, DATE): {f"{NEGATIVE_STEM}.jpg": "negative"}}, indent=2,
-    ), encoding="utf-8")
+    from tcip_mcp.dataset_layout import record_image_statuses
+
+    record_image_statuses(root, status_bucket(SUBJECT, DATE),
+                          {f"{NEGATIVE_STEM}.jpg": "negative"}, recorded_by=CONFIRMED_BY)
     return root
 
 
@@ -103,7 +103,22 @@ def test_carried_confirmation_is_stored_under_the_dateless_bucket_as_a_negative(
     stored = json.loads(image_status_path(out / holder).read_text(encoding="utf-8"))
 
     assert list(stored) == [status_bucket(SUBJECT, None)]
-    assert stored[status_bucket(SUBJECT, None)] == {f"{NEGATIVE_STEM}.jpg": "negative"}
+    assert list(stored[status_bucket(SUBJECT, None)]) == [f"{NEGATIVE_STEM}.jpg"]
+    assert stored[status_bucket(SUBJECT, None)][f"{NEGATIVE_STEM}.jpg"]["status"] == "negative"
+
+
+def test_the_carried_confirmation_still_names_who_made_it(tmp_path: Path):
+    """The split records the person the source dataset recorded, not the tool that copied it:
+    re-attributing a carried confirmation would credit a human's work to a split writer."""
+    out, _ = _materialize(tmp_path, subject=SUBJECT)
+    holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
+
+    stored = json.loads(image_status_path(out / holder).read_text(encoding="utf-8"))
+    carried = stored[status_bucket(SUBJECT, None)][f"{NEGATIVE_STEM}.jpg"]
+    source = json.loads(image_status_path(tmp_path / "ds").read_text(encoding="utf-8"))
+
+    assert carried["recorded_by"] == CONFIRMED_BY
+    assert carried == source[status_bucket(SUBJECT, DATE)][f"{NEGATIVE_STEM}.jpg"]
 
 
 def test_carried_confirmation_round_trips_through_the_confirmed_negative_reader(tmp_path: Path):

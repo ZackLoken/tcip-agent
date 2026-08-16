@@ -102,10 +102,11 @@ def materialize_review_dataset(
         only_completed: Restrict to fully-reviewed (``img_status=='completed'``) images.
         copy_files: Copy images (True) or symlink (False).
         subject: The object the review was about; confirmed negatives are keyed under it. When
-            omitted it is derived from the verdicts' own class names, but only when the verdicts
-            name exactly one subject; a review touching more than one subject with no explicit
-            ``subject`` can't attribute its negatives, and they are silently dropped rather than
-            carried into the curated set.
+            omitted it is derived from every subject the verdicts name, rejections included, and
+            only when they name exactly one. A rejected image whose own rejections answer for
+            another subject, or for none, is materialized as an unconfirmed empty and reported in
+            ``unconfirmed_negatives`` with why, rather than keyed under a subject no verdict on
+            that image mentions.
         bucket: Which prediction bucket's verdicts to curate, as
             ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
             and refuses, naming them, when it holds several: two buckets are two reviews, and
@@ -162,6 +163,8 @@ def materialize_review_dataset(
             "review_shards": str(state_path),
             "n_positive": result["positive"],
             "n_hard_negative": result["hard_negative"],
+            # Of the rejected-only images, the ones no verdict attributed, so they train as neither.
+            "n_unconfirmed_negative": result["unconfirmed_negative"],
             "n_boxes": result["total_boxes"],
             "manifest": result["manifest"],
             "materialized_at": datetime.now(timezone.utc).isoformat(),

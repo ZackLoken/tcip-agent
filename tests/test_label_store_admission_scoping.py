@@ -17,6 +17,7 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.dataset_layout import status_records  # noqa: E402
 
 CATKIN = "catkin"
 BUSH = "bush"
@@ -103,11 +104,11 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
     _write(labels, "confirmed_empty", [])
     state = tmp_path / ".tcip" / "state"
     state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps({CATKIN: {
+    (state / "image_status.json").write_text(json.dumps({CATKIN: status_records({
         "worked.jpg": "complete",
         "emptied.jpg": "complete",
         "confirmed_empty.jpg": "negative",
-    }}))
+    }, recorded_by="user:breeder")}))
 
     assert confirmed_negative_names(labels, subject=CATKIN) == {"confirmed_empty.jpg"}
 

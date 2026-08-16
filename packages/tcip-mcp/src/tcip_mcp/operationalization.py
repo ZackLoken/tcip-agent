@@ -39,6 +39,7 @@ import tcip_store as ts
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, Versioned, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.identity import user_identity
 from tcip_mcp.traits import TraitSpec, crops_definitions, get_trait_for, trait_specs_dir
 
 # ── the delivery kinds ───────────────────────────────────────────────────────
@@ -717,7 +718,7 @@ def confirm_trait_operationalization(
     updated = dict(stated)
     if confirmed:
         updated.update({
-            "confirmed_by": _user_identity(user),
+            "confirmed_by": user_identity(user),
             "confirmed_at": _now(),
             "identity_from_request": bool(identity_from_request),
             "confirmed_fields": _live_constituting(spec, delivery_kind),
@@ -728,17 +729,6 @@ def confirm_trait_operationalization(
     key = operationalization_key(operationalizations_scope(project_root), trait, delivery_kind)
     ts.replace(key, updated, expect=existing.version)
     return updated
-
-
-def _user_identity(name: str | None) -> str:
-    """A confirming human's recorded identity, under the platform's ``user:<name>`` convention."""
-    value = (name or "").strip()
-    if not value:
-        raise ValueError(
-            "a confirmation records who gave it, so the confirming name is required; resolve it "
-            "from the request or the backend's own fallback identity before calling"
-        )
-    return value if value.startswith("user:") else f"user:{value}"
 
 
 # ── the edit-time supersession signal ────────────────────────────────────────

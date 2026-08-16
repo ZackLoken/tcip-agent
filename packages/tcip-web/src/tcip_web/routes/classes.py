@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from tcip_store import StoreError
 
 from tcip_mcp.dataset_layout import IMAGE_STATUSES
+from tcip_web.identity import resolve_user, user_id
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,8 @@ class ImageStatusPayload(BaseModel):
     date: str | None = None
     dataset_root: Optional[str] = None
     annotations_dir: Optional[str] = None
+    # GUI-set identity (bare name), recorded as "user:<name>" against each status this write sets.
+    user: Optional[str] = None
 
 
 def _require_dataset_root(dataset_root: str | None, annotations_dir: str | None) -> str:
@@ -307,7 +310,8 @@ def set_image_status(payload: ImageStatusPayload) -> dict:
 
     root = _require_dataset_root(payload.dataset_root, payload.annotations_dir)
     bucket = _require_bucket(payload.subject, payload.date)
-    record_image_statuses(root, bucket, {payload.image_name: payload.status})
+    record_image_statuses(root, bucket, {payload.image_name: payload.status},
+                          recorded_by=user_id(resolve_user(payload.user)))
     _stamp_digest(root, bucket, payload.subject, [payload.image_name])
     _audit_dataset_write(
         root,
@@ -325,6 +329,8 @@ class ImageStatusBulkPayload(BaseModel):
     date: str | None = None
     dataset_root: Optional[str] = None
     annotations_dir: Optional[str] = None
+    # GUI-set identity (bare name), recorded as "user:<name>" against each status this write sets.
+    user: Optional[str] = None
 
 
 @router.post("/image_status/bulk")
@@ -335,7 +341,8 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
     bucket = _require_bucket(payload.subject, payload.date)
     applied = {name: st for name, st in payload.statuses.items() if st in IMAGE_STATUSES}
     if applied:
-        record_image_statuses(root, bucket, applied)
+        record_image_statuses(root, bucket, applied,
+                              recorded_by=user_id(resolve_user(payload.user)))
     _stamp_digest(root, bucket, payload.subject, applied)
     # Record what was actually written, not the raw payload: an entry whose status was skipped
     # would overstate the change, and a no-op write logged as a mutation is noise.

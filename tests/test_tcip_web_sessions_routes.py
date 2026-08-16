@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp.dataset_layout import status_records
 from tcip_web.app import app
 
 
@@ -127,7 +128,8 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
     dataset_root = tmp_path / "data"
     (dataset_root / ".tcip" / "state").mkdir(parents=True)
     status_path = dataset_root / ".tcip" / "state" / "image_status.json"
-    status_path.write_text(json.dumps({"catkin/2026-02-11": {"IMG_NEG": "negative"}}))
+    status_path.write_text(json.dumps({"catkin/2026-02-11": status_records(
+        {"IMG_NEG": "negative"}, recorded_by="user:breeder")}))
 
     pr = str(project_root)
     common = {"project_root": pr, "dataset_root": str(dataset_root), "subject": "catkin",
@@ -210,7 +212,8 @@ def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_en
     assert before["negative_confirmation_seconds"] == 0.0
 
     status_path = dataset_root / ".tcip" / "state" / "image_status.json"
-    status_path.write_text(json.dumps({"catkin/2026-02-11": {"IMG_LATE": "negative"}}))
+    status_path.write_text(json.dumps({"catkin/2026-02-11": status_records(
+        {"IMG_LATE": "negative"}, recorded_by="user:breeder")}))
 
     after = client.get("/api/sessions/load", params={"project_root": pr}).json()["sessions"][0]
     assert after["review_seconds"] == 0.0

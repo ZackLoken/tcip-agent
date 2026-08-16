@@ -537,7 +537,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:74` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:177` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+| `prioritize_review_queue` | `feedback_tools.py:180` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
 
 ### inference_tools.py (4 tools)
 
@@ -685,12 +685,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/load` | `load_classes` | `routes/classes.py:122` |
-| POST | `/save` | `save_classes` | `routes/classes.py:168` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:293` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:303` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:331` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:360` |
+| GET | `/load` | `load_classes` | `routes/classes.py:123` |
+| POST | `/save` | `save_classes` | `routes/classes.py:169` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:296` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:306` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:337` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:367` |
 
 ### routes/coverage.py, prefix `/api/coverage` (5 routes)
 
@@ -977,7 +977,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:263`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:777`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:879`.
 
 Seam S17 ("Canonical per-image annotation JSON schema"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: every writer and the shared `json_io.read_annotations`
@@ -1052,8 +1052,8 @@ named third consumer, `scripts/check_dataset_identity.py`, is never executed by 
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:303`; `set_image_status_bulk`,
-`routes/classes.py:331`; `tcip_mcp.tools.data_tools._carry_confirmed_negatives`
+`packages/tcip-web/src/tcip_web/routes/classes.py:306`; `set_image_status_bulk`,
+`routes/classes.py:337`; `tcip_mcp.tools.data_tools._carry_confirmed_negatives`
 (split-materialized copy), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:499`.
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
@@ -1065,7 +1065,7 @@ subject whose attribute schema is about to change so the confirmations under it 
 before the outgoing digest is gone.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:541`, imported by the web route module.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:596`, imported by the web route module.
 
 Seam S22 ("image_status.json confirmed-negative store"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_classes_routes.py:132,149`,
@@ -1080,18 +1080,18 @@ has not been re-verified; MCP-side readers test membership through
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:263`, called from
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:266`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.class_registry.stamp_unstamped_confirmations`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:215`, called by both registry writers,
-`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:168`) and `write_class_map`
+`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:169`) and `write_class_map`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:900`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
 vocabulary. Both writers reach the store through the one transactional writer
 `dataset_layout.stamp_image_status_digests`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:609`, whose `only_unstamped` argument keeps
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:711`, whose `only_unstamped` argument keeps
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`'s quarantine logic,
@@ -1113,7 +1113,7 @@ sidecar, `confirmed_negative_names` reads it) and in
 
 Path: `<dataset_root>/.tcip/state/view_coverage.json`.
 
-Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:322`.
+Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:327`.
 Writer and reader not independently re-traced beyond `dataset_layout.py`'s own docstring in the
 phase0 inventory; this session did not open the coverage route module to name a writer/reader
 symbol beyond what phase0 recorded.
@@ -1133,9 +1133,9 @@ Path: `<dataset_root>/.tcip/state/region_completeness.json` and
 `region_completeness_digest.json`, siblings of `image_status.json`.
 
 Path/shape definition: `tcip_mcp.dataset_layout.region_completeness_path`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:401`;
-`region_completeness_digest_path`, `dataset_layout.py:439`; shape guard
-`normalize_region_completeness_store`, `dataset_layout.py:479`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:406`;
+`region_completeness_digest_path`, `dataset_layout.py:444`; shape guard
+`normalize_region_completeness_store`, `dataset_layout.py:484`.
 
 Writer/reader named by phase0 but not independently opened this session:
 `pipelines/region_completeness.py` as the digest sidecar's writer.
@@ -1143,9 +1143,9 @@ Writer/reader named by phase0 but not independently opened this session:
 Seam S25 ("region_completeness.json attestation store"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_coverage_routes.py:449`,
 `tests/test_block_calibration.py:126,164,203`. The shared functions across the HTTP-route side and
-the calibration-gate side are `region_completeness_path` (`dataset_layout.py:401`),
-`normalize_region_completeness_store` (`dataset_layout.py:479`) and `status_bucket`
-(`dataset_layout.py:503`). Gap: `test_block_calibration.py`'s
+the calibration-gate side are `region_completeness_path` (`dataset_layout.py:406`),
+`normalize_region_completeness_store` (`dataset_layout.py:484`) and `status_bucket`
+(`dataset_layout.py:508`). Gap: `test_block_calibration.py`'s
 `_attest_regions_complete` helper bypasses the HTTP route, writing the store via the same shared
 functions the route calls internally rather than via a POST to `/api/coverage/completeness`, so a
 bug confined to the route's own HTTP layer would not be caught by the calibration-gate tests.
@@ -1571,21 +1571,21 @@ Phase 3 verdict: single.
 ## S13. image_status carried in annotation_stats.json
 
 Must agree: the annotation-stats file's image_status block and the canonical image_status.json do not disagree.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:563` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:618` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. One membership restatement survives outside the resolver at `packages/tcip-web/src/tcip_web/routes/sessions.py:272` (session time classification), recorded as remaining work.
 
 ## S14. dataset_layout.py as the on-disk path resolver
 
 Must agree: agent writes and GUI reads resolve to the same files.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:107` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date` at line 475 as the published inverse of `status_bucket`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:108` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date` at line 475 as the published inverse of `status_bucket`).
 Side B: `packages/tcip-web/src/tcip_web/routes/dataset.py` (`select_dataset` resolves every directory through the resolver; `scripts/doctor.py`, `data_tools`, `project_tools` and `annotation_tools` no longer re-spell the tree).
 Phase 3 verdict: single.
 
 ## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:655` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:757` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
 Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
@@ -1621,7 +1621,7 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:181` (`from tcip_mcp.dataset_layout import classes_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:182` (`from tcip_mcp.dataset_layout import classes_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
@@ -1633,29 +1633,29 @@ Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store
 
-Must agree: a negative is empty labels plus an explicit human Complete, and every consumer applies the same bucket keying and status vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:550` (`def derive_status(`, with `IMAGE_STATUSES` at line 501 as the one vocabulary and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
+Must agree: a negative is empty labels plus an explicit human Complete, every consumer applies the same bucket keying and status vocabulary, and each stored status carries the actor who set it and when, so a person's Complete and a status a harvest wrote stay distinguishable.
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:605` (`def derive_status(`, with `IMAGE_STATUSES` at line 596 as the one vocabulary, `status_of` at line 528 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` and `routes/review.py` call `derive_status`; the browser imports one `ImageStatus` type from `api/classes.ts`, pinned against the Python vocabulary by a gate test.
 Phase 3 verdict: single.
 
 ## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:609` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry.stamp_unstamped_confirmations`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:711` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry.stamp_unstamped_confirmations`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
 Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:161` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
 ## S24. view_coverage.json advisory coverage record  <!-- queued: P5-279 unify -->
 
 Must agree: backend store shape and the browser's coverage payload match, keyed by status_bucket.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:322` (`def view_coverage_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:327` (`def view_coverage_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-web/src/tcip_web/routes/coverage.py:186` (`@router.post("")`, `post_coverage`).
 Phase 3 verdict: duplicated.
 
 ## S25. region_completeness.json attestation store
 
 Must agree: an attestation written by the GUI is readable, and staleness-checkable, by the calibration path that relies on it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:401` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:406` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:123` (`def stale_cells(`).
 Phase 3 verdict: restated-in-test.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:123` (`def stale_cells(`).
@@ -1663,7 +1663,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S26. dataset.json identity and fingerprint
 
 Must agree: the stored fingerprint and the recomputed one cover the same inputs.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:253` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:254` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:647` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
@@ -1782,8 +1782,8 @@ Phase 3 verdict: duplicated.
 ## S43. dataset_source bespoke dataset seam  <!-- queued: P5-322 unify -->
 
 Must agree: a bespoke dataset builder returns a Dataset the trainer's loaders and the task's collation accept.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1419` (`DATASET_SOURCE_KEY = "dataset_source"`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1522` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1435` (`DATASET_SOURCE_KEY = "dataset_source"`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1538` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
 Phase 3 verdict: duplicated.
 
 ## S44. Model-contract smoke batch versus the trainer's real batch
@@ -1798,7 +1798,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
 Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:606` (`def record_detection_action(`, the one writer of a stored verdict entry).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:67` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 16), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:72` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 16), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 
 ## S46. Frontend api/ layer against backend route paths
