@@ -163,6 +163,34 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     assert all(row.get("timestamp") for row in rows)
 
 
+def test_a_trial_name_that_would_escape_its_sweep_is_refused(tmp_path):
+    """A trial's config and its metrics are addressed by the same name, so both constructors
+    refuse one that walks out rather than only the one a route reaches.
+    """
+    from tcip_store import BadKey
+
+    from tcip_mcp.tools.training_tools import trial_config_key, trial_metrics_key
+
+    sweep = tmp_path / "sweep"
+    for escaping in ("../elsewhere", "sub/dir", r"other\dir", ".."):
+        with pytest.raises(BadKey):
+            trial_config_key(sweep, escaping)
+        with pytest.raises(BadKey):
+            trial_metrics_key(sweep, escaping)
+
+
+def test_an_ordinary_trial_name_still_addresses_its_own_documents(tmp_path):
+    from tcip_mcp.tools.training_tools import trial_config_key, trial_metrics_key
+
+    sweep = tmp_path / "sweep"
+    config = trial_config_key(sweep, "trial_00000")
+    metrics = trial_metrics_key(sweep, "trial_00000")
+
+    assert config.parts == ("trial_00000", "resolved_config")
+    assert metrics.parts == ("trial_00000", "metrics")
+    assert config.scope == metrics.scope == str(sweep.resolve())
+
+
 def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp_path):
     """An HPO trial has no experiment record, and the Tuning view reads its rows from the
     trial's own directory: routing every row through the experiment log would leave it blank.

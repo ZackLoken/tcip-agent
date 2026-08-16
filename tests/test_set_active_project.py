@@ -37,6 +37,18 @@ def test_set_active_reports_gui_notified_when_delivered(monkeypatch):
     assert result["gui_notified"] is True
 
 
+def test_a_marker_that_does_not_decode_reads_as_no_active_project():
+    """The marker is the front door's first read, so bytes no encoding of it can turn into a
+    name are treated as unset rather than raised at every caller that asks which project is
+    open. An ordinary marker still names its project, in the tests above.
+    """
+    marker = workspace.active_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes("hazelnut_catkin_valley-farm\n".encode("utf-16"))
+
+    assert workspace.read_active_project() is None
+
+
 def test_set_active_rejects_traversal():
     result = set_active_project(name="../escape")
     assert "error" in result

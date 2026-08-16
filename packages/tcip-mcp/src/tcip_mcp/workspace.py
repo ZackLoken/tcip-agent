@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from tcip_store import Key, StoreDescriptor, register_store, replace, text_codec
+from tcip_store import DecodeError, Key, StoreDescriptor, read, register_store, replace, text_codec
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -101,16 +101,13 @@ def active_project_key() -> Key:
 
 def read_active_project() -> Optional[str]:
     """Return the active project's name, or ``None`` if the marker is absent/empty."""
-    p = active_marker_path()
-    if not p.is_file():
-        return None
     try:
-        val = p.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):
+        val = read(active_project_key(), default=None)
+    except (OSError, DecodeError):
         # A marker written with the wrong encoding (e.g. UTF-16 from PowerShell) must not
         # 500 the whole front door: treat it as unset.
         return None
-    return val or None
+    return (val.strip() or None) if val is not None else None
 
 
 def resolve_project_path(given: str) -> str:

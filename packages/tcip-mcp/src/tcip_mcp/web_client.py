@@ -3,10 +3,12 @@
 MCP tools call ``post_panel_event`` to ship a panel event to the running FastAPI GUI over HTTP,
 never through a file on disk.
 
-The backend's port handoff store is declared here rather than in the web package: this module
-is the reader, and it cannot import ``tcip_web``. The web entry point imports the declaration
-from here, which is the legal dependency direction and the same one ``VALID_PANELS`` already
-takes.
+The stores the two packages share are declared here rather than in the web package: the
+backend's port handoff, the GUI snapshot, and the live-canvas pair. MCP tools read all of them
+and cannot import ``tcip_web``, so the web side imports the declarations from here, which is the
+legal dependency direction and the same one ``VALID_PANELS`` already takes. A declaration on
+each side would be two stores wearing one name, and whichever imported first would decide where
+the documents land.
 
 Port discovery order:
   1. ``TCIP_WEB_PORT`` environment variable.
@@ -34,7 +36,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, register_store, text_codec
+from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.project_paths import project_root as _platform_root
@@ -72,6 +74,82 @@ def backend_port_key(root: Path | str | None = None) -> Key:
     """
     resolved = Path(root) if root is not None else _platform_root()
     return Key(BACKEND_PORT_STORE, str(resolved.resolve()), _PORT_PARTS)
+
+
+_SNAPSHOT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The GUI snapshot, one document per project."""
+
+GUI_SNAPSHOT_STORE = "gui_snapshot"
+_SNAPSHOT_PARTS = ("gui",)
+register_store(
+    StoreDescriptor(
+        name=GUI_SNAPSHOT_STORE,
+        kind="record",
+        key_fields=("document",),
+        codec=RECORD_JSON,
+        concurrency="last_writer_wins",
+        durable=False,
+        locator=_SNAPSHOT_DOC,
+    )
+)
+
+
+def gui_snapshot_key(project_root: str | Path) -> Key:
+    """This project's persisted GUI snapshot.
+
+    ``last_writer_wins``: the backend holds the live state in memory and writes the whole
+    snapshot from it, so the document is one process's view rather than one writers merge
+    into. ``durable=False``: the snapshot is rewritten on a debounce cycle and a crash losing
+    the last one costs a re-selection, not history.
+    """
+    return Key(GUI_SNAPSHOT_STORE, str(project_root), _SNAPSHOT_PARTS)
+
+
+_CANVAS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+"""The live-canvas documents, one pair per project."""
+
+CANVAS_META_STORE = "canvas_meta"
+CANVAS_GEOMETRY_STORE = "canvas_geometry"
+_META_PARTS = ("canvas_live",)
+_GEOMETRY_PARTS = ("canvas_shapes",)
+
+
+def _register_canvas_store(name: str) -> None:
+    """Declare one of the pair: same codec, same relaxed durability, same policy."""
+    register_store(
+        StoreDescriptor(
+            name=name,
+            kind="record",
+            key_fields=("document",),
+            codec=RECORD_JSON,
+            concurrency="last_writer_wins",
+            durable=False,
+            locator=_CANVAS_DOC,
+        )
+    )
+
+
+_register_canvas_store(CANVAS_META_STORE)
+_register_canvas_store(CANVAS_GEOMETRY_STORE)
+
+
+def canvas_meta_key(project_root: str) -> Key:
+    """The small meta document every push overwrites.
+
+    ``last_writer_wins``: each push writes the document whole from the payload it was given
+    and reads nothing first; the reader pairs meta with geometry by identity rather than by
+    mutual exclusion. ``durable=False`` carries the canvas route's own stated property, that a
+    crash losing the last push costs nothing because the next push repaints it.
+    """
+    return Key(CANVAS_META_STORE, project_root, _META_PARTS)
+
+
+def canvas_geometry_key(project_root: str) -> Key:
+    """The display-resolved geometry a full push writes, on the same terms as the meta
+    document, and written before it so a reader pairing new meta with old geometry sees an
+    identity mismatch rather than a false match."""
+    return Key(CANVAS_GEOMETRY_STORE, project_root, _GEOMETRY_PARTS)
+
 
 # Every panel a pushed event may target: one per GUI tab, plus "app", the app-level channel for
 # steering the GUI itself (open a project, focus a tab). The MCP tool that pushes and the web

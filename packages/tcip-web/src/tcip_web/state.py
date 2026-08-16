@@ -13,40 +13,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, StoreError, read, register_store, replace
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store import StoreError, read, replace
+
+from tcip_mcp.web_client import gui_snapshot_key
 
 logger = logging.getLogger(__name__)
 
 PERSIST_DEBOUNCE_SECONDS = 0.5
-
-_SNAPSHOT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""The GUI snapshot, one document per project."""
-
-GUI_SNAPSHOT_STORE = "gui_snapshot"
-_SNAPSHOT_PARTS = ("gui",)
-register_store(
-    StoreDescriptor(
-        name=GUI_SNAPSHOT_STORE,
-        kind="record",
-        key_fields=("document",),
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        durable=False,
-        locator=_SNAPSHOT_DOC,
-    )
-)
-
-
-def gui_snapshot_key(project_root: str | Path) -> Key:
-    """This project's persisted GUI snapshot.
-
-    ``last_writer_wins``: the backend holds the live state in memory and writes the whole
-    snapshot from it, so the document is one process's view rather than one writers merge
-    into. ``durable=False``: the snapshot is rewritten on a debounce cycle and a crash losing
-    the last one costs a re-selection, not history.
-    """
-    return Key(GUI_SNAPSHOT_STORE, str(project_root), _SNAPSHOT_PARTS)
 
 TAB_NAMES = ("annotate", "review", "training", "tuning", "inference", "results", "meta")
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
