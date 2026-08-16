@@ -581,9 +581,9 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:28` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
 | `update_trait_spec_fields` | `phenology_tools.py:110` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:376` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:537` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:718` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:395` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:556` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `compute_phenology` | `phenology_tools.py:737` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -768,11 +768,11 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:692` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:713` |
 | POST | `/validate_reference` | `validate_reference` | `routes/review.py:760` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1073` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1111` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1139` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1260` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1287` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1072` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1110` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1138` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1259` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1286` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -904,7 +904,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:62`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:63`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object the
 55 `@mcp.tool()` decorators in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` register
 against.
@@ -1730,14 +1730,14 @@ Phase 3 verdict: single.
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
 Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:221` (`def crops_yml_path(`, the one placement of `.github/skills/crops/crops.yml`, loaded once for every reader of it by `_crops_traits`, line 228).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:254` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:264` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
 ## S38. Per-project trait spec files .tcip/state/trait_specs/*.yml
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:296` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 334 and `trait_spec_key` at line 350 addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:407` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:462` (`write_trait_spec_fields`, the one write, reading and merging inside one transaction on that key). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:306` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 334 and `trait_spec_key` at line 350 addressing one spec).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:417` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:462` (`write_trait_spec_fields`, the one write, reading and merging inside one transaction on that key). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
@@ -1919,7 +1919,7 @@ Phase 3 verdict: duplicated.
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:45` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:46` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 

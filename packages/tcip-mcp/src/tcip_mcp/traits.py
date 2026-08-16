@@ -251,6 +251,16 @@ def crops_units() -> dict[str, str]:
     return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
 
 
+def crops_definitions() -> dict[str, str]:
+    """trait name -> crops.yml's declared definition, for every trait that carries one.
+
+    The breeder's own wording for what a delivered phenotype is. A surface that has to show a
+    breeder what a number means quotes this rather than paraphrasing it, so the vocabulary the
+    breeder reads is the vocabulary the vocabulary file holds.
+    """
+    return {t["name"]: t["definition"] for t in _crops_traits() if isinstance(t.get("definition"), str)}
+
+
 def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, str | None]:
     """Build a ``TraitSpec`` from one breeder-authored config dict, cross-checked against ``vocab``.
 
@@ -528,7 +538,18 @@ def _all_traits() -> dict[str, TraitSpec]:
 
 def get_trait(name: str) -> TraitSpec:
     """Return the ``TraitSpec`` for ``name``, or raise ``TraitUnknownError`` listing the registered traits."""
-    traits = _all_traits()
+    return get_trait_for(name)
+
+
+def get_trait_for(name: str, project_root: str | Path | None = None) -> TraitSpec:
+    """One trait's spec from an explicit project's registry, or from the pinned one.
+
+    For a caller (the web backend, the operationalization resolver) that serves more than one
+    project per process and so cannot rely on ``resolve_state``'s single ``$TCIP_PROJECT_ROOT``
+    pin. ``get_trait`` is the same lookup against that pin, so both surfaces refuse an unregistered
+    trait in the same words.
+    """
+    traits = {spec.name: spec for spec in load_trait_specs(project_root=project_root)}
     spec = traits.get(name)
     if spec is None:
         raise TraitUnknownError(f"Unknown trait {name!r}. Registered traits: {sorted(traits)}")
