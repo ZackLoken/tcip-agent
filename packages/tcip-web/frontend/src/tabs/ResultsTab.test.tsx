@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
-import { resultsApi, STATEMENT_FIELDS, type OperationalizationRecord } from "@/api/inference";
+import { resultsApi, type OperationalizationRecord } from "@/api/inference";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 
@@ -43,7 +43,10 @@ beforeEach(() => {
     invalid_specs: [],
   });
   // The operationalization panel loads with the tab; a test about anything else has no records.
-  vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [] });
+  vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+    records: [],
+    statement_fields: [],
+  });
 });
 
 afterEach(() => {
@@ -408,28 +411,65 @@ describe("ResultsTab operationalization records", () => {
     record_seen: "hash-of-the-displayed-record",
   };
 
+  // What the list route answers, the server's own naming of the fields the record_seen hash covers.
+  const LISTED = {
+    records: [COUNT_RECORD],
+    statement_fields: [
+      "statement",
+      "mechanism",
+      "measured_subject",
+      "delivered_phenotypes",
+      "delivered_value_keys",
+      "stated_by",
+      "stated_at",
+      "relayed_note",
+    ],
+  };
+
+  const CONFIRMED_RECORD: OperationalizationRecord = {
+    ...COUNT_RECORD,
+    confirmed_by: "user:breeder",
+    confirmed_at: "2026-02-02T09:00:00+00:00",
+    identity_from_request: true,
+    confirmed_current: true,
+  };
+
   function rowFor(record: OperationalizationRecord) {
     return screen.findByTestId(`operationalization-${record.trait}::${record.delivery_kind}`);
   }
 
-  it("shows every field a confirmation covers", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+  it("shows every field the served list names as covered by a confirmation", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
 
     render(<ResultsTab />);
     const row = await rowFor(COUNT_RECORD);
 
-    for (const field of STATEMENT_FIELDS) {
-      const value = COUNT_RECORD[field];
+    const values: Record<string, unknown> = COUNT_RECORD;
+    for (const field of LISTED.statement_fields) {
+      const value = values[field];
       expect(
-        within(row).getByText(Array.isArray(value) ? value.join(", ") : value),
+        within(row).getByText(Array.isArray(value) ? value.join(", ") : String(value)),
       ).toBeInTheDocument();
     }
     // The crop vocabulary's own wording for what the trait delivers, beside the statement.
     expect(within(row).getByText(/objects counted per plant/)).toBeInTheDocument();
   });
 
+  it("shows only what the served list names, so a field the server drops leaves the row", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+      records: [COUNT_RECORD],
+      statement_fields: ["statement"],
+    });
+
+    render(<ResultsTab />);
+    const row = await rowFor(COUNT_RECORD);
+
+    expect(within(row).getByText(COUNT_RECORD.statement)).toBeInTheDocument();
+    expect(within(row).queryByText(COUNT_RECORD.mechanism)).not.toBeInTheDocument();
+  });
+
   it("lists a record whose delivery kind this tab computes no view for", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
 
     render(<ResultsTab />);
     const row = await rowFor(COUNT_RECORD);
@@ -439,7 +479,7 @@ describe("ResultsTab operationalization records", () => {
   });
 
   it("confirms with the record_seen hash of what was displayed", async () => {
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
     const confirmSpy = vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
       confirmed_by: "user:breeder",
       confirmed_at: "2026-02-02T09:00:00+00:00",
@@ -454,17 +494,20 @@ describe("ResultsTab operationalization records", () => {
       confirmed_current: true,
     });
 
+    useStore.setState({ user: "breeder" });
     render(<ResultsTab />);
     const row = await rowFor(COUNT_RECORD);
     fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
 
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    // The app-set name rides the post, so the record's identity_from_request stays honest.
     expect(confirmSpy.mock.calls[0][0]).toEqual({
       project_root: "C:/proj",
       trait: "subject_b_total",
       delivery_kind: "per_plant_count_aggregate",
       record_seen: "hash-of-the-displayed-record",
       confirmed: true,
+      user: "breeder",
     });
     expect(await within(row).findByText(/confirmed by user:breeder/i)).toBeInTheDocument();
   });
@@ -475,7 +518,7 @@ describe("ResultsTab operationalization records", () => {
       statement: "Only the objects on the plant's own leader, summed over that plant's images.",
       record_seen: "hash-of-the-record-on-file",
     };
-    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({ records: [COUNT_RECORD] });
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
     vi.spyOn(resultsApi, "confirmOperationalization").mockRejectedValue(
       new StructuredRefusalError(
         { message: "the operationalization moved since it was read", record: MOVED },
@@ -490,6 +533,72 @@ describe("ResultsTab operationalization records", () => {
 
     expect(await within(row).findByText(MOVED.statement)).toBeInTheDocument();
     expect(within(row).queryByText(COUNT_RECORD.statement)).not.toBeInTheDocument();
+    expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
+  });
+
+  it("offers no withdrawal for a record nobody has confirmed", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue(LISTED);
+
+    render(<ResultsTab />);
+    const row = await rowFor(COUNT_RECORD);
+
+    expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
+  });
+
+  it("withdraws with confirmed false and the row comes back unconfirmed", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+      records: [CONFIRMED_RECORD],
+      statement_fields: LISTED.statement_fields,
+    });
+    const confirmSpy = vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
+      confirmed_by: null,
+      confirmed_at: null,
+      identity_from_request: null,
+      confirmed_fields: null,
+    });
+    vi.spyOn(resultsApi, "operationalization").mockResolvedValue(COUNT_RECORD);
+
+    render(<ResultsTab />);
+    const row = await rowFor(CONFIRMED_RECORD);
+    fireEvent.click(within(row).getByRole("button", { name: /withdraw this confirmation/i }));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(confirmSpy.mock.calls[0][0]).toEqual({
+      project_root: "C:/proj",
+      trait: "subject_b_total",
+      delivery_kind: "per_plant_count_aggregate",
+      record_seen: "hash-of-the-displayed-record",
+      confirmed: false,
+    });
+    expect(await within(row).findByText("Not confirmed")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /confirm this record/i })).toBeEnabled();
+    expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
+  });
+
+  it("re-renders what is on file when the record moved since the withdrawal was offered", async () => {
+    const MOVED: OperationalizationRecord = {
+      ...CONFIRMED_RECORD,
+      statement: "Only the objects on the plant's own leader, summed over that plant's images.",
+      record_seen: "hash-of-the-record-on-file",
+    };
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+      records: [CONFIRMED_RECORD],
+      statement_fields: LISTED.statement_fields,
+    });
+    vi.spyOn(resultsApi, "confirmOperationalization").mockRejectedValue(
+      new StructuredRefusalError(
+        { message: "the operationalization moved since it was read", record: MOVED },
+        409,
+        "the operationalization moved since it was read",
+      ),
+    );
+
+    render(<ResultsTab />);
+    const row = await rowFor(CONFIRMED_RECORD);
+    fireEvent.click(within(row).getByRole("button", { name: /withdraw this confirmation/i }));
+
+    expect(await within(row).findByText(MOVED.statement)).toBeInTheDocument();
+    expect(within(row).queryByText(CONFIRMED_RECORD.statement)).not.toBeInTheDocument();
     expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
   });
 

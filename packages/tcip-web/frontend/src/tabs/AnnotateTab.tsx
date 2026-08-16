@@ -649,6 +649,7 @@ export function AnnotateTab() {
                 dataset.date,
                 dataset.dataset_root,
                 dataset.annotations_dir,
+                useStore.getState().user || undefined,
               )
               .catch(() => {});
           }

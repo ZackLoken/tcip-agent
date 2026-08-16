@@ -580,6 +580,9 @@ def list_operationalizations(project_root: str) -> dict:
     ``unresolved`` names a record whose trait is no longer registered, or whose delivery kind is not
     one this platform declares, rather than dropping it: an unlistable record and no record at all
     would otherwise read identically.
+
+    ``statement_fields`` names the fields ``record_seen`` hashes, in the order a surface shows them,
+    so the confirming surface renders the set the record module owns rather than its own copy of it.
     """
     import tcip_store as ts
     from tcip_mcp import operationalization as op
@@ -596,7 +599,11 @@ def list_operationalizations(project_root: str) -> dict:
             unresolved.append(
                 {"trait": trait, "delivery_kind": delivery_kind, "reason": str(e)}
             )
-    return {"records": records, "unresolved": unresolved}
+    return {
+        "records": records,
+        "unresolved": unresolved,
+        "statement_fields": list(op.STATEMENT_FIELDS),
+    }
 
 
 @router.post("/operationalization/confirm")

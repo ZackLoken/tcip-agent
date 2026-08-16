@@ -79,6 +79,7 @@ export const classesApi = {
     );
   },
 
+  /** `user` is the GUI-set identity; omitting it stamps the backend's process identity instead. */
   setImageStatus: (
     project_root: string,
     image_name: string,
@@ -87,6 +88,7 @@ export const classesApi = {
     date: string | null,
     dataset_root?: string | null,
     annotations_dir?: string | null,
+    user?: string,
   ) =>
     postJson<unknown>(ROUTES.postClassesImageStatus, {
       project_root,
@@ -96,6 +98,7 @@ export const classesApi = {
       date,
       dataset_root,
       annotations_dir,
+      user,
     }),
 
   setImageStatusBulk: (
@@ -105,6 +108,7 @@ export const classesApi = {
     date: string | null,
     dataset_root?: string | null,
     annotations_dir?: string | null,
+    user?: string,
   ) =>
     postJson<unknown>(ROUTES.postClassesImageStatusBulk, {
       project_root,
@@ -113,6 +117,7 @@ export const classesApi = {
       date,
       dataset_root,
       annotations_dir,
+      user,
     }),
 
   deriveImageStatus: (body: {

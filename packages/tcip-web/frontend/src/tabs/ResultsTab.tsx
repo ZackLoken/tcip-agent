@@ -15,14 +15,12 @@ import { StructuredRefusalError } from "@/api/http";
 import {
   operationalizationRefusalOf,
   resultsApi,
-  STATEMENT_FIELDS,
   type OperationalizationRecord,
   type OperationalizationRefusal,
   type PhenologyRequest,
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
-  type StatementField,
 } from "@/api/inference";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
@@ -34,7 +32,9 @@ interface DateRow {
   [plantId: string]: number | string | null;
 }
 
-const STATEMENT_FIELD_LABELS: Record<StatementField, string> = {
+/** Breeder-facing wording only; the served `statement_fields` decides what a row shows, and a
+ *  field without an entry here renders under its own name rather than disappearing. */
+const STATEMENT_FIELD_LABELS: Record<string, string> = {
   statement: "What the number means",
   mechanism: "How the platform decides it",
   measured_subject: "Measured subject",
@@ -50,10 +50,12 @@ function recordKey(record: { trait: string; delivery_kind: string }): string {
   return `${record.trait}::${record.delivery_kind}`;
 }
 
-function statementFieldText(record: OperationalizationRecord, field: StatementField): string {
-  const value = record[field];
+function statementFieldText(record: OperationalizationRecord, field: string): string {
+  const values: Record<string, unknown> = record;
+  const value = values[field];
   if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "none";
-  return value.trim() === "" ? "none" : value;
+  if (typeof value !== "string" || value.trim() === "") return "none";
+  return value;
 }
 
 function supersededValueText(value: unknown): string {
@@ -87,16 +89,22 @@ function correctionRequest(record: OperationalizationRecord): string {
 
 function OperationalizationRow({
   record,
+  statementFields,
   refused,
-  busy,
+  confirming,
+  withdrawing,
   note,
   onConfirm,
+  onWithdraw,
 }: {
   record: OperationalizationRecord;
+  statementFields: string[];
   refused: boolean;
-  busy: boolean;
+  confirming: boolean;
+  withdrawing: boolean;
   note: string | null;
   onConfirm: (record: OperationalizationRecord) => void;
+  onWithdraw: (record: OperationalizationRecord) => void;
 }) {
   const { request, setRequest } = useEditableAgentRequest(correctionRequest(record));
   const [correcting, setCorrecting] = useState(false);
@@ -132,9 +140,9 @@ function OperationalizationRow({
       )}
       <p className="mt-1 text-[11px] text-tcip-muted">Delivers {delivers}</p>
       <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[11px]">
-        {STATEMENT_FIELDS.map((field) => (
+        {statementFields.map((field) => (
           <Fragment key={field}>
-            <dt className="text-tcip-muted">{STATEMENT_FIELD_LABELS[field]}</dt>
+            <dt className="text-tcip-muted">{STATEMENT_FIELD_LABELS[field] ?? field}</dt>
             <dd>{statementFieldText(record, field)}</dd>
           </Fragment>
         ))}
@@ -158,9 +166,18 @@ function OperationalizationRow({
           <button
             className="tcip-btn-primary text-[11px]"
             onClick={() => onConfirm(record)}
-            disabled={busy}
+            disabled={confirming || withdrawing}
           >
-            {busy ? "Confirming…" : "Confirm this record"}
+            {confirming ? "Confirming…" : "Confirm this record"}
+          </button>
+        )}
+        {record.confirmed_by && (
+          <button
+            className="tcip-btn text-[11px]"
+            onClick={() => onWithdraw(record)}
+            disabled={confirming || withdrawing}
+          >
+            {withdrawing ? "Withdrawing…" : "Withdraw this confirmation"}
           </button>
         )}
         <button
@@ -196,18 +213,24 @@ function OperationalizationRow({
 
 function OperationalizationPanel({
   records,
+  statementFields,
   loadError,
   refusal,
-  busyKey,
+  confirmingKey,
+  withdrawingKey,
   notes,
   onConfirm,
+  onWithdraw,
 }: {
   records: OperationalizationRecord[];
+  statementFields: string[];
   loadError: string | null;
   refusal: OperationalizationRefusal | null;
-  busyKey: string | null;
+  confirmingKey: string | null;
+  withdrawingKey: string | null;
   notes: Record<string, string>;
   onConfirm: (record: OperationalizationRecord) => void;
+  onWithdraw: (record: OperationalizationRecord) => void;
 }) {
   return (
     <div className="tcip-panel p-4">
@@ -215,7 +238,8 @@ function OperationalizationPanel({
       <p className="mb-3 text-[11px] text-tcip-muted">
         The agent records what each delivered number means and how the platform decides it. A
         delivery waits until you confirm the record it would ship under. Read what is on file, then
-        confirm it or send the agent a correction.
+        confirm it or send the agent a correction. A confirmation you gave stands until you withdraw
+        it.
       </p>
       {refusal && (
         <div className="mb-3 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
@@ -238,14 +262,17 @@ function OperationalizationPanel({
             <OperationalizationRow
               key={recordKey(record)}
               record={record}
+              statementFields={statementFields}
               refused={
                 refusal !== null &&
                 refusal.trait === record.trait &&
                 refusal.delivery_kind === record.delivery_kind
               }
-              busy={busyKey === recordKey(record)}
+              confirming={confirmingKey === recordKey(record)}
+              withdrawing={withdrawingKey === recordKey(record)}
               note={notes[recordKey(record)] || null}
               onConfirm={onConfirm}
+              onWithdraw={onWithdraw}
             />
           ))}
         </ul>
@@ -311,10 +338,13 @@ export function ResultsTab() {
 
   // Listed rather than selected: records are keyed by trait plus kind, including uncomputed kinds.
   const [operationalizations, setOperationalizations] = useState<OperationalizationRecord[]>([]);
+  // Which fields a confirmation covers, and their order, as the record's own module names them.
+  const [statementFields, setStatementFields] = useState<string[]>([]);
   const [operationalizationsError, setOperationalizationsError] = useState<string | null>(null);
   const [operationalizationRefusal, setOperationalizationRefusal] =
     useState<OperationalizationRefusal | null>(null);
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
+  const [withdrawingKey, setWithdrawingKey] = useState<string | null>(null);
   const [confirmNotes, setConfirmNotes] = useState<Record<string, string>>({});
 
   // The trait a delivery is computed for, resolved from this project's own registered traits
@@ -364,10 +394,12 @@ export function ResultsTab() {
       .operationalizations(projectRoot)
       .then((res) => {
         setOperationalizations(res.records);
+        setStatementFields(res.statement_fields);
         setOperationalizationsError(null);
       })
       .catch((e) => {
         setOperationalizations([]);
+        setStatementFields([]);
         setOperationalizationsError(
           `Could not load what this project's delivered numbers mean: ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -380,11 +412,13 @@ export function ResultsTab() {
     );
   }, []);
 
-  const confirmOperationalization = useCallback(
-    async (record: OperationalizationRecord) => {
+  // Withdrawal is the same door with confirmed false, so one writer serves both directions.
+  const writeConfirmation = useCallback(
+    async (record: OperationalizationRecord, confirmed: boolean) => {
       if (!projectRoot) return;
       const key = recordKey(record);
-      setConfirmingKey(key);
+      const setPending = confirmed ? setConfirmingKey : setWithdrawingKey;
+      setPending(key);
       setConfirmNotes((prev) => ({ ...prev, [key]: "" }));
       try {
         await resultsApi.confirmOperationalization({
@@ -392,7 +426,8 @@ export function ResultsTab() {
           trait: record.trait,
           delivery_kind: record.delivery_kind,
           record_seen: record.record_seen,
-          confirmed: true,
+          confirmed,
+          user: useStore.getState().user || undefined,
         });
         replaceOperationalization(
           await resultsApi.operationalization(projectRoot, record.trait, record.delivery_kind),
@@ -403,17 +438,20 @@ export function ResultsTab() {
           replaceOperationalization(moved);
           setConfirmNotes((prev) => ({
             ...prev,
-            [key]:
-              "This record changed since it was shown. Read what is on file above, then confirm that.",
+            [key]: confirmed
+              ? "This record changed since it was shown. Read what is on file above, then confirm that."
+              : "This record changed since it was shown. Read what is on file above, then withdraw that.",
           }));
         } else {
           setConfirmNotes((prev) => ({
             ...prev,
-            [key]: `Could not confirm: ${e instanceof Error ? e.message : String(e)}`,
+            [key]: `${confirmed ? "Could not confirm" : "Could not withdraw"}: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
           }));
         }
       } finally {
-        setConfirmingKey(null);
+        setPending(null);
       }
     },
     [projectRoot, replaceOperationalization],
@@ -761,11 +799,14 @@ export function ResultsTab() {
 
       <OperationalizationPanel
         records={operationalizations}
+        statementFields={statementFields}
         loadError={operationalizationsError}
         refusal={operationalizationRefusal}
-        busyKey={confirmingKey}
+        confirmingKey={confirmingKey}
+        withdrawingKey={withdrawingKey}
         notes={confirmNotes}
-        onConfirm={(record) => void confirmOperationalization(record)}
+        onConfirm={(record) => void writeConfirmation(record, true)}
+        onWithdraw={(record) => void writeConfirmation(record, false)}
       />
 
       {trait && !hasMilestones && (

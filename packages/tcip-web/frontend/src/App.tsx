@@ -285,6 +285,7 @@ function App() {
               datasetDate,
               datasetRoot,
               annotationsDir,
+              useStore.getState().user || undefined,
             );
           }
           setImageStatuses(reconciled);
