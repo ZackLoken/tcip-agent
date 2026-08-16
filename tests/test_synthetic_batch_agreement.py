@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
 pytest.importorskip("PIL")
+import torch  # noqa: E402
 
 from tcip_mcp.pipelines.components.heads import OrdinalHead  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402

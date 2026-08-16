@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
+import torch  # noqa: E402
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training import generic_trainer as gt
@@ -55,7 +56,8 @@ def _per_batch_gradients(loader: DataLoader) -> list[torch.Tensor]:
         model.zero_grad(set_to_none=True)
         losses = model(images, targets)
         sum(losses.values()).backward()
-        grads.append(torch.cat([p.grad.detach().reshape(-1) for p in model.parameters()]))
+        grads.append(torch.cat([p.grad.detach().reshape(-1) for p in model.parameters()
+                                if p.grad is not None]))
     return grads
 
 

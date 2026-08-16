@@ -17,7 +17,8 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
+import torch  # noqa: E402
 
 
 # --------------------------------------------------------------------------

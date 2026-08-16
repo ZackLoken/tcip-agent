@@ -15,8 +15,9 @@ from pathlib import Path
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
 pytest.importorskip("torchvision")
+import torch  # noqa: E402
 
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
 
