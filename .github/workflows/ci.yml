@@ -73,7 +73,8 @@ jobs:
           pip install -e "packages/tcip-web[dev]"
 
       - name: Type check (mypy, permissive; see mypy.ini)
-        run: mypy packages/tcip-store/src packages/tcip-annotation/src packages/tcip-mcp/src packages/tcip-web/src scripts tests
+        # bare mypy: the roots come from mypy.ini's files list, the single source.
+        run: mypy
 
   python:
     runs-on: ubuntu-latest
