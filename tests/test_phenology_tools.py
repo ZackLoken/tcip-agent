@@ -27,6 +27,7 @@ from tcip_mcp.tools.phenology_tools import (
     calibrate_classifier_operating_point,
     compute_phenology,
 )
+from tests._binding_fixtures import write_bound_sidecar
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real
 # catkin.yml into this test's pinned project root so get_trait("catkin") keeps resolving by default.
@@ -101,25 +102,44 @@ def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
     json_io.write_annotations(dir_path / f"{stem}.json", anns, 8, 8)
 
 
-def _write_op_sidecar(dir_path: Path, *, validated: bool, conf: float = 0.4,
+def _ds_root(tmp_path: Path) -> Path:
+    return tmp_path / "ds"
+
+
+def _bucket(tmp_path: Path, date: str) -> Path:
+    """A prediction bucket under the dataset's own predictions layout, so a count claim's
+    covered-bucket key (relative to dataset_root) resolves against a real root."""
+    return _ds_root(tmp_path) / "predictions" / "run" / date
+
+
+def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None,
                       tile_size_prov: dict | None = None) -> None:
     """The operating_point.json a calibrated export_predictions writes.
 
     ``tile_size_prov`` is the tile_size param's own provenance entry, present for a run that
     actually tiled; omitted here for an untiled run, which carries no gating tile scale.
+    ``experiment_id`` doubles as the record's producing_experiment_id when ``validated``: the run
+    that produced these predictions is the run a genuinely-bound claim names.
     """
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
     op: dict = {"conf": {"value": conf, "validated_against": ref}}
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
-    (dir_path / "operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": validated,
+        "trait": "catkin",
         "operating_point": op,
         "id_map": id_map,
         "experiment_id": experiment_id,
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
+                            experiment_id=f"exp-record-{dir_path.name}",
+                            producing_experiment_id=experiment_id)
+    else:
+        (dir_path / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
 
 
 def _tiled(ref: str, value: int = 640) -> dict:
@@ -127,29 +147,36 @@ def _tiled(ref: str, value: int = 640) -> dict:
             "validated_against": ref}
 
 
-def _write_classifier_sidecar(dir_path: Path, *, validated: bool, trait: str | None = None,
-                              experiment_id: str | None = None) -> None:
+def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool,
+                              trait: str | None = None, experiment_id: str | None = None) -> None:
     """The classifier_operating_point.json calibrate_classifier_operating_point writes."""
     ref = "held_out_annotations" if validated else "false"
     dir_path.mkdir(parents=True, exist_ok=True)
-    (dir_path / "classifier_operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": validated,
         "operating_point": {"classifier": {"value": "elongated", "validated_against": ref}},
         "trait": trait,
         "experiment_id": experiment_id,
-    }), encoding="utf-8")
+    }
+    if validated and trait:
+        write_bound_sidecar(dir_path, stamp, document="classifier_operating_point",
+                            dataset_root=dataset_root, experiment_id=f"exp-classifier-{dir_path.name}",
+                            producing_experiment_id=experiment_id, trait=trait)
+    else:
+        (dir_path / "classifier_operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
 
 
 ID_MAP = {"dormant": 0, "elongated": 1}
 
 
 def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, validated=True, trait="catkin")
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -177,9 +204,10 @@ def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_pat
     positive class) must disclose n_images_unmapped the same way the success path does -- both
     read it off the same per_plant_phenology result, so an early refusal is not missing a field
     a later success would have carried."""
-    d1 = tmp_path / "2026-02-11"
+    root = _ds_root(tmp_path)
+    d1 = _bucket(tmp_path, "2026-02-11")
     d1.mkdir(parents=True)
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     # No P1_a.json written under d1 -- the mapping names it but nothing was ever inferred for it,
     # so the only date on record is missing, never classified.
     mapping_path = tmp_path / "state" / "plant_mapping.json"
@@ -209,15 +237,16 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
     different trait/experiment must not validate an unrelated delivery -- classifier_pred_dirs is a
     separate, caller-supplied list, so reconcile_classifier_validity's own on-disk check alone can't
     see this; the stamp's own recorded trait/experiment_id must agree with what's being delivered."""
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP, experiment_id="run-B")
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP, experiment_id="run-B")
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id="run-B")
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, experiment_id="run-B")
     # Genuinely validated (validated=True), but calibrated for a different trait and a different
     # producing run than the one being delivered here.
     other_trait_dir = tmp_path / "unrelated_calibration"
-    _write_classifier_sidecar(other_trait_dir, validated=True,
+    _write_classifier_sidecar(other_trait_dir, dataset_root=root, validated=True,
                               trait="some_other_trait", experiment_id="run-A-different-model")
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
@@ -247,14 +276,15 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
     omits it. A sidecar with trait=None (a hand-edited or foreign file, not one the real writer could
     produce) must not be trusted just because neither the trait-mismatch nor the experiment-mismatch
     branch fires against a null -- both being null would otherwise bypass the binding check entirely."""
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # Genuinely "validated", but with neither trait nor experiment_id recorded -- the shape a
     # hand-edited/foreign sidecar could carry, never one calibrate_classifier_operating_point writes.
-    _write_classifier_sidecar(d1, validated=True, trait=None, experiment_id=None)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait=None, experiment_id=None)
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -278,11 +308,12 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
 
 
 def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> None:
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # No classifier_operating_point.json anywhere -> classifier dimension floors to unvalidated.
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
@@ -302,11 +333,12 @@ def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> Non
 
 
 def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) -> None:
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -327,12 +359,13 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
 
 def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None:
     # Classifier validated but the count operating point isn't. The gate requires both.
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=False, id_map=ID_MAP)
-    _write_op_sidecar(d2, validated=False, id_map=ID_MAP)
-    _write_classifier_sidecar(d1, validated=True, trait="catkin")
+    _write_op_sidecar(d1, dataset_root=root, validated=False, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=False, id_map=ID_MAP)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -351,11 +384,12 @@ def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None
 
 
 def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_path: Path) -> None:
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP)
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # Classifier not validated; op point IS validated on disk.
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
@@ -379,12 +413,13 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
 
 def _tile_gate_fixture(tmp_path: Path, tile_size_prov: dict | None) -> dict:
     """A fully-validated two-date phenology delivery, varying only the tile scale's own basis."""
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
     _write_preds(d1, "P1_a", ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"])
-    _write_op_sidecar(d1, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
-    _write_op_sidecar(d2, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
-    _write_classifier_sidecar(d1, validated=True, trait="catkin")
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -452,9 +487,10 @@ def test_compute_phenology_acknowledged_tile_size_floors_the_csv_operating_point
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
     # Predictions from a bare detector (no elongation axis at all) must refuse,
     # never report full coverage.
-    d1 = tmp_path / "2026-02-11"
+    root = _ds_root(tmp_path)
+    d1 = _bucket(tmp_path, "2026-02-11")
     _write_preds(d1, "P1_a", ["catkin"])
-    _write_op_sidecar(d1, validated=True, id_map={"catkin": 0})
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map={"catkin": 0})
     mapping_path = tmp_path / "plant_mapping.json"
     _write_mapping(mapping_path, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],

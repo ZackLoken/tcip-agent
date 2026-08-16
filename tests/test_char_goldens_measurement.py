@@ -37,6 +37,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     pick_f1_max,
     sweep_operating_point,
 )
+from tests._binding_fixtures import write_bound_sidecar  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 from tests._dense_op_fixtures import dense_records  # noqa: E402
 
@@ -266,7 +267,9 @@ _PARAM_PROVENANCE_KEYS = {
 
 
 def _stamp(bundle, *, validated: bool, issues: list[str]) -> dict:
-    """Replicate the exact operating_point.json stamp export_predictions writes."""
+    """The three fields of a bucket's stamp this golden pins, not the whole stamp: what a resolved
+    bundle contributes to it. The provenance and the pointer at the record behind a validated claim
+    are `operating_point_stamp`'s own, checked where that constructor is."""
     return {"operating_point": bundle.to_provenance()["operating_point"],
             "validated": bool(validated), "shippable_issues": issues}
 
@@ -527,7 +530,8 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 # 6. compute_phenology gate behavior
 # ══════════════════════════════════════════════════════════════════════════
 
-def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: dict | None = None,
+def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
+                      id_map: dict | None = None,
                       checkpoint_sha256: str | None = "deadbeef" * 8,
                       experiment_id: str | None = "exp-golden") -> None:
     """The operating_point.json stamp export_predictions writes beside a bucket's labels: the
@@ -536,33 +540,49 @@ def _write_op_sidecar(d: Path, *, validated: bool, conf: float = 0.4, id_map: di
     at the top level; a fixture that omitted them blessed a shape the platform never produces)."""
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": validated,
+        "trait": "catkin",
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
         "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_bound_sidecar(d, stamp, dataset_root=dataset_root,
+                            experiment_id=f"exp-record-{d.name}",
+                            producing_experiment_id=experiment_id)
+    else:
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
 
 
-def _write_classifier_sidecar(d: Path, *, validated: bool, trait: str | None = "catkin") -> None:
+def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
+                              trait: str | None = "catkin") -> None:
     ref = "held_out_annotations" if validated else "false"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "classifier_operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": validated,
         "operating_point": {"classifier": {"value": "elongated", "validated_against": ref}},
         "trait": trait,
-    }), encoding="utf-8")
+    }
+    if validated and trait:
+        write_bound_sidecar(d, stamp, document="classifier_operating_point",
+                            dataset_root=dataset_root, experiment_id=f"exp-classifier-{d.name}",
+                            producing_experiment_id="exp-golden", trait=trait)
+    else:
+        (d / "classifier_operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
 
 
 def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None = None):
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = tmp_path / "ds"
+    d1 = root / "predictions" / "run" / "2026-02-11"
+    d2 = root / "predictions" / "run" / "2026-03-09"
     id_map = {"dormant": 0, "elongated": 1} if elongated else {"catkin": 0}
     _write_preds(d1, "P1_a", ["catkin"] if not elongated else ["dormant"])
     _write_preds(d2, "P1_b", ["elongated"] if elongated else ["catkin"])
     if op_validated is not None:
-        _write_op_sidecar(d1, validated=op_validated, id_map=id_map)
-        _write_op_sidecar(d2, validated=op_validated, id_map=id_map)
+        _write_op_sidecar(d1, dataset_root=root, validated=op_validated, id_map=id_map)
+        _write_op_sidecar(d2, dataset_root=root, validated=op_validated, id_map=id_map)
     else:
         # count-operating-point sidecar still needs an id_map for the coverage rule even when its
         # own validity isn't the thing under test: a bucket with no sidecar at all is the
@@ -634,7 +654,7 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
     # The positive-state fraction is now produced, so a fully-validated call (classifier + count
     # operating point both validated on disk) delivers a real phenology CSV.
     mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
-    _write_classifier_sidecar(d1, validated=True)
+    _write_classifier_sidecar(d1, dataset_root=tmp_path / "ds", validated=True)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",

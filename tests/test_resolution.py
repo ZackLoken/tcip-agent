@@ -60,12 +60,21 @@ def test_review_confirmed_calibration_is_shippable():
 
 def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
     import json
-    d = tmp_path / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "operating_point.json").write_text(json.dumps({
-        "validated": validated,
+
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
+
+    root = tmp_path / "ds"
+    d = root / "predictions" / name
+    stamp = {
+        "validated": validated, "trait": "catkin",
         "operating_point": {"conf": {"value": conf, "validated_against": ref if validated else "false"}},
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_prediction(d, "img_a")
+        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+    else:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(d)
 
 
@@ -88,10 +97,11 @@ def test_reconcile_all_validated_on_disk(tmp_path):
 
 def test_reconcile_one_unvalidated_bucket_floors_whole_curve(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
-    dirs = [_bucket(tmp_path, "d1", validated=True), _bucket(tmp_path, "d2", validated=False)]
-    r = reconcile_operating_point_validity(dirs, asserted=VALIDATED_HELD_OUT)
+    d1 = _bucket(tmp_path, "d1", validated=True)
+    d2 = _bucket(tmp_path, "d2", validated=False)
+    r = reconcile_operating_point_validity([d1, d2], asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
-    assert r["unvalidated_buckets"] == [str(tmp_path / "d2")]
+    assert r["unvalidated_buckets"] == [d2]
 
 
 def test_reconcile_asserted_false_lowers_on_disk_validated(tmp_path):

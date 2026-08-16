@@ -79,36 +79,29 @@ def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: 
 def _phenology_fixture(
     tmp_path: Path, *, validated: bool, images_per_plant: int = 1,
     fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0), id_map: dict | None = None,
-    detections: int = 10,
+    detections: int = 10, producing_experiment_id: str | None = "exp-1",
 ) -> dict:
     """A mapping + per-date prediction buckets, written through the platform's own writers.
 
     ``validated`` controls only the sidecars' recorded validity, so the same numbers can be driven
-    through every door with and without the evidence that qualifies them.
+    through every door with and without the evidence that qualifies them. A validated bucket earns a
+    genuine validation record (:mod:`tests._binding_fixtures`) rather than asserting one, since a
+    stamp that claims validated is refused unless a record outside the bucket answers for it.
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    from tests._binding_fixtures import write_bound_sidecar
 
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
     positive = "elongated" if "elongated" in id_map else None
+    # A validated stamp's covered-bucket key is relative to a dataset root, recognised only when
+    # the path holds an "annotations"/"predictions"/"images"/"labels" segment.
+    root = tmp_path / "ds"
     mapping, preds = {}, {}
     for date_str, frac in zip(dates, fractions):
-        bucket = tmp_path / "preds" / date_str
+        bucket = root / "predictions" / "live" / date_str
         bucket.mkdir(parents=True, exist_ok=True)
-        sidecar: dict = {"id_map": id_map}
-        if validated:
-            sidecar.update({
-                "validated": True,
-                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
-                "experiment_id": "exp-1",
-                "checkpoint_sha256": "abc123",
-            })
-            (bucket / "classifier_operating_point.json").write_text(json.dumps({
-                "validated": True, "trait": "catkin", "experiment_id": "exp-1",
-                "operating_point": {"classifier": {"value": "elongated",
-                                                   "validated_against": "held_out_annotations"}},
-            }), encoding="utf-8")
-        (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
         assigns = []
         for plant in ("PLANT_A", "PLANT_B"):
             for i in range(images_per_plant):
@@ -126,6 +119,28 @@ def _phenology_fixture(
                     id_map=id_map)
                 assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                                 "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
+        sidecar: dict = {"id_map": id_map}
+        if validated:
+            sidecar.update({
+                "validated": True,
+                "trait": "catkin",
+                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
+                "experiment_id": producing_experiment_id,
+                "checkpoint_sha256": "abc123",
+            })
+            write_bound_sidecar(bucket, sidecar, dataset_root=root,
+                                experiment_id=f"exp-op-{date_str}",
+                                producing_experiment_id=producing_experiment_id, trait="catkin")
+            classifier_stamp = {
+                "validated": True, "trait": "catkin", "experiment_id": producing_experiment_id,
+                "operating_point": {"classifier": {"value": "elongated",
+                                                   "validated_against": "held_out_annotations"}},
+            }
+            write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
+                                dataset_root=root, experiment_id=f"exp-cls-{date_str}",
+                                producing_experiment_id=producing_experiment_id, trait="catkin")
+        else:
+            (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"
@@ -280,16 +295,35 @@ def test_acknowledge_reveals_provisional_numbers_on_screen_but_never_in_a_file(
 
 
 def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
-    """Rewrite each bucket's sidecar tile_size entry, leaving every other dimension untouched."""
-    for bucket in body["predictions_by_date"].values():
-        path = Path(bucket) / "operating_point.json"
+    """Rewrite each bucket's sidecar tile_size entry, leaving every other dimension untouched.
+
+    A validated bucket's claim covers the whole ``operating_point`` field, so changing tile_size
+    inside it makes the existing validation record answer for a claim it was never earned against;
+    the record is re-earned here, over the mutated stamp, the same way a real producer would.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    from tests._binding_fixtures import file_validation_record
+
+    for bucket_str in body["predictions_by_date"].values():
+        bucket = Path(bucket_str)
+        path = bucket / "operating_point.json"
         sidecar = json.loads(path.read_text(encoding="utf-8"))
         op = sidecar.setdefault("operating_point", {})
         if tile_size_prov is None:
             op.pop("tile_size", None)
         else:
             op["tile_size"] = tile_size_prov
-        path.write_text(json.dumps(sidecar), encoding="utf-8")
+        if sidecar.get("validated"):
+            root = dataset_root_of(bucket)
+            sidecar = file_validation_record(
+                sidecar, dataset_root=root, pred_dirs=[bucket],
+                experiment_id=f"exp-tile-{bucket.name}", producing_experiment_id="exp-1",
+                trait=sidecar.get("trait"))
+            write_sidecar(bucket, sidecar, "operating_point")
+        else:
+            path.write_text(json.dumps(sidecar), encoding="utf-8")
     return body
 
 
@@ -480,13 +514,26 @@ def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_p
 
 
 def _rewrite_classifier_sidecars(body: dict, **overrides) -> None:
+    """A genuine classifier record, so a wrong-trait/wrong-experiment refusal comes from the
+    disagreement a real record surfaces rather than from an absent one. ``experiment_id`` here is
+    the producing run the record is checked against (``bind_classifier_validity``'s
+    ``producing_experiment_id``), not the log the record itself is filed in.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    from tests._binding_fixtures import write_bound_sidecar
+
     for bucket in body["predictions_by_date"].values():
+        bucket_path = Path(bucket)
         sidecar = {"validated": True, "trait": "catkin", "experiment_id": "exp-1",
                    "operating_point": {"classifier": {"value": "elongated",
                                                       "validated_against": "held_out_annotations"}}}
         sidecar.update(overrides)
-        (Path(bucket) / "classifier_operating_point.json").write_text(
-            json.dumps(sidecar), encoding="utf-8")
+        root = dataset_root_of(bucket_path)
+        write_bound_sidecar(
+            bucket_path, sidecar, document="classifier_operating_point", dataset_root=root,
+            experiment_id=f"exp-cls-record-{bucket_path.name}",
+            producing_experiment_id=sidecar.get("experiment_id"), trait=sidecar.get("trait"))
 
 
 def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delivery(
@@ -502,7 +549,8 @@ def test_a_classifier_calibrated_for_another_trait_does_not_validate_this_delive
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
-    assert "calibrated for trait" in resp.json()["detail"]
+    assert "was earned for trait" in resp.json()["detail"]
+    assert "chestnut_bur" in resp.json()["detail"]
     assert client.post("/api/results/onset_dates", json=body).status_code == 400
 
 
@@ -514,7 +562,7 @@ def test_a_classifier_calibrated_against_another_experiment_does_not_validate_th
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 400
-    assert "calibrated against experiment" in resp.json()["detail"]
+    assert "records producing run 'exp-OTHER'" in resp.json()["detail"]
 
 
 def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_path: Path) -> None:
@@ -524,11 +572,13 @@ def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_pat
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200
-    # A foreign checkpoint with no recorded experiment_id is not rejected for lacking one to
-    # compare against; only a real mismatch is.
-    _rewrite_classifier_sidecars(body, trait="catkin", experiment_id=None)
+    # A foreign checkpoint has no producing run to name on either document, and two records that
+    # both record none agree; what refuses is a real disagreement, never the absence itself.
+    foreign = _phenology_fixture(tmp_path / "foreign", validated=True, producing_experiment_id=None)
+    _rewrite_classifier_sidecars(foreign, trait="catkin", experiment_id=None)
     assert client.post("/api/results/export_csv",
-                       json={**body, "payload": "milestones", "filename": "x.csv"}).status_code == 200
+                       json={**foreign, "payload": "milestones", "filename": "x.csv"}
+                       ).status_code == 200
 
 
 def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(

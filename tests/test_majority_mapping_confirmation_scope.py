@@ -55,23 +55,35 @@ def _write_specs(project_root: Path) -> None:
         (specs_dir / f"{spec['name']}.yml").write_text(yaml.safe_dump(spec), encoding="utf-8")
 
 
-def _predictions(root: Path, positive_class: str, id_map: dict) -> tuple[Path, dict]:
-    """Two dates of classified predictions for one plant, plus the plant mapping that names it."""
+def _predictions(root: Path, positive_class: str, id_map: dict, *, trait: str) -> tuple[Path, dict]:
+    """Two dates of classified predictions for one plant, plus the plant mapping that names it.
+
+    The count operating point always claims validated (only the classifier stamp varies with the
+    delivery's own ``validated`` flag), so it always earns a genuine validation record rather than
+    asserting one (:mod:`tests._binding_fixtures`).
+    """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
+    from tests._binding_fixtures import write_bound_sidecar
+
     dirs = {}
     for date in ("2026-02-11", "2026-03-09"):
-        d = root / date
+        # A validated stamp's covered-bucket key is relative to a dataset root, recognised only
+        # when the path holds an "annotations"/"predictions"/"images"/"labels" segment.
+        d = root / "predictions" / "live" / date
         d.mkdir(parents=True, exist_ok=True)
         json_io.write_annotations(
             d / "P1.json",
             [Annotation(subject=positive_class, geometry=BBox(1.0, 1.0, 4.0, 7.0), score=0.9)], 16, 9)
-        (d / "operating_point.json").write_text(json.dumps({
+        stamp = {
             "validated": True,
+            "trait": trait,
             "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
             "id_map": id_map,
-        }), encoding="utf-8")
+        }
+        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
+                            producing_experiment_id="exp-1", trait=trait)
         dirs[date] = str(d)
     mapping_path = root / "plant_mapping.json"
     mapping_path.write_text(json.dumps({
@@ -80,13 +92,18 @@ def _predictions(root: Path, positive_class: str, id_map: dict) -> tuple[Path, d
     return mapping_path, dirs
 
 
-def _stamp_classifier(pred_dir: str, trait: str, positive_class: str) -> None:
-    (Path(pred_dir) / "classifier_operating_point.json").write_text(json.dumps({
+def _stamp_classifier(pred_dir: str, trait: str, positive_class: str, *, dataset_root: Path) -> None:
+    from tests._binding_fixtures import write_bound_sidecar
+
+    stamp = {
         "validated": True,
         "operating_point": {"classifier": {"value": positive_class,
                                            "validated_against": "held_out_annotations"}},
         "trait": trait,
-    }), encoding="utf-8")
+    }
+    write_bound_sidecar(Path(pred_dir), stamp, document="classifier_operating_point",
+                        dataset_root=dataset_root, experiment_id=f"exp-cls-{trait}",
+                        producing_experiment_id="exp-1", trait=trait)
 
 
 def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
@@ -94,11 +111,11 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     root = tmp_path / spec["name"]
     mapping_path, dirs = _predictions(
         root, spec["positive_class_name"],
-        {"other": 0, spec["positive_class_name"]: 1})
+        {"other": 0, spec["positive_class_name"]: 1}, trait=spec["name"])
     classifier_dirs = None
     if validated:
         first = dirs["2026-02-11"]
-        _stamp_classifier(first, spec["name"], spec["positive_class_name"])
+        _stamp_classifier(first, spec["name"], spec["positive_class_name"], dataset_root=root)
         classifier_dirs = [first]
     out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
     res = compute_phenology(

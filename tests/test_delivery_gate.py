@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import json
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,7 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_REVIEW_CONFIRMED,
     check_delivery_gate,
 )
+from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
 
 # ── the shared helper ─────────────────────────────────────────────────────
@@ -81,14 +83,17 @@ def test_export_detection_csv_acknowledge_stamps_false(tmp_path):
 
 def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6,
                       tile_size_prov=None):
-    d = tmp_path / name
-    d.mkdir(parents=True, exist_ok=True)
+    root = tmp_path / "ds"
+    d = root / "predictions" / name
+    write_prediction(d, "img_a")
     op = {"conf": {"value": conf, "validated_against": ref if validated else VALIDATED_FALSE}}
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
-    (d / "operating_point.json").write_text(json.dumps({
-        "validated": validated, "operating_point": op,
-    }), encoding="utf-8")
+    stamp = {"validated": validated, "trait": "catkin", "operating_point": op}
+    if validated:
+        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+    else:
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(d)
 
 
@@ -194,11 +199,17 @@ def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowled
 def _scalar_bucket(tmp_path, name, task, *, validated, ref=VALIDATED_HELD_OUT, criterion="r_squared"):
     d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{task}_operating_point.json").write_text(json.dumps({
-        "validated": validated,
+    document = f"{task}_operating_point"
+    stamp = {
+        "validated": validated, "trait": "catkin",
         "operating_point": {task: {"validated_against": ref if validated else VALIDATED_FALSE,
                                    "criterion": criterion}},
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_bound_sidecar(d, stamp, document=document, dataset_root=tmp_path,
+                            experiment_id=f"exp-{name}-{task}")
+    else:
+        (d / f"{document}.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(d)
 
 
@@ -674,18 +685,22 @@ def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
 
 # ── the same tile-geometry dimension, read from a written bucket's sidecar ──
 
-def _write_bucket(path, *, conf_ref, tile_size_prov=None, validated=None):
+def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=None):
     """A prediction bucket's operating_point.json, the shape export_predictions writes."""
-    path.mkdir(parents=True, exist_ok=True)
+    root = tmp_path / "ds"
+    d = root / "predictions" / name
+    write_prediction(d, "img_a")
     op = {"conf": {"value": 0.4, "requires_validation": True, "validation_kind": "annotations",
                    "validated_against": conf_ref}}
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
-    (path / "operating_point.json").write_text(json.dumps({
-        "validated": conf_ref == VALIDATED_HELD_OUT if validated is None else validated,
-        "operating_point": op,
-    }), encoding="utf-8")
-    return str(path)
+    is_validated = (conf_ref == VALIDATED_HELD_OUT) if validated is None else validated
+    stamp = {"validated": is_validated, "trait": "catkin", "operating_point": op}
+    if is_validated:
+        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+    else:
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+    return str(d)
 
 
 def _tile(ref, value=640):
@@ -698,7 +713,7 @@ def test_untiled_buckets_leave_the_tile_dimension_out_of_the_gate(tmp_path):
     scale was never operative, so gating on it would refuse work that was always fine."""
     from tcip_mcp.pipelines.resolution import reconcile_tile_size_validity
 
-    d = _write_bucket(tmp_path / "b1", conf_ref=VALIDATED_HELD_OUT,
+    d = _write_bucket(tmp_path, "b1", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov={"value": None, "requires_validation": False,
                                       "validation_kind": None, "validated_against": None})
     recon = reconcile_tile_size_validity([d])
@@ -715,7 +730,7 @@ def test_a_persisted_tile_geometry_is_not_floored_by_an_uncalibrated_conf(tmp_pa
         reconcile_tile_size_validity,
     )
 
-    d = _write_bucket(tmp_path / "b1", conf_ref=VALIDATED_FALSE,
+    d = _write_bucket(tmp_path, "b1", conf_ref=VALIDATED_FALSE,
                       tile_size_prov=_tile(VALIDATED_PERSISTED_GEOMETRY, 224))
     recon = reconcile_tile_size_validity([d])
     assert recon["operative"] is True
@@ -731,9 +746,9 @@ def test_one_ungrounded_tiled_bucket_floors_the_whole_delivery(tmp_path):
         reconcile_tile_size_validity,
     )
 
-    good = _write_bucket(tmp_path / "b1", conf_ref=VALIDATED_HELD_OUT,
+    good = _write_bucket(tmp_path, "b1", conf_ref=VALIDATED_HELD_OUT,
                          tile_size_prov=_tile(VALIDATED_PERSISTED_GEOMETRY, 224))
-    bad = _write_bucket(tmp_path / "b2", conf_ref=VALIDATED_HELD_OUT,
+    bad = _write_bucket(tmp_path, "b2", conf_ref=VALIDATED_HELD_OUT,
                         tile_size_prov=_tile(VALIDATED_FALSE, 640))
     recon = reconcile_tile_size_validity([good, bad])
     assert recon["validated"] == VALIDATED_FALSE
@@ -750,9 +765,9 @@ def test_a_stated_override_beside_a_persisted_geometry_reports_the_weaker_basis(
         reconcile_tile_size_validity,
     )
 
-    a = _write_bucket(tmp_path / "b1", conf_ref=VALIDATED_HELD_OUT,
+    a = _write_bucket(tmp_path, "b1", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_PERSISTED_GEOMETRY, 224))
-    b = _write_bucket(tmp_path / "b2", conf_ref=VALIDATED_HELD_OUT,
+    b = _write_bucket(tmp_path, "b2", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_EXPLICIT_GEOMETRY, 512))
     recon = reconcile_tile_size_validity([a, b])
     assert recon["validated"] == VALIDATED_EXPLICIT_GEOMETRY
@@ -764,7 +779,7 @@ def test_export_aggregated_csv_refuses_a_fabricated_tile_size_with_a_validated_c
     paper over it, exactly as it does not at the count-CSV door."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT,
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_FALSE, 640))
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv([{"plant_id": "p1", "value": 5, "observations": 2}],
@@ -777,7 +792,7 @@ def test_export_aggregated_csv_ships_when_the_tile_scale_has_a_real_basis(tmp_pa
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT,
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_PERSISTED_GEOMETRY, 224))
     out = tmp_path / "o.csv"
     export_aggregated_csv([{"plant_id": "p1", "value": 5, "observations": 2}], str(out),
@@ -791,7 +806,7 @@ def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_pa
     not acquire a tile-geometry dimension from it and refuse work that was always fine."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT,
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov={"value": None, "requires_validation": False,
                                       "validation_kind": None, "validated_against": None})
     out = tmp_path / "o.csv"
@@ -807,7 +822,7 @@ def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_p
     reference."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT,
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                       tile_size_prov=_tile(VALIDATED_FALSE, 640))
     out = tmp_path / "o.csv"
     export_aggregated_csv([{"plant_id": "p1", "value": 5, "observations": 2}], str(out),
@@ -824,8 +839,9 @@ def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
     path.mkdir(parents=True, exist_ok=True)
-    (path / "resolve_scale.json").write_text(json.dumps({
-        "validated": validated_against == VALIDATED_PHYSICAL_MEASUREMENT,
+    is_validated = validated_against == VALIDATED_PHYSICAL_MEASUREMENT
+    stamp = {
+        "validated": is_validated, "trait": "catkin",
         "operating_point": {
             "scale": {
                 "value": value, "unit": unit, "capture_id": capture_id,
@@ -833,7 +849,12 @@ def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05
                 "validated_against": validated_against,
             },
         },
-    }), encoding="utf-8")
+    }
+    if is_validated:
+        write_bound_sidecar(path, stamp, document="resolve_scale", dataset_root=path,
+                            experiment_id=f"exp-scale-{path.name}")
+    else:
+        (path / "resolve_scale.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(path)
 
 
@@ -844,8 +865,8 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
-    _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="not_a_real_crops_yml_trait", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
@@ -859,7 +880,7 @@ def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_side
     is exactly the gap the scale gate closes."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
                               trait_name="not_a_real_crops_yml_trait", pred_dirs=[d])
@@ -871,7 +892,7 @@ def test_export_aggregated_csv_count_trait_never_gates_on_scale(tmp_path):
     over."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
     export_aggregated_csv([{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
                           str(out), trait_name="count", pred_dirs=[d])
@@ -885,8 +906,8 @@ def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
-    _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
                          capture_id="2026-02-10_plot7")
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
@@ -900,8 +921,8 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
-    _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
                          capture_id="2026-02-10_plot7")
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="not_a_real_crops_yml_trait",
@@ -916,7 +937,7 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
     reference."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path / "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="not_a_real_crops_yml_trait",
                           pred_dirs=[d], acknowledge_unvalidated=True)

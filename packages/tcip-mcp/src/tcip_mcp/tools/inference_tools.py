@@ -1061,6 +1061,8 @@ def _export_predictions_raster(
     op_stamp = operating_point_stamp(
         op_provenance,
         validated=validated,
+        # This door has not earned a validation record yet, so it stamps no pointer at one.
+        validated_by=None,
         tile_size_validated=tile_size_validated,
         shippable_issues=op_bundle.shippable_issues(),
         id_map=id_map,
@@ -1399,6 +1401,8 @@ def export_predictions(
     op_stamp = operating_point_stamp(
         result.get("operating_point"),
         validated=bool(result.get("validated", False)),
+        # This door has not earned a validation record yet, so it stamps no pointer at one.
+        validated_by=None,
         tile_size_validated=tile_size_validated,
         shippable_issues=result.get("shippable_issues", []),
         id_map=id_map,

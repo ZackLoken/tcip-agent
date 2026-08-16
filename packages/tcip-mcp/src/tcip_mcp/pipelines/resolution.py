@@ -23,6 +23,7 @@ import csv
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -84,6 +85,18 @@ _ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
 def accepted_references(validation_kind: str) -> tuple[str, ...]:
     """The validated_against values that legitimately clear validation for this kind."""
     return _ACCEPTED_REFERENCES[validation_kind]
+
+
+def cleared_reference(reference: str | None, *, validation_kind: str) -> str:
+    """``reference`` when it legitimately clears ``validation_kind``, else :data:`VALIDATED_FALSE`.
+
+    The one place "did this reference clear this kind" is decided, so the reader floor
+    (:func:`_sidecar_reference`, reading a persisted stamp) and the earning gate
+    (:func:`open_validation`, reading a resolver's own live result) cannot drift into disagreeing
+    about which references count. An absent, unrecognized or wrong-kind reference floors rather
+    than being read as validated.
+    """
+    return reference if reference in accepted_references(validation_kind) else VALIDATED_FALSE
 
 
 def tile_size_source_of(reference: str | None, *, tile_size: int | None) -> str:
@@ -733,6 +746,51 @@ def _read_sidecar(pred_dir: str | Path, document: str) -> dict | None:
         return None
 
 
+def well_formed_validated_by(stamp: dict | None) -> dict | None:
+    """The stamp's pointer at the validation record behind it, or ``None`` when it has no usable one.
+
+    A pointer is usable only with both halves present as non-empty strings: an experiment to look in
+    and the identity of one row inside it. Read here for the writer refusal and the reader
+    verification alike, so a shape one side accepts can never be a shape the other rejects.
+    """
+    pointer = (stamp or {}).get("validated_by")
+    if not isinstance(pointer, dict):
+        return None
+    experiment_id = pointer.get("experiment_id")
+    record_digest = pointer.get("record_digest")
+    if not isinstance(experiment_id, str) or not experiment_id:
+        return None
+    if not isinstance(record_digest, str) or not record_digest:
+        return None
+    return pointer
+
+
+def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None:
+    """Refuse a stamp that claims validation without the two things a claim is unreadable without.
+
+    A validated stamp names the record it was earned from and the trait it was earned for. Neither
+    is defaultable: a pointer this writer filled in would point at nothing, and a trait it guessed
+    would be a claim nobody made. This is a writer-side rail and it closes nothing on its own, since
+    a file written straight to disk never passes here; it exists so a platform producer cannot omit
+    what every reader compares.
+    """
+    if not stamp.get("validated"):
+        return
+    if well_formed_validated_by(stamp) is None:
+        raise ValueError(
+            f"{document}.json at {str(pred_dir)!r} claims validated with no well-formed "
+            "validated_by (an experiment_id and a record_digest, both non-empty strings). A "
+            "validated claim is earned through open_validation/seal_validation, which append the "
+            "record and return the stamp with its pointer merged in; a stamp cannot assert one."
+        )
+    if not stamp.get("trait"):
+        raise ValueError(
+            f"{document}.json at {str(pred_dir)!r} claims validated with no trait. Pass the trait "
+            "the claim was earned for to open_validation and stamp the body seal_validation "
+            "returns; a claim with no trait names nothing a delivery can be checked against."
+        )
+
+
 def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_point") -> None:
     """Write one bucket's stamp whole, under the stamp's own lock.
 
@@ -741,6 +799,7 @@ def write_sidecar(pred_dir: str | Path, stamp: dict, document: str = "operating_
     sidecar write passes, rather than at each producer.
     """
     check_json_value(stamp, path="stamp")
+    _check_stamp_claim(stamp, document, pred_dir)
     Path(pred_dir).mkdir(parents=True, exist_ok=True)
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
@@ -766,6 +825,7 @@ def update_sidecar(
         if updated is None:
             return False
         check_json_value(updated, path="stamp")
+        _check_stamp_claim(updated, document, pred_dir)
         txn.write(key, updated)
     return True
 
@@ -774,6 +834,7 @@ def operating_point_stamp(
     operating_point: dict | None,
     *,
     validated: bool,
+    validated_by: dict | None,
     tile_size_validated: str | None,
     shippable_issues: list[str],
     id_map: dict | None,
@@ -800,6 +861,11 @@ def operating_point_stamp(
     scale is floored in here rather than at each door: a bucket whose tile geometry has no real
     basis produced its counts at a scale nothing justifies, so it is not a validated bucket no
     matter what the conf dimension earned.
+
+    ``validated_by`` is the pointer at the validation record the claim was earned from, the mapping
+    :func:`seal_validation` returns, and ``None`` for a stamp that claims nothing. It has no default
+    on purpose: a producer that stamps a validated bucket must have earned a record to name, and a
+    producer that stamps an unvalidated one says so at its own call site.
     """
     return {
         "trait": trait,
@@ -807,6 +873,7 @@ def operating_point_stamp(
         "operating_point": operating_point,
         "id_map": id_map,
         "validated": bool(validated) and tile_size_validated != VALIDATED_FALSE,
+        "validated_by": validated_by,
         "tile_size_validated": tile_size_validated,
         "shippable_issues": list(shippable_issues),
         "checkpoint": checkpoint,
@@ -884,9 +951,587 @@ def _sidecar_reference(
     if not sidecar or not sidecar.get("validated"):
         return VALIDATED_FALSE
     param = (sidecar.get("operating_point") or {}).get(param_key) or {}
-    ref = param.get("validated_against")
-    accepted = accepted_references(validation_kind)
-    return ref if ref in accepted else VALIDATED_FALSE
+    return cleared_reference(param.get("validated_against"), validation_kind=validation_kind)
+
+
+# --- the claim a stamp asserts, and the record that has to answer for it -------------------
+
+_CLAIM_KEYS: dict[str, tuple[str, ...]] = {
+    "operating_point": ("operating_point", "tile_size_validated", "claim_scope_validated",
+                        "shippable_issues", "id_map", "mask_binarize"),
+    "classifier_operating_point": ("operating_point",),
+    "ordinal_operating_point": ("operating_point",),
+    "regression_operating_point": ("operating_point",),
+    "resolve_scale": ("operating_point",),
+}
+"""Which of a stamp's fields *are* the claim, per document: the values a delivery consumes, as
+opposed to the provenance describing where they came from. Stated once and nowhere restated, since
+the side that mints a record and the side that verifies one must subset a stamp identically or a
+verification compares two different things and always agrees."""
+
+_DOCUMENT_PARAM: dict[str, tuple[str, str]] = {
+    "operating_point": ("conf", "annotations"),
+    "classifier_operating_point": ("classifier", "annotations"),
+    "ordinal_operating_point": ("ordinal", "annotations"),
+    "regression_operating_point": ("regression", "annotations"),
+    "resolve_scale": ("scale", "physical"),
+}
+"""The parameter each document's claim hangs on, and the kind of reference that can validate it.
+Read by every reconciler and by the verifier, so a document's validity is decided against one
+parameter of one kind wherever it is read."""
+
+
+def claim_payload(sidecar: dict | None, *, document: str) -> dict:
+    """The part of a stamp that constitutes the claim, for the document it is a stamp of.
+
+    The one extractor both sides of the binding call: :func:`seal_validation` runs it over the stamp
+    body a door is about to publish and stores the result in the validation record, and
+    :func:`verify_stamp_binding` runs it over the stamp it is reading and compares. Compared whole,
+    never field by field, so a key added to a stamp after its record was minted reads as a
+    disagreement rather than as an ignored extra. A key the stamp does not carry is absent from the
+    payload rather than defaulted, since a defaulted value is a claim nobody made.
+    """
+    try:
+        keys = _CLAIM_KEYS[document]
+    except KeyError:
+        raise ValueError(
+            f"{document!r} is not a prediction-bucket stamp; declared documents are "
+            f"{sorted(_CLAIM_KEYS)}"
+        ) from None
+    stamp = sidecar or {}
+    return {key: stamp[key] for key in keys if key in stamp}
+
+
+@dataclass(frozen=True)
+class _Resolver:
+    """One resolver a document's claim may be earned through, and how to read its result."""
+
+    module: str
+    function: str
+    trait_param: str | None
+    experiment_param: str | None
+
+
+_DOCUMENT_RESOLVERS: dict[str, dict[str, _Resolver]] = {
+    "operating_point": {
+        "resolve_operating_point": _Resolver(
+            "tcip_mcp.pipelines.operating_point", "resolve_operating_point",
+            "trait_name", "experiment_id"),
+        "resolve_operating_point_from_review": _Resolver(
+            "tcip_mcp.pipelines.feedback.review_calibration", "resolve_operating_point_from_review",
+            "trait_name", "experiment_id"),
+    },
+    "classifier_operating_point": {
+        "resolve_classifier_operating_point": _Resolver(
+            "tcip_mcp.pipelines.operating_point", "resolve_classifier_operating_point",
+            "trait_name", "experiment_id"),
+    },
+    "ordinal_operating_point": {
+        "resolve_ordinal_operating_point": _Resolver(
+            "tcip_mcp.pipelines.operating_point", "resolve_ordinal_operating_point",
+            "trait_name", "experiment_id"),
+    },
+    "regression_operating_point": {
+        "resolve_regression_operating_point": _Resolver(
+            "tcip_mcp.pipelines.operating_point", "resolve_regression_operating_point",
+            "trait_name", "experiment_id"),
+    },
+    "resolve_scale": {
+        "resolve_scale": _Resolver(
+            "tcip_mcp.pipelines.measurement.mask_geometry", "resolve_scale", None, None),
+    },
+}
+"""Which resolvers may earn which document's claim, named rather than handed in. A caller supplies
+the resolver's *name* and its inputs and never a callable: a primitive that ran whatever function it
+was given would be a primitive a caller could hand a verdict to, which is the signature this seam
+exists to remove. A document with more than one entry has genuinely different evidence shapes behind
+one claim (ground-truth records against reviewer-confirmed verdicts), and the caller says which."""
+
+_REFERENCE_INPUT_GROUPS = ("label_dirs", "label_csvs", "reference_buckets", "scope_roots",
+                           "stated_values")
+"""The kinds of evidence a reference identity is built from. Each names locations the platform can
+hash for itself, except ``stated_values``, which holds what another primitive already computed (a
+split lock's identity, a review reference's hash and image count) and this one cannot recompute."""
+
+_UNCOMPARED = object()
+"""A resolver result that publishes no value of its own for its parameter, so the claim's value has
+nothing here to be compared against and the reference alone carries the agreement."""
+
+
+def _resolver_reference(result: Any, param_key: str) -> str | None:
+    """The reference a resolver's own result recorded for the document's parameter."""
+    if isinstance(result, ResolvedBundle):
+        return result.get(param_key).validated_against
+    if isinstance(result, ResolvedParam):
+        return result.validated_against
+    return (result or {}).get("validated_against")
+
+
+def _resolver_value(result: Any, param_key: str) -> Any:
+    """The value a resolver's own result carries for the document's parameter, if it carries one."""
+    if isinstance(result, ResolvedBundle):
+        return result.get(param_key)._raw
+    if isinstance(result, ResolvedParam):
+        return result._raw
+    return _UNCOMPARED
+
+
+def _relative_location(path: str | Path, dataset_root: Path) -> str:
+    """Where an input sits, expressed against the dataset root the record hangs off.
+
+    Recorded so an auditor who wants to recompute a reference can find it, which no delivery does
+    (:func:`verify_stamp_binding` compares the recorded hashes, it does not re-read the labels,
+    verdicts or lock behind them). An input outside the dataset root is legitimate work (a CSV over a
+    loose images directory), and comes back as a path stepping out of the root, or as an absolute
+    path when the two share no anchor at all.
+    """
+    resolved = Path(path).resolve()
+    try:
+        return resolved.relative_to(dataset_root, walk_up=True).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def _reference_identity(reference_inputs: dict, dataset_root: Path) -> dict:
+    """The identity of the evidence a claim was earned against, hashed here rather than stated.
+
+    Every location the platform can hash for itself is hashed here (labels through
+    :func:`dataset_hash`, a CSV-sourced reference through :func:`csv_dataset_hash`, a reference
+    prediction bucket through ``bucket_content_digest``), so a caller cannot hand over an identity
+    for evidence it did not present. Each entry records where the input was as well as what it
+    hashed to, so the reference stays resolvable to someone auditing offline.
+    """
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    unknown = sorted(set(reference_inputs) - {"dataset_root", *_REFERENCE_INPUT_GROUPS})
+    if unknown:
+        raise ValueError(
+            f"reference_inputs holds {', '.join(unknown)}, which name no kind of evidence this "
+            f"seam can identify; the kinds are {', '.join(_REFERENCE_INPUT_GROUPS)}."
+        )
+
+    identity: dict[str, Any] = {}
+    for role, d in sorted((reference_inputs.get("label_dirs") or {}).items()):
+        identity.setdefault("label_dirs", {})[role] = {
+            "path": _relative_location(d, dataset_root), "dataset_hash": dataset_hash(d)}
+    for role, p in sorted((reference_inputs.get("label_csvs") or {}).items()):
+        identity.setdefault("label_csvs", {})[role] = {
+            "path": _relative_location(p, dataset_root), "dataset_hash": csv_dataset_hash(p)}
+    for role, d in sorted((reference_inputs.get("reference_buckets") or {}).items()):
+        identity.setdefault("reference_buckets", {})[role] = {
+            "path": _relative_location(d, dataset_root), "content_digest": bucket_content_digest(d)}
+    for role, d in sorted((reference_inputs.get("scope_roots") or {}).items()):
+        identity.setdefault("scope_roots", {})[role] = _relative_location(d, dataset_root)
+    stated = reference_inputs.get("stated_values") or {}
+    if stated:
+        identity["stated_values"] = {k: stated[k] for k in sorted(stated)}
+
+    if not identity:
+        raise ValueError(
+            "reference_inputs names no evidence at all; a validation record has to say what the "
+            f"claim was checked against, through one of {', '.join(_REFERENCE_INPUT_GROUPS)}."
+        )
+    return identity
+
+
+@dataclass(frozen=True)
+class ValidationDraft:
+    """A gate that passed, before there is anything on disk for it to cover.
+
+    Not a record and not appendable: it carries the resolver's own result and the identity of the
+    evidence that produced it, and it is handed to :func:`seal_validation` once the predictions it
+    covers have been written. The split is what lets the gate run exactly once, before anything is
+    published, while the content identity is taken over the files as they actually landed.
+    """
+
+    document: str
+    trait: str
+    validated_against: str
+    checkpoint_sha256: str | None
+    producing_experiment_id: str | None
+    reference_identity: dict
+    dataset_root: str
+    result: Any
+    token: str
+
+
+_OPEN_DRAFTS: set[str] = set()
+"""Drafts this process minted. A draft assembled by any other means is refused at the seal, so the
+resolver result a record is minted from is one this process watched a gate produce."""
+
+
+def open_validation(
+    *,
+    document: str,
+    evidence: dict,
+    trait: str,
+    checkpoint_sha256: str | None,
+    producing_experiment_id: str | None,
+    reference_inputs: dict,
+) -> ValidationDraft:
+    """Run a document's own gate over the evidence, and return the draft a record is sealed from.
+
+    The first of the two phases a validated claim is earned in. It takes the evidence, never a
+    verdict: it looks up the named resolver among those the document admits, runs it, and refuses
+    unless the resolver's own result cleared a reference ``accepted_references`` recognizes for the
+    document's kind. Nothing is written here, and a caller holding a draft holds a passed gate, not
+    a claim.
+
+    ``evidence`` is ``{"resolver": <name>, "inputs": {...}}``: which of the document's resolvers ran
+    the gate, and the arguments it ran over. The trait and the producing experiment are passed here
+    rather than through ``inputs``, so the trait a record is earned for is the trait the gate was
+    run for, and the run whose training split disjointness is checked is the run that produced the
+    predictions. ``inputs`` restating either is refused rather than allowed to disagree.
+
+    ``reference_inputs`` names the evidence's own locations (see :func:`_reference_identity`), and
+    must include the ``dataset_root`` the claim, its covered buckets and its reference all hang off.
+
+    ``checkpoint_sha256`` is the identity the evidence carried, and ``producing_experiment_id`` the
+    run that produced the predictions; both may be ``None`` for a bespoke or unregistered checkpoint,
+    and both are recorded as they are rather than re-derived from a file on disk, which would prove
+    a file with that content exists somewhere and not that these predictions came from it.
+    """
+    import importlib
+
+    try:
+        resolvers = _DOCUMENT_RESOLVERS[document]
+    except KeyError:
+        raise ValueError(
+            f"{document!r} is not a prediction-bucket stamp; declared documents are "
+            f"{sorted(_DOCUMENT_RESOLVERS)}"
+        ) from None
+    if not isinstance(trait, str) or not trait:
+        raise ValueError(
+            f"a {document} claim needs the trait it is earned for; a validated stamp with no trait "
+            "names nothing a delivery can be checked against."
+        )
+
+    unknown = sorted(set(evidence) - {"resolver", "inputs"})
+    if unknown or "resolver" not in evidence:
+        raise ValueError(
+            f"evidence for {document} must be {{'resolver': <name>, 'inputs': {{...}}}}; got "
+            f"{sorted(evidence)}. The resolver is named, never handed in, and the admitted names "
+            f"for this document are {sorted(resolvers)}."
+        )
+    name = evidence["resolver"]
+    if name not in resolvers:
+        raise ValueError(
+            f"{name!r} does not earn a {document} claim; the resolvers this document admits are "
+            f"{sorted(resolvers)}."
+        )
+    spec = resolvers[name]
+    inputs = dict(evidence.get("inputs") or {})
+    owned = {spec.trait_param, spec.experiment_param} & set(inputs)
+    if owned:
+        raise ValueError(
+            f"evidence inputs for {document} restate {', '.join(sorted(owned))}: the trait and the "
+            "producing run are open_validation's own arguments, so a second spelling of them could "
+            "disagree with the record they are written into."
+        )
+    if spec.trait_param:
+        inputs[spec.trait_param] = trait
+    if spec.experiment_param:
+        inputs[spec.experiment_param] = producing_experiment_id
+
+    root = reference_inputs.get("dataset_root")
+    if not root:
+        raise ValueError(
+            f"reference_inputs for {document} names no dataset_root; a record's covered buckets and "
+            "reference locations are recorded against one, so the claim cannot be placed without it."
+        )
+    dataset_root = Path(root).resolve()
+    reference_identity = _reference_identity(reference_inputs, dataset_root)
+
+    result = getattr(importlib.import_module(spec.module), spec.function)(**inputs)
+    param_key, validation_kind = _DOCUMENT_PARAM[document]
+    reported = _resolver_reference(result, param_key)
+    cleared = cleared_reference(reported, validation_kind=validation_kind)
+    if cleared == VALIDATED_FALSE:
+        raise ValueError(
+            f"{name} reported {param_key} validated_against={reported!r} for trait {trait!r}, which "
+            f"clears nothing for a {validation_kind} claim; a {document} claim is earned only "
+            f"against {list(accepted_references(validation_kind))}. Deliver provisionally with "
+            "acknowledge_unvalidated=True, or calibrate against a reference sized to the trait."
+        )
+
+    import secrets
+
+    token = secrets.token_hex(16)
+    _OPEN_DRAFTS.add(token)
+    return ValidationDraft(
+        document=document, trait=trait, validated_against=cleared,
+        checkpoint_sha256=checkpoint_sha256, producing_experiment_id=producing_experiment_id,
+        reference_identity=reference_identity, dataset_root=str(dataset_root), result=result,
+        token=token,
+    )
+
+
+def seal_validation(
+    draft: ValidationDraft,
+    *,
+    dataset_root: str | Path,
+    bucket_dirs: list[str | Path] | tuple[str | Path, ...],
+    stamp_body: dict,
+) -> tuple[str, dict]:
+    """Append the record a passed gate earned, over the files as they are now, and stamp the pointer.
+
+    The second phase. It takes the content identity of every bucket the claim covers from the files
+    on disk at this moment (so the claim covers what was actually written, not what the run set out
+    to write), takes the claim itself from the stamp body about to be published, appends the row, and
+    returns the digest together with that stamp body with ``validated_by`` merged in. The caller
+    writes the returned body last.
+
+    There is no transaction across the experiment store and the bucket, and none is invented: the
+    order is chosen so every partial state fails closed. A crash before this call leaves prediction
+    files with no stamp, which floors. A crash after it leaves a record no stamp names, which is
+    inert. Only a stamp that names a row a reader can find and recompute delivers.
+
+    ``covered_buckets`` is keyed by each bucket's path relative to ``dataset_root``, so a dataset
+    moved or copied whole still verifies while a bucket moved to a different place inside it does
+    not. A bucket outside the stated dataset root cannot be keyed that way and is refused here, the
+    same claim being unverifiable on the reading side.
+    """
+    from tcip_mcp.experiments import _append_validation, ensure_calibration_experiment
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    if draft.token not in _OPEN_DRAFTS:
+        raise ValueError(
+            "seal_validation was handed a draft this process did not mint; a record is appended "
+            "only for a gate open_validation itself ran over the evidence."
+        )
+    root = Path(dataset_root).resolve()
+    if str(root) != draft.dataset_root:
+        raise ValueError(
+            f"seal_validation was given dataset_root {str(root)!r} for a draft opened against "
+            f"{draft.dataset_root!r}; the covered buckets and the reference identity are recorded "
+            "against one root, so they cannot be sealed against another."
+        )
+
+    covered: dict[str, str] = {}
+    if draft.document == "operating_point":
+        for d in bucket_dirs:
+            resolved = Path(d).resolve()
+            try:
+                key = resolved.relative_to(root).as_posix()
+            except ValueError:
+                raise ValueError(
+                    f"prediction bucket {str(resolved)!r} is not under dataset root {str(root)!r}, "
+                    "so a count claim covering it has no dataset-relative key to record. Write the "
+                    "predictions into the dataset's own predictions layout "
+                    "(resolve_prediction_bucket) to earn a validated count."
+                ) from None
+            covered[key] = bucket_content_digest(resolved)
+    elif bucket_dirs:
+        raise ValueError(
+            f"a {draft.document} claim covers no prediction bucket's content: it is earned against a "
+            "reference and legitimately applies to later buckets. Name the calibration and holdout "
+            "buckets in reference_inputs['reference_buckets'] instead of in bucket_dirs."
+        )
+
+    claim = claim_payload(stamp_body, document=draft.document)
+    param_key, _ = _DOCUMENT_PARAM[draft.document]
+    stamped = (claim.get("operating_point") or {}).get(param_key) or {}
+    if not stamp_body.get("validated"):
+        raise ValueError(
+            f"the {draft.document} stamp handed to seal_validation is not stamped validated, so the "
+            "record would answer for a claim the stamp does not make."
+        )
+    if stamped.get("validated_against") != draft.validated_against:
+        raise ValueError(
+            f"the {draft.document} stamp records {param_key} validated_against="
+            f"{stamped.get('validated_against')!r} while the gate cleared "
+            f"{draft.validated_against!r}; stamp the reference the resolver reported."
+        )
+    resolved_value = _resolver_value(draft.result, param_key)
+    if resolved_value is not _UNCOMPARED and stamped.get("value") != resolved_value:
+        raise ValueError(
+            f"the {draft.document} stamp records {param_key}={stamped.get('value')!r} while the gate "
+            f"resolved {resolved_value!r}; a record cannot answer for a value its gate never saw."
+        )
+
+    experiment_id = draft.producing_experiment_id or ensure_calibration_experiment(
+        document=draft.document, checkpoint_sha256=draft.checkpoint_sha256,
+        reference_identity=draft.reference_identity, trait=draft.trait,
+        config={"derived_from": "a claim earned at a delivery door for predictions no run in this "
+                                "platform's experiment record produced"},
+    )
+    body = {
+        "document": draft.document,
+        "trait": draft.trait,
+        "claim": claim,
+        "validated_against": draft.validated_against,
+        "checkpoint_sha256": draft.checkpoint_sha256,
+        "producing_experiment_id": draft.producing_experiment_id,
+        "reference_identity": draft.reference_identity,
+        "covered_buckets": covered,
+        "dataset_root": str(root),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    appended = _append_validation(experiment_id, body)
+    if "error" in appended:
+        raise ValueError(f"the {draft.document} claim was not recorded: {appended['error']}")
+    record_digest = appended["record_digest"]
+    return record_digest, {**stamp_body,
+                           "validated_by": {"experiment_id": experiment_id,
+                                            "record_digest": record_digest}}
+
+
+@dataclass(frozen=True)
+class StampBinding:
+    """Whether a stamp's claim is answered for by a record outside the bucket that made it.
+
+    ``claimed`` says whether the stamp asserts validation at all: a stamp that asserts nothing has
+    nothing to bind, so ``ok`` stays true and the dimension floors on its own merits exactly as it
+    did before. ``experiment_id`` is the experiment the record lives in, which for a calibration
+    earned outside a training run is not the run that produced the predictions;
+    ``producing_experiment_id`` is that run, and is what a delivery's producer column reports.
+    """
+
+    ok: bool
+    claimed: bool
+    experiment_id: str | None = None
+    producing_experiment_id: str | None = None
+    checkpoint_sha256: str | None = None
+    record_digest: str | None = None
+    note: str = ""
+
+
+def verify_stamp_binding(
+    sidecar: dict | None, pred_dir: str | Path, *, document: str, trait: str | None = None,
+    digest_memo: dict[str, str] | None = None,
+) -> StampBinding:
+    """Check that a stamp's validation claim is answered for by a record it cannot itself write.
+
+    Called from inside the reconcilers rather than at each delivery door, so no door can deliver
+    without it. Every check is cheap: a stamp read, a log read, and for the count document one pass
+    over the prediction files the claim covers. No model is loaded and no gate is re-run.
+
+    In order: the stamp's own parameter cleared a reference of the document's kind (unchanged, and
+    still first); it names an experiment and a row; that experiment exists; that row is in it and
+    still hashes to the identity the stamp committed to; the row agrees with the stamp on document,
+    reference, checkpoint identity (absence equal to absence), trait and the whole claim payload; and
+    for the count document, every bucket being read is in the covered set at its dataset-relative key
+    with the content identity it was earned over, recomputed now.
+
+    Verification is per stamp file, not per parameter. One failed check floors every dimension that
+    stamp carries, so a count operating point, a tile geometry, a claim scope and a review upgrade
+    written into one ``operating_point.json`` stand or fall together.
+
+    ``digest_memo`` is a caller-owned dict living for the span of one delivery, so a bucket several
+    reconcilers read is hashed once. There is deliberately no cache beyond it: recomputation is what
+    detects a replacement whose size and timestamp were restored.
+    """
+    from tcip_mcp.experiments import experiment_exists, experiments_scope, find_validation
+    from tcip_mcp.prediction_buckets import bucket_content_digest
+
+    param_key, validation_kind = _DOCUMENT_PARAM[document]
+    stamp = sidecar or {}
+    reference = _sidecar_reference(stamp, param_key=param_key, validation_kind=validation_kind)
+    if reference == VALIDATED_FALSE:
+        return StampBinding(ok=True, claimed=False)
+
+    bucket = str(pred_dir)
+
+    def floored(note: str, **known: Any) -> StampBinding:
+        return StampBinding(ok=False, claimed=True, note=note, **known)
+
+    pointer = well_formed_validated_by(stamp)
+    if pointer is None:
+        return floored(
+            f"{document}.json at {bucket!r} claims validated with no well-formed validated_by, so "
+            "no record answers for it. A validated claim is earned through the calibrated export "
+            "door, the calibration tool for this document, or the review validation action; the "
+            "bucket delivers unvalidated until one of them earns a record."
+        )
+    experiment_id = pointer["experiment_id"]
+    record_digest = pointer["record_digest"]
+
+    if not experiment_exists(experiment_id):
+        return floored(
+            f"{document}.json at {bucket!r} names experiment {experiment_id!r}, which the experiment "
+            f"store at {experiments_scope()} does not hold. Earn the claim through the calibration "
+            "door for this document, which creates the record it names.",
+            experiment_id=experiment_id, record_digest=record_digest,
+        )
+
+    row = find_validation(experiment_id, record_digest)
+    if row is None:
+        return floored(
+            f"{document}.json at {bucket!r} names record {record_digest!r} in experiment "
+            f"{experiment_id!r}, and no row in that experiment's validations hashes to it (searched "
+            f"the experiment store at {experiments_scope()}). Re-earn the claim through the "
+            "calibration door for this document.",
+            experiment_id=experiment_id, record_digest=record_digest,
+        )
+
+    known = {"experiment_id": experiment_id, "record_digest": record_digest,
+             "producing_experiment_id": row.get("producing_experiment_id"),
+             "checkpoint_sha256": row.get("checkpoint_sha256")}
+
+    if row.get("document") != document:
+        return floored(
+            f"record {record_digest!r} was earned for {row.get('document')!r}, not for the "
+            f"{document} being read at {bucket!r}. Re-calibrate for the document this delivery "
+            "reads.", **known)
+    if row.get("validated_against") != reference:
+        return floored(
+            f"{document}.json at {bucket!r} records validated_against={reference!r} while record "
+            f"{record_digest!r} was earned against {row.get('validated_against')!r}. Re-calibrate "
+            "against the reference the stamp claims.", **known)
+    if row.get("checkpoint_sha256") != stamp.get("checkpoint_sha256"):
+        return floored(
+            f"{document}.json at {bucket!r} records checkpoint {stamp.get('checkpoint_sha256')!r} "
+            f"while record {record_digest!r} was earned under {row.get('checkpoint_sha256')!r}. "
+            "Re-calibrate for the checkpoint that produced these predictions.", **known)
+    if row.get("trait") != stamp.get("trait"):
+        return floored(
+            f"{document}.json at {bucket!r} records trait {stamp.get('trait')!r} while record "
+            f"{record_digest!r} was earned for {row.get('trait')!r}. Re-calibrate for the delivered "
+            "trait.", **known)
+    if trait is not None and row.get("trait") != trait:
+        return floored(
+            f"record {record_digest!r} behind {document}.json at {bucket!r} was earned for trait "
+            f"{row.get('trait')!r}, not {trait!r}. Re-calibrate for the delivered trait.", **known)
+    if claim_payload(stamp, document=document) != row.get("claim"):
+        return floored(
+            f"{document}.json at {bucket!r} asserts a claim record {record_digest!r} was not earned "
+            f"for: the stamp's {', '.join(_CLAIM_KEYS[document])} disagree with the values the gate "
+            "was run over. Re-calibrate to earn a record for the values being delivered.", **known)
+
+    if document == "operating_point":
+        resolved = Path(bucket).resolve()
+        dataset_root = _dataset_root_of(resolved)
+        if dataset_root is None:
+            return floored(
+                f"operating_point.json at {bucket!r} claims a validated count from a bucket under no "
+                "dataset root, so the covered set cannot be located. Write the predictions into the "
+                "dataset's own predictions layout (resolve_prediction_bucket) to earn a validated "
+                "count.", **known)
+        key = resolved.relative_to(dataset_root).as_posix()
+        covered = row.get("covered_buckets") or {}
+        if key not in covered:
+            return floored(
+                f"operating_point.json at {bucket!r} claims a validated count, and record "
+                f"{record_digest!r} covers {sorted(covered)} rather than {key!r}. Write to a fresh "
+                "bucket variant and re-validate.", **known)
+        recomputed = bucket_content_digest(resolved, memo=digest_memo)
+        if recomputed != covered[key]:
+            return floored(
+                f"the prediction files in {bucket!r} hash to {recomputed!r}, and record "
+                f"{record_digest!r} was earned over {covered[key]!r}: a file has been added, "
+                "replaced or removed since the claim was earned. Write to a fresh bucket variant "
+                "and re-validate.", **known)
+
+    return StampBinding(ok=True, claimed=True, **known)
+
+
+def _dataset_root_of(path: Path) -> Path | None:
+    """The dataset root a bucket sits under, resolved from where it is now rather than from the
+    record, so a dataset moved or copied whole still keys its covered buckets the same way."""
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    root = dataset_root_of(path)
+    return root.resolve() if root is not None else None
 
 
 def _validity_rank(state: str | None) -> int:
@@ -900,34 +1545,46 @@ def _validity_rank(state: str | None) -> int:
 
 
 def _reconcile_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None,
-    read_sidecar: Callable[[str | Path], dict | None], param_key: str,
-    validation_kind: str = "annotations",
+    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None, document: str,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor a validity dimension against every bucket's on-disk sidecar, generalized.
 
     Shared by :func:`reconcile_operating_point_validity` and :func:`reconcile_classifier_validity`,
     the flooring logic (read on-disk, never trust a caller string, an asserted value may only lower
-    the result) is identical for both dimensions; only which sidecar file, which param key, and which
-    validation kind is read differs, threaded in by the two thin public wrappers below.
+    the result) is identical for both dimensions; only which document is read differs, threaded in by
+    the thin public wrappers below, which is also what says which parameter and which kind of
+    reference that document's claim rests on.
 
-    Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, conf, per_bucket}``.
+    A stamp whose claim no validation record answers for floors here, with the reason recorded per
+    bucket: a claim a bucket wrote for itself is not evidence, and the check lives inside this shared
+    body so no delivery door can reach a validated result without it.
+
+    Returns ``{validated, on_disk_validated, missing_sidecars, unvalidated_buckets, binding_notes,
+    conf, per_bucket}``.
     """
+    param_key, validation_kind = _DOCUMENT_PARAM[document]
     per_bucket: dict[str, str] = {}
     missing: list[str] = []
     unvalidated: list[str] = []
+    binding_notes: dict[str, str] = {}
     refs: set[str] = set()
     confs: list[float] = []
     all_validated = bool(pred_dirs)
     accepted = accepted_references(validation_kind)
+    memo = digest_memo if digest_memo is not None else {}
     for d in pred_dirs:
-        sc = read_sidecar(d)
+        sc = _read_sidecar(d, document)
         if sc is None:
             missing.append(str(d))
             per_bucket[str(d)] = VALIDATED_FALSE
             all_validated = False
             continue
         ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
+        binding = verify_stamp_binding(sc, d, document=document, digest_memo=memo)
+        if not binding.ok:
+            binding_notes[str(d)] = binding.note
+            ref = VALIDATED_FALSE
         per_bucket[str(d)] = ref
         if ref in accepted:
             refs.add(ref)
@@ -950,6 +1607,7 @@ def _reconcile_validity(
         "on_disk_validated": all_validated and bool(refs),
         "missing_sidecars": missing,
         "unvalidated_buckets": unvalidated,
+        "binding_notes": binding_notes,
         "conf": (confs[0] if len(set(confs)) == 1 else None),
         "per_bucket": per_bucket,
     }
@@ -957,6 +1615,7 @@ def _reconcile_validity(
 
 def reconcile_operating_point_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the count operating-point validity against every bucket's ``operating_point.json``.
 
@@ -966,13 +1625,13 @@ def reconcile_operating_point_validity(
     :func:`_reconcile_validity` for the shared mechanism.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted,
-        read_sidecar=read_operating_point_sidecar, param_key="conf", validation_kind="annotations",
+        pred_dirs, asserted=asserted, document="operating_point", digest_memo=digest_memo,
     )
 
 
 def reconcile_classifier_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the classifier validity against every bucket's ``classifier_operating_point.json``.
 
@@ -983,14 +1642,14 @@ def reconcile_classifier_validity(
     never falls back to a caller-asserted string.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted,
-        read_sidecar=read_classifier_operating_point_sidecar, param_key="classifier",
-        validation_kind="annotations",
+        pred_dirs, asserted=asserted, document="classifier_operating_point",
+        digest_memo=digest_memo,
     )
 
 
 def reconcile_ordinal_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the ordinal compensating-error validity against every bucket's
     ``ordinal_operating_point.json``.
@@ -1001,23 +1660,21 @@ def reconcile_ordinal_validity(
     legitimate way to earn an ordinal-validated stamp without one.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted,
-        read_sidecar=read_ordinal_operating_point_sidecar, param_key="ordinal",
-        validation_kind="annotations",
+        pred_dirs, asserted=asserted, document="ordinal_operating_point", digest_memo=digest_memo,
     )
 
 
 def reconcile_regression_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the regression compensating-error validity against every bucket's
     ``regression_operating_point.json``. Same shape as :func:`reconcile_ordinal_validity`, for the
     regression dimension's own sidecar/param key.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted,
-        read_sidecar=read_regression_operating_point_sidecar, param_key="regression",
-        validation_kind="annotations",
+        pred_dirs, asserted=asserted, document="regression_operating_point",
+        digest_memo=digest_memo,
     )
 
 
@@ -1044,7 +1701,9 @@ def tile_size_gate_flag(operating_point: dict | None) -> str | None:
     return ref if ref in accepted_references("geometry") else VALIDATED_FALSE
 
 
-def reconcile_tile_size_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict:
+def reconcile_tile_size_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, digest_memo: dict[str, str] | None = None,
+) -> dict:
     """Floor the tile-geometry dimension across every prediction bucket's ``operating_point.json``.
 
     The sidecar-reading counterpart of :func:`tile_size_gate_flag`, for the delivery doors that
@@ -1054,26 +1713,37 @@ def reconcile_tile_size_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict
     ``VALIDATED_FALSE``; when the cleared references differ across buckets the weaker basis
     (a caller's stated override) is what travels, never the stronger one some other bucket earned.
 
-    Returns ``{operative, validated, per_bucket, unvalidated_buckets}``. ``operative`` is False (and
-    ``validated`` ``None``) when no bucket ran tiled, in which case the caller adds nothing to its
-    gate. A bucket with no readable sidecar contributes nothing here; that bucket's missing stamp
-    already floors the count operating point via :func:`reconcile_operating_point_validity`.
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``. ``operative``
+    is False (and ``validated`` ``None``) when no bucket ran tiled, in which case the caller adds
+    nothing to its gate. A bucket with no readable sidecar contributes nothing here; that bucket's
+    missing stamp already floors the count operating point via
+    :func:`reconcile_operating_point_validity`. A tiled bucket whose stamp claims a validation no
+    record answers for floors here too: the tile geometry rides in the same stamp file as the count
+    claim, so the two stand or fall together.
     """
     per_bucket: dict[str, str] = {}
     unvalidated: list[str] = []
+    binding_notes: dict[str, str] = {}
     refs: set[str] = set()
     accepted = accepted_references("geometry")
+    memo = digest_memo if digest_memo is not None else {}
     for d in pred_dirs:
-        flag = tile_size_gate_flag((read_operating_point_sidecar(d) or {}).get("operating_point"))
+        sc = read_operating_point_sidecar(d)
+        flag = tile_size_gate_flag((sc or {}).get("operating_point"))
         if flag is None:
             continue
+        binding = verify_stamp_binding(sc, d, document="operating_point", digest_memo=memo)
+        if not binding.ok:
+            binding_notes[str(d)] = binding.note
+            flag = VALIDATED_FALSE
         per_bucket[str(d)] = flag
         if flag in accepted:
             refs.add(flag)
         else:
             unvalidated.append(str(d))
     if not per_bucket:
-        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
+        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": [],
+                "binding_notes": binding_notes}
     if unvalidated:
         validated = VALIDATED_FALSE
     elif VALIDATED_EXPLICIT_GEOMETRY in refs:
@@ -1081,10 +1751,12 @@ def reconcile_tile_size_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict
     else:
         validated = VALIDATED_PERSISTED_GEOMETRY
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
-            "unvalidated_buckets": unvalidated}
+            "unvalidated_buckets": unvalidated, "binding_notes": binding_notes}
 
 
-def reconcile_claim_scope_validity(pred_dirs: list[str] | tuple[str, ...]) -> dict:
+def reconcile_claim_scope_validity(
+    pred_dirs: list[str] | tuple[str, ...], *, digest_memo: dict[str, str] | None = None,
+) -> dict:
     """Floor the claim-scope dimension across every prediction bucket's ``operating_point.json``.
 
     The sidecar-reading counterpart of the export-time claim-scope check, for the delivery doors
@@ -1095,32 +1767,41 @@ def reconcile_claim_scope_validity(pred_dirs: list[str] | tuple[str, ...]) -> di
     delivery, and a bucket whose recorded value is not a member of :data:`CLAIM_SCOPE_REFERENCES`
     floors it to ``VALIDATED_FALSE``.
 
-    Returns ``{operative, validated, per_bucket, unvalidated_buckets}``, the same shape
-    :func:`reconcile_tile_size_validity` returns.
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``, the same
+    shape :func:`reconcile_tile_size_validity` returns, and floors on an unanswered-for stamp for the
+    same reason: the claim scope rides in the same stamp file as the count claim.
     """
     per_bucket: dict[str, str] = {}
     unvalidated: list[str] = []
+    binding_notes: dict[str, str] = {}
     refs: set[str] = set()
+    memo = digest_memo if digest_memo is not None else {}
     for d in pred_dirs:
-        recorded = (read_operating_point_sidecar(d) or {}).get("claim_scope_validated")
+        sc = read_operating_point_sidecar(d)
+        recorded = (sc or {}).get("claim_scope_validated")
         if recorded is None:
             continue
         flag = recorded if recorded in CLAIM_SCOPE_REFERENCES else VALIDATED_FALSE
+        binding = verify_stamp_binding(sc, d, document="operating_point", digest_memo=memo)
+        if not binding.ok:
+            binding_notes[str(d)] = binding.note
+            flag = VALIDATED_FALSE
         per_bucket[str(d)] = flag
         if flag in CLAIM_SCOPE_REFERENCES:
             refs.add(flag)
         else:
             unvalidated.append(str(d))
     if not per_bucket:
-        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
+        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": [],
+                "binding_notes": binding_notes}
     validated = VALIDATED_FALSE if unvalidated else sorted(refs)[0]
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
-            "unvalidated_buckets": unvalidated}
+            "unvalidated_buckets": unvalidated, "binding_notes": binding_notes}
 
 
 def reconcile_scale_validity(
     pred_dirs: list[str] | tuple[str, ...], *, capture_id: str | None = None,
-    asserted: str | None = None,
+    asserted: str | None = None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the physical-scale dimension across every prediction bucket's ``resolve_scale.json``.
 
@@ -1148,23 +1829,33 @@ def reconcile_scale_validity(
     ``asserted``, mirroring :func:`reconcile_operating_point_validity`, may only lower the on-disk
     result, never raise it: a caller string can never launder an ungrounded scale into a shippable one.
 
-    Returns ``{operative, validated, per_bucket, unvalidated_buckets}``, the same shape
-    :func:`reconcile_tile_size_validity` returns. ``operative`` is False (``validated`` ``None``) only
-    when ``pred_dirs`` itself is empty, there is nothing to reconcile against.
+    Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``, the same
+    shape :func:`reconcile_tile_size_validity` returns. ``operative`` is False (``validated``
+    ``None``) only when ``pred_dirs`` itself is empty, there is nothing to reconcile against. No
+    producer writes this document today, so every ``resolve_scale.json`` on disk was hand-authored
+    and floors here for want of a record that answers for it.
     """
     if not pred_dirs:
-        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": []}
-    accepted = accepted_references("physical")
+        return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": [],
+                "binding_notes": {}}
+    param_key, validation_kind = _DOCUMENT_PARAM["resolve_scale"]
+    accepted = accepted_references(validation_kind)
     per_bucket: dict[str, str] = {}
     unvalidated: list[str] = []
+    binding_notes: dict[str, str] = {}
     refs: set[str] = set()
+    memo = digest_memo if digest_memo is not None else {}
     for d in pred_dirs:
         sc = read_scale_sidecar(d)
-        ref = _sidecar_reference(sc, param_key="scale", validation_kind="physical")
+        ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
         if ref in accepted and capture_id is not None:
-            recorded = ((sc.get("operating_point") or {}).get("scale") or {}).get("capture_id")
+            recorded = ((sc.get("operating_point") or {}).get(param_key) or {}).get("capture_id")
             if recorded is not None and recorded != capture_id:
                 ref = VALIDATED_FALSE
+        binding = verify_stamp_binding(sc, d, document="resolve_scale", digest_memo=memo)
+        if not binding.ok:
+            binding_notes[str(d)] = binding.note
+            ref = VALIDATED_FALSE
         per_bucket[str(d)] = ref
         if ref in accepted:
             refs.add(ref)
@@ -1173,7 +1864,7 @@ def reconcile_scale_validity(
     on_disk = VALIDATED_FALSE if unvalidated or not refs else next(iter(refs))
     validated = on_disk if _validity_rank(asserted) >= _validity_rank(on_disk) else VALIDATED_FALSE
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
-            "unvalidated_buckets": unvalidated}
+            "unvalidated_buckets": unvalidated, "binding_notes": binding_notes}
 
 
 def bind_classifier_validity(
@@ -1182,16 +1873,24 @@ def bind_classifier_validity(
     producing_dirs: list[str] | tuple[str, ...],
     *,
     trait: str,
+    digest_memo: dict[str, str] | None = None,
 ) -> tuple[str | None, str]:
     """Floor a reconciled classifier stamp to the delivery it is being used to validate.
 
     Unlike the count dimension (which reconciles from the same buckets it delivers),
     :func:`reconcile_classifier_validity` alone cannot see whether a genuinely-validated stamp was
-    calibrated for an unrelated model or trait, it reads only the validity field. A sidecar's own
-    recorded ``trait``/``experiment_id`` (written by ``calibrate_classifier_operating_point``) must
-    agree with what is actually being delivered. A foreign/unregistered checkpoint calibration
-    (``experiment_id=None``) is not rejected for lacking one to compare against; a ``trait`` mismatch
-    always is, since the real writer always records one.
+    calibrated for an unrelated model or trait, it reads only the validity field. What the stamp must
+    agree with is checked through :func:`verify_stamp_binding`, so the trait comparison is the same
+    one every document gets and the run being compared is the run each stamp's own record names.
+
+    The producing runs are taken from the count buckets' verified bindings, never from what those
+    sidecars declare for themselves: an id a bucket wrote beside its own predictions is the id
+    whoever wrote the bucket chose, so a set built from it would let one file decide what the other
+    is checked against. A bucket whose binding does not hold contributes no id at all.
+
+    Both sides recording no producing run is agreement, not a gap to be tolerated: a bespoke or
+    unregistered checkpoint has no run to name, and its documents legitimately live in calibration
+    experiments of their own.
 
     Returns ``(state, note)``, ``state`` floored to ``VALIDATED_FALSE`` on a mismatch, and a
     breeder-readable ``note`` naming which sidecar failed and why (empty when nothing was floored).
@@ -1202,24 +1901,26 @@ def bind_classifier_validity(
     """
     if classifier_state in (None, VALIDATED_FALSE):
         return classifier_state, ""
-    producing_experiment_ids = {
-        sc["experiment_id"]
-        for d in producing_dirs
-        if (sc := read_operating_point_sidecar(d)) is not None and sc.get("experiment_id")
-    }
+    memo = digest_memo if digest_memo is not None else {}
+    producing_experiment_ids: set[str] = set()
+    for d in producing_dirs:
+        binding = verify_stamp_binding(
+            read_operating_point_sidecar(d), d, document="operating_point", digest_memo=memo)
+        if binding.ok and binding.claimed and binding.producing_experiment_id:
+            producing_experiment_ids.add(binding.producing_experiment_id)
     for d in (classifier_dirs or []):
-        csc = read_classifier_operating_point_sidecar(d) or {}
-        stamped_trait = csc.get("trait")
-        stamped_exp = csc.get("experiment_id")
-        if stamped_trait != trait:
+        binding = verify_stamp_binding(
+            read_classifier_operating_point_sidecar(d), d,
+            document="classifier_operating_point", trait=trait, digest_memo=memo)
+        if not binding.ok:
+            return VALIDATED_FALSE, binding.note
+        stamped_exp = binding.producing_experiment_id
+        if producing_experiment_ids and stamped_exp not in producing_experiment_ids:
             return VALIDATED_FALSE, (
-                f"classifier_operating_point.json at {d!r} was calibrated for trait "
-                f"{stamped_trait!r}, not {trait!r}, the stamp is not trusted for this delivery.")
-        if stamped_exp is not None and producing_experiment_ids and stamped_exp not in producing_experiment_ids:
-            return VALIDATED_FALSE, (
-                f"classifier_operating_point.json at {d!r} was calibrated against experiment "
-                f"{stamped_exp!r}, not the producing run ({sorted(producing_experiment_ids)}), "
-                "the stamp is not trusted for this delivery.")
+                f"classifier_operating_point.json at {d!r} records producing run {stamped_exp!r}, "
+                f"not the run behind this delivery's counts ({sorted(producing_experiment_ids)}), "
+                "so the stamp is not trusted here. Re-calibrate the classifier over the "
+                "predictions this delivery counts.")
     return classifier_state, ""
 
 
