@@ -27,6 +27,9 @@ from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
 
+_PER_PLANT_VALUE_KEY = "count"
+"""The quantity every row of this delivery holds, named once for the aggregation and the check."""
+
 
 @mcp.tool()
 @audited
@@ -75,6 +78,11 @@ def deliver_orthomosaic_plant_counts(
     the identical ``export_aggregated_csv`` gate every other per-plant delivery goes through, not
     a second implementation of it.
 
+    Meaning door: this runs the same per-plant-count-aggregate precondition its nested writer runs,
+    and runs it first, before the raster identity is resolved or a single prediction is read. A
+    number with no confirmed meaning has nothing for a raster identity to attribute, so the
+    precondition reports on its own rather than behind a refusal about the mosaic.
+
     The producer identity this returns, and the one the CSV carries, is built by the shared
     ``delivered_provenance`` from what verification confirmed of the bucket's stamp rather than
     copied off the stamp: a bucket naming an experiment the store cannot answer for reports its
@@ -93,8 +101,9 @@ def deliver_orthomosaic_plant_counts(
             ``accession_name``, ``WGS84_centroid_x/y``, …).
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
             against the project root, never the server process's cwd.
-        trait_name: Name of the trait being measured (a CSV column value, not validated against
-            the trait registry, count traits carry no physical unit to cross-check).
+        trait_name: The crop-vocabulary delivered phenotype this CSV ships under, resolved to the
+            registered trait whose spec delivers it and whose confirmed operationalization this
+            delivery rests on.
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         nn_tolerance_m: Nearest-neighbour match tolerance (m). ``None`` (default) derives it from
@@ -119,6 +128,26 @@ def deliver_orthomosaic_plant_counts(
     missing = [p for p in plant_csv_paths if not Path(p).is_file()]
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
+
+    from tcip_mcp.operationalization import (
+        PER_PLANT_COUNT_AGGREGATE,
+        check_operationalization,
+        resolve_trait_and_record,
+        resolve_trait_for_phenotype,
+    )
+    from tcip_mcp.traits import TraitUnknownError
+
+    # First refusal in this body: how a number was attributed says nothing until it has a meaning.
+    try:
+        trait = resolve_trait_for_phenotype(trait_name)
+        spec, record, _specs_dir = resolve_trait_and_record(trait, PER_PLANT_COUNT_AGGREGATE)
+    except (TraitUnknownError, ValueError) as exc:
+        return {"error": str(exc)}
+    stated = check_operationalization(
+        spec, record, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=trait_name,
+        value_keys=[_PER_PLANT_VALUE_KEY])
+    if not stated.ok:
+        return {"error": stated.message}
 
     pred_files = sorted(f for f in pred_dir.glob("*.json")
                         if f.name not in SIDECAR_FILENAMES)
@@ -186,15 +215,16 @@ def deliver_orthomosaic_plant_counts(
     mapped_plant_ids = {a.plot_name for a in mapped}
     records = [
         {"plant_id": a.plot_name, "plant_id_source": a.source,
-         "plant_id_distance_m": a.distance_m, "count": 1}
+         "plant_id_distance_m": a.distance_m, _PER_PLANT_VALUE_KEY: 1}
         for a in mapped
     ]
     # Every plant the scan covers gets a row: an explicit 0 for a plant that matched no
     # detection, never silently absent from the delivery (see the docstring above).
-    records += [{"plant_id": p.plot_name, "count": 0}
+    records += [{"plant_id": p.plot_name, _PER_PLANT_VALUE_KEY: 0}
                 for p in plants if p.plot_name not in mapped_plant_ids]
 
-    agg = aggregate_per_plant(records, strategy="sum", plant_id_key="plant_id", value_key="count")
+    agg = aggregate_per_plant(records, strategy="sum", plant_id_key="plant_id",
+                              value_key=_PER_PLANT_VALUE_KEY)
 
     from tcip_mcp.pipelines.resolution import (
         delivered_provenance,
@@ -219,7 +249,11 @@ def deliver_orthomosaic_plant_counts(
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except ValueError as exc:
-        return {"error": str(exc), "n_detections": len(assignments), "n_mapped": len(mapped),
+        # The gate's reason names the dimension; only these notes name which bucket failed, and why.
+        notes = " ".join(f"{bucket}: {note}"
+                         for bucket, note in sorted(recon["binding_notes"].items()) if note)
+        return {"error": f"{exc} {notes}".rstrip(),
+                "n_detections": len(assignments), "n_mapped": len(mapped),
                 "n_unmapped": n_unmapped}
 
     record_delivery_binding_event("deliver_orthomosaic_plant_counts", output_csv_path,

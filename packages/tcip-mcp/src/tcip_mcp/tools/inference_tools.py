@@ -398,7 +398,7 @@ def _sweep_summary(conf_param) -> dict:
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="dataset_root")
 def force_redraw_cal_holdout_split(
     dataset_root: str,
     labels_dir: str | None = None,
@@ -461,7 +461,7 @@ def force_redraw_cal_holdout_split(
 
     from tcip_store import DecodeError, store
 
-    from tcip_mcp.audit import record_event
+    from tcip_mcp.audit import dataset_scope_of, record_event
     from tcip_mcp.pipelines.data.splits import (
         cal_holdout_lock_key, cal_holdout_scope_root, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split,
@@ -513,16 +513,12 @@ def force_redraw_cal_holdout_split(
     )
     new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
 
-    # @audited (the decorator on this tool) logs only the call's kwargs, never the return value,
-    # and the auditable fact here is what the redraw actually produced, not just that one was
-    # requested. record_event brackets that the same way envelope.py's training loop closes the
-    # "no audit record for what happened inside the call" hole. A distinct tool name (not this
-    # function's own) so the two log entries, @audited's call-args line and this result line,
-    # don't collide under one ambiguous schema.
+    # A distinct tool name under the same scope: @audited logs the call, this logs what it made.
     record_event(
         "force_redraw_cal_holdout_split_result",
         {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
          "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason},
+        scope=dataset_scope_of(str(scope_root)),
         old_membership=old_membership, new_membership=new_membership,
     )
 
@@ -1682,6 +1678,7 @@ def tabulate_counts(
     checkpoint_path: str,
     images_dir: str,
     output_path: str,
+    trait: str,
     conf_threshold: float = DEFAULT_CONF,
     device: str | None = None,
     tile: bool | None = None,
@@ -1691,7 +1688,6 @@ def tabulate_counts(
     global_nms_iou: float | None = None,
     max_dets: int | None = None,
     postprocess: str = "nms",
-    trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
     experiment_id: str | None = None,
@@ -1722,11 +1718,19 @@ def tabulate_counts(
     bucket exactly as ``export_predictions`` does (the same bucket resolution, earning order and
     stamp), and reads the CSV's own validity back off that stamp.
 
+    Meaning door: ``trait``'s per-image-count operationalization must be recorded and
+    breeder-confirmed, and that is checked before the inference runs, not after. This function
+    returns ``image_count`` and ``total_detections`` on its refusal paths as well as its success
+    one, so a check placed after the pass would hand back the very numbers it refused to write.
+
     Args:
         checkpoint_path: Path to model .pt checkpoint.
         images_dir: Directory containing input images.
         output_path: Path for the output CSV file. A relative path resolves against the
             project root, never the server process's cwd.
+        trait: The registered trait whose confirmed per-image-count operationalization this
+            delivery rests on, and whose operating point is calibrated per dataset (with
+            ``calibration_labels_dir``). Required.
         conf_threshold: Minimum confidence score.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
@@ -1742,7 +1746,6 @@ def tabulate_counts(
             leaving the value to be derived; a stated value is an explicit override even when it
             equals the platform default. See ``run_inference``'s own doc.
         postprocess: Cross-tile merge, "nms" or "nmm".
-        trait: Trait to calibrate the operating point per dataset (with ``calibration_labels_dir``).
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
@@ -1755,9 +1758,24 @@ def tabulate_counts(
             variant). Omitted, the CSV can only be delivered provisionally, since its counts would
             rest on no artifact anyone can re-read.
     """
+    from tcip_mcp.operationalization import (
+        PER_IMAGE_COUNT,
+        check_operationalization,
+        resolve_trait_and_record,
+    )
     from tcip_mcp.project_paths import resolve_output_path
+    from tcip_mcp.traits import TraitUnknownError
 
     output_path = str(resolve_output_path(output_path))
+    # Ahead of the pass, so a refused delivery has no counts of its own to hand back.
+    try:
+        spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    except TraitUnknownError as e:
+        return {"error": str(e)}
+    stated = check_operationalization(spec, record, PER_IMAGE_COUNT)
+    if not stated.ok:
+        return {"error": stated.message}
+
     bucket = bucket_root = None
     resolution = None
     if predictions_dir is not None:
@@ -1853,11 +1871,17 @@ def tabulate_counts(
     # Read back off the bucket's own stamp, the same reconciliation the other bucket doors perform.
     csv_measurement_validated = gate.column_stamp("operating_point")
     csv_path = export_detection_csv(
-        result["results"], output_path, provenance=provenance,
+        result["results"], output_path, provenance=provenance, trait=trait,
         measurement_validated=csv_measurement_validated,
         pred_dirs=[str(bucket)] if bucket is not None else None,
         acknowledge_unvalidated=acknowledge_unvalidated,
     )
+    # This response carries the counts too, so it needs the proof at the end that the write did.
+    spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    still_stated = check_operationalization(
+        spec_now, record_now, PER_IMAGE_COUNT, basis=stated.basis)
+    if not still_stated.ok:
+        return {"error": still_stated.message}
     out = {
         "csv_path": csv_path,
         "image_count": result["image_count"],

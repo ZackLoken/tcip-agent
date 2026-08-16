@@ -72,6 +72,17 @@ _CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
     PER_PLANT_REGRESSION_AGGREGATE: ("regression_skill_floor",),
 }
 
+_AGGREGATE_KIND_BY_TASK: dict[str | None, str] = {
+    None: PER_PLANT_COUNT_AGGREGATE,
+    "ordinal": PER_PLANT_ORDINAL_AGGREGATE,
+    "regression": PER_PLANT_REGRESSION_AGGREGATE,
+}
+"""Which aggregate kind a per-plant delivery is recorded under, by the task its door was called for.
+
+The mapping is total over the tasks the aggregate door accepts, so the kind is derived rather than
+guessed, and a confirmation covers the one floor the delivery in front of the breeder rests on.
+"""
+
 _PHENOTYPE_NAMING_KINDS = frozenset({
     STATE_CROSSING_DATES,
     PER_PLANT_COUNT_AGGREGATE,
@@ -128,6 +139,45 @@ def constituting_fields(delivery_kind: str) -> tuple[str, ...]:
             f"unknown delivery kind {delivery_kind!r}; the kinds are {list(DELIVERY_KINDS)}"
         )
     return fields
+
+
+def aggregate_delivery_kind(task: str | None) -> str:
+    """The delivery kind a per-plant aggregate of ``task`` is recorded and confirmed under.
+
+    The three aggregate kinds rest on three different spec floors, and which one applies is decided
+    by the task the door was called for, never by the record's reader. A task outside the set the
+    door accepts raises rather than falling back to a kind the delivery would not rest on.
+    """
+    if task not in _AGGREGATE_KIND_BY_TASK:
+        raise ValueError(
+            f"no aggregate delivery kind for task {task!r}; the tasks are "
+            f"{[t for t in _AGGREGATE_KIND_BY_TASK if t is not None]} or None for a count"
+        )
+    return _AGGREGATE_KIND_BY_TASK[task]
+
+
+def resolve_trait_for_phenotype(
+    delivered_phenotype: str, *, project_root: str | Path | None = None
+) -> str:
+    """The registered trait whose spec delivers ``delivered_phenotype``, for this project.
+
+    A per-plant CSV ships under a crop-vocabulary phenotype name, while the record that says what
+    that number means is keyed by the registry trait. The two namespaces are genuinely different: a
+    spec's own name need not be a vocabulary name, and the unit cross-check reads the vocabulary
+    name. This binds them by reading the specs' own ``delivers``, and refuses when no registered
+    trait delivers the phenotype or when more than one does.
+    """
+    from tcip_mcp.traits import load_trait_specs
+
+    delivering = sorted(
+        spec.name for spec in load_trait_specs(project_root=project_root)
+        if delivered_phenotype in spec.delivers
+    )
+    if not delivering:
+        raise ValueError(_no_deliverer_text(delivered_phenotype))
+    if len(delivering) > 1:
+        raise ValueError(_ambiguous_deliverer_text(delivered_phenotype, delivering))
+    return delivering[0]
 
 
 def canonical(value: Any) -> Any:
@@ -416,6 +466,26 @@ def _statement_call_form(delivery_kind: str) -> str:
         f"state_trait_operationalization(project_root=..., trait=..., "
         f"delivery_kind='{delivery_kind}', statement=..., mechanism=..., measured_subject=..., "
         f"delivered_phenotypes={phenotypes}{value_keys})"
+    )
+
+
+def _no_deliverer_text(delivered_phenotype: str) -> str:
+    return (
+        f"Delivery refused: no trait registered for this project delivers {delivered_phenotype!r}. "
+        "A per-plant CSV ships under a crop-vocabulary phenotype name, and what that number means "
+        "is recorded against the trait whose spec delivers it, so a phenotype no spec claims has "
+        "nothing to rest on. Author a trait spec whose delivers names "
+        f"{delivered_phenotype!r} in this project, then record its operationalization with "
+        "state_trait_operationalization and have the breeder confirm it."
+    )
+
+
+def _ambiguous_deliverer_text(delivered_phenotype: str, delivering: Sequence[str]) -> str:
+    return (
+        f"Delivery refused: traits {list(delivering)} each deliver {delivered_phenotype!r}, so "
+        "there is no single operationalization this delivery rests on. Two records could say two "
+        "different things about the same delivered number. Deliver under a phenotype exactly one "
+        "registered trait names, or narrow the specs so one of them delivers it."
     )
 
 

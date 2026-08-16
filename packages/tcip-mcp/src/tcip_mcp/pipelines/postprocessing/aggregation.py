@@ -13,7 +13,10 @@ different shape of computation than a per-image summary statistic, implemented o
 
 Usage:
     results = aggregate_per_plant(image_results, strategy="count")
-    export_aggregated_csv(results, "output.csv", trait_name="count")
+    export_aggregated_csv(results, "output.csv", trait_name="stem_count")
+
+``trait_name`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an example
+rather than as the shape), which is what the CSV column and the unit cross-check are about.
 """
 
 from __future__ import annotations
@@ -217,7 +220,7 @@ def _resolve_units(trait_name: str, results: list[dict]) -> str:
 def export_aggregated_csv(
     results: list[dict],
     output_path: str,
-    trait_name: str = "trait",
+    trait_name: str,
     crop: str = "",
     pipeline_version: str = "",
     provenance: dict | None = None,
@@ -280,10 +283,20 @@ def export_aggregated_csv(
     recorded scope that cleared nothing floors this delivery the same way an uncalibrated conf
     does. A bucket recording no claim scope never acquires the dimension.
 
+    Meaning door: the delivered value has to have a recorded, breeder-confirmed meaning before it
+    ships. ``trait_name`` is the crop-vocabulary phenotype the CSV column carries and the unit
+    cross-check reads; the record that says what the number means is keyed by the registered trait
+    whose spec delivers that phenotype, resolved here, refusing when no registered trait delivers it
+    and when more than one does. Which of the three aggregate kinds is confirmed follows from
+    ``task``, since a count, an ordinal and a regression aggregate rest on three different floors.
+    Every delivered row carries a value key, and every one must be inside the confirmed set: a row
+    with no stated quantity has nothing to check against what the breeder confirmed.
+
     Args:
         results: Output from aggregate_per_plant().
         output_path: Path for the output CSV file.
-        trait_name: Name of the trait being measured.
+        trait_name: The crop-vocabulary delivered phenotype this CSV ships under. Required, and
+            resolved to the registered trait whose spec delivers it.
         crop: Crop species name.
         pipeline_version: Pipeline identifier.
         provenance: Optional producing-model stamp added as trailing columns.
@@ -320,6 +333,22 @@ def export_aggregated_csv(
         raise ValueError(f"task must be None, 'ordinal', or 'regression', got {task!r}")
 
     units = _resolve_units(trait_name, results)
+
+    from tcip_mcp.operationalization import (
+        aggregate_delivery_kind,
+        check_operationalization,
+        resolve_trait_and_record,
+        resolve_trait_for_phenotype,
+    )
+
+    delivery_kind = aggregate_delivery_kind(task)
+    trait = resolve_trait_for_phenotype(trait_name)
+    value_keys = [r.get("value_key", "") for r in results]
+    spec, record, _specs_dir = resolve_trait_and_record(trait, delivery_kind)
+    stated = check_operationalization(
+        spec, record, delivery_kind, delivered_phenotype=trait_name, value_keys=value_keys)
+    if not stated.ok:
+        raise ValueError(stated.message)
 
     tile_recon = {"operative": False, "validated": None}
     scale_recon = {"operative": False, "validated": None}
@@ -364,6 +393,14 @@ def export_aggregated_csv(
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)
+
+    # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
+    spec_now, record_now, _ = resolve_trait_and_record(trait, delivery_kind)
+    still_stated = check_operationalization(
+        spec_now, record_now, delivery_kind, delivered_phenotype=trait_name,
+        value_keys=value_keys, basis=stated.basis)
+    if not still_stated.ok:
+        raise ValueError(still_stated.message)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
