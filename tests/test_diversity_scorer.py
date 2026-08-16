@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytest.importorskip("torch")
+import torch  # noqa: E402
 from PIL import Image  # noqa: E402
 
 

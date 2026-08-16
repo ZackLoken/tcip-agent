@@ -23,7 +23,8 @@ def test_push_panel_data_reports_delivered_flag():
 
 
 def test_uncertainty_scorer_averages_over_heads(tmp_path):
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
+    import torch
     from PIL import Image
 
     from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer, _entropy

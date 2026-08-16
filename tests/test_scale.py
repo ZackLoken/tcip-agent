@@ -4,7 +4,8 @@ import pytest
 
 
 def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
+    import torch
     from PIL import Image
 
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
