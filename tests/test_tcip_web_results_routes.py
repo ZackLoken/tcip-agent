@@ -95,8 +95,7 @@ def _phenology_fixture(
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
     positive = "elongated" if "elongated" in id_map else None
-    # A validated stamp's covered-bucket key is relative to a dataset root, recognised only when
-    # the path holds an "annotations"/"predictions"/"images"/"labels" segment.
+    # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
     for date_str, frac in zip(dates, fractions):
@@ -572,8 +571,7 @@ def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_pat
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200
-    # A foreign checkpoint has no producing run to name on either document, and two records that
-    # both record none agree; what refuses is a real disagreement, never the absence itself.
+    # A foreign checkpoint names no producing run on either document; two absences agree, so nothing refuses.
     foreign = _phenology_fixture(tmp_path / "foreign", validated=True, producing_experiment_id=None)
     _rewrite_classifier_sidecars(foreign, trait="catkin", experiment_id=None)
     assert client.post("/api/results/export_csv",

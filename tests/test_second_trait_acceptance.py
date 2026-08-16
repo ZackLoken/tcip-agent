@@ -89,8 +89,7 @@ def _currant_bloom_fixture(
 
     _seed_currant_bloom_trait(tmp_path)
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
-    # A validated stamp's covered-bucket key is relative to a dataset root, recognised only when
-    # the path holds an "annotations"/"predictions"/"images"/"labels" segment.
+    # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
     root = tmp_path / "ds"
     mapping, preds = {}, {}
     for date_str, frac in zip(dates, fractions):

@@ -69,8 +69,7 @@ def _predictions(root: Path, positive_class: str, id_map: dict, *, trait: str) -
 
     dirs = {}
     for date in ("2026-02-11", "2026-03-09"):
-        # A validated stamp's covered-bucket key is relative to a dataset root, recognised only
-        # when the path holds an "annotations"/"predictions"/"images"/"labels" segment.
+        # A covered-bucket key is relative to a dataset root, recognised by its annotations/predictions segment.
         d = root / "predictions" / "live" / date
         d.mkdir(parents=True, exist_ok=True)
         json_io.write_annotations(

@@ -261,8 +261,7 @@ def test_classifier_trust_set_ignores_unbacked_ids(tmp_path):
     count_dir = _bucket(root)
     classifier_dir = _bucket(root, name="classifier", stems=())
 
-    # The count stamp declares one run for itself while its record names the run that really produced
-    # it, which is the disagreement the trusted set has to resolve in the record's favour.
+    # The stamp self-declares one run while its record names the real producer; the record wins.
     write_bound_sidecar(count_dir, _count_stamp(experiment_id="exp-forged"), dataset_root=root,
                         experiment_id="exp-count-record", producing_experiment_id=PRODUCING_RUN)
     classifier_stamp = {
