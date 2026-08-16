@@ -295,14 +295,18 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
 # ── writer ─────────────────────────────────────────────────────────────────
 
 
-def _xywh(box: BBox) -> list[float]:
-    """A pixel box as this schema's ``bbox``: COCO ``[x, y, w, h]``, rounded to 2 decimals.
+def xywh(x1: float, y1: float, x2: float, y2: float) -> list[float]:
+    """A pixel box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``, 2 decimals.
+
+    The 2-decimal quantum is the grid the stored document lives on, so it is also the grid anything
+    comparing a stored box against another box has to be on. Public because that comparison happens
+    outside this package too (evaluation puts both sides of a match on this grid before scoring);
+    one implementation, so a reader and a scorer cannot land on different grids.
 
     The inverse, reading such a record back, is ``BBox(x, y, x + w, y + h)`` in
     :func:`_annotations_of`, which is what keeps write and read symmetric.
     """
-    return [round(box.x1, 2), round(box.y1, 2),
-            round(box.x2 - box.x1, 2), round(box.y2 - box.y1, 2)]
+    return [round(x1, 2), round(y1, 2), round(x2 - x1, 2), round(y2 - y1, 2)]
 
 
 def _annotation_record(a: Annotation) -> dict | None:
@@ -317,9 +321,10 @@ def _annotation_record(a: Annotation) -> dict | None:
         # The polygon's box travels with it (COCO-style record). Derived from the rings here and
         # never authored or trusted as input: the polygon stays the sole source of truth, so the two
         # can't diverge; every reader re-derives via bbox_of rather than reading this stored value.
-        rec["bbox"] = _xywh(bbox_of(Polygon(valid_rings)))
+        poly_box = bbox_of(Polygon(valid_rings))
+        rec["bbox"] = xywh(poly_box.x1, poly_box.y1, poly_box.x2, poly_box.y2)
     elif isinstance(geom, BBox):
-        rec["bbox"] = _xywh(geom)
+        rec["bbox"] = xywh(geom.x1, geom.y1, geom.x2, geom.y2)
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:
@@ -466,7 +471,7 @@ def to_coco_dataset(
             box = bbox_of(a.geometry)
             rec: dict = {
                 "id": ann_id, "image_id": img_id, "category_id": cid, "iscrowd": 0,
-                "bbox": _xywh(box),
+                "bbox": xywh(box.x1, box.y1, box.x2, box.y2),
                 "area": round((box.x2 - box.x1) * (box.y2 - box.y1), 2),
             }
             if isinstance(a.geometry, Polygon):

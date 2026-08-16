@@ -38,6 +38,9 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
+# Every box handed to pycocotools goes through this, both sides of a match on the one stored grid.
+from tcip_annotation.json_io import xywh
+
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, DEFAULT_NMS_IOU
 
 logger = logging.getLogger(__name__)
@@ -148,10 +151,6 @@ def compute_composite_objective(
 # ====================================================================
 # pycocotools detection / instance_seg metrics
 # ====================================================================
-
-def _xyxy_to_xywh(x1: float, y1: float, x2: float, y2: float) -> list[float]:
-    return [float(x1), float(y1), float(x2 - x1), float(y2 - y1)]
-
 
 def build_coco_image_record(width: int, height: int, gt: list[dict], dt: list[dict],
                             image_id=None) -> dict:
@@ -789,7 +788,7 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
     if gboxes is not None and len(gboxes):
         glabels = target["labels"].detach().cpu().tolist()
         for i, ((x1, y1, x2, y2), c) in enumerate(zip(gboxes.detach().cpu().tolist(), glabels)):
-            ann = {"category_id": int(c), "bbox": _xyxy_to_xywh(x1, y1, x2, y2),
+            ann = {"category_id": int(c), "bbox": xywh(x1, y1, x2, y2),
                    "area": float((x2 - x1) * (y2 - y1)), "iscrowd": 0}
             if gmasks is not None and i < len(gmasks):
                 ann["segmentation"] = _mask_to_rle(gmasks[i])
@@ -802,7 +801,7 @@ def records_from_detector(target: dict, output: dict, *, width: int, height: int
         pscores = output["scores"].detach().cpu().tolist()
         for i, ((x1, y1, x2, y2), c, s) in enumerate(
                 zip(pboxes.detach().cpu().tolist(), plabels, pscores)):
-            res = {"category_id": int(c), "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "score": float(s)}
+            res = {"category_id": int(c), "bbox": xywh(x1, y1, x2, y2), "score": float(s)}
             if pmasks is not None and i < len(pmasks):
                 res["segmentation"] = _mask_to_rle(pmasks[i])
             dt.append(res)
@@ -858,7 +857,7 @@ def records_from_annotation(gt, preds, *, width: int, height: int, force_segm: b
             return None
         box = bbox_of(a.geometry)
         rec: dict = {"category_id": name_id[a.subject],
-                     "bbox": _xyxy_to_xywh(box.x1, box.y1, box.x2, box.y2)}
+                     "bbox": xywh(box.x1, box.y1, box.x2, box.y2)}
         if is_pred:
             rec["score"] = float(a.score if a.score is not None else 0.0)
         else:
@@ -1383,7 +1382,7 @@ def run_full_frame_evaluation(
                 continue
             for (x1, y1, x2, y2), lab in zip(gboxes, glabels):
                 gt.append({"category_id": int(lab),
-                           "bbox": _xyxy_to_xywh(x1, y1, x2, y2), "iscrowd": 0})
+                           "bbox": xywh(x1, y1, x2, y2), "iscrowd": 0})
         # require_masks=False: this gate matches boxes to full-frame GT and never reads masks, so a
         # tile-trained instance_seg checkpoint evaluates here exactly as a detector does, instead of
         # being blocked by predict_tiled's mask contract for masks nothing on this path consumes.
@@ -1391,7 +1390,7 @@ def run_full_frame_evaluation(
                                     global_nms_iou=global_nms_iou, postprocess=postprocess,
                                     require_masks=False)
         w, h = int(r["width"]), int(r["height"])
-        dt = [{"category_id": int(lab), "bbox": _xyxy_to_xywh(*b), "score": float(s)}
+        dt = [{"category_id": int(lab), "bbox": xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]
         rec = build_coco_image_record(w, h, gt, dt, image_id=p.stem)
         # predict_tiled stamps cap_hit itself now; read it rather than re-deriving, falling back
