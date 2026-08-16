@@ -52,6 +52,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 2 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 4 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/model_registry.py | Model registry, track trained models and their performance. | 3 | 7 |
+| packages/tcip-mcp/src/tcip_mcp/operationalization.py | Per-project trait-operationalization records: what a delivered number means, who confirmed it, and the precondition every crossing delivery door checks. | 4 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/__init__.py | Pipeline sub-package: data, models, training, evaluation, inference, postprocessing. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/__init__.py | Active learning pipeline: scorer and selector modules. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/helpers.py | Shared active-learning helpers used by the AL MCP tools. | 2 | 1 |
@@ -121,6 +122,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 8 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 7 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 9 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline. | 16 | 3 |  <!-- queued: P5-235 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 9 | 3 |
@@ -188,7 +190,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 14 | 2 |
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 1 | 1 |
 | packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 2 | 1 |
-| packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export. | 8 | 1 |
+| packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export, and the operationalization record surface. | 10 | 1 |
 | packages/tcip-web/src/tcip_web/routes/review.py | Review routes: compute matches, walk detections, record actions, save GT. | 14 | 1 |  <!-- queued: P5-228 merge-or-split -->
 | packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 2 | 1 |
 | packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 2 | 4 |
@@ -492,8 +494,8 @@ f943c12d4693409bcf2a0c1a4229d26b61d34cc1.
 
 `packages/tcip-mcp/src/tcip_mcp/server.py:9` defines `mcp = MCPServer("tcip-pipeline")`.
 `python scripts/list_tools.py` (run this session) reports 55 registered tools, matching
-the 55 `@mcp.tool()` decorator sites found in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`.
-Every one of the 55 `@mcp.tool()` sites is immediately followed by an `@audited` decorator
+the 56 `@mcp.tool()` decorator sites found in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`.
+Every one of the 56 `@mcp.tool()` sites is immediately followed by an `@audited` decorator
 (0 exceptions, verified by pairing each `@mcp.tool()` line with the line after it across
 all 13 tool modules; seven of the sites read `@audited(scope_arg=...)`, so a check must match
 the decorator name rather than the whole line).
@@ -569,6 +571,12 @@ Docstring is the function's docstring first line, verbatim.
 | `list_registered_models` | `model_tools.py:63` | yes | List models in the project registry. |
 | `select_best_model` | `model_tools.py:88` | yes | Get the best registered model by an explicit metric, no default is assumed. |
 
+### operationalization_tools.py (1 tool)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `state_trait_operationalization` | `operationalization_tools.py:19` | yes | Record what this trait's delivered number means, in the breeder's terms, for one delivery. |
+
 ### orthomosaic_tools.py (1 tool)
 
 | tool | line | audited | docstring first line |
@@ -633,9 +641,9 @@ modules under `routes/`, each with a fixed prefix. Verified: `routes/__init__.py
 in either file); `_metrics_common.py` holds `metrics_response`, the response shape `training.py`
 and `tuning.py` both answer in.
 
-Total HTTP routes at HEAD: 85 (6 on `app.py` plus 79 across the 16 route modules, both
+Total HTTP routes at HEAD: 88 (6 on `app.py` plus 82 across the 16 route modules, both
 counts obtained this session by grepping `@app.get/post(` and `@router.get/post(` and
-summing). This matches the phase0 count.
+summing).
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -746,7 +754,7 @@ registered at HEAD.
 | GET | `/active` | `get_active_project` | `routes/projects.py:97` |  <!-- queued: P5-89 unify -->
 | POST | `/active` | `set_active_project` | `routes/projects.py:117` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
-### routes/results.py, prefix `/api/results` (7 routes)
+### routes/results.py, prefix `/api/results` (10 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
@@ -756,6 +764,9 @@ registered at HEAD.
 | POST | `/onset_dates` | `onset_dates` | `routes/results.py:402` |  <!-- queued: P5-131 merge-or-split -->
 | POST | `/export_csv` | `export_csv` | `routes/results.py:425` |
 | GET | `/traits` | `list_traits` | `routes/results.py:666` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:556` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:572` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:603` |
 | GET | `/models/registered` | `registered_models` | `routes/results.py:695` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
@@ -906,7 +917,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
 from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:63`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object the
-55 `@mcp.tool()` decorators in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` register
+56 `@mcp.tool()` decorators in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` register
 against.
 
 `python -m tcip_web`: `packages/tcip-web/src/tcip_web/__main__.py` defines `main()`
