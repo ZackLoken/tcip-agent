@@ -277,6 +277,11 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     disagreement and is excluded, this calibrates the classifier's call, not the detector's, the
     same separation the platform's own detect-then-classify decomposition makes elsewhere.
 
+    ``gt_dir`` is read as a measurement reference, so it goes through
+    ``json_io.require_reference_ground_truth`` first: a GT dir pointed at a prediction bucket would
+    match the classifier's calls against the classifier's own calls and agree with itself
+    perfectly, which no numeric gate below can catch.
+
     The match criterion (kind + tolerance/iou_threshold) is resolved once across the whole split
     via ``evaluation.resolve_match_criterion``, the same resolver every other localization
     consumer goes through, never a second independent computation, built from the same
@@ -288,6 +293,7 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     gt_p, pred_p = Path(gt_dir), Path(pred_dir)
+    json_io.require_reference_ground_truth(gt_p)  # the prediction side is never held to this
     paired = [f for f in sorted(gt_p.glob("*.json")) if (pred_p / f.name).is_file()]
 
     def _scoped_gt(path: str) -> list:
@@ -356,6 +362,9 @@ def calibrate_classifier_operating_point(
     point's own sidecar, never conflatable with it. Without this producer, a classifier-validated
     stamp can never be earned on disk, and the gate floors every caller to unvalidated forever.
 
+    Refuses (a plain ``{"error": ...}``) when either GT dir holds the model's own predictions
+    rather than a measurement; the pred dirs are predictions by definition and are not held to it.
+
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
         subject: The GT annotation subject naming this trait's object type, a per-run fact the
@@ -384,12 +393,15 @@ def calibrate_classifier_operating_point(
     if not spec.positive_class_name:
         return {"error": f"trait {trait_name!r} defines no positive_class_name to calibrate"}
 
-    cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
-                                      subject=subject, positive_value=spec.positive_class_name,
-                                      attribute=attribute)
-    hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
-                                       subject=subject, positive_value=spec.positive_class_name,
-                                       attribute=attribute)
+    try:
+        cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
+                                          subject=subject, positive_value=spec.positive_class_name,
+                                          attribute=attribute)
+        hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
+                                           subject=subject, positive_value=spec.positive_class_name,
+                                           attribute=attribute)
+    except ValueError as exc:
+        return {"error": str(exc)}
     result = resolve_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,
         experiment_id=experiment_id,

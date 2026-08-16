@@ -540,10 +540,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:369` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:484` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1113` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1435` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `force_redraw_cal_holdout_split` | `inference_tools.py:377` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `run_inference` | `inference_tools.py:492` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1129` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1451` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -580,9 +580,9 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:28` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
 | `update_trait_spec_fields` | `phenology_tools.py:110` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:337` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:454` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:594` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_classifier_operating_point` | `phenology_tools.py:343` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:466` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `compute_phenology` | `phenology_tools.py:606` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -952,7 +952,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:341`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:387`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1249,7 +1249,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:149`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:341` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:387` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:118`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:86`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -1570,7 +1570,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:40` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:298` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:344` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
