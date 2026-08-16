@@ -138,8 +138,8 @@ Only `GUARDS` counts. `VACUOUS` means the test guards nothing, so say so rather 
 rather than as a result, and never read either as a pass. The tool records the failing assertion it
 observed, and citing that record is what makes a fail-before claim checkable by the next reader.
 
-Never report the gate before its slowest part finishes. ruff/mypy/typecheck return in seconds and
-`pytest tests/` takes minutes. Reporting the fast half as green is guessing. Wait, then report, and
+Never report the gate before its slowest part finishes. ruff and the frontend typecheck return in
+seconds, mypy in a couple of minutes, and `pytest tests/` takes minutes. Reporting the fast half as green is guessing. Wait, then report, and
 report a green gate as "no detected breakage", never as evidence the work is correct.
 
 (Commit/push/branch discipline: no branch ops, per-commit file breakdown, `git stash create` for
@@ -278,8 +278,9 @@ shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
 ```bash
 conda activate tcip-agent          # Python 3.12; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
-pytest tests/ -n auto --tb=short   # xdist parallelism, same form CI runs
+pytest tests/ -n auto --tb=short   # xdist parallelism, matching CI's -n auto
 ruff check .
+mypy                               # type gate; roots come from mypy.ini's files list, run from the repo root
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)
 # the full frontend gate, in CI order (.github/workflows/ci.yml): a partial run misses format:check/lint
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build   # build → ../static/

@@ -62,8 +62,10 @@ dependencies:
       - pytest>=7.0
       - pytest-asyncio>=0.21
       - pytest-timeout
+      - pytest-xdist
       - httpx
       - ruff
+      - mypy==2.2.0  # pinned to the version CI's type gate installs
       - pypdf>=4.0  # verify_citations.py extracts a paper's text to check its quote appears verbatim
       # --- SAM-assisted labeling ---
       # Not on PyPI: distribution `sam-2`, import path `sam2`, built against the torch entry above.
