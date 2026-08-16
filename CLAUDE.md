@@ -152,7 +152,11 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   produce. So:
   - The domain expert defines each trait's measurement, grounded in the imagery. You
     (Claude) are the CV engineer who operationalizes *their* definition; never substitute
-    your own. If the definition is unclear, stop and ask; do not infer it.
+    your own. If the definition is unclear, stop and ask; do not infer it. The platform
+    enforces this at every delivery door: a delivered number requires an operationalization
+    stated per trait and delivery kind and confirmed by the breeder (the
+    `trait_operationalizations` record; `state_trait_operationalization` states it, the
+    Results tab confirms it), and the door refuses otherwise, naming what is missing.
   - Geometry measures dimensions; it can't replace the CV step or proxy a state. Area /
     length / width computed on a *validated mask* (with scale calibration) is a valid
     measurement: that is how a dimensional trait (leaf area, organ length, canopy width) is
@@ -200,7 +204,9 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   content is `"complete"`. Two distinct values: `"complete"` is not a weaker negative, it is the
   opposite, so anything reading it as a confirmed negative trains populated images as empty. The
   store is `<dataset_root>/.tcip/state/image_status.json`, resolved through `image_status_path` and
-  never reconstructed locally, and a confirmation is scoped to one subject on one image. An empty
+  never reconstructed locally; each stored status is a record naming who recorded it and when (a
+  bare token reads as unconfirmed), a confirmation is scoped to one subject on one image, and it is
+  read only under the bucket key its writer stated, never a date derived from a path. An empty
   label file alone is never a negative (it may be emptied mid-work) and never trains as one. Don't
   delete empty label files without asking.
 - Never train or evaluate on an unconfirmed format. If `read_annotations`
