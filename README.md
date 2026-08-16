@@ -130,10 +130,11 @@ CSV export, including a percentile-crossing phenology-milestone deliverable (per
 `<trait>_05/50/95per_date` = the dates a plant's classified positive-state fraction of detected
 objects crosses 5/50/95%; the positive state is a validated per-object classifier call, never a
 geometric proxy). Ordinal and regression are also trainable and evaluable, through the same
-model/training machinery and their own heads, losses, and metrics, but neither has an
-annotation/review or calibration tool built for it: both read labels from a hand-authored
-external CSV of image stem plus rank or value rather than the platform's own annotation/review
-UI, and both are excluded from the platform's automatic train/val split. The agent composes the
+model/training machinery and their own heads, losses, and metrics, and calibrate through their
+own door (`calibrate_ordinal_regression_operating_point`), but neither has an annotation/review
+surface built for it: both read labels from a hand-authored external CSV of image stem plus rank
+or value rather than the platform's own annotation/review UI, and both are excluded from the
+platform's automatic train/val split. The agent composes the
 working slice end to end via `build_plant_mapping` → tiled inference → `compute_phenology`, and
 the same milestone code backs the Results tab, so a milestone date means one thing on both
 surfaces. Phase 1's own shipped example is hazelnut catkin bloom phenology
