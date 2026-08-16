@@ -212,6 +212,83 @@ describe("ReviewTab empty states", () => {
   });
 });
 
+describe("ReviewTab review-route scoping", () => {
+  const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
+
+  it("scopes every review call to the dataset root, never to the project root", async () => {
+    matchesSpy.mockResolvedValue(matchesRes([det()], { gt: [gtAnn] }));
+    const actionSpy = vi.spyOn(api.review, "action").mockResolvedValue({
+      status: "ok",
+      image_status: "started",
+      annotation_status: "partial",
+      matches: matchesRes([det()], { gt: [gtAnn] }),
+    });
+    const backupSpy = vi.spyOn(api.review, "backupLabels").mockResolvedValue({
+      status: "ok",
+      files_backed_up: 0,
+    });
+    const markSpy = vi.spyOn(api.review, "markComplete").mockResolvedValue({
+      status: "ok",
+      image_status: "completed",
+      annotation_status: "complete",
+    });
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(screen.getByText("1 / 1")).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle("Keep this ground-truth object (A)"));
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByLabelText("Reviewed"));
+    await waitFor(() => expect(markSpy).toHaveBeenCalledTimes(1));
+
+    // The two roots are distinct directories in this fixture, so a call that kept the project root
+    // reads differently from one that moved to the dataset root.
+    expect(matchesSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
+    expect(matchesSpy.mock.calls[0][0]).not.toHaveProperty("project_root");
+    expect(statusesSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
+    expect(statusesSpy.mock.calls[0][0]).not.toHaveProperty("project_root");
+    expect(actionSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
+    expect(actionSpy.mock.calls[0][0]).not.toHaveProperty("project_root");
+    expect(backupSpy.mock.calls[0][0]).toBe("C:/data");
+    expect(markSpy.mock.calls[0][0].dataset_root).toBe("C:/data");
+    expect(markSpy.mock.calls[0][0]).not.toHaveProperty("project_root");
+  });
+});
+
+describe("ReviewTab with a project open but no dataset selected", () => {
+  beforeEach(() => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, dataset_root: null } },
+    }));
+  });
+
+  it("disables the review actions and names the dataset selection as the fix", async () => {
+    render(<ReviewTab />);
+    expect(await screen.findByText(/No dataset is selected/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Reopen this project from the top bar to select its dataset/),
+    ).toBeInTheDocument();
+
+    expect(screen.getByRole("button", { name: /validation reference/i })).toBeDisabled();
+    expect(screen.getByTitle(/Draw a box around an object the model missed/i)).toBeDisabled();
+    expect(
+      screen.getByTitle("Record that you checked this image for missed objects and found none"),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("Reviewed")).toBeDisabled();
+  });
+
+  it("fires no review request, and falls back to no other root", async () => {
+    const actionSpy = vi.spyOn(api.review, "action");
+    render(<ReviewTab />);
+    // Outwait the matches debounce before asserting that nothing was requested.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    expect(matchesSpy).not.toHaveBeenCalled();
+    expect(statusesSpy).not.toHaveBeenCalled();
+    expect(actionSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("ReviewTab validation-reference affordance", () => {
   const refBtn = () => screen.getByRole("button", { name: /validation reference/i });
 
@@ -231,7 +308,7 @@ describe("ReviewTab validation-reference affordance", () => {
     fireEvent.click(refBtn());
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith({
-        project_root: "C:/proj",
+        dataset_root: "C:/data",
         trait: "subject_a",
         pred_dir: PRED_DIR_A,
       }),
@@ -1077,7 +1154,7 @@ describe("ReviewTab priority queue", () => {
 
     await waitFor(() =>
       expect(launchSpy).toHaveBeenCalledWith({
-        project_root: "C:/proj",
+        dataset_root: "C:/data",
         checkpoint_path: "C:/ckpts/run-42.pt",
         images_dir: "C:/data/images/2026-01-01",
       }),

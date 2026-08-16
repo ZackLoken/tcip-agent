@@ -200,6 +200,9 @@ export function ReviewTab() {
   const [imageStatus, setImageStatus] = useState<MatchesResponse["image_status"]>("not_started");
   // A reviewed (completed) image is locked: no verdicts/edits until it's reopened.
   const reviewLocked = imageStatus === "completed";
+  // Every review route is scoped to the dataset root whose store holds the verdicts.
+  const canReview = !!dataset.dataset_root;
+  const needsDatasetSelection = !dataset.dataset_root && !!dataset.project_root;
   // Result of "use this review as a validation reference" (dataset-level, so it clears on selection).
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{
@@ -332,13 +335,13 @@ export function ReviewTab() {
   }, [pqJobId, pqStatus]);
 
   async function computePriorityQueue() {
-    if (!dataset.project_root || !dataset.images_dir || !pqModelPath) return;
+    if (!dataset.dataset_root || !dataset.images_dir || !pqModelPath) return;
     setPqStatus("running");
     setPqError(null);
     setPqQueue(null);
     try {
       const res = await api.review.launchPriorityQueue({
-        project_root: dataset.project_root,
+        dataset_root: dataset.dataset_root,
         checkpoint_path: pqModelPath,
         images_dir: dataset.images_dir,
       });
@@ -493,7 +496,7 @@ export function ReviewTab() {
   }
 
   async function reloadMatches(indexHint?: number, signal?: AbortSignal) {
-    if (!dataset.project_root || !imgPath || !imgName) return;
+    if (!dataset.dataset_root || !imgPath || !imgName) return;
     setLoading(true);
     try {
       // One unified label file per image holds every subject's box and polygon annotations, so a
@@ -501,7 +504,7 @@ export function ReviewTab() {
       // and the overlay renders each by its own geometry.
       const res = await api.review.matches(
         {
-          project_root: dataset.project_root,
+          dataset_root: dataset.dataset_root,
           image_name: imgName,
           image_path: imgPath,
           gt_path: paths.gt,
@@ -579,14 +582,14 @@ export function ReviewTab() {
   // can filter Reviewed/Unreviewed and skip images with nothing to review. Re-runs when the dataset
   // or its reviewed-kind dirs change; live per-image updates ride on verdicts (setReviewImageStatus).
   useEffect(() => {
-    const projectRoot = dataset.project_root;
+    const datasetRoot = dataset.dataset_root;
     const imageList = dataset.image_list;
-    if (!projectRoot || imageList.length === 0) return;
+    if (!datasetRoot || imageList.length === 0) return;
     let cancelled = false;
     void (async () => {
       try {
         const res = await api.review.imageStatuses({
-          project_root: projectRoot,
+          dataset_root: datasetRoot,
           gt_dir: reviewDirs.gtDir,
           pred_dir: reviewDirs.predDir,
         });
@@ -607,7 +610,7 @@ export function ReviewTab() {
       cancelled = true;
     };
   }, [
-    dataset.project_root,
+    dataset.dataset_root,
     dataset.image_list,
     reviewDirs.gtDir,
     reviewDirs.predDir,
@@ -684,7 +687,7 @@ export function ReviewTab() {
   ): Promise<boolean> {
     if (actionPending.current) return false;
     if (reviewLocked) return false; // a completed/reviewed image is locked until reopened
-    if (!current || !dataset.project_root || !imgPath || !imgName) return false;
+    if (!current || !dataset.dataset_root || !imgPath || !imgName) return false;
     // Reject on a detection that has ground truth (TP/FN) deletes that GT box: a destructive,
     // irreversible action (CLAUDE.md "confirm before destructive actions"). Reject on an FP is
     // safe (discards a prediction, GT unchanged) and needs no confirmation.
@@ -700,7 +703,7 @@ export function ReviewTab() {
       // failure aborts the verdict rather than mutating labels with no pristine baseline.
       if (!(await ensureBackup())) return false;
       const res = await api.review.action({
-        project_root: dataset.project_root,
+        dataset_root: dataset.dataset_root,
         image_name: imgName,
         image_path: imgPath,
         gt_path: paths.gt,
@@ -743,15 +746,15 @@ export function ReviewTab() {
   }
 
   async function ensureBackup(): Promise<boolean> {
-    if (!dataset.project_root) return false;
+    if (!dataset.dataset_root) return false;
     const dirs = [dataset.annotations_dir].filter(Boolean) as string[];
     if (!dirs.length) return true;
     // backup_original_labels captures every original file in the dir in one pass, so it only needs
     // running once per label-dir set: skip the (whole-dir-scanning) call once it's done this session.
-    const key = `${dataset.project_root}/${dirs.join("/")}`;
+    const key = `${dataset.dataset_root}/${dirs.join("/")}`;
     if (backedUpKeys.current.has(key)) return true;
     try {
-      await api.review.backupLabels(dataset.project_root, dirs);
+      await api.review.backupLabels(dataset.dataset_root, dirs);
       backedUpKeys.current.add(key);
       return true;
     } catch {
@@ -766,7 +769,7 @@ export function ReviewTab() {
   async function recordMissedObject(box: [number, number, number, number]): Promise<boolean> {
     if (actionPending.current) return false;
     if (reviewLocked) return false;
-    if (!dataset.project_root || !imgPath || !imgName) return false;
+    if (!dataset.dataset_root || !imgPath || !imgName) return false;
     if (!dataset.subject) {
       useStore
         .getState()
@@ -777,7 +780,7 @@ export function ReviewTab() {
     try {
       if (!(await ensureBackup())) return false;
       const res = await api.review.action({
-        project_root: dataset.project_root,
+        dataset_root: dataset.dataset_root,
         image_name: imgName,
         image_path: imgPath,
         gt_path: paths.gt,
@@ -826,11 +829,11 @@ export function ReviewTab() {
   async function recordSweepAttested(): Promise<boolean> {
     if (actionPending.current) return false;
     if (reviewLocked) return false;
-    if (!dataset.project_root || !imgPath || !imgName) return false;
+    if (!dataset.dataset_root || !imgPath || !imgName) return false;
     actionPending.current = true;
     try {
       const res = await api.review.action({
-        project_root: dataset.project_root,
+        dataset_root: dataset.dataset_root,
         image_name: imgName,
         image_path: imgPath,
         gt_path: paths.gt,
@@ -866,10 +869,10 @@ export function ReviewTab() {
   }
 
   async function markImageComplete(completed: boolean) {
-    if (!dataset.project_root || !imgName) return;
+    if (!dataset.dataset_root || !imgName) return;
     try {
       const res = await api.review.markComplete({
-        project_root: dataset.project_root,
+        dataset_root: dataset.dataset_root,
         image_name: imgName,
         gt_path: paths.gt,
         pred_dir: dataset.predictions_dir,
@@ -880,17 +883,20 @@ export function ReviewTab() {
       // The annotation status comes from the server (GT files on disk), never from a
       // matches snapshot that can belong to the previous image mid-navigation.
       setStoreImageStatus(imgName, res.annotation_status);
-      void classesApi
-        .setImageStatus(
-          dataset.project_root,
-          imgName,
-          res.annotation_status,
-          dataset.subject,
-          dataset.date,
-          dataset.dataset_root,
-          dataset.annotations_dir,
-        )
-        .catch(() => {});
+      // The registry this status is mirrored into is the project's, not the review store's.
+      if (dataset.project_root) {
+        void classesApi
+          .setImageStatus(
+            dataset.project_root,
+            imgName,
+            res.annotation_status,
+            dataset.subject,
+            dataset.date,
+            dataset.dataset_root,
+            dataset.annotations_dir,
+          )
+          .catch(() => {});
+      }
     } catch (e) {
       useStore
         .getState()
@@ -901,7 +907,7 @@ export function ReviewTab() {
   // Promote the current dataset's completed review into a validation reference. Runs the platform's
   // own validation gate server-side; the honest validated / not-yet result is surfaced (never forced).
   async function promoteReviewToValidationReference() {
-    if (!dataset.project_root) {
+    if (!dataset.dataset_root) {
       useStore.getState().pushToast("Select a dataset first.");
       return;
     }
@@ -918,7 +924,7 @@ export function ReviewTab() {
     setValidating(true);
     try {
       const res = await api.review.validateReference({
-        project_root: dataset.project_root,
+        dataset_root: dataset.dataset_root,
         trait,
         pred_dir: dataset.predictions_dir,
       });
@@ -1082,16 +1088,16 @@ export function ReviewTab() {
       action: (e) => {
         if (!e.repeat) void recordAction("accepted");
       },
-      when: () => !!current && !edit && !reviewLocked,
+      when: () => !!current && !edit && !reviewLocked && canReview,
     },
     {
       keys: "r",
       action: (e) => {
         if (!e.repeat) void recordAction("rejected");
       },
-      when: () => !!current && !edit && !reviewLocked,
+      when: () => !!current && !edit && !reviewLocked && canReview,
     },
-    { keys: "e", action: () => startEdit(), when: () => !!current && !edit },
+    { keys: "e", action: () => startEdit(), when: () => !!current && !edit && canReview },
     {
       keys: "enter",
       action: (e) => {
@@ -1200,6 +1206,12 @@ export function ReviewTab() {
           </span>
 
           <span aria-hidden className="mx-1 h-4 w-px bg-tcip-border" />
+          {needsDatasetSelection && (
+            <span className="text-tcip-warn max-w-[360px]">
+              No dataset is selected, so review verdicts have nowhere to be recorded. Reopen this
+              project from the top bar to select its dataset.
+            </span>
+          )}
           {/* Which registered trait a validation-reference promotion is computed for (see
               ResultsTab's identical picker): only shown when the project has more than one. */}
           {availableTraits.length > 1 && (
@@ -1226,7 +1238,7 @@ export function ReviewTab() {
           <button
             className="tcip-btn"
             onClick={() => void promoteReviewToValidationReference()}
-            disabled={validating || !!edit || !trait}
+            disabled={validating || !!edit || !trait || !canReview}
             title={
               traitError ??
               "Check whether this review confirms the model's counts well enough to trust them for results. Runs the platform's own validation check; it will tell you if it isn't enough yet."
@@ -1262,7 +1274,7 @@ export function ReviewTab() {
           <button
             className="tcip-btn"
             onClick={() => (drawingMiss ? cancelMarkMissedObject() : startMarkMissedObject())}
-            disabled={!imgName || reviewLocked || !!edit || !dataset.subject}
+            disabled={!imgName || reviewLocked || !!edit || !dataset.subject || !canReview}
             title={
               drawingMiss
                 ? "Cancel drawing a missed object"
@@ -1277,7 +1289,7 @@ export function ReviewTab() {
           <button
             className="tcip-btn"
             onClick={() => void recordSweepAttested()}
-            disabled={!imgName || reviewLocked || !!edit || drawingMiss}
+            disabled={!imgName || reviewLocked || !!edit || drawingMiss || !canReview}
             title="Record that you checked this image for missed objects and found none"
           >
             ✓ Confirm: nothing missed
@@ -1343,7 +1355,7 @@ export function ReviewTab() {
               type="checkbox"
               checked={imageStatus === "completed"}
               onChange={(e) => void markImageComplete(e.target.checked)}
-              disabled={!imgName || !!edit || !dataset.subject}
+              disabled={!imgName || !!edit || !dataset.subject || !canReview}
             />
             Reviewed
           </label>
@@ -1471,7 +1483,7 @@ export function ReviewTab() {
             </select>
             <button
               className="tcip-btn"
-              disabled={!pqModelPath || pqStatus === "running"}
+              disabled={!pqModelPath || pqStatus === "running" || !canReview}
               onClick={() => void computePriorityQueue()}
               title="Rank this date's images by how useful reviewing them would be"
             >
@@ -1636,7 +1648,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn-primary"
               onClick={() => void recordAction("accepted")}
-              disabled={reviewLocked}
+              disabled={reviewLocked || !canReview}
               title={acceptTitle}
             >
               ✓&nbsp;&nbsp;{acceptLabel}
@@ -1644,7 +1656,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn"
               onClick={startEdit}
-              disabled={reviewLocked}
+              disabled={reviewLocked || !canReview}
               title="Adjust this shape on the canvas (E)"
             >
               ✎&nbsp;&nbsp;Edit
@@ -1652,7 +1664,7 @@ export function ReviewTab() {
             <button
               className="tcip-btn-danger"
               onClick={() => void recordAction("rejected")}
-              disabled={reviewLocked}
+              disabled={reviewLocked || !canReview}
               title={rejectTitle}
             >
               ✕&nbsp;&nbsp;{rejectLabel}

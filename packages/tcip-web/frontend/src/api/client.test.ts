@@ -173,6 +173,34 @@ describe("images.url region params", () => {
   });
 });
 
+describe("review request scoping", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names the dataset root in the label-backup body, the root that opens the review engine", async () => {
+    stubFetch(200, { status: "ok", files_backed_up: 3 });
+    await api.review.backupLabels("C:/data", ["C:/data/annotations/2026-01-01"]);
+    const init = vi.mocked(fetch).mock.calls[0][1];
+    expect(init?.body).toBe(
+      JSON.stringify({ dataset_root: "C:/data", label_dirs: ["C:/data/annotations/2026-01-01"] }),
+    );
+  });
+
+  it("names the dataset root in the batch image-status query string", async () => {
+    stubFetch(200, { statuses: {}, detection_stems: [] });
+    await api.review.imageStatuses({
+      dataset_root: "C:/data",
+      gt_dir: "C:/data/annotations/2026-01-01",
+      pred_dir: null,
+    });
+    const params = parseQuery(String(vi.mocked(fetch).mock.calls[0][0]));
+    expect(params.get("dataset_root")).toBe("C:/data");
+    expect(params.has("project_root")).toBe(false);
+    expect(params.get("gt_dir")).toBe("C:/data/annotations/2026-01-01");
+  });
+});
+
 describe("images.bands", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
