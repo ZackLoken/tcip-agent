@@ -309,7 +309,6 @@ def _worker(job: InferenceJob) -> None:
             from tcip_mcp.pipelines.postprocessing.export import mask_binarize_provenance
 
             provenance["mask_binarize"] = mask_binarize_provenance()
-        write_sidecar(output_dir, provenance)
 
         for img in images:
             if job.cancel_event.is_set():
@@ -326,6 +325,10 @@ def _worker(job: InferenceJob) -> None:
                                    created_by=f"model:{Path(job.checkpoint_path).stem}", id_map=id_map)
             job.results.append({"image": _display_name(img), "n_detections": results[0]["count"]})
             job.done += 1
+
+        # Last, never beside where it is built: a stamp certifies the prediction files it sits with,
+        # so a pass that dies partway leaves a bucket no reader can mistake for a certified one.
+        write_sidecar(output_dir, provenance)
 
         job.status = "cancelled" if job.cancel_event.is_set() else "completed"
     except Exception as exc:
