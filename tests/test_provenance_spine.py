@@ -193,17 +193,35 @@ def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
 
 # ── R2: delivery CSVs carry the producing-model provenance columns ────────────
 
+def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
+    """A run whose own record answers for the checkpoint a delivery names it by.
+
+    A delivered producer column is emitted only when something outside the prediction bucket
+    corroborates it, so a test wanting the populated case has to leave that evidence behind: the
+    experiment record and the weights it filed, which is what a completed run files for itself.
+    """
+    from tcip_mcp.experiments import create_experiment, update_lineage
+    from tcip_mcp.model_registry import checkpoint_sha256
+
+    ckpt = tmp_path / "model_best.pt"
+    ckpt.write_bytes(b"the bytes a producing run left behind")
+    create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
+    update_lineage(experiment_id, model_weights=str(ckpt))
+    return checkpoint_sha256(ckpt)
+
+
 def test_export_detection_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
+    sha = _run_with_a_recorded_checkpoint(tmp_path, "expE")
     out = tmp_path / "counts.csv"
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
-        provenance={"producer_model_sha256": "abc", "experiment_id": "expE",
+        provenance={"producer_model_sha256": sha, "experiment_id": "expE",
                     "operating_point_conf": 0.42, "produced_at": "2026-07-19T00:00:00Z"},
         measurement_validated="held_out_annotations")
     rows = list(__import__("csv").DictReader(out.open()))
-    assert rows[0]["producer_model_sha256"] == "abc"
+    assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["experiment_id"] == "expE"
     assert rows[0]["operating_point_conf"] == "0.42"
 
@@ -211,17 +229,17 @@ def test_export_detection_csv_carries_provenance(tmp_path):
 def test_export_aggregated_csv_carries_provenance(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
+    sha = _run_with_a_recorded_checkpoint(tmp_path, "expA")
     out = tmp_path / "agg.csv"
-    # No on-disk measurement-validity source for a bare trait_name="count" call with no
-    # pred_dirs: acknowledge the provisional delivery explicitly (the provenance stamp itself is
-    # unaffected by that).
+    # A bare trait_name="count" call with no pred_dirs has no on-disk validity source, so the
+    # provisional delivery is acknowledged explicitly; the provenance stamp is unaffected by that.
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 5, "observations": 2}], str(out), trait_name="count",
-        provenance={"producer_model_sha256": "def", "experiment_id": "expA",
+        provenance={"producer_model_sha256": sha, "experiment_id": "expA",
                     "produced_at": "2026-07-19T00:00:00Z"},
         measurement_validated="held_out_annotations", acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
-    assert rows[0]["producer_model_sha256"] == "def"
+    assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["experiment_id"] == "expA"
 
 

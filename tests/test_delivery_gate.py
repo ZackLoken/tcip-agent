@@ -994,3 +994,140 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
                           pred_dirs=[d], acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
+
+
+# ── the provenance columns a delivery may carry ────────────────────────────
+
+_COUNT_RESULTS = [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}]
+
+
+def _delivered_row(out_path):
+    return next(csv.DictReader(Path(out_path).open(newline="")))
+
+
+def test_a_bespoke_producer_keeps_its_checkpoint_hash_in_a_provisional_delivery(tmp_path):
+    """A bucket produced by a real checkpoint that belongs to no experiment, delivered honestly
+    unvalidated, still names the checkpoint behind its numbers: validity and producer identity rest
+    on different evidence, and a hash resolved from the checkpoint file answers for itself."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "bespoke", conf_ref=VALIDATED_FALSE)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(
+        _COUNT_RESULTS, str(out), trait_name="count", pred_dirs=[d],
+        provenance={"producer_model_sha256": "a" * 64, "experiment_id": None,
+                    "produced_at": "2026-03-04T12:00:00+00:00"},
+        acknowledge_unvalidated=True)
+
+    row = _delivered_row(out)
+    assert row["producer_model_sha256"] == "a" * 64
+    assert row["experiment_id"] == ""
+    assert row["validation_record"] == ""
+    assert row["measurement_validated"] == VALIDATED_FALSE
+
+
+def test_a_bucket_naming_an_experiment_that_never_ran_delivers_no_producer_identity(tmp_path):
+    """The provisional half of the recorded route: a stamp may assert any checkpoint and any run,
+    so a delivery repeats neither unless something outside the bucket answers for the run. The CSV
+    says the producer is unknown rather than naming an experiment the store never held."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "forged", conf_ref=VALIDATED_FALSE)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(
+        _COUNT_RESULTS, str(out), trait_name="count", pred_dirs=[d],
+        provenance={"producer_model_sha256": "0" * 64, "experiment_id": "exp_that_never_ran",
+                    "produced_at": "2026-03-04T12:00:00+00:00"},
+        acknowledge_unvalidated=True)
+
+    row = _delivered_row(out)
+    assert row["producer_model_sha256"] == ""
+    assert row["experiment_id"] == ""
+    assert row["validation_record"] == ""
+
+
+def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
+    """The column a reviewer opens: the delivered validation_record is the experiment and row the
+    stamp's own pointer names, which is the pair verification confirmed rather than a second
+    reading of the stamp."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="count", pred_dirs=[d],
+                          provenance={"produced_at": "2026-03-04T12:00:00+00:00"})
+
+    pointer = json.loads((Path(d) / "operating_point.json").read_text())["validated_by"]
+    row = _delivered_row(out)
+    assert row["measurement_validated"] == VALIDATED_HELD_OUT
+    assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
+    assert row["experiment_id"] == "exp-preds"
+
+
+def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_path):
+    """Two deliverables, two column lists, one builder: the per-image CSV's producer cells are
+    decided the same way the per-plant CSV's are, so they cannot disagree about one bucket."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    out = tmp_path / "o.csv"
+    export_detection_csv([{"image": "img_a.jpg", "count": 5}], str(out), pred_dirs=[d],
+                         provenance={"producer_model_sha256": "b" * 64,
+                                     "experiment_id": "exp_that_never_ran",
+                                     "operating_point_conf": 0.4})
+
+    pointer = json.loads((Path(d) / "operating_point.json").read_text())["validated_by"]
+    row = _delivered_row(out)
+    assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
+    # The record's own producing run wins over the asserted one, so the forged name never ships.
+    assert row["experiment_id"] == "exp-preds"
+    assert row["producer_model_sha256"] == ""
+    assert row["operating_point_conf"] == "0.4"
+    assert len(_audit_rows(tmp_path / "ds", "export_detection_csv")) == 1
+
+
+def _audit_rows(root, tool):
+    log = Path(root) / ".tcip" / "audit.jsonl"
+    if not log.is_file():
+        return []
+    return [r for r in (json.loads(ln) for ln in log.read_text().splitlines() if ln)
+            if r["tool"] == tool]
+
+
+def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
+    """What stood behind a delivered number is a fact about the dataset, so it travels with it. The
+    audited decorator records arguments and status only, which is why the door emits this itself."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), trait_name="count",
+                          pred_dirs=[d])
+
+    pointer = json.loads((Path(d) / "operating_point.json").read_text())["validated_by"]
+    rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
+    assert len(rows) == 1, rows
+    assert rows[0]["record_digests"] == [pointer["record_digest"]]
+    assert rows[0]["verified_buckets"][d]["verified"] is True
+    assert rows[0]["verified_buckets"][d]["record"] == (
+        f"{pointer['experiment_id']}:{pointer['record_digest']}")
+    assert _audit_rows(tmp_path, "export_aggregated_csv") == []
+
+
+def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
+    """The same event on the failing side: a reader of the log sees which bucket floored the
+    delivery and the reason, not only that a CSV was written."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "unbound", conf_ref=VALIDATED_HELD_OUT, validated=False)
+    stamp = json.loads((Path(d) / "operating_point.json").read_text())
+    (Path(d) / "operating_point.json").write_text(json.dumps({**stamp, "validated": True}),
+                                                  encoding="utf-8")
+
+    export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), trait_name="count",
+                          pred_dirs=[d], acknowledge_unvalidated=True)
+
+    rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
+    assert len(rows) == 1, rows
+    assert rows[0]["verified_buckets"][d]["verified"] is False
+    assert "validated_by" in rows[0]["verified_buckets"][d]["note"]
+    assert rows[0]["record_digests"] == []
