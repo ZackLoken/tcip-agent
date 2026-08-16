@@ -124,54 +124,59 @@ def test_cal_holdout_split_remaps_train_val_to_calibration_holdout():
 
 # --- resolve_locked_cal_holdout_split ---
 
-def test_resolve_locked_cal_holdout_split_group_straddle():
+def test_resolve_locked_cal_holdout_split_group_straddle(tmp_path):
     # Group "m" has two tiles; many other stems sort alphabetically between them, so a naive
     # lexicographic midpoint cut would split them across cal/holdout. The locked, group-aware
     # split must not.
     stems = ["m_0_0"] + [f"g{i}_0_0" for i in range(8)] + ["m_9_9"]
-    locked = resolve_locked_cal_holdout_split(stems, identity_hash="straddle-test", seed=1)
+    locked = resolve_locked_cal_holdout_split(
+        stems, identity_hash="straddle-test", scope_root=tmp_path, seed=1)
     cal, hold = set(locked["calibration"]), set(locked["holdout"])
     assert ("m_0_0" in cal) == ("m_9_9" in cal)
     assert ("m_0_0" in hold) == ("m_9_9" in hold)
 
 
-def test_resolve_locked_cal_holdout_split_stable_across_redeclared_policy():
+def test_resolve_locked_cal_holdout_split_stable_across_redeclared_policy(tmp_path):
     stems = _grouped(6)
-    first = resolve_locked_cal_holdout_split(stems, identity_hash="stable-test", seed=1)
+    first = resolve_locked_cal_holdout_split(
+        stems, identity_hash="stable-test", scope_root=tmp_path, seed=1)
     # A later call declaring a different seed/group_by, with no force_redraw, must not redraw.
     second = resolve_locked_cal_holdout_split(
-        stems, identity_hash="stable-test", seed=99, group_by="stem")
+        stems, identity_hash="stable-test", scope_root=tmp_path, seed=99, group_by="stem")
     assert first["calibration"] == second["calibration"]
     assert first["holdout"] == second["holdout"]
 
 
-def test_resolve_locked_cal_holdout_split_persists_lock_file():
+def test_resolve_locked_cal_holdout_split_persists_lock_file(tmp_path):
     stems = _grouped(4)
-    resolve_locked_cal_holdout_split(stems, identity_hash="persist-test", seed=3)
-    assert cal_holdout_lock_path("persist-test").is_file()
+    resolve_locked_cal_holdout_split(
+        stems, identity_hash="persist-test", scope_root=tmp_path, seed=3)
+    assert cal_holdout_lock_path("persist-test", scope_root=tmp_path).is_file()
 
 
-def test_resolve_locked_cal_holdout_split_group_key_map_produces_working_split():
+def test_resolve_locked_cal_holdout_split_group_key_map_produces_working_split(tmp_path):
     # Rail-admits-valid-work: a valid group_key_map covering every stem still produces a usable
     # locked split (not just a raise-on-bad-input path).
     stems = ["p1", "p2", "p3", "p4"]
     group_key_map = {"p1": "gA", "p2": "gA", "p3": "gB", "p4": "gB"}
     locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash="map-test", group_by="ignored", group_key_map=group_key_map, seed=2)
+        stems, identity_hash="map-test", scope_root=tmp_path, group_by="ignored",
+        group_key_map=group_key_map, seed=2)
     cal, hold = set(locked["calibration"]), set(locked["holdout"])
     assert ("p1" in cal) == ("p2" in cal)  # gA never straddles
     assert ("p3" in cal) == ("p4" in cal)  # gB never straddles
     assert cal | hold == set(stems)
 
 
-def test_resolve_locked_cal_holdout_split_force_redraw_records_history():
+def test_resolve_locked_cal_holdout_split_force_redraw_records_history(tmp_path):
     stems = _grouped(6)
-    first = resolve_locked_cal_holdout_split(stems, identity_hash="redraw-test", seed=1)
+    first = resolve_locked_cal_holdout_split(
+        stems, identity_hash="redraw-test", scope_root=tmp_path, seed=1)
     assert len(first["redraw_history"]) == 1
     assert first["redraw_history"][0]["old_content_hash"] is None  # nothing existed before it
 
     second = resolve_locked_cal_holdout_split(
-        stems, identity_hash="redraw-test", seed=2, force_redraw=True,
+        stems, identity_hash="redraw-test", scope_root=tmp_path, seed=2, force_redraw=True,
         timestamp="2026-01-01T00:00:00Z")
     assert len(second["redraw_history"]) == 2  # the first draw + this redraw, never dropped
     entry = second["redraw_history"][-1]
@@ -180,8 +185,34 @@ def test_resolve_locked_cal_holdout_split_force_redraw_records_history():
     assert entry["policy"]["seed"] == 2
 
     # Re-running with the same (now-locked) policy and no force_redraw returns it unchanged.
-    third = resolve_locked_cal_holdout_split(stems, identity_hash="redraw-test", seed=2)
+    third = resolve_locked_cal_holdout_split(
+        stems, identity_hash="redraw-test", scope_root=tmp_path, seed=2)
     assert third == second
+
+
+def test_lock_survives_an_active_project_repin(tmp_path, monkeypatch):
+    """A locked split belongs to the dataset it was drawn over, not to the adopted project.
+
+    ``set_active_project`` repins the platform state root inside a live process. A lock scoped to
+    that root reads as absent once it moves, and the next call cuts a fresh split for the same
+    identity, which is the silent re-cut this lock exists to prevent.
+    """
+    dataset_root = tmp_path / "ds"
+    dataset_root.mkdir()
+    stems = _grouped(8)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "before_adoption"))
+    first = resolve_locked_cal_holdout_split(
+        stems, identity_hash="repin-test", scope_root=dataset_root, seed=1)
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "adopted_project"))
+    after = resolve_locked_cal_holdout_split(
+        stems, identity_hash="repin-test", scope_root=dataset_root, seed=2, group_by="stem")
+
+    assert after["calibration"] == first["calibration"]
+    assert after["holdout"] == first["holdout"]
+    # The lock was read, not redrawn: the declared policy is reported as diverging from it.
+    assert after["policy_divergence"]["locked"]["seed"] == 1
+    assert cal_holdout_lock_path("repin-test", scope_root=dataset_root).is_file()
 
 
 # --- spatial_strip_split ---

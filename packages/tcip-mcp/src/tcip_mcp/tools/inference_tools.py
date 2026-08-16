@@ -192,7 +192,10 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     seeded, and stable across calls, not a fresh lexicographic cut every time), at a floor conf so
     hesitant detections survive to be swept, so the resolved conf is validated in the regime it
     ships through, not an untiled full-frame model pass. ``seed``/``holdout_ratio`` only take effect
-    on the first (locking) draw for this labeled dir's identity hash.
+    on the first (locking) draw for this labeled dir's identity hash. That lock is scoped to the
+    labeled dir's own root (``cal_holdout_scope_root``), so it is still the same lock after a
+    project adoption repins the platform root, and ``force_redraw_cal_holdout_split`` addresses it
+    by stating that root.
 
     Raises ``ValueError`` (propagated from ``resolve_locked_cal_holdout_split``) when the lock
     references a stem whose image/label no longer exists, or its lock file is corrupt, the caller
@@ -213,7 +216,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.data.splits import (
-        count_label_lines, label_image_stems, resolve_locked_cal_holdout_split,
+        cal_holdout_scope_root, count_label_lines, label_image_stems,
+        resolve_locked_cal_holdout_split,
     )
     from tcip_mcp.pipelines.operating_point import (
         attach_split_policy_provenance, derive_max_dets_from_counts, resolve_operating_point,
@@ -253,7 +257,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # rather than measuring the sweep against the caller's (possibly unrelated) max_dets.
     density_cap = derive_max_dets_from_counts(list(annotation_counts.values()))
     locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash=dh, annotation_counts=annotation_counts,
+        stems, identity_hash=dh, scope_root=cal_holdout_scope_root(labels_dir),
+        annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
     )
     if locked.get("unlocked_stems"):
@@ -395,6 +400,7 @@ def _sweep_summary(conf_param) -> dict:
 @mcp.tool()
 @audited
 def force_redraw_cal_holdout_split(
+    dataset_root: str,
     labels_dir: str | None = None,
     images_dir: str | None = None,
     identity_hash: str | None = None,
@@ -422,6 +428,12 @@ def force_redraw_cal_holdout_split(
     universe, since a review reference has no labels directory to re-scan).
 
     Args:
+        dataset_root: The root the lock is stored under, required, no default: a locked split
+            travels with the data it was drawn over, and this tool holds an identity hash rather
+            than anything the root can be read off. With ``labels_dir`` given, it is the root that
+            dir's own lock lives under (its dataset root, or the dir itself when the layout places
+            it under none), and a root disagreeing with it refuses rather than redrawing a lock
+            nothing reads.
         labels_dir: Labeled dir whose GT identity locked the split (mutually exclusive with
             ``identity_hash``, if both are omitted, or ``identity_hash`` is given with no
             existing lock and no ``labels_dir``, this refuses).
@@ -451,16 +463,26 @@ def force_redraw_cal_holdout_split(
 
     from tcip_mcp.audit import record_event
     from tcip_mcp.pipelines.data.splits import (
-        cal_holdout_lock_key, count_label_lines, label_image_stems,
+        cal_holdout_lock_key, cal_holdout_scope_root, count_label_lines, label_image_stems,
         resolve_locked_cal_holdout_split,
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
+
+    scope_root = Path(dataset_root).resolve()
+    if labels_dir:
+        labels_scope = cal_holdout_scope_root(labels_dir)
+        if labels_scope != scope_root:
+            return {"error": f"labels_dir {labels_dir!r} locks its cal/holdout split under "
+                             f"{str(labels_scope)!r}, and dataset_root states {str(scope_root)!r}. "
+                             "A redraw under the stated root would replace a lock the calibration "
+                             "never reads, so state the root those labels' own lock lives under."}
 
     if identity_hash is None:
         identity_hash = dataset_hash(labels_dir)
 
     try:
-        old_lock = store.read(cal_holdout_lock_key(identity_hash), default=None)
+        old_lock = store.read(cal_holdout_lock_key(identity_hash, scope_root=scope_root),
+                              default=None)
     except DecodeError:
         # A redraw is the recovery for a lock whose bytes do not decode, so an unreadable one
         # is redrawn over rather than blocking the call; the entry it replaces is unknowable.
@@ -484,7 +506,8 @@ def force_redraw_cal_holdout_split(
                           "labels_dir to derive stems from"}
 
     new_lock = resolve_locked_cal_holdout_split(
-        stems, identity_hash=identity_hash, annotation_counts=annotation_counts,
+        stems, identity_hash=identity_hash, scope_root=scope_root,
+        annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, holdout_ratio=holdout_ratio, seed=seed,
         force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
     )

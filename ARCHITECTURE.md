@@ -541,10 +541,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:397` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:512` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1389` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1658` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `force_redraw_cal_holdout_split` | `inference_tools.py:402` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `run_inference` | `inference_tools.py:535` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1412` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1681` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -583,7 +583,7 @@ Docstring is the function's docstring first line, verbatim.
 | `update_trait_spec_fields` | `phenology_tools.py:110` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
 | `calibrate_classifier_operating_point` | `phenology_tools.py:376` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
 | `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:537` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:716` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `compute_phenology` | `phenology_tools.py:718` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -768,11 +768,11 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:651` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:672` |
 | POST | `/validate_reference` | `validate_reference` | `routes/review.py:723` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:929` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:967` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:995` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1116` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1144` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:931` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:969` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:997` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1118` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1146` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 

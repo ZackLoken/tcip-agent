@@ -114,9 +114,10 @@ def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
 
 # ── the review door (routes/review.py) ────────────────────────────────────────────────────────
 
-def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_calls_unbiased():
+def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_calls_unbiased(tmp_path):
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=True), "catkin",
-                                            tiled=True, staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
+                                            tiled=True, staged_conf_floor=0.01,
+                                            bucket_identities=[_IDENTITY], scope_root=tmp_path)
     conf = b.params["conf"]
     sweep = conf.sweep
     hb = sweep["holdout_bias"]
@@ -132,11 +133,12 @@ def test_review_door_refuses_a_class_compensating_reference_the_pooled_bias_call
     assert conf.validated_against == VALIDATED_FALSE
 
 
-def test_review_door_class_failure_has_its_own_breeder_message():
+def test_review_door_class_failure_has_its_own_breeder_message(tmp_path):
     # The named-failure vocabulary is exhaustive by construction (describe_review_validation raises
     # on a name it can't translate), so a new gate name without a message is a loud error here.
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=True), "catkin",
-                                            tiled=True, staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
+                                            tiled=True, staged_conf_floor=0.01,
+                                            bucket_identities=[_IDENTITY], scope_root=tmp_path)
     out = describe_review_validation(b, reviewed_image_count=N_IMAGES)
     assert out["validated"] is False
     assert "kind" in out["reason"].lower()
@@ -145,9 +147,10 @@ def test_review_door_class_failure_has_its_own_breeder_message():
     assert "didn't agree closely enough" not in out["reason"]
 
 
-def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_class():
+def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_class(tmp_path):
     b = resolve_operating_point_from_review(_two_class_review_state(swap_classes=False), "catkin",
-                                            tiled=True, staged_conf_floor=0.01, bucket_identities=[_IDENTITY])
+                                            tiled=True, staged_conf_floor=0.01,
+                                            bucket_identities=[_IDENTITY], scope_root=tmp_path)
     conf = b.params["conf"]
     assert conf.sweep["failures"] == []
     assert conf.sweep["per_class_count_bias_failures"] == []

@@ -136,13 +136,13 @@ def test_review_only_completed_images():
     assert ids == {"A", "B"}  # a partially-reviewed image is not a confirmed reference
 
 
-def test_review_confirmed_stamps_when_the_same_gate_passes():
+def test_review_confirmed_stamps_when_the_same_gate_passes(tmp_path):
     # staged_conf_floor simulates what the review-path threading computes and passes (threaded
     # from routes/review.py); the seam here is a caller-supplied value.
     # tiled=False: this test is about conf-calibration shippability, not tiling; tile_size only
     # gates a bundle when tiled.
     b = resolve_operating_point_from_review(_good_review_state(), "catkin", staged_conf_floor=0.01,
-                                            tiled=False, bucket_identities=[_IDENTITY_A])
+                                            tiled=False, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     # A disjoint, uncensored, count-bias-passing review reference earns review_confirmed (distinct
     # from VALIDATED_HELD_OUT so provenance records which reference validated) and is shippable.
@@ -153,22 +153,22 @@ def test_review_confirmed_stamps_when_the_same_gate_passes():
     assert conf.sweep["failures"] == []
 
 
-def test_review_confirmed_fails_closed_without_a_staged_conf_floor():
+def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
     # With no staged_conf_floor asserted, even a geometrically perfect reference cannot validate:
     # the honest default, not a silent pass. Same fixture as the passing case above.
     b = resolve_operating_point_from_review(_good_review_state(), "catkin",
-                                            tiled=True, bucket_identities=[_IDENTITY_A])
+                                            tiled=True, bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
     assert "conf_censored" in conf.sweep["failures"]
 
 
-def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor():
+def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor(tmp_path):
     # The asserted floor sits at the picked conf: the sweep could not have seen anything below
     # it, so it must refuse even though the split is disjoint and the counts genuinely agree.
     b = resolve_operating_point_from_review(_good_review_state(), "catkin", tiled=True, staged_conf_floor=0.95,
-                                            bucket_identities=[_IDENTITY_A])
+                                            bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
@@ -296,7 +296,7 @@ def test_confirmed_negative_image_carries_its_own_producer_identity():
 # ── FN-adjudication coverage ────────────────────────────────────────
 
 
-def test_previously_unlabeled_session_with_marked_misses_can_still_validate():
+def test_previously_unlabeled_session_with_marked_misses_can_still_validate(tmp_path):
     # The breeder used the "mark missed object" tool at least once per image on images with no
     # pre-existing GT (gt_preexisting=False): the gate must be able to reach review_confirmed.
     # fp_pattern=2 (not 1): with exactly one confirmed miss per image, a single low-conf FP would
@@ -312,29 +312,29 @@ def test_previously_unlabeled_session_with_marked_misses_can_still_validate():
     state = _dense_review_state(gt_preexisting=False, miss_pattern=[1] * N_IMAGES,
                                 fp_pattern=[2] * N_IMAGES, objects_per_image=250)
     b = resolve_operating_point_from_review(state, "catkin", tiled=True, staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY_A])
+                                            bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
     assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]
 
 
-def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly():
+def test_previously_unlabeled_session_with_zero_adjudication_refuses_honestly(tmp_path):
     # Previously-unlabeled images, reviewed (accept/reject), but never checked for a missed
     # object, must fail with an honest reason naming the new tool rather than falling through to
     # the generic "counts didn't agree" message.
     state = _dense_review_state(gt_preexisting=False, fp_pattern=[1] * N_IMAGES)
     b = resolve_operating_point_from_review(state, "catkin", tiled=True, staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY_A])
+                                            bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert conf.sweep["failures"] == ["insufficient_adjudication_coverage"]
 
 
-def test_gt_backed_session_passes_unaffected_by_the_coverage_gate():
+def test_gt_backed_session_passes_unaffected_by_the_coverage_gate(tmp_path):
     # A genuinely GT-backed review session (gt_preexisting=True, the default) must still pass,
     # unaffected by the adjudication-coverage gate.
     b = resolve_operating_point_from_review(_good_review_state(), "catkin", tiled=True, staged_conf_floor=0.01,
-                                            bucket_identities=[_IDENTITY_A])
+                                            bucket_identities=[_IDENTITY_A], scope_root=tmp_path)
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
     assert "insufficient_adjudication_coverage" not in conf.sweep["failures"]

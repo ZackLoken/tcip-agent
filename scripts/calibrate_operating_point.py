@@ -14,6 +14,7 @@ Usage:
     python scripts/calibrate_operating_point.py \
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
+        --dataset-root <dataset_root> \
         [--experiment-id <id>] [--val-ratio 0.5] [--device cpu]
 """
 
@@ -30,6 +31,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trait", required=True, help="Trait name (defines the count objective).")
     parser.add_argument("--labels-dir", required=True, help="Labeled dir (per-image JSON).")
     parser.add_argument("--images-dir", required=True, help="Images for the labels.")
+    parser.add_argument("--dataset-root", required=True,
+                        help="Root the cal/holdout split lock is stored under, so this script and "
+                             "run_inference's own calibration read one lock for these labels. The "
+                             "labels' dataset root, or the labels dir itself when the dataset "
+                             "layout places it under none.")
     parser.add_argument("--experiment-id", default=None,
                         help="Experiment id to persist under (.tcip/experiments/<id>/). "
                              "Defaults to a hash-tagged id.")
@@ -100,7 +106,8 @@ def main(argv: list[str] | None = None) -> int:
     # cal/holdout split; a later run of this script over unchanged labels returns the same split
     # rather than a fresh cut that could happen to draw a weaker holdout.
     locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash=dh, annotation_counts=annotation_counts,
+        stems, identity_hash=dh, scope_root=args.dataset_root,
+        annotation_counts=annotation_counts,
         group_by=args.group_by, group_key_map=group_key_map, holdout_ratio=args.val_ratio,
         seed=args.seed,
     )

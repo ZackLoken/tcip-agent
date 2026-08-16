@@ -586,7 +586,8 @@ def calibrate_ordinal_regression_operating_point(
         output_dir: Where to write the sidecar.
         dataset_root: The dataset this calibration's claim hangs off, stated by the caller: the
             record's reference locations (the CSV, the images directory, the locked split) are
-            written against it, and it is the root a reader resolves them from. Refuses when the
+            written against it, it is the root the cal/holdout lock itself is stored under, and it
+            is the root a reader resolves them from. Refuses when the
             images directory's own layout places it under a different root; a loose directory the
             layout cannot place refuses nothing, since a CSV over a bespoke image set with a stated
             root is legitimate.
@@ -638,7 +639,8 @@ def calibrate_ordinal_regression_operating_point(
     identity_hash = csv_dataset_hash(csv_path)
     try:
         locked = resolve_locked_cal_holdout_split(
-            stems, identity_hash=identity_hash, group_by=group_by, group_key_map=group_key_map,
+            stems, identity_hash=identity_hash, scope_root=dataset_root,
+            group_by=group_by, group_key_map=group_key_map,
             seed=seed, holdout_ratio=holdout_ratio,
         )
     except ValueError as exc:

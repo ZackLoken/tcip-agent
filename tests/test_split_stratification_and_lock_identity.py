@@ -101,31 +101,35 @@ def test_groups_with_no_annotations_reach_every_active_split():
         )
 
 
-def test_lock_path_distinguishes_identities_sharing_an_eight_character_prefix():
+def test_lock_path_distinguishes_identities_sharing_an_eight_character_prefix(tmp_path):
     first = "9f3c17b20a1b2c3d4e5f6071"
     second = "9f3c17b2ffeeddccbbaa9988"
     assert first[:8] == second[:8] and first != second
-    assert cal_holdout_lock_path(first) != cal_holdout_lock_path(second)
+    assert (cal_holdout_lock_path(first, scope_root=tmp_path)
+            != cal_holdout_lock_path(second, scope_root=tmp_path))
 
 
-def test_a_prefix_sharing_identity_never_inherits_another_datasets_lock():
+def test_a_prefix_sharing_identity_never_inherits_another_datasets_lock(tmp_path):
     first_stems = [f"plotA{g}_{i}_0" for g in range(6) for i in range(2)]
     second_stems = first_stems + [f"plotB{g}_{i}_0" for g in range(6) for i in range(2)]
     first_hash = "9f3c17b20a1b2c3d"
     second_hash = "9f3c17b2ffeeddcc"
 
-    first = resolve_locked_cal_holdout_split(first_stems, identity_hash=first_hash, seed=1)
+    first = resolve_locked_cal_holdout_split(
+        first_stems, identity_hash=first_hash, scope_root=tmp_path, seed=1)
     assert set(first["calibration"]) | set(first["holdout"]) == set(first_stems)
 
-    second = resolve_locked_cal_holdout_split(second_stems, identity_hash=second_hash, seed=1)
+    second = resolve_locked_cal_holdout_split(
+        second_stems, identity_hash=second_hash, scope_root=tmp_path, seed=1)
     assert second["identity_hash"] == second_hash
     assert "unlocked_stems" not in second, (
         "the second dataset was handed a lock drawn over a different stem universe"
     )
     assert set(second["calibration"]) | set(second["holdout"]) == set(second_stems)
-    assert cal_holdout_lock_path(first_hash).is_file()
-    assert cal_holdout_lock_path(second_hash).is_file()
+    assert cal_holdout_lock_path(first_hash, scope_root=tmp_path).is_file()
+    assert cal_holdout_lock_path(second_hash, scope_root=tmp_path).is_file()
 
-    reread = resolve_locked_cal_holdout_split(first_stems, identity_hash=first_hash, seed=1)
+    reread = resolve_locked_cal_holdout_split(
+        first_stems, identity_hash=first_hash, scope_root=tmp_path, seed=1)
     assert reread["calibration"] == first["calibration"]
     assert reread["holdout"] == first["holdout"]
