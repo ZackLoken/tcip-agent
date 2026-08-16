@@ -145,6 +145,7 @@ def export_detection_csv(
     output_path: str,
     provenance: dict | None = None,
     *,
+    trait: str,
     measurement_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     acknowledge_unvalidated: bool = False,
@@ -175,10 +176,21 @@ def export_detection_csv(
     unknown rather than repeated from the stamp that asserted it, and ``validation_record`` names the
     record a reader can open to see what the claim was earned against.
 
+    Meaning door: a count nobody defined is not a measurement, so this refuses before it composes
+    the gate's flags unless ``trait``'s ``per_image_count`` operationalization is recorded and
+    breeder-confirmed. The counts are counts of that record's own ``measured_subject``, which is
+    checked against the ``id_map`` of every bucket that recorded one; a delivery whose buckets
+    recorded none, and one called with no ``pred_dirs`` at all, carries the subject unchecked
+    because nothing in it names what the labels decoded to. The record names no delivered
+    phenotype, because this CSV's columns name none.
+
     Args:
         image_results: List of dicts with 'image', 'count', 'boxes', etc.
         output_path: Path for the output CSV file.
         provenance: Optional producing-model / operating-point stamp added as trailing columns.
+        trait: The registered trait whose confirmed per-image-count operationalization this
+            delivery rests on. Required: a count CSV under no trait states nothing about what was
+            counted.
         measurement_validated: The count operating point's reconciled validity reference. Floored
             against each bucket's on-disk sidecar when ``pred_dirs`` is given; taken as-is otherwise.
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
@@ -188,6 +200,12 @@ def export_detection_csv(
     Returns:
         Path to the written CSV file.
     """
+    from tcip_mcp.operationalization import (
+        PER_IMAGE_COUNT,
+        check_operationalization,
+        resolve_trait_and_record,
+    )
+    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
     from tcip_mcp.pipelines.resolution import (
         check_delivery_gate,
         delivered_provenance,
@@ -195,6 +213,14 @@ def export_detection_csv(
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
     )
+
+    # Only buckets that recorded a map: one that recorded none says nothing about what was counted.
+    recorded_maps = {d: bucket_id_map(Path(d)) for d in (pred_dirs or [])}
+    id_maps = {d: m for d, m in recorded_maps.items() if m is not None} or None
+    spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, id_maps=id_maps)
+    if not stated.ok:
+        raise ValueError(stated.message)
 
     flags: dict[str, str | None] = {"measurement": measurement_validated}
     measurement_recon: dict = {"bindings": {}}
@@ -211,6 +237,13 @@ def export_detection_csv(
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)
+
+    # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
+    spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    still_stated = check_operationalization(
+        spec_now, record_now, PER_IMAGE_COUNT, id_maps=id_maps, basis=stated.basis)
+    if not still_stated.ok:
+        raise ValueError(still_stated.message)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 

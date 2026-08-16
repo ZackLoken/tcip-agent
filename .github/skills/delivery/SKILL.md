@@ -64,6 +64,27 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 avg_confidence` CSV, not the per-plant schema above. Don't reach for it when the
 per-plant schema is what's wanted.
 
+## The meaning door (what the number is)
+
+Before the evidence gate below, every count and per-plant delivery answers a different question:
+what the delivered number means, recorded per project and confirmed by the breeder. `crops.yml`
+gives a field criterion, which is not something a model can realize on its own, so the record says
+what the number means, what decides it in the imagery, and which subject it is about. No record, or
+one nobody confirmed, or one whose spec fields moved since, and the door refuses and names the
+primitive that fixes it. `acknowledge_unvalidated` does not reach this: it says a number's error is
+uncharacterized, which is a claim about a quantity that has been defined.
+
+- `export_detection_csv` and `tabulate_counts` take a required `trait` and rest on its
+  `per_image_count` record. That record names no delivered phenotype, because the per-image CSV
+  carries no phenotype column; what it names is the counted subject, checked against the recorded
+  `id_map` of every bucket that recorded one.
+- `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `trait_name`, which stays a
+  crop-vocabulary delivered-phenotype name (the CSV column and the unit cross-check read it), and
+  resolve it to the registered trait whose spec `delivers` it: none or more than one refuses. Which
+  record applies follows from `task`, since a count, an ordinal and a regression aggregate rest on
+  three different spec floors and are three separate confirmations. Every row carries a value key
+  and every one has to be inside the confirmed set.
+
 ## The delivery gate (measurement integrity)
 
 Every phenotype-delivery door refuses a bare write: an unvalidated measurement number with no
@@ -80,8 +101,9 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
   producer tail: `producer_model_sha256`, `producer_experiment_id` and `validation_record`, filled
   from the verified bindings, so a bucket whose claim no record answers for delivers those cells
   blank rather than repeating the names its stamp asserted.
-- `tabulate_counts` gates the count operating point on the run's resolved bundle, so it calls
-  `export_detection_csv` without `pred_dirs` and passes it the already-reconciled state directly.
+- `tabulate_counts` gates the count operating point on the run's resolved bundle and hands
+  `export_detection_csv` the already-reconciled state, plus the bucket it persisted when it was
+  given a `predictions_dir` to persist one into.
   `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same way: pass
   `pred_dirs` for a count trait so the validity is reconciled from each bucket's
   `operating_point.json` sidecar rather than trusting a bare caller string. Without `pred_dirs`,
