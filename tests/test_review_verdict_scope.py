@@ -174,8 +174,7 @@ def test_gui_verdict_is_visible_to_the_bucket_guard(client: TestClient, tmp_path
     assert again["redirected"] is True
     assert again["verdict_count"] == 1
     assert again["bucket"] == "detector@r2"
-    # The verdict is in the dataset's own store, and the project the breeder worked out of holds
-    # no review state at all.
+    # The verdict lives in the dataset's own store; the project directory holds no review state.
     assert (dataset_root / ".tcip" / "state" / "review").is_dir()
     assert not (project_root / ".tcip").exists()
 
@@ -221,8 +220,7 @@ def test_promotion_refuses_a_changed_prediction_file(client: TestClient, tmp_pat
     assert removed["validated"] is False
     assert f"{other}.jpg" in removed["reason"]
 
-    # Written back by hand: the staging path would redirect around this reviewed bucket, which is
-    # the very protection being tested here.
+    # Written back by hand: the staging path would redirect around the reviewed bucket under test.
     Path(staged_other["path"]).write_bytes(original_other)
     third = "IMG_0009"
     _image(dataset_root, third)
@@ -327,7 +325,6 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
     again = _stage(dataset_root, "detector", DATE_A)
     assert again["redirected"] is True
 
-    # Every record these routes changed travels with the dataset, and the project directory the
-    # breeder worked out of is left untouched.
+    # Every record these routes changed travels with the dataset; the project directory is untouched.
     assert (dataset_root / ".tcip" / "audit.jsonl").is_file()
     assert not (project_root / ".tcip").exists()
