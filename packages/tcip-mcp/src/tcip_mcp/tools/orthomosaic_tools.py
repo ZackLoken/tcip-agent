@@ -57,6 +57,16 @@ def deliver_orthomosaic_plant_counts(
     plant's count (counted in ``n_unmapped``, never force-assigned to the nearest plant
     regardless of distance).
 
+    Identity door: the georeferencing that decides which plant each detection belongs to comes
+    from the caller's ``raster_path``, so a raster that is not the one the bucket was produced on
+    silently re-attributes every count (a pixel-identical copy with a moved tiepoint shifts each
+    detection onto a neighbouring plant; a far-shifted one reads every plant as zero). The supplied
+    raster is therefore checked against the identity the bucket recorded at export time, content
+    and georeferencing alike (:func:`~tcip_mcp.pipelines.raster_source.
+    georeferenced_raster_identity_mismatch`), and a bucket carrying no recorded identity is refused
+    rather than trusted: there is nothing to check against, and no per-plant attribution is
+    trustworthy without one.
+
     Delivery gate: the count is the phenotype, so this refuses a bare write of an unvalidated
     count operating point (read from the bucket's own ``operating_point.json``, never trusted
     from a caller string) unless ``acknowledge_unvalidated=True`` ships a clearly-flagged
@@ -68,9 +78,10 @@ def deliver_orthomosaic_plant_counts(
     Args:
         predictions_dir: The bucket ``export_predictions``'s ``raster_path`` regime persisted.
         raster_path: The same georeferenced raster the bucket's predictions were produced from
-            (needed to resolve each detection's pixel position to a real-world coordinate; not
-            read from the bucket, since the sidecar's own ``raster_path`` is a provenance record,
-            not a promise this tool re-trusts it against a different file on disk).
+            (needed to resolve each detection's pixel position to a real-world coordinate). Given
+            by the caller rather than taken from the sidecar's recorded ``raster_path``, which
+            names a location that may hold a different file by now, and checked against the
+            bucket's recorded raster identity before anything is resolved through it.
         plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
             ``accession_name``, ``WGS84_centroid_x/y``, …).
         output_csv_path: Where to write the delivered per-plant CSV. A relative path resolves
@@ -106,6 +117,30 @@ def deliver_orthomosaic_plant_counts(
                         if f.name not in SIDECAR_FILENAMES)
     if not pred_files:
         return {"error": f"no prediction file(s) found in {predictions_dir}"}
+
+    from tcip_mcp.pipelines.raster_source import georeferenced_raster_identity_mismatch
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(predictions_dir) or {}
+    recorded_identity = sidecar.get("raster_content_identity")
+    if recorded_identity is None:
+        return {"error": (
+            f"delivery refused: the bucket at {predictions_dir} records no raster content "
+            "identity, so there is nothing to check raster_path against. Every count this "
+            "delivery writes is attributed to a plant through the supplied raster's own "
+            "georeferencing, so the bucket must carry the identity of the raster it was produced "
+            "on: produce it with export_predictions's raster_path regime, which records that "
+            "identity into the bucket's operating_point.json."
+        )}
+    try:
+        identity_mismatch = georeferenced_raster_identity_mismatch(recorded_identity, raster_path)
+    except ValueError as exc:
+        return {"error": f"delivery refused: {exc}"}
+    if identity_mismatch is not None:
+        return {"error": (
+            f"delivery refused: {raster_path} is not the raster the bucket at {predictions_dir} "
+            f"was produced on. {identity_mismatch}"
+        )}
 
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
@@ -154,9 +189,6 @@ def deliver_orthomosaic_plant_counts(
 
     agg = aggregate_per_plant(records, strategy="sum", plant_id_key="plant_id", value_key="count")
 
-    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
-
-    sidecar = read_operating_point_sidecar(predictions_dir) or {}
     provenance = {
         "producer_model_sha256": sidecar.get("checkpoint_sha256"),
         "experiment_id": sidecar.get("experiment_id"),

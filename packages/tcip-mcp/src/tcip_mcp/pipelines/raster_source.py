@@ -1121,3 +1121,41 @@ def raster_identity_matches(recorded: dict, source: "str | Path | BandGroupRef")
         and fresh.dtype == recorded["dtype"]
         and fresh.pixel_checksum == recorded["pixel_checksum"]
     )
+
+
+def georeferenced_raster_identity_mismatch(
+    recorded: dict, source: "str | Path | BandGroupRef",
+) -> str | None:
+    """``None`` when ``source`` is both content-identical to a recorded
+    :func:`raster_content_identity` result and carries the georeferencing that result recorded;
+    otherwise a summary naming which part mismatched and the values behind it.
+
+    The georeferencing-inclusive companion to :func:`raster_identity_matches`, which it calls for
+    the content half rather than restating that comparison. The two scopes answer different
+    questions and both are real: pixels alone decide which mosaic a model was calibrated on, so a
+    claim about that scope is content-only by construction; a consumer that resolves a pixel
+    position to a real-world coordinate (per-plant attribution through an orthomosaic's affine
+    tags) also depends on those tags, and to it a pixel-identical copy with a moved tiepoint is a
+    different raster.
+
+    Geotransform values compare exactly: both sides are read by the same tag reader and a JSON
+    round-trip of a float returns the same value, so a genuine match cannot drift apart here and
+    any difference found is a real one, never sampling or serialization noise.
+    """
+    if not raster_identity_matches(recorded, source):
+        return (
+            f"content mismatch: {source} is not the raster this identity was recorded on "
+            f"(recorded {recorded['width']}x{recorded['height']}x{recorded['num_channels']} "
+            f"{recorded['dtype']}, pixel checksum {str(recorded['pixel_checksum'])[:12]})"
+        )
+    recorded_gt = recorded.get("geotransform")
+    supplied_gt = _optional_geotransform(source)
+    if recorded_gt == supplied_gt:
+        return None
+    if recorded_gt is None or supplied_gt is None:
+        return (f"georeferencing mismatch: recorded geotransform {recorded_gt!r}, "
+                f"supplied {supplied_gt!r}")
+    differing = sorted(k for k in set(recorded_gt) | set(supplied_gt)
+                       if recorded_gt.get(k) != supplied_gt.get(k))
+    return "georeferencing mismatch: " + ", ".join(
+        f"{k} recorded {recorded_gt.get(k)!r}, supplied {supplied_gt.get(k)!r}" for k in differing)

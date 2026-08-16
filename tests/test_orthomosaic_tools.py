@@ -29,14 +29,18 @@ def _geokeys() -> tuple[int, ...]:
 
 
 def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels: int = 3,
-                      rowsperstrip: int = 8) -> np.ndarray:
+                      rowsperstrip: int = 8, tiepoint_x: float = TIEPOINT_NATIVE_X,
+                      seed: int = 0) -> np.ndarray:
     """A raster carrying both real georeferencing tags and real (random, decodable) pixel
-    content, so it works for both :func:`read_geotransform` and a tiling inference pass."""
-    rng = np.random.default_rng(0)
+    content, so it works for both :func:`read_geotransform` and a tiling inference pass.
+
+    ``tiepoint_x``/``seed`` vary the two halves independently, so a caller can write a
+    pixel-identical copy at a moved tiepoint, or different content at the same one."""
+    rng = np.random.default_rng(seed)
     arr = rng.integers(0, 255, size=(height, width, channels), dtype=np.uint8)
     extratags = [
         (33550, "d", 3, (PIXEL_SCALE, PIXEL_SCALE, 0.0), False),
-        (33922, "d", 6, (0.0, 0.0, 0.0, TIEPOINT_NATIVE_X, TIEPOINT_NATIVE_Y, 0.0), False),
+        (33922, "d", 6, (0.0, 0.0, 0.0, tiepoint_x, TIEPOINT_NATIVE_Y, 0.0), False),
         (34735, "H", len(_geokeys()), _geokeys(), False),
     ]
     tifffile.imwrite(str(path), arr, rowsperstrip=rowsperstrip, extratags=extratags)
@@ -378,7 +382,22 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
         str(bucket_dir / "mosaic.json"),
         [Annotation(subject="0", geometry=BBox(1.0, 1.0, 5.0, 5.0), score=0.9)], 64, 64,
         keep_empty=True)
-    (bucket_dir / "operating_point.json").write_text(json.dumps({"validated": False}))
+    # The bucket records the rotated raster's own identity so the delivery's identity check
+    # passes and the refusal under test is the georeferencing one, not a missing identity.
+    import dataclasses
+
+    from tcip_mcp.pipelines.raster_source import (
+        CONTENT_IDENTITY_MAX_WINDOWS,
+        CONTENT_IDENTITY_SEED,
+        CONTENT_IDENTITY_WINDOW_SIZE,
+        raster_content_identity,
+    )
+
+    identity = dataclasses.asdict(raster_content_identity(
+        str(raster_path), 3, seed=CONTENT_IDENTITY_SEED,
+        window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS))
+    (bucket_dir / "operating_point.json").write_text(
+        json.dumps({"validated": False, "raster_content_identity": identity}))
 
     # Arbitrary geolocation, never derived from the rotated raster itself (which refuses to
     # resolve any pixel -> real-world coordinate at all): the point of this test is that
@@ -395,3 +414,4 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(tmp_path / "counts.csv"),
         trait_name="catkin_count", acknowledge_unvalidated=True)
     assert "error" in result
+    assert "ModelTransformationTag" in result["error"]

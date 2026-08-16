@@ -1064,20 +1064,22 @@ def _export_predictions_raster(
         op_stamp["block_calibration"] = {
             k: v for k, v in block_prov.items() if k != "spatial_manifest"
         }
-        try:
-            import dataclasses
+    # Recorded for every run of this regime: a consumer resolving these boxes through a raster's
+    # georeferencing has no other way to tell that raster is the one behind them.
+    try:
+        import dataclasses
 
-            from tcip_mcp.pipelines.raster_source import (
-                CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
-                raster_content_identity,
-            )
+        from tcip_mcp.pipelines.raster_source import (
+            CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
+            raster_content_identity,
+        )
 
-            export_identity = raster_content_identity(
-                raster_path, predictor.in_chans, seed=CONTENT_IDENTITY_SEED,
-                window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
-            op_stamp["raster_content_identity"] = dataclasses.asdict(export_identity)
-        except Exception:
-            logger.warning("export-time raster content identity could not be recorded", exc_info=True)
+        export_identity = raster_content_identity(
+            raster_path, predictor.in_chans, seed=CONTENT_IDENTITY_SEED,
+            window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+        op_stamp["raster_content_identity"] = dataclasses.asdict(export_identity)
+    except Exception:
+        logger.warning("export-time raster content identity could not be recorded", exc_info=True)
     write_sidecar(out, op_stamp)
 
     exp_id = identity["experiment_id"]

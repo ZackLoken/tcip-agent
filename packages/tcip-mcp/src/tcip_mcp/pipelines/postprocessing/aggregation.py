@@ -270,6 +270,12 @@ def export_aggregated_csv(
     image). ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped
     ``validated=false``.
 
+    A bucket whose sidecar records a claim scope (which raster its predictions were produced on,
+    written by the whole-raster export regime) also gates on that dimension, whatever the task: an
+    operating point calibrated on one mosaic says nothing about a bucket produced on another, so a
+    recorded scope that cleared nothing floors this delivery the same way an uncalibrated conf
+    does. A bucket recording no claim scope never acquires the dimension.
+
     Args:
         results: Output from aggregate_per_plant().
         output_path: Path for the output CSV file.
@@ -296,6 +302,7 @@ def export_aggregated_csv(
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
         check_delivery_gate,
+        reconcile_claim_scope_validity,
         reconcile_operating_point_validity,
         reconcile_ordinal_validity,
         reconcile_regression_validity,
@@ -310,6 +317,10 @@ def export_aggregated_csv(
 
     tile_recon = {"operative": False, "validated": None}
     scale_recon = {"operative": False, "validated": None}
+    # Which raster a bucket's predictions were produced on is a fact about the bucket, not about
+    # the task being delivered, so this reconciles for any bucket that records one.
+    claim_scope_recon = (reconcile_claim_scope_validity(pred_dirs) if pred_dirs
+                         else {"operative": False, "validated": None})
     if pred_dirs and task == "ordinal":
         state = reconcile_ordinal_validity(pred_dirs, asserted=measurement_validated)["validated"]
     elif pred_dirs and task == "regression":
@@ -337,6 +348,8 @@ def export_aggregated_csv(
         flags["tile_size"] = tile_recon["validated"]
     if scale_recon["operative"]:
         flags["scale"] = scale_recon["validated"]
+    if claim_scope_recon["operative"]:
+        flags["claim_scope"] = claim_scope_recon["validated"]
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)

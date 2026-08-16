@@ -1,0 +1,216 @@
+"""A per-plant orthomosaic delivery resolves detections only through the raster its bucket was
+produced on.
+
+The counts in the delivered CSV are attributed to plants by the caller-supplied raster's own
+georeferencing, so the raster is part of the measurement, not a convenience argument: a
+pixel-identical copy at a moved tiepoint re-attributes every count to a neighbouring plant, and a
+far-shifted one reads every plant as an explicit zero. Covers the delivery-time identity check and
+the claim-scope dimension the shared delivery gate reconciles from a bucket's own sidecar.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("torchvision")
+
+from tcip_mcp.pipelines.resolution import (  # noqa: E402
+    VALIDATED_FALSE, VALIDATED_HELD_OUT, VALIDATED_SAME_MOSAIC_IDENTITY,
+)
+from tests.test_orthomosaic_tools import (  # noqa: E402
+    _PLANT_PIXELS, TIEPOINT_NATIVE_X, TILE, _bespoke_detection_checkpoint, _plant_grid_csv,
+    _replace_boxes, _write_geo_raster,
+)
+
+# One detection sitting on the first plant of the grid (pixel 10, 10).
+_ON_FIRST_PLANT = [(8.0, 8.0, 12.0, 12.0)]
+
+
+def _project(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True)
+
+
+def _raster_bucket(tmp_path, raster_path: Path, boxes) -> Path:
+    """A bucket from the real producer: export_predictions's whole-raster regime."""
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = tmp_path / "preds"
+    result = export_predictions(
+        _bespoke_detection_checkpoint(tmp_path), output_dir=str(out_dir),
+        raster_path=str(raster_path), conf_threshold=0.0, tile_size=TILE)
+    assert "error" not in result, result
+    _replace_boxes(Path(result["files"][0]), boxes)
+    return out_dir
+
+
+def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
+    """A bucket whose sidecar is written directly, for the stamps a live run cannot produce."""
+    d = tmp_path / name
+    d.mkdir(parents=True, exist_ok=True)
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    json_io.write_annotations(
+        str(d / "mosaic.json"),
+        [Annotation(subject="0", geometry=BBox(8.0, 8.0, 12.0, 12.0), score=0.9)], 64, 64,
+        keep_empty=True)
+    (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+    return d
+
+
+def _validated_count_stamp(*, claim_scope: str | None = None) -> dict:
+    stamp = {"validated": True,
+             "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
+    if claim_scope is not None:
+        stamp["claim_scope_validated"] = claim_scope
+    return stamp
+
+
+# ── the delivery-time identity check ─────────────────────────────────────
+
+
+def test_delivery_refuses_a_pixel_identical_raster_whose_tiepoint_moved(tmp_path, monkeypatch):
+    """Identical pixels at a moved tiepoint resolve every detection onto a different plant, so the
+    raster is refused rather than silently believed: the content half alone cannot see this."""
+    _project(tmp_path, monkeypatch)
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    moved = tmp_path / "mosaic_moved.tif"
+    _write_geo_raster(moved, tiepoint_x=TIEPOINT_NATIVE_X + 20.0)
+
+    bucket = _raster_bucket(tmp_path, raster_path, _ON_FIRST_PLANT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket), str(moved), [str(plant_csv)], str(out_csv), trait_name="catkin_count",
+        acknowledge_unvalidated=True)
+
+    assert "error" in refused
+    assert "georeferencing mismatch" in refused["error"]
+    assert "tiepoint_native_x" in refused["error"]
+    assert not out_csv.exists()
+
+
+def test_delivery_refuses_a_raster_of_different_content(tmp_path, monkeypatch):
+    """The content half still refuses on its own: a different mosaic at the same tiepoint."""
+    _project(tmp_path, monkeypatch)
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    other = tmp_path / "other.tif"
+    _write_geo_raster(other, seed=7)
+
+    bucket = _raster_bucket(tmp_path, raster_path, _ON_FIRST_PLANT)
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket), str(other), [str(plant_csv)], str(out_csv), trait_name="catkin_count",
+        acknowledge_unvalidated=True)
+
+    assert "error" in refused
+    assert "content mismatch" in refused["error"]
+    assert not out_csv.exists()
+
+
+def test_delivery_refuses_a_bucket_that_records_no_raster_identity(tmp_path, monkeypatch):
+    """No recorded identity means nothing to check the supplied raster against, so the delivery
+    refuses and names the regime that records one rather than trusting whatever it was handed."""
+    _project(tmp_path, monkeypatch)
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket = _hand_written_bucket(tmp_path, "preds_no_identity", _validated_count_stamp())
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="catkin_count")
+
+    assert "error" in refused
+    assert "export_predictions" in refused["error"]
+    assert not out_csv.exists()
+
+
+def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeypatch):
+    """The legitimate call is unchanged: the same raster delivers, with the identity recorded by
+    the producer itself rather than written into the fixture by hand."""
+    _project(tmp_path, monkeypatch)
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    bucket = _raster_bucket(tmp_path, raster_path, _ON_FIRST_PLANT)
+
+    recorded = json.loads((bucket / "operating_point.json").read_text())["raster_content_identity"]
+    assert recorded["width"] == 64 and recorded["pixel_checksum"]
+    assert recorded["geotransform"]["tiepoint_native_x"] == TIEPOINT_NATIVE_X
+
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    delivered = deliver_orthomosaic_plant_counts(
+        str(bucket), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="catkin_count",
+        acknowledge_unvalidated=True)
+
+    assert "error" not in delivered
+    assert delivered["n_mapped"] == 1
+    rows = {r["plant_id"]: r for r in csv.DictReader(out_csv.open(newline=""))}
+    assert rows["plot0"]["value"] == "1"
+
+
+# ── the claim-scope dimension of the shared delivery gate ────────────────
+
+
+def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    return export_aggregated_csv(
+        [{"plant_id": "plot0", "value": 3, "observations": 1}], str(tmp_path / name),
+        trait_name="catkin_count", measurement_validated=VALIDATED_HELD_OUT,
+        pred_dirs=[str(bucket)])
+
+
+def test_delivery_gate_ships_a_bucket_scoped_to_the_mosaic_it_was_produced_on(tmp_path):
+    bucket = _hand_written_bucket(
+        tmp_path, "preds", _validated_count_stamp(claim_scope=VALIDATED_SAME_MOSAIC_IDENTITY))
+    out = _aggregated(tmp_path, bucket)
+    rows = list(csv.DictReader(Path(out).open(newline="")))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_delivery_gate_refuses_a_bucket_whose_claim_scope_cleared_nothing(tmp_path):
+    bucket = _hand_written_bucket(
+        tmp_path, "preds", _validated_count_stamp(claim_scope=VALIDATED_FALSE))
+    with pytest.raises(ValueError, match="claim_scope"):
+        _aggregated(tmp_path, bucket)
+
+
+def test_delivery_gate_refuses_a_claim_scope_borrowed_from_another_dimension(tmp_path):
+    """A held-out annotation reference says nothing about which raster produced the bucket, so it
+    clears nothing here even though the gate treats it as shippable for the dimension it belongs
+    to."""
+    bucket = _hand_written_bucket(
+        tmp_path, "preds", _validated_count_stamp(claim_scope=VALIDATED_HELD_OUT))
+    with pytest.raises(ValueError, match="claim_scope"):
+        _aggregated(tmp_path, bucket)
+
+
+def test_delivery_gate_never_gates_a_bucket_that_records_no_claim_scope(tmp_path):
+    """The dimension is operative only for a bucket that records one, so every other delivery is
+    unaffected."""
+    bucket = _hand_written_bucket(tmp_path, "preds", _validated_count_stamp())
+    out = _aggregated(tmp_path, bucket)
+    rows = list(csv.DictReader(Path(out).open(newline="")))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
