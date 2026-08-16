@@ -387,8 +387,7 @@ describe("ResultsTab onset table validity marker", () => {
 });
 
 describe("ResultsTab operationalization records", () => {
-  // Every field the record_seen hash covers is non-empty here, so the row's rendering of each one
-  // is asserted against the hashed set itself rather than against a chosen subset.
+  // Every hashed field is non-empty here, so rendering is asserted against the hashed set itself.
   const COUNT_RECORD: OperationalizationRecord = {
     trait: "subject_b_total",
     delivery_kind: "per_plant_count_aggregate",

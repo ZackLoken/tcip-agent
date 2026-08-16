@@ -329,8 +329,7 @@ export const resultsApi = {
   onsetDates: (body: PhenologyRequest) =>
     postJson<PhenologyResponse<OnsetRow>>(ROUTES.postResultsOnsetDates, body),
 
-  // Every operationalization record this project holds. The key is a trait plus a delivery kind,
-  // so the surface enumerates what exists rather than selecting from a fixed list of kinds.
+  // Enumerates what exists: records are keyed by trait plus delivery kind, never a fixed kind list.
   operationalizations: (project_root: string) =>
     getJson<{ records: OperationalizationRecord[] }>(
       `${ROUTES.getResultsOperationalizations}?project_root=${encodeURIComponent(project_root)}`,
@@ -363,8 +362,7 @@ export const resultsApi = {
       body: JSON.stringify({ ...body, acknowledge_unvalidated: false, payload, filename }),
     });
     if (!resp.ok) {
-      // The same decoder every JSON call uses, so a structured refusal reaches this door parsed
-      // rather than stringified.
+      // The same decoder every JSON call uses, so a structured refusal arrives parsed, not stringified.
       throw await decodeRefusal(resp, `export_csv failed: ${resp.status}`);
     }
     return await resp.blob();
