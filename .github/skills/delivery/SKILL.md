@@ -75,7 +75,11 @@ sample, see the `evaluation` and `cv-research` skills), read from the prediction
 
 - `compute_phenology` gates both the elongation classifier (reconciled from
   `classifier_operating_point.json`, see `calibrate_classifier_operating_point`) and the count
-  operating point; the web `/export_csv` phenology branch gates the same, per row.
+  operating point; the web `/export_csv` phenology branch gates the same, per row. The phenology
+  CSV's own schema (`phenology_csv_columns`, not the per-plant table above) carries the same
+  producer tail: `producer_model_sha256`, `producer_experiment_id` and `validation_record`, filled
+  from the verified bindings, so a bucket whose claim no record answers for delivers those cells
+  blank rather than repeating the names its stamp asserted.
 - `tabulate_counts` gates the count operating point on the run's resolved bundle, so it calls
   `export_detection_csv` without `pred_dirs` and passes it the already-reconciled state directly.
   `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same way: pass

@@ -591,7 +591,7 @@ Docstring is the function's docstring first line, verbatim.
 | `update_trait_spec_fields` | `phenology_tools.py:110` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
 | `calibrate_classifier_operating_point` | `phenology_tools.py:395` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
 | `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:556` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:737` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `compute_phenology` | `phenology_tools.py:744` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -760,14 +760,14 @@ registered at HEAD.
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:111` |
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:158` |  <!-- queued: P5-129 delete -->
-| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:379` |  <!-- queued: P5-130 merge-or-split -->
-| POST | `/onset_dates` | `onset_dates` | `routes/results.py:402` |  <!-- queued: P5-131 merge-or-split -->
-| POST | `/export_csv` | `export_csv` | `routes/results.py:425` |
-| GET | `/traits` | `list_traits` | `routes/results.py:673` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:556` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:572` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:610` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:702` |
+| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:382` |  <!-- queued: P5-130 merge-or-split -->
+| POST | `/onset_dates` | `onset_dates` | `routes/results.py:405` |  <!-- queued: P5-131 merge-or-split -->
+| POST | `/export_csv` | `export_csv` | `routes/results.py:428` |
+| GET | `/traits` | `list_traits` | `routes/results.py:683` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:566` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:582` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:620` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:712` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
 
@@ -1671,7 +1671,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:701` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:711` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar

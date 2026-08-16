@@ -591,6 +591,10 @@ def calibrate_ordinal_regression_operating_point(
     stamp is written last. A calibration that does not clear its gate stamps unvalidated, with its
     failures, and earns nothing.
 
+    Record and stamp carry ``checkpoint_sha256`` from ``resolve_model_identity`` over the checkpoint
+    this door itself ran, rather than the classifier door's copied evidence, which has nothing to copy
+    here: running the checkpoint is what makes the hash the identity behind the scored predictions.
+
     Args:
         trait_name: The registered trait whose rank/value prediction is being calibrated.
         task: ``"ordinal"`` or ``"regression"``, dispatches which criterion toolkit, item shape and
@@ -686,10 +690,13 @@ def calibrate_ordinal_regression_operating_point(
 
     from tcip_mcp.project_paths import resolve_output_path
 
+    from tcip_mcp.model_registry import resolve_model_identity
     from tcip_mcp.pipelines.resolution import open_validation, seal_validation, write_sidecar
 
     out = resolve_output_path(output_dir)
     document = f"{task}_operating_point"
+    checkpoint_sha256 = resolve_model_identity(
+        checkpoint_path, experiment_id=experiment_id)["sha256"]
     stamp = {
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},
@@ -697,8 +704,7 @@ def calibrate_ordinal_regression_operating_point(
         "validated_by": None,
         "failures": result["failures"],
         "sweep_data": result["sweep_data"],
-        # No staged prediction bucket carries a checkpoint identity for this door to copy.
-        "checkpoint_sha256": None,
+        "checkpoint_sha256": checkpoint_sha256,
         "experiment_id": experiment_id,
         "trait": trait_name,
     }
@@ -709,7 +715,8 @@ def calibrate_ordinal_regression_operating_point(
             evidence={"resolver": resolver.__name__,
                       "inputs": {"criterion": criterion, "calibration_items": cal_items,
                                  "holdout_items": hold_items}},
-            trait=trait_name, checkpoint_sha256=None, producing_experiment_id=experiment_id,
+            trait=trait_name, checkpoint_sha256=checkpoint_sha256,
+            producing_experiment_id=experiment_id,
             reference_inputs={
                 "dataset_root": dataset_root,
                 "label_csvs": {"reference": csv_path},
@@ -793,6 +800,11 @@ def compute_phenology(
     geometry and no explicit caller override refuses here, the same way an uncalibrated conf does.
     Buckets from untiled runs are never gated on it.
 
+    The delivered CSV's producer tail (``producer_model_sha256``, ``producer_experiment_id``,
+    ``validation_record``) is built from the bindings the reconciliation verified, so a bucket whose
+    validation claim no record answers for delivers those cells empty rather than carrying the names
+    it asserted for itself, and a delivery every bucket of which is bound names the records.
+
     Returns a summary. Measurement-integrity guard: if no bucket, anywhere in the delivery, ever
     classified along the trait's positive-class axis, the positive fraction is not a valid measurement
     anywhere, the tool refuses to write the CSV and returns ``error`` with
@@ -865,6 +877,7 @@ def compute_phenology(
         reconcile_classifier_validity,
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
+        record_delivery_binding_event,
     )
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
@@ -940,9 +953,7 @@ def compute_phenology(
             "n_plants": len(rows),
         }
 
-    # Producing-model identity is recovered from the prediction dirs' operating_point.json sidecars
-    # (stamped by export_predictions) so the delivered curve names the exact checkpoint + run behind
-    # its counts. Distinct producers across dates collapse to "multiple"; absent -> left empty.
+    # What the sidecars assert about the producer, corroborated below against the verified bindings.
     producer = _resolve_producer_identity(predictions_by_date)
 
     # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
@@ -953,8 +964,10 @@ def compute_phenology(
         "operating_point_validated": gate.column_stamp(
             "operating_point", own_column=("classifier",)),
         "positive_state_classifier_validated": gate.stamp["classifier"],
-        "producer_model_sha256": producer.get("sha256"),
-        "producer_experiment_id": producer.get("experiment_id"),
+        **phenology.delivered_provenance_cells(
+            {"producer_model_sha256": producer.get("sha256"),
+             "experiment_id": producer.get("experiment_id")},
+            recon["bindings"]),
     }
     provisional_column = phenology.majority_provisional_column(spec)
     if provisional_column:
@@ -967,6 +980,8 @@ def compute_phenology(
         return {"error": still_stated.message, "n_plants": len(rows)}
     csv_path = phenology.write_phenology_csv(
         rows, Path(output_csv_path), spec, stamp=stamp, basis=still_stated.basis)
+    record_delivery_binding_event("compute_phenology", str(csv_path),
+                                  list(predictions_by_date.values()), recon["bindings"])
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares,
     # not a single hardcoded "50per" key, a trait authored with different milestone fractions has
     # no fabricated zero for a crossing it was never asked to report.

@@ -18,7 +18,8 @@ from tcip_mcp import operationalization as op
 from tcip_mcp.traits import TraitUnknownError
 from tcip_web.app import app
 from tests import _operationalization_fixtures as fx
-from tests.test_tcip_web_results_routes import _phenology_fixture
+from tests._binding_fixtures import PRODUCER_CHECKPOINT_SHA256
+from tests.test_tcip_web_results_routes import _expected_validation_record, _phenology_fixture
 
 
 @pytest.fixture
@@ -338,26 +339,35 @@ def test_the_record_is_read_from_the_project_the_caller_names(project: Path, mon
 
 # ── the crossing delivery doors ──────────────────────────────────────────────
 
-DELIVERED_GOLDEN = (
-    b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
-    b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
-    b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
-    b"catkin_95per_date_bound,catkin_elongation_provisional,operating_point_conf,"
-    b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
-    b"producer_experiment_id\r\n"
-    b"PLANT_A,AccA,2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
-    b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,abc123,exp-1"
-    b"\r\n"
-    b"PLANT_B,AccB,2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
-    b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,abc123,exp-1"
-    b"\r\n"
-)
-"""What a confirmed crossing delivery writes, byte for byte, for the golden inputs below.
 
-Both writers produce this: the tool's ``write_phenology_csv`` and the web door's own DictWriter.
-A precondition in front of a door must leave what the door delivers untouched, so this is asserted
-as bytes rather than as the absence of an error.
-"""
+def delivered_golden(body: dict) -> bytes:
+    """What a confirmed crossing delivery writes, byte for byte, for the golden inputs below.
+
+    Both writers produce this: the tool's ``write_phenology_csv`` and the web door's own DictWriter.
+    A precondition in front of a door must leave what the door delivers untouched, so this is
+    asserted as bytes rather than as the absence of an error.
+
+    The one cell no constant can hold is ``validation_record``: a record's digest covers the buckets
+    at their absolute dataset root, which is this run's own temporary directory. It is read from the
+    buckets' own stamps, so the golden still compares the delivered cell against the records the
+    stamps name rather than against whatever the delivery put there.
+    """
+    record = _expected_validation_record(body).encode()
+    sha = PRODUCER_CHECKPOINT_SHA256.encode()
+    row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
+           b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,"
+           + sha + b",exp-1," + record + b"\r\n")
+    return (
+        b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
+        b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
+        b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
+        b"catkin_95per_date_bound,catkin_elongation_provisional,operating_point_conf,"
+        b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
+        b"producer_experiment_id,validation_record\r\n"
+        + b"PLANT_A,AccA" + row
+        + b"PLANT_B,AccB" + row
+    )
+
 
 GOLDEN_INPUTS = {"fractions": (0.0, 1.0), "detections": 2}
 
@@ -621,7 +631,7 @@ def test_a_confirmed_delivery_writes_the_bytes_it_wrote_before_the_precondition(
     res = _compute(body, out_csv, **_validated_call(body))
 
     assert "error" not in res, res
-    assert out_csv.read_bytes() == DELIVERED_GOLDEN
+    assert out_csv.read_bytes() == delivered_golden(body)
 
 
 def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
@@ -634,8 +644,8 @@ def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
                        json={**body, "payload": "milestones", "filename": "x.csv"})
 
     assert resp.status_code == 200, resp.text
-    assert resp.content == DELIVERED_GOLDEN
-    assert (tmp_path / "results_export" / "x.csv").read_bytes() == DELIVERED_GOLDEN
+    assert resp.content == delivered_golden(body)
+    assert (tmp_path / "results_export" / "x.csv").read_bytes() == delivered_golden(body)
 
 
 def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: Path):

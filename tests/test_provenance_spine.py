@@ -194,20 +194,10 @@ def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
 # ── R2: delivery CSVs carry the producing-model provenance columns ────────────
 
 def _run_with_a_recorded_checkpoint(tmp_path, experiment_id):
-    """A run whose own record answers for the checkpoint a delivery names it by.
+    """A run whose own record answers for the checkpoint a delivery names it by."""
+    from tests._binding_fixtures import record_producing_run
 
-    A delivered producer column is emitted only when something outside the prediction bucket
-    corroborates it, so a test wanting the populated case has to leave that evidence behind: the
-    experiment record and the weights it filed, which is what a completed run files for itself.
-    """
-    from tcip_mcp.experiments import create_experiment, update_lineage
-    from tcip_mcp.model_registry import checkpoint_sha256
-
-    ckpt = tmp_path / "model_best.pt"
-    ckpt.write_bytes(b"the bytes a producing run left behind")
-    create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
-    update_lineage(experiment_id, model_weights=str(ckpt))
-    return checkpoint_sha256(ckpt)
+    return record_producing_run(tmp_path, experiment_id)
 
 
 def test_export_detection_csv_carries_provenance(tmp_path):
@@ -251,3 +241,4 @@ def test_phenology_columns_include_producer_identity():
     columns = phenology_csv_columns(CATKIN)
     assert "producer_model_sha256" in columns
     assert "producer_experiment_id" in columns
+    assert "validation_record" in columns

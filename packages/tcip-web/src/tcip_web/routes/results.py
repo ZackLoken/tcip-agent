@@ -199,10 +199,12 @@ class _PhenologyMeasurement:
 
     def __init__(
         self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
-        basis,
+        basis, bindings: dict, pred_dirs: list[str],
     ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
+        # What the count reconciliation verified per bucket, and the buckets it verified.
+        self.bindings, self.pred_dirs = bindings, pred_dirs
         # The guarded, resolved root every later write and audit entry resolves from.
         self.project_root = project_root
         # What the precondition rested on, re-checked before this measurement reaches a caller.
@@ -311,7 +313,8 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     )
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, payload.predictions_by_date)
     return _PhenologyMeasurement(
-        spec, plants, validity, gate, positive_class_id, root, stated.basis)
+        spec, plants, validity, gate, positive_class_id, root, stated.basis,
+        recon["bindings"], pred_dirs)
 
 
 def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
@@ -433,7 +436,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
 
     Milestone rows are written in the canonical ``phenology_csv_columns`` schema, so a web-delivered
     CSV and the MCP door's ``write_phenology_csv`` cannot disagree about what a phenology
-    delivery's columns are.
+    delivery's columns are. The producer tail comes from ``delivered_provenance_cells`` over the
+    bindings the reconciliation verified, the same builder the MCP door stamps from, so neither door
+    can put a producer name into a delivered CSV that nothing outside the bucket answers for.
     """
     measurement = _measure_phenology(payload)
     if measurement.gate.unvalidated:
@@ -454,6 +459,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     # column a schema declares but nothing fills is a phantom that must not reach the delivered CSV.
     # Both payloads are the same measurement, so both carry the same chain. Uses phenology_tools'
     # own resolver rather than re-reading the sidecars here.
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
     from tcip_mcp.tools.phenology_tools import _resolve_producer_identity
 
     producer = _resolve_producer_identity(payload.predictions_by_date)
@@ -461,8 +467,10 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         "operating_point_conf": measurement.validity["operating_point_conf"],
         "operating_point_validated": measurement.gate.stamp["operating_point"],
         "positive_state_classifier_validated": measurement.gate.stamp["classifier"],
-        "producer_model_sha256": producer.get("sha256"),
-        "producer_experiment_id": producer.get("experiment_id"),
+        **phenology.delivered_provenance_cells(
+            {"producer_model_sha256": producer.get("sha256"),
+             "experiment_id": producer.get("experiment_id")},
+            measurement.bindings),
     }
     if payload.payload == "milestones":
         provisional_column = phenology.majority_provisional_column(measurement.spec)
@@ -496,6 +504,8 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
         "rows": len(rows),
     })
+    record_delivery_binding_event("results.export_csv", str(saved_path),
+                                  measurement.pred_dirs, measurement.bindings)
     headers["X-TCIP-Saved-To"] = str(saved_path)
     return Response(content=body, media_type="text/csv", headers=headers)
 

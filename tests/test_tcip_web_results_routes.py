@@ -12,6 +12,8 @@ from tcip_annotation.state import Annotation, BBox
 
 from tcip_web.app import app
 
+from tests._binding_fixtures import PRODUCER_CHECKPOINT_SHA256
+
 # seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
@@ -85,7 +87,10 @@ def _phenology_fixture(
     ``validated`` controls only the sidecars' recorded validity, so the same numbers can be driven
     through every door with and without the evidence that qualifies them. A validated bucket earns a
     genuine validation record (:mod:`tests._binding_fixtures`) rather than asserting one, since a
-    stamp that claims validated is refused unless a record outside the bucket answers for it.
+    stamp that claims validated is refused unless a record outside the bucket answers for it. It
+    also files the producing run the stamp names, for the same reason one step further out: a
+    delivery repeats a producer identity only where an experiment outside the bucket corroborates
+    it, so a fixture that only asserted one would deliver blank producer columns.
 
     The trait and its confirmed operationalization are registered in the very root this body names,
     because that is the root the doors resolve both from. A caller passing a subdirectory gets a
@@ -93,13 +98,16 @@ def _phenology_fixture(
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
-    from tests._binding_fixtures import write_bound_sidecar
+    from tests._binding_fixtures import record_producing_run, write_bound_sidecar
     from tests._operationalization_fixtures import seed_confirmed_crossing, write_spec
     from tests._trait_fixtures import CATKIN
 
     write_spec(tmp_path, CATKIN)
     seed_confirmed_crossing(tmp_path, CATKIN.name)
 
+    # A stamp naming a producing run is only repeated in a delivery when that run really exists.
+    checkpoint_sha256 = (record_producing_run(tmp_path, producing_experiment_id)
+                         if validated and producing_experiment_id else "abc123")
     id_map = id_map or _ID_MAP
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
     positive = "elongated" if "elongated" in id_map else None
@@ -133,7 +141,7 @@ def _phenology_fixture(
                 "trait": "catkin",
                 "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
                 "experiment_id": producing_experiment_id,
-                "checkpoint_sha256": "abc123",
+                "checkpoint_sha256": checkpoint_sha256,
             })
             write_bound_sidecar(bucket, sidecar, dataset_root=root,
                                 experiment_id=f"exp-op-{date_str}",
@@ -154,6 +162,20 @@ def _phenology_fixture(
     mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
     return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
             "predictions_by_date": preds, "trait": "catkin"}
+
+
+def _expected_validation_record(body: dict) -> str:
+    """The record cell a delivery from these buckets must carry, read off the buckets' own pointers.
+
+    Derived from each stamp's ``validated_by`` rather than from the delivery being checked, so the
+    assertion compares the delivered cell against the records the stamps actually name.
+    """
+    pointers = set()
+    for pred_dir in body["predictions_by_date"].values():
+        stamp = json.loads((Path(pred_dir) / "operating_point.json").read_text(encoding="utf-8"))
+        by = stamp["validated_by"]
+        pointers.add(f"{by['experiment_id']}:{by['record_digest']}")
+    return "; ".join(sorted(pointers))
 
 
 def test_per_plant_curves_uses_mapping_and_counts(client: TestClient, tmp_path: Path) -> None:
@@ -478,7 +500,8 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["positive_state_classifier_validated"] == "held_out_annotations"
     assert cells["operating_point_conf"] == "0.4"
     assert cells["producer_experiment_id"] == "exp-1"
-    assert cells["producer_model_sha256"] == "abc123"
+    assert cells["producer_model_sha256"] == PRODUCER_CHECKPOINT_SHA256
+    assert cells["validation_record"] == _expected_validation_record(body)
     assert [c for c, v in cells.items() if v == ""] == []
 
 
@@ -587,6 +610,28 @@ def test_a_correctly_bound_classifier_still_delivers(client: TestClient, tmp_pat
                        ).status_code == 200
 
 
+def test_the_web_export_records_what_verification_found_in_the_datasets_own_log(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The audited arguments say what was asked for; this says which buckets stood behind the
+    numbers and which records answered for them, in the log that travels with the data. The same
+    event the MCP door emits, from the door that writes the same schema."""
+    body = _phenology_fixture(tmp_path, validated=True)
+    resp = client.post("/api/results/export_csv",
+                       json={**body, "payload": "milestones", "filename": "x.csv"})
+    assert resp.status_code == 200, resp.text[:300]
+
+    log = tmp_path / "ds" / ".tcip" / "audit.jsonl"
+    assert log.is_file(), "the delivery wrote nothing to the log of the dataset its buckets sit in"
+    emitted = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln]
+    events = [e for e in emitted if e["tool"] == "results.export_csv" and "verified_buckets" in e]
+    assert len(events) == 1, emitted
+    verified = events[0]["verified_buckets"]
+    assert set(verified) == set(body["predictions_by_date"].values())
+    assert all(v["verified"] for v in verified.values())
+    assert events[0]["record_digests"], events[0]
+
+
 def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
     client: TestClient, tmp_path: Path,
 ) -> None:
@@ -615,7 +660,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     # fails on the delivered BYTES when the stamp is absent, not on a missing symbol.
     provenance = ["operating_point_conf", "operating_point_validated",
                   "positive_state_classifier_validated", "producer_model_sha256",
-                  "producer_experiment_id"]
+                  "producer_experiment_id", "validation_record"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
@@ -627,6 +672,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
         assert cells[col] != "", col
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["producer_experiment_id"] == "exp-1"
+    assert cells["validation_record"] == _expected_validation_record(body)
 
 
 def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
