@@ -507,14 +507,14 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `read_annotations` | `annotation_tools.py:83` | yes | Load the ground-truth labels and predictions for a single image. |
-| `save_annotations` | `annotation_tools.py:129` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `score_predictions` | `annotation_tools.py:411` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
-| `segment_prompt` | `annotation_tools.py:443` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
-| `push_panel_data` | `annotation_tools.py:539` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus` | `annotation_tools.py:570` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
-| `stage_proposals` | `annotation_tools.py:769` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:900` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `read_annotations` | `annotation_tools.py:93` | yes | Load the ground-truth labels and predictions for a single image. |
+| `save_annotations` | `annotation_tools.py:139` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
+| `score_predictions` | `annotation_tools.py:421` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
+| `segment_prompt` | `annotation_tools.py:453` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
+| `push_panel_data` | `annotation_tools.py:549` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `focus` | `annotation_tools.py:580` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
+| `stage_proposals` | `annotation_tools.py:779` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+| `write_class_map` | `annotation_tools.py:910` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)
 
@@ -763,11 +763,11 @@ registered at HEAD.
 | POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:379` |  <!-- queued: P5-130 merge-or-split -->
 | POST | `/onset_dates` | `onset_dates` | `routes/results.py:402` |  <!-- queued: P5-131 merge-or-split -->
 | POST | `/export_csv` | `export_csv` | `routes/results.py:425` |
-| GET | `/traits` | `list_traits` | `routes/results.py:666` |
+| GET | `/traits` | `list_traits` | `routes/results.py:673` |
 | GET | `/operationalization` | `get_operationalization` | `routes/results.py:556` |
 | GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:572` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:603` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:695` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:610` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:702` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
 
@@ -964,7 +964,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:387`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:419`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1085,7 +1085,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:266`
 `tcip_mcp.class_registry.stamp_unstamped_confirmations`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:215`, called by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:169`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:900`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:910`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1275,7 +1275,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:215`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:387` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:419` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:184`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:152`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -1515,9 +1515,9 @@ Phase 3 verdict: duplicated.
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:692` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:702` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:282` (`if event.event_type == "review_focus":`).
-Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-name mismatch on this seam, and it still holds: the posted payload carries a key named `subject` (`annotation_tools.py:688-692`), while both readers take `active_subject` (`app.py:295-296`, `frontend/src/lib/annotateFocus.ts:21,54`), so the browser's `setActiveSubject` call this seam exists to trigger is never reached from an agent-posted `annotate_focus` event.
+Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-name mismatch on this seam, and it still holds: the posted payload carries a key named `subject` (`annotation_tools.py:698-702`), while both readers take `active_subject` (`app.py:295-296`, `frontend/src/lib/annotateFocus.ts:21,54`), so the browser's `setActiveSubject` call this seam exists to trigger is never reached from an agent-posted `annotate_focus` event.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 
@@ -1607,14 +1607,14 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:40` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:344` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:376` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
 
 Must agree: every reader refuses rather than guesses when a file's format is undetermined.
 Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:61` (`def detect_format(path: str) -> AnnotFormat:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:105` (`file_fmt = fmt or detect_format(str(gt_path))`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:115` (`file_fmt = fmt or detect_format(str(gt_path))`).
 Phase 3 verdict: single.
 
 ## S20. classes.json class registry
@@ -1671,7 +1671,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:694` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:701` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar

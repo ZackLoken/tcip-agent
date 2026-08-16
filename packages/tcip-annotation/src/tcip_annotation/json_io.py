@@ -294,6 +294,8 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
 
 # ── reference admissibility ────────────────────────────────────────────────
 
+PERSON_IDENTITY_PREFIX = "user:"  # spelled here, not imported: this package depends only on tcip-store
+
 
 def is_unadjudicated_prediction(a: Annotation) -> bool:
     """True when ``a`` is a model's own output that no human has taken responsibility for.
@@ -306,13 +308,31 @@ def is_unadjudicated_prediction(a: Annotation) -> bool:
     return a.score is not None
 
 
+def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
+    """True when ``a`` names a producer that is not a person and no reviewer has signed off on it.
+
+    A person's recorded identity opens with :data:`PERSON_IDENTITY_PREFIX`, while a tool producer
+    stays bare (``sam``, an agent's own name) or carries a ``model:<checkpoint>`` stamp, so an
+    authorship without that prefix is something other than a person's statement. An annotation
+    carrying no ``created_by`` at all is not claimed by this rule: it is unattributed, not
+    attributed to a machine, and the pre-provenance hand labels a project already holds read that
+    way. A set ``accepted_by`` is a reviewer taking responsibility for the record, which is what
+    turns machine-origin ground truth back into something a person stands behind.
+    """
+    if not a.created_by or a.created_by.startswith(PERSON_IDENTITY_PREFIX):
+        return False
+    return not a.accepted_by
+
+
 def require_reference_ground_truth(directory: str | Path) -> None:
-    """Refuse ``directory`` as a measurement reference when it holds unadjudicated predictions.
+    """Refuse ``directory`` as a measurement reference when only the model stands behind it.
 
     The rule every reference read shares: a calibration or held-out reference is only a measurement
-    if something other than the model produced it. A directory of the model's own predictions
-    clears every numeric gate a calibration applies, since the model agrees with itself, so the
-    gates cannot catch it and the provenance has to.
+    if something other than the model produced it. Two shapes fail it, both provenance rather than
+    a number. A record carrying a prediction ``score`` is the model's own output. A record an agent
+    authored as ground truth, with no reviewer's ``accepted_by``, is the same output with the score
+    dropped. Either clears every numeric gate a calibration applies, since the model agrees with
+    itself, so the gates cannot catch it and the provenance has to.
 
     Refuses on the whole directory, never by dropping the offending records: a mixed directory
     silently narrowed to its admissible subset would validate against a reference nobody chose.
@@ -320,22 +340,34 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     checks that itself.
     """
     directory = Path(directory)
-    flagged = 0
+    scored = 0
     total = 0
+    agent_authored: list[str] = []
     for path in sorted(directory.glob("*.json")):
         for a in read_annotations(path):
             total += 1
-            flagged += is_unadjudicated_prediction(a)
-    if not flagged:
-        return
-    raise ValueError(
-        f"{flagged} of {total} annotations in {directory} carry a prediction score, so they are "
-        "the model's own output that no human has ruled on, and a reference built from them "
-        "measures the model against itself rather than against a measurement. Annotate this "
-        "reference, accept the model's proposals through review so each record is a reviewer's "
-        "call and carries their accepted_by, or validate against a breeder-confirmed sample of "
-        "the model's outputs instead."
-    )
+            scored += is_unadjudicated_prediction(a)
+            if is_unadjudicated_agent_authorship(a):
+                agent_authored.append(str(a.created_by))
+    if scored:
+        raise ValueError(
+            f"{scored} of {total} annotations in {directory} carry a prediction score, so they are "
+            "the model's own output that no human has ruled on, and a reference built from them "
+            "measures the model against itself rather than against a measurement. Annotate this "
+            "reference, accept the model's proposals through review so each record is a reviewer's "
+            "call and carries their accepted_by, or validate against a breeder-confirmed sample of "
+            "the model's outputs instead."
+        )
+    if agent_authored:
+        producers = ", ".join(sorted(set(agent_authored)))
+        raise ValueError(
+            f"{len(agent_authored)} of {total} annotations in {directory} are authored by "
+            f"{producers}, which names no person under this platform's {PERSON_IDENTITY_PREFIX}"
+            "<name> convention, and carry no accepted_by. Ground truth an agent wrote and no "
+            "human has adjudicated is not a calibration or holdout reference. The lighter path "
+            "is the review-confirmation loop: have a reviewer confirm these records so each one "
+            "carries their accepted_by, rather than hand-annotating the whole reference."
+        )
 
 
 # ── writer ─────────────────────────────────────────────────────────────────

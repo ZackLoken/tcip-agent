@@ -14,7 +14,7 @@ from tcip_annotation import (
     load_annotations_any,
     save_annotations_any,
 )
-from tcip_annotation.json_io import annotation_from_payload
+from tcip_annotation.json_io import _PROV_KEYS, annotation_from_payload
 from tcip_annotation.json_io import read_annotations as read_labels
 
 from tcip_mcp.dataset_layout import (
@@ -65,6 +65,12 @@ def _ann_dict(a: Annotation) -> dict:
     one ring (an occlusion-split instance_seg prediction), so the read side always represents every
     ring rather than silently reporting only the first. ``point`` is the same ``[x, y]`` key the
     on-disk schema uses, so a prompt/keypoint reads back as itself instead of as a geometry-less label.
+
+    Provenance travels out under the schema's own key names, and only where the record holds it, so
+    who authored a label and who accepted it are readable here rather than write-only. A reference's
+    admissibility turns on exactly those two fields
+    (:func:`tcip_annotation.json_io.require_reference_ground_truth`), so a reader that dropped them
+    could not tell agent-authored ground truth from a person's.
     """
     d: dict = {"subject": a.subject, "attributes": dict(a.attributes)}
     if isinstance(a.geometry, BBox):
@@ -75,6 +81,10 @@ def _ann_dict(a: Annotation) -> dict:
         d["point"] = [a.geometry.x, a.geometry.y]
     if a.score is not None:
         d["score"] = a.score
+    for k in _PROV_KEYS:
+        v = getattr(a, k, None)
+        if v is not None:
+            d[k] = v
     return d
 
 
