@@ -15,6 +15,7 @@ from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.feedback.materialize import (
     materialize_dataset, reviewed_image_names, select_unreviewed,
 )
+from tcip_mcp.project_paths import resolve_output_path
 
 
 def _review_state_exists(review_state_dir: str) -> bool:
@@ -26,7 +27,7 @@ def _review_state_exists(review_state_dir: str) -> bool:
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="output_dir", scope_via=resolve_output_path)
 def materialize_review_dataset(
     review_state_dir: str,
     source_images_dir: str,
@@ -60,8 +61,6 @@ def materialize_review_dataset(
             ``subject`` can't attribute its negatives, and they are silently dropped rather than
             carried into the curated set.
     """
-    from tcip_mcp.project_paths import resolve_output_path
-
     output_dir = str(resolve_output_path(output_dir))
     if not _review_state_exists(review_state_dir):
         return {"error": f"no review state (review/ shards) in {review_state_dir}"}

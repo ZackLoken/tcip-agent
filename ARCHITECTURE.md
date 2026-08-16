@@ -495,7 +495,8 @@ f943c12d4693409bcf2a0c1a4229d26b61d34cc1.
 the 55 `@mcp.tool()` decorator sites found in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`.
 Every one of the 55 `@mcp.tool()` sites is immediately followed by an `@audited` decorator
 (0 exceptions, verified by pairing each `@mcp.tool()` line with the line after it across
-all 13 tool modules).
+all 13 tool modules; seven of the sites read `@audited(scope_arg=...)`, so a check must match
+the decorator name rather than the whole line).
 
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
@@ -533,17 +534,17 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `materialize_review_dataset` | `feedback_tools.py:30` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:108` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+| `materialize_review_dataset` | `feedback_tools.py:31` | yes | Build a curated detection dataset from human review verdicts. |
+| `prioritize_review_queue` | `feedback_tools.py:107` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
 
 ### inference_tools.py (4 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:377` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:492` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1129` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1451` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `force_redraw_cal_holdout_split` | `inference_tools.py:378` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `run_inference` | `inference_tools.py:493` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1130` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1452` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -1140,18 +1141,25 @@ bug confined to the route's own HTTP layer would not be caught by the calibratio
 
 ## 9. `.tcip/audit.jsonl`, append-only tool-call log
 
-Path: `.tcip/audit.jsonl`, resolved via `resolve_state` against the pinned platform state root.
+Path: `.tcip/audit.jsonl` under the root the entry's scope names: the pinned platform state
+root, via `resolve_state`, for a platform event, and the dataset root for an event that changed
+a record travelling with the data.
 
-Writers: the `@audited` decorator, `packages/tcip-mcp/src/tcip_mcp/audit.py:111`; `record_event`,
-same file, line 85, which is what code that is not an `@audited` MCP tool emits through (the
-training envelope's open/close events, and each GUI route's own `_audit` helper). Both funnel
-through `_write_entry`, same file, line 76, which appends through the storage seam under the key
-`audit_log_key`, line 57, resolves: the platform root by default, or the dataset root for an
-event that changed a record travelling with the data.
+Writers: the `@audited` decorator, `packages/tcip-mcp/src/tcip_mcp/audit.py:139`, which records
+a call in the platform log unless the tool declares `@audited(scope_arg=...)` naming the
+argument that carries the dataset it mutates a record of, resolved by `dataset_scope_of`, line
+112 (through the same canonicalizer the tool body uses, when the declaration passes one as
+`scope_via`); `record_event`, same file, line 86, which is what code that is not an `@audited`
+MCP tool emits through (the training envelope's open/close events, and each GUI route's own
+`_audit` helper). Both funnel through `_write_entry`, same file, line 77, which appends through
+the storage seam under the key `audit_log_key`, line 58. Dataset-scoped entries carry a `scope`
+field naming their root; platform entries keep the original shape.
 
-Reader: not independently traced in the phase0 inventory or this session; append-only logs of
-this kind are read by ad hoc analysis tooling rather than one fixed reader module (flagged as an
-inference in phase0, not verified).
+Reader: no production code parses the log's entries. The only production consumer is
+`archive_project` (`tools/project_tools.py`), which copies the file into the archive by suffix
+without opening it. Rows are otherwise read only through the storage seam's `read_log`, which
+decodes each line into an opaque mapping, and by tests that access named keys, so a new
+per-entry field is additive for every existing consumer.
 
 Seam S06 ("Append-only audit log .tcip/audit.jsonl"), verdict `one-side-only`,
 `phase0_implementation: mixed`: `tests/test_audit_experiments.py:25,57`,
@@ -1484,8 +1492,8 @@ Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-nam
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 
-Must agree: mutations from any process land in the same JSONL log with the same entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:111` (`def audited(fn: Callable) -> Callable:`) and `record_event`, line 85, the one emitter for code that is not an `@audited` tool; both append through `_write_entry`, line 76.
+Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:139` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 86, the one emitter for code that is not an `@audited` tool; both append through `_write_entry`, line 77.
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:77` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 
@@ -1591,7 +1599,7 @@ Phase 3 verdict: single.
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:295` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/datasets.py:120`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:102` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:103` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store

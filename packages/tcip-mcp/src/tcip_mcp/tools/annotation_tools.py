@@ -125,7 +125,7 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="image_path")
 def save_annotations(
     image_path: str,
     annotations: list[dict] | None = None,
@@ -765,7 +765,7 @@ def _focus_review(
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="dataset_root")
 def stage_proposals(
     dataset_root: str,
     model_name: str,
@@ -896,7 +896,7 @@ def stage_proposals(
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="dataset_root")
 def write_class_map(dataset_root: str, subjects: dict, output_path: str = "") -> dict:
     """Author the dataset's nested class registry, a thin wrapper over ``class_registry``.
 

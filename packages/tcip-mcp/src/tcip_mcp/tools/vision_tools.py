@@ -825,7 +825,7 @@ def propose_annotations(
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="image_path")
 def accept_proposals(
     image_path: str,
     assignments: list[dict],

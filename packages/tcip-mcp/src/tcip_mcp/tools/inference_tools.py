@@ -19,6 +19,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
 )
+from tcip_mcp.project_paths import resolve_output_path
 
 logger = logging.getLogger(__name__)
 
@@ -1125,7 +1126,7 @@ def _export_predictions_raster(
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="output_dir", scope_via=resolve_output_path)
 def export_predictions(
     checkpoint_path: str,
     images_dir: str | None = None,
@@ -1283,7 +1284,7 @@ def export_predictions(
         resolve_writable_bucket,
         review_state_dir_of,
     )
-    from tcip_mcp.project_paths import project_root, resolve_output_path
+    from tcip_mcp.project_paths import project_root
 
     # Resolve the writable bucket before the (expensive) inference so a verdict-blocked overwrite
     # fails fast.

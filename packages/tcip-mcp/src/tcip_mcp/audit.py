@@ -5,8 +5,9 @@ Append-only JSONL format.
 
 The log is scoped: an event whose subject is a record that travels with a dataset is recorded
 in that dataset's own log, so the provenance travels with the data, and a platform event is
-recorded in the platform's log. Each event is written once, by :func:`record_event`, to the
-one log its scope names.
+recorded in the platform's log. Each event is written once, to the one log its scope names:
+:func:`record_event` for code that is not an MCP tool, and :func:`audited` for the tools, which
+name the argument carrying the dataset location with ``@audited(scope_arg=...)``.
 """
 
 from __future__ import annotations
@@ -108,44 +109,120 @@ def record_event(
     _write_entry(entry, scope)
 
 
-def audited(fn: Callable) -> Callable:
-    """Decorator that logs MCP tool calls to the platform's audit log.
+def dataset_scope_of(value: Any) -> Path | None:
+    """The dataset root ``value`` names, or ``None`` when it does not name one.
+
+    ``value`` is whatever a tool's declared scope argument holds: a path inside the dataset
+    (an annotations or predictions directory, an image), or the dataset root itself. A path
+    under a canonical dataset segment resolves through :func:`dataset_layout.dataset_root_of`,
+    the one resolver for that shape. A path that is not under one counts as a root only when it
+    is a directory that actually carries dataset or project state (its own ``.tcip/`` or a class
+    registry); anything else is not evidence of a dataset and yields ``None``, since a guessed
+    root would file the event against a log nobody can trace it back to.
+    """
+    from tcip_mcp.dataset_layout import CLASSES_FILENAME, dataset_root_of
+
+    if not isinstance(value, (str, Path)) or not str(value):
+        return None
+    root = dataset_root_of(value)
+    if root is None:
+        candidate = Path(value)
+        if not candidate.is_dir() or not (
+            (candidate / ".tcip").is_dir() or (candidate / CLASSES_FILENAME).is_file()
+        ):
+            return None
+        root = candidate
+    # Resolved, so the scope an entry names is the same root its key was built from.
+    return root.resolve()
+
+
+def audited(
+    fn: Callable | None = None,
+    *,
+    scope_arg: str | None = None,
+    scope_via: Callable[[Any], Any] | None = None,
+) -> Callable:
+    """Decorator that logs MCP tool calls to the audit log their scope names.
+
+    Bare (``@audited``), a call is a platform event and is recorded in the platform's log.
+    ``@audited(scope_arg="dataset_root")`` declares which of the tool's own arguments carries
+    the dataset the call mutates a record of: that argument's value is resolved at call time by
+    :func:`dataset_scope_of`, and the entry goes to that dataset's log instead, carrying a
+    ``scope`` field naming the root. An argument that is ``None``, absent, or resolves to no
+    dataset leaves the call a platform event. Exactly one log receives each entry.
+
+    ``scope_via`` is for a tool whose body canonicalizes that argument before writing through it,
+    such as a relative output path anchored to the platform state root rather than the process
+    cwd. Pass the resolver the body itself calls, so the scope is resolved along the identical
+    path the write takes; a second implementation of that anchoring would file entries at a
+    location the tool never wrote to.
 
     Binds positional args to their parameter names so a caller that invokes the
     tool positionally, e.g. the web routes, which call ``launch_training(payload.config,
     payload.output_dir)`` rather than by keyword, is recorded with the same fidelity as a keyword
     call, instead of writing an empty ``arguments`` dict. Binding failures never abort the call this
-    decorator only observes; they fall back to the kwargs-only record.
+    decorator only observes; they fall back to the kwargs-only record, and to the platform log,
+    since the scope argument's value is not recoverable from a failed binding.
     """
-    sig = inspect.signature(fn)
+    def decorate(func: Callable) -> Callable:
+        sig = inspect.signature(func)
+        if scope_arg is not None and scope_arg not in sig.parameters:
+            raise ValueError(
+                f"@audited(scope_arg={scope_arg!r}) on {func.__name__} names no parameter of it; "
+                f"it takes {tuple(sig.parameters)}"
+            )
+        if scope_via is not None and scope_arg is None:
+            raise ValueError(
+                f"@audited(scope_via=...) on {func.__name__} has no scope_arg to apply it to"
+            )
 
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        tool_name = fn.__name__
-        t0 = time.monotonic()
-        try:
-            bound = sig.bind(*args, **kwargs)
-            bound.apply_defaults()
-            logged_args: dict[str, Any] = dict(bound.arguments)
-        except TypeError:
-            logged_args = dict(kwargs)
-        entry: dict[str, Any] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "tool": tool_name,
-            "arguments": _redact(logged_args) if logged_args else {},
-        }
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            tool_name = func.__name__
+            t0 = time.monotonic()
+            try:
+                bound = sig.bind(*args, **kwargs)
+                bound.apply_defaults()
+                logged_args: dict[str, Any] = dict(bound.arguments)
+            except TypeError:
+                logged_args = dict(kwargs)
+            entry: dict[str, Any] = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tool": tool_name,
+                "arguments": _redact(logged_args) if logged_args else {},
+            }
 
-        try:
-            result = fn(*args, **kwargs)
+            def record() -> None:
+                # Resolved after the body, so a tool that creates the dataset it names is
+                # recorded in that dataset's own log rather than the platform's.
+                scope = None
+                raw = logged_args.get(scope_arg) if scope_arg else None
+                if raw is not None:
+                    try:
+                        scope = dataset_scope_of(scope_via(raw) if scope_via else raw)
+                    except Exception:
+                        # A location that cannot be resolved leaves the entry a platform event,
+                        # rather than failing the call this decorator only observes.
+                        logger.warning("Failed to resolve the audit scope for %s", tool_name,
+                                       exc_info=True)
+                if scope is not None:
+                    entry["scope"] = str(scope)
+                entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
+                _write_entry(entry, scope)
+
+            # One entry per call by construction: the two paths are exclusive, and neither
+            # writer sits inside a handler that could run the other.
+            try:
+                result = func(*args, **kwargs)
+            except Exception as exc:
+                entry["status"] = "exception"
+                entry["error"] = str(exc)
+                record()
+                raise
             entry["status"] = "error" if isinstance(result, dict) and "error" in result else "ok"
-            entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
-            _write_entry(entry)
+            record()
             return result
-        except Exception as exc:
-            entry["status"] = "exception"
-            entry["error"] = str(exc)
-            entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
-            _write_entry(entry)
-            raise
 
-    return wrapper
+        return wrapper
+
+    return decorate(fn) if fn is not None else decorate
