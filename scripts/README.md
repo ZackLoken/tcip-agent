@@ -9,8 +9,8 @@ reaching for again versus one built narrowly for a specific past investigation.
 
 - `calibrate_operating_point.py` - runs one model pass over a disjoint calibration/holdout
   split of a labeled dir, derives a count-unbiased detection operating point, checks its
-  held-out count bias, and persists the full provenance + sweep to
-  `.tcip/experiments/<id>/operating_point.json`.
+  held-out count bias, and prints the full provenance + sweep for inspection. It writes
+  nothing; validated claims are minted only by the audited doors.
 - `check_dataset_identity.py` - recomputes a dataset's on-disk fingerprint and compares it
   against the fingerprint recorded in `dataset.json` and the project's `.tcip/datasets.json`,
   to catch data that changed or moved since it was registered.
