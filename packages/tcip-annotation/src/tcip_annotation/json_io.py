@@ -292,6 +292,52 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
     return _annotations_of(data if isinstance(data, dict) else None), stored.version
 
 
+# ── reference admissibility ────────────────────────────────────────────────
+
+
+def is_unadjudicated_prediction(a: Annotation) -> bool:
+    """True when ``a`` is a model's own output that no human has taken responsibility for.
+
+    A set ``score`` is this format's own marker that the record is a prediction (see
+    :class:`~tcip_annotation.state.Annotation`), and a scored record is by construction one no
+    reviewer has ruled on: accepting a prediction into ground truth drops its ``score`` and stamps
+    ``accepted_by``, so an accepted record no longer answers True here.
+    """
+    return a.score is not None
+
+
+def require_reference_ground_truth(directory: str | Path) -> None:
+    """Refuse ``directory`` as a measurement reference when it holds unadjudicated predictions.
+
+    The rule every reference read shares: a calibration or held-out reference is only a measurement
+    if something other than the model produced it. A directory of the model's own predictions
+    clears every numeric gate a calibration applies, since the model agrees with itself, so the
+    gates cannot catch it and the provenance has to.
+
+    Refuses on the whole directory, never by dropping the offending records: a mixed directory
+    silently narrowed to its admissible subset would validate against a reference nobody chose.
+    An absent or empty directory raises nothing here; a caller that needs a reference to exist
+    checks that itself.
+    """
+    directory = Path(directory)
+    flagged = 0
+    total = 0
+    for path in sorted(directory.glob("*.json")):
+        for a in read_annotations(path):
+            total += 1
+            flagged += is_unadjudicated_prediction(a)
+    if not flagged:
+        return
+    raise ValueError(
+        f"{flagged} of {total} annotations in {directory} carry a prediction score, so they are "
+        "the model's own output that no human has ruled on, and a reference built from them "
+        "measures the model against itself rather than against a measurement. Annotate this "
+        "reference, accept the model's proposals through review so each record is a reviewer's "
+        "call and carries their accepted_by, or validate against a breeder-confirmed sample of "
+        "the model's outputs instead."
+    )
+
+
 # ── writer ─────────────────────────────────────────────────────────────────
 
 

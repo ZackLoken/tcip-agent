@@ -190,11 +190,18 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     (``run_inference``) turns this into a clean ``{"error": ...}`` rather than letting a bare
     ``KeyError`` surface from a stale ``stem_to_image`` lookup.
 
+    ``labels_dir`` is read as a measurement reference, so it goes through
+    ``json_io.require_reference_ground_truth`` first (the same admissibility rule the classifier
+    calibration path applies to its own GT dirs): a directory of the model's own predictions
+    clears every numeric gate below, since the model agrees with itself, so nothing downstream
+    can catch it.
+
     ``tile_size_source``/``tiled_source`` are the caller's already-resolved
     provenance for ``tile_size``/``tile``, forwarded into ``resolve_operating_point`` so the
     calibrated bundle doesn't stamp a fabricated tile_size as ``"derived"``, and so it records
     whether calibration itself actually tiled rather than always asserting ``tiled=True``.
     """
+    from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.data.splits import (
         count_label_lines, label_image_stems, resolve_locked_cal_holdout_split,
@@ -207,6 +214,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
 
     labels_p = Path(labels_dir)
+    require_reference_ground_truth(labels_p)
     dh = dataset_hash(labels_dir)
     # The run's subject + single id map (from predictor.config): calibration GT reads through the
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
@@ -703,9 +711,8 @@ def run_inference(
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
             )
         except ValueError as exc:
-            # A locked cal/holdout split refusing this call: a calibration stem's
-            # image/label was deleted/renamed since the split locked, or the lock file is corrupt.
-            # Clean refusal here, not a bare KeyError from a stale stem_to_image lookup downstream.
+            # An inadmissible reference, or a locked split that no longer resolves: a clean refusal
+            # here, not a bare KeyError from a stale stem_to_image lookup downstream.
             return {"error": str(exc)}
         conf_param = bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
@@ -750,8 +757,17 @@ def run_inference(
                         "in_chans", int(getattr(predictor, "in_chans", 3)))})
                 issues = issues + validate_resolved_bundle(chan_bundle, probed_channels=probed)
         # validated only when held-out passed and nothing is un-shippable under the target actually used.
+        validated = bool(bundle.is_shippable and not issues)
+        if (conf_param.sweep or {}).get("conf_floor_mismatch"):
+            # Read after `validated`: this one travels to the delivery surface without gating there.
+            issues = issues + [
+                "conf: the reference's own lowest detection score sits materially above the conf "
+                "floor this calibration staged it at, so something truncated the reference after "
+                "it was generated (a stale bucket, cap-trimmed tiles, a bespoke producer) and the "
+                "swept curve never saw the low-conf tail it assumes"
+            ]
         extra = {
-            "validated": bool(bundle.is_shippable and not issues),
+            "validated": validated,
             "shippable_issues": issues,
             "cross_dataset_check": cross_dataset_check,
             "conf_source": "calibration",
