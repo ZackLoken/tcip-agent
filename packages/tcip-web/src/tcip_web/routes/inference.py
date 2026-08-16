@@ -289,6 +289,8 @@ def _worker(job: InferenceJob) -> None:
         provenance = operating_point_stamp(
             op_bundle.to_provenance()["operating_point"],
             validated=op_bundle.is_shippable,
+            # This worker stamps from a raw operating point and is never validated at write time.
+            validated_by=None,
             tile_size_validated=gate.stamp.get("tile_size"),
             shippable_issues=op_bundle.shippable_issues(),
             id_map=id_map,

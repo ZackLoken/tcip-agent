@@ -45,6 +45,28 @@ def _count_bucket(bucket: Path, *, bundle_flag: bool, recorded_reference: str | 
                     recorded_reference=recorded_reference, value=conf, validation_kind="annotations")
 
 
+def _bound_sidecar(bucket: Path, filename: str, param_key: str, *, recorded_reference: str,
+                   document: str, dataset_root: Path, experiment_id: str,
+                   **param_fields: object) -> str:
+    """A sidecar genuinely answered for by a validation record, the same shape :func:`_sidecar`
+    writes but with a real ``validated_by`` merged in, for tests whose subject is a stamp that did
+    clear rather than one that was merely claimed."""
+    from tests._binding_fixtures import file_validation_record, write_prediction
+
+    param: dict[str, object] = {"requires_validation": True, "validated_against": recorded_reference}
+    param.update(param_fields)
+    stamp = {"validated": True, "trait": "catkin", "operating_point": {param_key: param}}
+    pred_dirs: list[Path] = []
+    if document == "operating_point":
+        write_prediction(bucket, "img_a")
+        pred_dirs = [bucket]
+    bound = file_validation_record(stamp, document=document, dataset_root=dataset_root,
+                                   pred_dirs=pred_dirs, experiment_id=experiment_id)
+    bucket.mkdir(parents=True, exist_ok=True)
+    (bucket / filename).write_text(json.dumps(bound), encoding="utf-8")
+    return str(bucket)
+
+
 # --- a bucket already stamped unvalidated never reads back as validated ---
 
 def test_a_count_bucket_stamped_unvalidated_never_reads_back_its_recorded_reference(tmp_path):
@@ -86,8 +108,10 @@ def test_a_scale_stamp_flagged_unvalidated_never_reads_back_its_recorded_referen
 def test_a_classifier_stamp_that_did_clear_still_reports_its_reference(tmp_path):
     """The rail must admit valid work: a genuinely persisted classifier calibration reports the
     reference it earned, so the checks above refuse a shape rather than refusing everything."""
-    d = _sidecar(tmp_path / "b1", "classifier_operating_point.json", "classifier",
-                 bundle_flag=True, recorded_reference=VALIDATED_REVIEW_CONFIRMED, value=0.41)
+    d = _bound_sidecar(tmp_path / "b1", "classifier_operating_point.json", "classifier",
+                       recorded_reference=VALIDATED_REVIEW_CONFIRMED,
+                       document="classifier_operating_point", dataset_root=tmp_path,
+                       experiment_id="exp-b1", value=0.41)
     r = reconcile_classifier_validity([d])
     assert r["validated"] == VALIDATED_REVIEW_CONFIRMED
     assert r["on_disk_validated"] is True
@@ -100,8 +124,11 @@ def test_a_bucket_with_no_sidecar_floors_a_curve_assembled_beside_a_validated_on
     """A delivery spanning several buckets is only as grounded as its least-grounded bucket: one
     bucket that never had an operating point written for it floors the whole curve, rather than the
     validated bucket beside it reporting its reference for both."""
-    good = _count_bucket(tmp_path / "b1", bundle_flag=True,
-                         recorded_reference=VALIDATED_HELD_OUT, conf=0.62)
+    root = tmp_path / "ds"
+    good = _bound_sidecar(root / "predictions" / "b1", "operating_point.json", "conf",
+                          recorded_reference=VALIDATED_HELD_OUT, document="operating_point",
+                          dataset_root=root, experiment_id="exp-b1", value=0.62,
+                          validation_kind="annotations")
     absent = tmp_path / "b2"
     absent.mkdir()
     r = reconcile_operating_point_validity([good, str(absent)])
@@ -129,16 +156,23 @@ def test_a_missing_classifier_stamp_floors_a_dimension_two_other_buckets_cleared
 def test_buckets_that_ran_at_different_thresholds_report_no_single_operating_point(tmp_path):
     """A reconciled curve reports one conf only when every bucket agrees on it; buckets produced at
     different thresholds have no single operating point to report, and none of theirs is picked."""
-    a = _count_bucket(tmp_path / "b1", bundle_flag=True,
-                      recorded_reference=VALIDATED_HELD_OUT, conf=0.62)
-    b = _count_bucket(tmp_path / "b2", bundle_flag=True,
-                      recorded_reference=VALIDATED_REVIEW_CONFIRMED, conf=0.41)
+    root = tmp_path / "ds"
+    a = _bound_sidecar(root / "predictions" / "b1", "operating_point.json", "conf",
+                       recorded_reference=VALIDATED_HELD_OUT, document="operating_point",
+                       dataset_root=root, experiment_id="exp-a", value=0.62,
+                       validation_kind="annotations")
+    b = _bound_sidecar(root / "predictions" / "b2", "operating_point.json", "conf",
+                       recorded_reference=VALIDATED_REVIEW_CONFIRMED, document="operating_point",
+                       dataset_root=root, experiment_id="exp-b", value=0.41,
+                       validation_kind="annotations")
     mixed = reconcile_operating_point_validity([a, b])
     assert mixed["validated"] == VALIDATED_HELD_OUT
     assert mixed["conf"] is None
 
-    c = _count_bucket(tmp_path / "b3", bundle_flag=True,
-                      recorded_reference=VALIDATED_REVIEW_CONFIRMED, conf=0.41)
+    c = _bound_sidecar(root / "predictions" / "b3", "operating_point.json", "conf",
+                       recorded_reference=VALIDATED_REVIEW_CONFIRMED, document="operating_point",
+                       dataset_root=root, experiment_id="exp-c", value=0.41,
+                       validation_kind="annotations")
     agreed = reconcile_operating_point_validity([b, c])
     assert agreed["validated"] == VALIDATED_REVIEW_CONFIRMED
     assert agreed["conf"] == 0.41

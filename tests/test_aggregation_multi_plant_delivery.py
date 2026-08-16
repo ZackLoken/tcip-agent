@@ -20,6 +20,7 @@ from tcip_mcp.pipelines.postprocessing.aggregation import (
     export_aggregated_csv,
 )
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
+from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
 
 def _by_plant(rows: list[dict]) -> dict[str, dict]:
@@ -158,28 +159,38 @@ def test_summed_areas_stay_within_their_own_plant():
 
 
 def _count_bucket(tmp_path, name, *, validated=True):
-    d = tmp_path / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "operating_point.json").write_text(json.dumps({
-        "validated": validated,
+    root = tmp_path / "ds"
+    d = root / "predictions" / name
+    write_prediction(d, "img_a")
+    stamp = {
+        "validated": validated, "trait": "catkin",
         "operating_point": {"conf": {
             "value": 0.55,
             "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
         }},
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+    else:
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(d)
 
 
 def _ordinal_bucket(tmp_path, name, *, validated=True):
     d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
-    (d / "ordinal_operating_point.json").write_text(json.dumps({
-        "validated": validated,
+    stamp = {
+        "validated": validated, "trait": "catkin",
         "operating_point": {"ordinal": {
             "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
             "criterion": "quadratic_weighted_kappa",
         }},
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_bound_sidecar(d, stamp, document="ordinal_operating_point", dataset_root=tmp_path,
+                            experiment_id=f"exp-{name}-ordinal")
+    else:
+        (d / "ordinal_operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(d)
 
 

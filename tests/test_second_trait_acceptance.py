@@ -77,29 +77,25 @@ def _currant_bloom_fixture(
     detections: int = 10,
 ) -> dict:
     """Mirrors test_tcip_web_results_routes.py's ``_phenology_fixture`` shape, for currant_bloom's own
-    classes/trait name: the same real writers, the same real doors, a different registered trait."""
+    classes/trait name: the same real writers, the same real doors, a different registered trait.
+
+    A validated bucket earns a genuine validation record (:mod:`tests._binding_fixtures`) rather
+    than asserting one, since a stamp that claims validated is refused unless a record outside the
+    bucket answers for it.
+    """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    from tests._binding_fixtures import write_bound_sidecar
 
     _seed_currant_bloom_trait(tmp_path)
     dates = ["2026-02-11", "2026-02-25", "2026-03-10", "2026-03-24"][: len(fractions)]
+    # A validated stamp's covered-bucket key is relative to a dataset root, recognised only when
+    # the path holds an "annotations"/"predictions"/"images"/"labels" segment.
+    root = tmp_path / "ds"
     mapping, preds = {}, {}
     for date_str, frac in zip(dates, fractions):
-        bucket = tmp_path / "preds" / date_str
+        bucket = root / "predictions" / "live" / date_str
         bucket.mkdir(parents=True, exist_ok=True)
-        sidecar: dict = {"id_map": _ID_MAP}
-        if validated:
-            sidecar.update({
-                "validated": True,
-                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
-                "experiment_id": "exp-1",
-                "checkpoint_sha256": "abc123",
-            })
-            (bucket / "classifier_operating_point.json").write_text(json.dumps({
-                "validated": True, "trait": "currant_bloom", "experiment_id": "exp-1",
-                "operating_point": {"classifier": {"value": "open",
-                                                   "validated_against": "held_out_annotations"}},
-            }), encoding="utf-8")
-        (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
         assigns = []
         for plant in ("BUSH_A", "BUSH_B"):
             stem = f"{plant}_{date_str}_0"
@@ -113,6 +109,28 @@ def _currant_bloom_fixture(
                 id_map=_ID_MAP)
             assigns.append({"image_path": f"{stem}.tif", "stem": stem, "plot_name": plant,
                             "accession_name": f"Acc{plant[-1]}", "distance_m": 1.0})
+        sidecar: dict = {"id_map": _ID_MAP}
+        if validated:
+            sidecar.update({
+                "validated": True,
+                "trait": "currant_bloom",
+                "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
+                "experiment_id": "exp-1",
+                "checkpoint_sha256": "abc123",
+            })
+            write_bound_sidecar(bucket, sidecar, dataset_root=root,
+                                experiment_id=f"exp-op-{date_str}", producing_experiment_id="exp-1",
+                                trait="currant_bloom")
+            classifier_stamp = {
+                "validated": True, "trait": "currant_bloom", "experiment_id": "exp-1",
+                "operating_point": {"classifier": {"value": "open",
+                                                   "validated_against": "held_out_annotations"}},
+            }
+            write_bound_sidecar(bucket, classifier_stamp, document="classifier_operating_point",
+                                dataset_root=root, experiment_id=f"exp-cls-{date_str}",
+                                producing_experiment_id="exp-1", trait="currant_bloom")
+        else:
+            (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"

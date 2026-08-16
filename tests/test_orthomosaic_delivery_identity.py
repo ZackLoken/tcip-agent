@@ -50,22 +50,34 @@ def _raster_bucket(tmp_path, raster_path: Path, boxes) -> Path:
 
 
 def _hand_written_bucket(tmp_path, name: str, stamp: dict) -> Path:
-    """A bucket whose sidecar is written directly, for the stamps a live run cannot produce."""
-    d = tmp_path / name
+    """A bucket whose sidecar is written directly, for the stamps a live run cannot produce.
+
+    A claiming stamp earns a real record over the prediction file below, so a refusal these tests
+    assert comes from the claim scope they are about rather than from an unanswered-for claim. The
+    bucket sits in the dataset's own predictions layout, since a count claim's covered set is keyed
+    relative to a dataset root.
+    """
+    root = tmp_path / "ds"
+    d = root / "predictions" / name
     d.mkdir(parents=True, exist_ok=True)
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+
+    from tests._binding_fixtures import write_bound_sidecar
 
     json_io.write_annotations(
         str(d / "mosaic.json"),
         [Annotation(subject="0", geometry=BBox(8.0, 8.0, 12.0, 12.0), score=0.9)], 64, 64,
         keep_empty=True)
-    (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+    if stamp.get("validated"):
+        write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
+    else:
+        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
     return d
 
 
 def _validated_count_stamp(*, claim_scope: str | None = None) -> dict:
-    stamp = {"validated": True,
+    stamp = {"validated": True, "trait": "catkin_count",
              "operating_point": {"conf": {"value": 0.5, "validated_against": VALIDATED_HELD_OUT}}}
     if claim_scope is not None:
         stamp["claim_scope_validated"] = claim_scope

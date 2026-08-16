@@ -25,6 +25,7 @@ from tcip_mcp.traits import (
     load_trait_specs_with_errors,
     registered_traits,
 )
+from tests._binding_fixtures import write_bound_sidecar
 from tests._trait_fixtures import CATKIN
 
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
@@ -334,20 +335,24 @@ def test_reference_fixture_delivers_are_all_in_crops_vocab():
 
 # ── positive class id resolved from a prediction bucket's own recorded id_map ───────
 
-def _op_sidecar(dir_path: Path, id_map: dict | None) -> None:
+def _op_sidecar(dir_path: Path, id_map: dict | None, *, dataset_root: Path) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    (dir_path / "operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": True,
+        "trait": "catkin",
         "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
         "id_map": id_map,
-    }), encoding="utf-8")
+    }
+    write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
+                        experiment_id=f"exp-record-{dir_path.name}",
+                        producing_experiment_id="exp-trait-authoring")
 
 
 def test_resolve_positive_class_id_by_name(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
     d = tmp_path / "preds"
-    _op_sidecar(d, {"dormant": 0, "elongated": 1})
+    _op_sidecar(d, {"dormant": 0, "elongated": 1}, dataset_root=tmp_path)
     cid, msg = _resolve_positive_class_id("catkin", {"2026-02-11": str(d)})
     assert cid == 1
     assert "elongated" in msg
@@ -357,7 +362,7 @@ def test_resolve_positive_class_id_honest_fail_when_absent(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import _resolve_positive_class_id
 
     d = tmp_path / "preds"
-    _op_sidecar(d, {"dormant": 0, "catkin": 1})  # no 'elongated' class
+    _op_sidecar(d, {"dormant": 0, "catkin": 1}, dataset_root=tmp_path)  # no 'elongated' class
     cid, msg = _resolve_positive_class_id("catkin", {"2026-02-11": str(d)})
     assert cid is None  # never silently defaults to 1
     assert "elongated" in msg
@@ -376,7 +381,9 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
-    d1, d2 = tmp_path / "2026-02-11", tmp_path / "2026-03-09"
+    root = tmp_path / "ds"
+    d1 = root / "predictions" / "run" / "2026-02-11"
+    d2 = root / "predictions" / "run" / "2026-03-09"
     id_map = {"dormant": 0, "elongated": 1} if classified else {"catkin": 0}
     subject = "elongated" if classified else "catkin"
     for d in (d1, d2):
@@ -384,7 +391,7 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
         json_io.write_annotations(
             d / "P1.json",
             [Annotation(subject=subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
-        _op_sidecar(d, id_map)
+        _op_sidecar(d, id_map, dataset_root=root)
     mapping_path = tmp_path / "plant_mapping.json"
     mapping_path.write_text(json.dumps({
         "2026-02-11": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
@@ -399,11 +406,15 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
 
     mapping_path, d1, d2 = _pheno_fixture(tmp_path, classified=True)
     out_csv = tmp_path / "out.csv"
-    (d1 / "classifier_operating_point.json").write_text(json.dumps({
+    classifier_stamp = {
         "validated": True,
-        "operating_point": {"classifier": {"value": "elongated", "validated_against": "held_out_annotations"}},
+        "operating_point": {"classifier": {"value": "elongated",
+                                           "validated_against": "held_out_annotations"}},
         "trait": "catkin",
-    }), encoding="utf-8")
+    }
+    write_bound_sidecar(d1, classifier_stamp, document="classifier_operating_point",
+                        dataset_root=tmp_path / "ds", experiment_id="exp-classifier-derives-id",
+                        producing_experiment_id="exp-trait-authoring", trait="catkin")
 
     res = compute_phenology(
         trait="catkin",

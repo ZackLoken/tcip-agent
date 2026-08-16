@@ -20,6 +20,7 @@ import pytest
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import phenology
+from tests._binding_fixtures import write_bound_sidecar
 from tests._trait_fixtures import CATKIN
 
 # A registry whose ids are not consecutive: the positive class sits at id 2 with nothing at id 1.
@@ -44,27 +45,37 @@ def _states(n_positive: int, n_negative: int) -> list[str]:
     return ["elongated"] * n_positive + ["dormant"] * n_negative
 
 
-def _write_sidecar(dir_path: Path, id_map: dict, *, validated: bool = True,
+def _write_sidecar(dir_path: Path, id_map: dict, *, dataset_root: Path, validated: bool = True,
                    conf: float = 0.37) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     ref = "held_out_annotations" if validated else "false"
-    (dir_path / "operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": validated,
+        "trait": "catkin",
         "operating_point": {"conf": {"value": conf, "validated_against": ref}},
         "id_map": id_map,
         "experiment_id": "exp-77",
-    }), encoding="utf-8")
+    }
+    if validated:
+        write_bound_sidecar(dir_path, stamp, dataset_root=dataset_root,
+                            experiment_id=f"exp-record-{dir_path.name}",
+                            producing_experiment_id="exp-77")
+    else:
+        (dir_path / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
 
 
-def _write_classifier_sidecar(dir_path: Path, *, trait: str) -> None:
+def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, trait: str) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
-    (dir_path / "classifier_operating_point.json").write_text(json.dumps({
+    stamp = {
         "validated": True,
         "operating_point": {"classifier": {"value": "elongated",
                                            "validated_against": "held_out_annotations"}},
         "trait": trait,
         "experiment_id": "exp-77",
-    }), encoding="utf-8")
+    }
+    write_bound_sidecar(dir_path, stamp, document="classifier_operating_point",
+                        dataset_root=dataset_root, experiment_id=f"exp-classifier-{dir_path.name}",
+                        producing_experiment_id="exp-77", trait=trait)
 
 
 # -- crossings on a curve that rises and falls ----------------------------
@@ -148,7 +159,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
     }
     for d in dates:
         bucket = tmp_path / d
-        _write_sidecar(bucket, SPARSE_ID_MAP)
+        _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=tmp_path)
         for plant, (pos, neg) in counts[d].items():
             _write_preds(bucket, f"{plant}_{d}", _states(pos, neg))
     mapping = {d: [_Assignment(f"P1_{d}", "P1", "acc-noisy"),
@@ -252,12 +263,16 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
     """
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
+    root = tmp_path / "ds"
     counts = {"2026-03-01": (1, 1), "2026-03-05": (1, 4), "2026-03-09": (4, 1)}
+    buckets = {d: root / "predictions" / "run" / d for d in counts}
     for d, (pos, neg) in counts.items():
-        bucket = tmp_path / d
-        _write_sidecar(bucket, SPARSE_ID_MAP)
+        bucket = buckets[d]
+        # Predictions land before the record is filed, so the bucket's content digest the record
+        # covers is the one the delivery will recompute and verify against.
         _write_preds(bucket, f"P1_{d}", _states(pos, neg))
-    _write_classifier_sidecar(tmp_path / "2026-03-01", trait="catkin")
+        _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=root)
+    _write_classifier_sidecar(buckets["2026-03-01"], dataset_root=root, trait="catkin")
     mapping_path = tmp_path / "state" / "plant_mapping.json"
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     mapping_path.write_text(json.dumps({
@@ -269,9 +284,9 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
     res = compute_phenology(
         trait="catkin",
         mapping_path=str(mapping_path),
-        predictions_by_date={d: str(tmp_path / d) for d in counts},
+        predictions_by_date={d: str(buckets[d]) for d in counts},
         output_csv_path=str(out_csv),
-        classifier_pred_dirs=[str(tmp_path / "2026-03-01")],
+        classifier_pred_dirs=[str(buckets["2026-03-01"])],
         operating_point_validated="held_out_annotations",
     )
 

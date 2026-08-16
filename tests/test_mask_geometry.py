@@ -284,6 +284,32 @@ def _write_scale_sidecar(path, *, validated_against, value=0.05, unit="mm", capt
     return str(path)
 
 
+def _write_bound_scale_sidecar(path, dataset_root, *, value=0.05, unit="mm", capture_id=None,
+                               experiment_id="exp-scale"):
+    """A ``resolve_scale.json`` sidecar genuinely answered for by a validation record, for the tests
+    whose subject is a scale claim that did clear rather than one merely stamped as such."""
+    import json
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
+    from tests._binding_fixtures import file_validation_record
+
+    stamp = {
+        "validated": True, "trait": "catkin",
+        "operating_point": {
+            "scale": {
+                "value": value, "unit": unit, "capture_id": capture_id,
+                "requires_validation": True, "validation_kind": "physical",
+                "validated_against": VALIDATED_PHYSICAL_MEASUREMENT,
+            },
+        },
+    }
+    bound = file_validation_record(stamp, document="resolve_scale", dataset_root=dataset_root,
+                                   experiment_id=experiment_id)
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "resolve_scale.json").write_text(json.dumps(bound), encoding="utf-8")
+    return str(path)
+
+
 def test_read_scale_sidecar_round_trips_a_validated_fixture(tmp_path):
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, read_scale_sidecar
 
@@ -306,7 +332,7 @@ def test_reconcile_scale_validity_ships_when_validated(tmp_path):
         reconcile_scale_validity,
     )
 
-    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path)
     recon = reconcile_scale_validity([d])
     assert recon["operative"] is True
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
@@ -346,12 +372,10 @@ def test_reconcile_scale_validity_an_annotations_reference_never_clears_it(tmp_p
 def test_reconcile_scale_validity_capture_id_mismatch_floors(tmp_path):
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
-        VALIDATED_PHYSICAL_MEASUREMENT,
         reconcile_scale_validity,
     )
 
-    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
-                             capture_id="2026-02-10_plot7")
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, capture_id="2026-02-10_plot7")
     recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot9")
     assert recon["validated"] == VALIDATED_FALSE
     assert recon["unvalidated_buckets"] == [d]
@@ -363,8 +387,7 @@ def test_reconcile_scale_validity_capture_id_match_ships(tmp_path):
         reconcile_scale_validity,
     )
 
-    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
-                             capture_id="2026-02-10_plot7")
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, capture_id="2026-02-10_plot7")
     recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot7")
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
 
@@ -377,8 +400,7 @@ def test_reconcile_scale_validity_unscoped_sidecar_applies_to_any_capture(tmp_pa
         reconcile_scale_validity,
     )
 
-    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
-                             capture_id=None)
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, capture_id=None)
     recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot7")
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
 
@@ -386,10 +408,9 @@ def test_reconcile_scale_validity_unscoped_sidecar_applies_to_any_capture(tmp_pa
 def test_reconcile_scale_validity_asserted_can_only_lower(tmp_path):
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
-        VALIDATED_PHYSICAL_MEASUREMENT,
         reconcile_scale_validity,
     )
 
-    d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path)
     recon = reconcile_scale_validity([d], asserted=VALIDATED_FALSE)
     assert recon["validated"] == VALIDATED_FALSE

@@ -31,7 +31,7 @@ from tcip_mcp.pipelines.resolution import (
 )
 
 
-def _stamp(**overrides) -> dict:
+def _stamp(*, validated_by=None, **overrides) -> dict:
     fields = dict(
         validated=True,
         tile_size_validated=None,
@@ -47,7 +47,15 @@ def _stamp(**overrides) -> dict:
         produced_at="2026-01-01T00:00:00+00:00",
     )
     fields.update(overrides)
-    return operating_point_stamp({"conf": {"value": 0.5}}, **fields)
+    return operating_point_stamp({"conf": {"value": 0.5}}, validated_by=validated_by, **fields)
+
+
+def _validated_stamp(tmp_path, **overrides) -> dict:
+    """A validated stamp genuinely answered for by a validation record, for tests whose subject is
+    the sidecar store's own locking/CAS/codec mechanics rather than the binding check itself."""
+    from tests._binding_fixtures import file_validation_record
+
+    return file_validation_record(_stamp(**overrides), dataset_root=tmp_path)
 
 
 # --- the stamp shape is one shape, whatever the producer had in hand ---
@@ -75,8 +83,9 @@ def test_stamp_admits_a_producer_specific_field():
 
 def test_sidecar_write_and_read_round_trip(tmp_path):
     bucket = tmp_path / "predictions" / "best" / "2026-03-04"
-    write_sidecar(bucket, _stamp())
-    assert read_operating_point_sidecar(bucket) == _stamp()
+    stamp = _validated_stamp(tmp_path)
+    write_sidecar(bucket, stamp)
+    assert read_operating_point_sidecar(bucket) == stamp
 
 
 def test_sidecar_store_refuses_an_unconditional_replace(tmp_path):
@@ -85,9 +94,10 @@ def test_sidecar_store_refuses_an_unconditional_replace(tmp_path):
     from tcip_store.errors import PolicyViolation
 
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp())
+    stamp = _validated_stamp(tmp_path)
+    write_sidecar(bucket, stamp)
     with pytest.raises(PolicyViolation):
-        tcip_store.replace(sidecar_key(bucket), _stamp())
+        tcip_store.replace(sidecar_key(bucket), stamp)
 
 
 def test_sidecar_update_merges_against_what_is_stored(tmp_path):
@@ -106,7 +116,7 @@ def test_sidecar_update_merges_against_what_is_stored(tmp_path):
 
 def test_sidecar_update_can_decline_to_write(tmp_path):
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp(validated=True))
+    write_sidecar(bucket, _validated_stamp(tmp_path, validated=True))
 
     assert update_sidecar(bucket, lambda stored: None) is False
     assert read_operating_point_sidecar(bucket)["validated"] is True
@@ -129,7 +139,7 @@ def test_a_stamp_field_that_json_cannot_hold_is_refused_at_the_sidecar_writer(tm
     assert "stamp.produced_at" in str(refused.value)
     assert read_operating_point_sidecar(bucket) is None
 
-    write_sidecar(bucket, _stamp())
+    write_sidecar(bucket, _validated_stamp(tmp_path))
     with pytest.raises(TypeError) as update_refused:
         update_sidecar(bucket, lambda stored: {**stored, "raster_path": Path("ortho.tif")})
     assert "stamp.raster_path" in str(update_refused.value)
@@ -140,7 +150,7 @@ def test_an_ordinary_stamp_is_still_written_and_merged(tmp_path):
     """The refusal above must not cost a real calibration its stamp or its promotion."""
     bucket = tmp_path / "bucket"
 
-    write_sidecar(bucket, _stamp())
+    write_sidecar(bucket, _validated_stamp(tmp_path))
     wrote = update_sidecar(bucket, lambda stored: {**stored, "raster_path": "ortho.tif"})
 
     assert wrote is True
@@ -155,9 +165,10 @@ def test_sidecar_bytes_are_the_canonical_record_spelling(tmp_path):
     from tcip_store import RECORD_JSON
 
     bucket = tmp_path / "bucket"
-    write_sidecar(bucket, _stamp())
+    stamp = _validated_stamp(tmp_path)
+    write_sidecar(bucket, stamp)
 
-    assert (bucket / "operating_point.json").read_bytes() == RECORD_JSON.encode(_stamp())
+    assert (bucket / "operating_point.json").read_bytes() == RECORD_JSON.encode(stamp)
 
 
 def test_unreadable_stamp_reads_as_absent_rather_than_raising(tmp_path):
