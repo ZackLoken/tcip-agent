@@ -194,6 +194,9 @@ def test_the_baseline_capture_waits_on_the_lock_its_record_is_written_under(
 
     A copy that ignores the lock can land on top of bytes another writer is part way through
     replacing, which is the one thing a pristine copy must never be.
+
+    Bound to the file backend on purpose: the contention is staged by holding the baseline's
+    own path lock, and ``path_for`` names that path, both of which only the file backend has.
     """
     label_dir = tmp_path / "annotations" / "2-11-26"
     label_dir.mkdir(parents=True)

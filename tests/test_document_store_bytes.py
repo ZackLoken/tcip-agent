@@ -295,9 +295,17 @@ def test_the_project_config_lands_as_the_toml_the_scaffolding_writes_once(tmp_pa
 def test_a_snapshot_manifest_lands_in_its_experiment_directory_under_the_experiments_scope(tmp_path):
     """The manifest hangs off the experiments root, the scope its experiment's other members
     already use, and still lands at ``<experiment_id>/model_src/manifest.json`` for the raw
-    reader that checks a bespoke run's provenance."""
+    reader that checks a bespoke run's provenance.
+
+    Bound to the file backend on purpose: unlike the documents around it this manifest is a
+    record, so the path its bespoke locator preserves is a fact about the file layout, and a
+    database backend keeps it in the database instead.
+    """
+    from tcip_store.file_backend import FileBackend
+
     from tcip_mcp.pipelines.model_build import snapshot_manifest_key
 
+    ts.bind(FileBackend())
     exp_dir = tmp_path / EXPERIMENT
     exp_dir.mkdir()
     key = snapshot_manifest_key(exp_dir)

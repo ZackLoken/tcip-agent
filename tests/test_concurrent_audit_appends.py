@@ -6,7 +6,6 @@ The append-only log must not tear or lose lines.
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import threading
@@ -29,10 +28,10 @@ def test_concurrent_threads_no_torn_or_lost_lines(tmp_path):
     for t in threads:
         t.join()
 
-    lines = (tmp_path / ".tcip" / "audit.jsonl").read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == n_threads * per_thread
-    parsed = [json.loads(ln) for ln in lines]  # every line is intact JSON
-    counts = Counter(p["tag"] for p in parsed)
+    page = ts.read_log(audit_log_key(tmp_path))
+    assert len(page.records) == n_threads * per_thread
+    assert page.corrupt == () and page.torn_tail is False
+    counts = Counter(r["tag"] for r in page.records)
     assert all(counts[t] == per_thread for t in range(n_threads))
 
 
@@ -53,10 +52,10 @@ def test_concurrent_processes_no_torn_or_lost_lines(tmp_path):
     for p in procs:
         assert p.wait(timeout=60) == 0
 
-    lines = (tmp_path / ".tcip" / "audit.jsonl").read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 100
-    parsed = [json.loads(ln) for ln in lines]
-    counts = Counter(p["tag"] for p in parsed)
+    page = ts.read_log(audit_log_key(tmp_path))
+    assert len(page.records) == 100
+    assert page.corrupt == () and page.torn_tail is False
+    counts = Counter(r["tag"] for r in page.records)
     assert counts["proc0"] == 50 and counts["proc1"] == 50
 
 

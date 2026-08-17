@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import tcip_store
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
     ImageStamp,
@@ -17,6 +18,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     haversine_m,
     load_mapping,
     persist_mapping,
+    plant_mapping_key,
     read_plant_csvs,
 )
 
@@ -214,7 +216,7 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
     }
     out = tmp_path / "mapping.json"
     persist_mapping(mapping, out)
-    assert out.exists()
+    assert tcip_store.exists(plant_mapping_key(out))
     loaded = load_mapping(out)
     assert list(loaded.keys()) == ["2-11-26"]
     assert loaded["2-11-26"][0].plot_name == "PLOT1"
@@ -246,15 +248,15 @@ def _one_assignment() -> dict[str, list[Assignment]]:
 def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(
     tmp_path: Path
 ) -> None:
-    """A caller names where the mapping goes, and the chain to it is created for them.
+    """A caller names where the mapping goes, and the location is made ready for them.
 
     The state directory of a fresh project has nothing in it, so a persist that required the
-    directory to exist would refuse the very first build.
+    location to exist already would refuse the very first build.
     """
     out = tmp_path / "state" / "runs" / "mapping.json"
     persist_mapping(_one_assignment(), out)
 
-    assert out.is_file()
+    assert tcip_store.exists(plant_mapping_key(out))
     assert load_mapping(out)["2-11-26"][0].plot_name == "PLOT1"
 
 
@@ -267,10 +269,12 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     Two processes can be handed the same mapping path, and an unguarded write would interleave
     with the other's bytes and leave a document that parses as a mapping while holding neither
     build's assignments.
+
+    Bound to the file backend on purpose: a per-path lock held from outside the write is the
+    file backend's own exclusion, and the contention a database backend reports is its own.
     """
     import threading
 
-    import tcip_store
     from tcip_store import StoreBusy
     from tcip_store.file_backend import FileBackend, path_lock
 
