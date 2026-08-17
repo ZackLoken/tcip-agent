@@ -31,11 +31,15 @@ def _bind_storage_backend():
     Every code path that reaches a store needs one bound; a suite that left it unbound would
     report the absence of a backend where the behavior under test is what the store does. Per
     test rather than per session, so a test that binds its own backend and drops it on the way
-    out leaves the next one a bound process rather than an unbound one.
+    out leaves the next one a bound process rather than an unbound one. Closed on the way out
+    so a database backend leaves no open handle on the test's tmp_path, which Windows would
+    then refuse to remove.
     """
-    from tcip_store.file_backend import bind_default
+    from tcip_store.binding import bind_default
 
-    bind_default()
+    backend = bind_default()
+    yield
+    backend.close()
 
 
 def pytest_collection_modifyitems(config, items):

@@ -5,16 +5,20 @@ test is exactly the one threads cannot check: two interpreters sharing a lock re
 pass a same-process test against a backend with no cross-process exclusion at all.
 
 The isolation cases are the ones that pin the defect this layer exists to remove, so they
-are also run against a backend whose writes skip the lock (set
-``TCIP_STORE_CONTRACT_UNLOCKED=1``) and observed failing there. Everything below the file
-annex is backend-independent: a second backend joins the ``store`` fixture's params and must
-pass it unchanged.
+are also run against a weakened backend and observed failing there: on the file backend one
+whose writes skip the lock (``TCIP_STORE_CONTRACT_UNLOCKED=1``), on the database backend one
+that never compares ``expect`` (``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``).
+
+The ``store`` fixture runs every case it serves against both backends. A handful of cases are
+about one backend's own mechanics rather than the contract, and each says at its top which
+backend it is about and why; everything else must pass unchanged on both.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -50,20 +54,30 @@ from tcip_mcp.tools import (
     training_tools,
     vision_tools,
 )
-from tcip_store.file_backend import FileBackend, RootedFileLocator
+from tcip_store.file_backend import (
+    DATABASE_FILENAME,
+    FileBackend,
+    RootedFileLocator,
+    creation_temp_name,
+)
+from tcip_store.sqlite_backend import SqliteBackend, database_path, encode_parts
 from tcip_web import agent_learning_capture
 from tcip_web import jobstore
 from tcip_web import state as web_state
 from tcip_web.routes import canvas, sessions
 from tests._store_worker import (
+    BACKEND_ENV,
     BLOB,
     CAS,
+    FILE,
     LOG,
     LWW,
     NESTED,
     OPAQUE,
     RELAXED,
     SEALED_BLOB,
+    SQLITE,
+    STATE_FILES,
     STRICT,
     make_backend,
     register_contract_stores,
@@ -79,16 +93,54 @@ _WORKER = Path(__file__).with_name("_store_worker.py")
 class Harness:
     """The bound backend, the scope its keys hang off, and how to reach bytes behind it."""
 
-    backend: FileBackend
+    backend: FileBackend | SqliteBackend
     root: Path
+    name: str = FILE
     procs: list[subprocess.Popen] = field(default_factory=list)
 
     def key(self, store: str, *parts: str) -> ts.Key:
         return ts.Key(store, str(self.root), tuple(parts))
 
     def path(self, key: ts.Key) -> Path:
-        """Where the file backend puts a key. The file annex uses this; nothing above does."""
+        """Where the file backend puts a key. Only the file-backend cases use this."""
         return self.backend.path_for(key)
+
+    def connect(self) -> sqlite3.Connection:
+        """A connection of this test's own to the scope's database, for reaching behind the seam."""
+        return sqlite3.connect(str(database_path(str(self.root))), isolation_level=None)
+
+    def damage_record(self, key: ts.Key, data: bytes) -> None:
+        """Put bytes that will not decode behind a record, wherever this backend keeps them.
+
+        The corruption has to reach the same place the backend reads from, or the case would
+        report absence on one backend and corruption on the other for the same setup.
+        """
+        if self.name == FILE:
+            self.path(key).write_bytes(data)
+            return
+        conn = self.connect()
+        try:
+            conn.execute(
+                "update records set value = ? where store = ? and parts = ?",
+                (data, key.store, encode_parts(key.parts)),
+            )
+        finally:
+            conn.close()
+
+    def damage_log_entry(self, key: ts.Key, position: int, data: bytes) -> None:
+        """Replace one committed log entry's bytes with bytes that will not decode."""
+        conn = self.connect()
+        try:
+            ids = [
+                row[0]
+                for row in conn.execute(
+                    "select id from log_entries where store = ? and parts = ? order by id",
+                    (key.store, encode_parts(key.parts)),
+                )
+            ]
+            conn.execute("update log_entries set entry = ? where id = ?", (data, ids[position]))
+        finally:
+            conn.close()
 
     def spawn(self, *args: object) -> subprocess.Popen:
         proc = subprocess.Popen(
@@ -106,11 +158,18 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-@pytest.fixture(params=["file"])
-def store(request, tmp_path):
+def only_on(store: "Harness", backend: str, why: str) -> None:
+    """Leave a case to the backend whose own mechanics it is about, saying which and why."""
+    if store.name != backend:
+        pytest.skip(f"this case is about the {backend} backend: {why}")
+
+
+@pytest.fixture(params=[FILE, SQLITE])
+def store(request, tmp_path, monkeypatch):
+    monkeypatch.setenv(BACKEND_ENV, request.param)
     backend = make_backend()
     ts.bind(backend)
-    harness = Harness(backend=backend, root=tmp_path)
+    harness = Harness(backend=backend, root=tmp_path, name=request.param)
     try:
         yield harness
     finally:
@@ -119,6 +178,7 @@ def store(request, tmp_path):
                 proc.kill()
                 proc.wait(timeout=30)
         ts.unbind()
+        backend.close()
 
 
 # ── atomicity and durability ────────────────────────────────────────────────────
@@ -290,6 +350,11 @@ def test_an_identical_rewrite_leaves_a_held_token_valid(store):
 
 def test_a_transaction_applies_in_the_declared_order_and_a_crash_leaves_a_prefix(store):
     """The order comes from the declaration, not from the order the body wrote the keys."""
+    only_on(store, FILE, "a crash mid-apply is what a backend applying key by key leaves, the "
+                         "worker that pauses between two applies binds a file backend of its "
+                         "own that the fixture's parameter cannot reach, and inside one atomic "
+                         "commit the applied order is unobservable because no reader ever sees "
+                         "a state between the two writes")
     first = store.key(LWW, "alpha")
     second = store.key(LWW, "beta")
     marker = store.root / "applied.marker"
@@ -300,6 +365,32 @@ def test_a_transaction_applies_in_the_declared_order_and_a_crash_leaves_a_prefix
 
     assert ts.read(first) == {"who": "alpha"}
     assert ts.read(second, default=None) is None
+
+
+def test_a_transaction_killed_before_its_commit_applies_nothing_and_wedges_no_successor(store):
+    """The all-or-nothing half of the crash contract, and the lock a killed writer must not keep.
+
+    A database commits the whole transaction or none of it, so there is no prefix to find. The
+    successor write is the other half: a holder killed mid-transaction that left the database
+    claimed would strand every later writer, which is worse than the lost work.
+    """
+    only_on(store, SQLITE, "all-or-nothing across a crash is exactly what the file backend "
+                           "does not promise, and the case above pins what it does instead")
+    first = store.key(LWW, "alpha")
+    second = store.key(LWW, "beta")
+    marker = store.root / "staged.marker"
+    proc = store.spawn("pause-before-commit", store.root, "alpha", "beta", marker, 30)
+    wait_for(marker, timeout_s=60)
+    proc.kill()
+    proc.wait(timeout=30)
+
+    assert ts.read(first, default=None) is None
+    assert ts.read(second, default=None) is None
+
+    with ts.transaction(first, second, timeout_s=10) as txn:
+        txn.write(first, {"who": "successor"})
+        txn.write(second, {"who": "successor"})
+    assert ts.read(first) == ts.read(second) == {"who": "successor"}
 
 
 # ── append durability ───────────────────────────────────────────────────────────
@@ -359,7 +450,14 @@ def test_a_cursor_resumes_with_no_gap_and_no_repeat(store):
     assert [r["i"] for r in ts.read_log(key, after=second.cursor).records] == []
 
 
+_LOG_FILE_MECHANICS = (
+    "a torn tail is bytes left in a file by an appender that died mid-write, reached here "
+    "through the path the file backend places the log at"
+)
+
+
 def test_a_torn_tail_is_held_back_and_an_interior_corruption_is_reported(store):
+    only_on(store, FILE, _LOG_FILE_MECHANICS)
     key = store.key(LOG, "damaged")
     for i in range(3):
         ts.append(key, {"i": i})
@@ -382,6 +480,7 @@ def test_a_torn_tail_is_held_back_and_an_interior_corruption_is_reported(store):
 
 
 def test_an_appender_repairs_a_torn_tail_before_adding_its_own_entry(store):
+    only_on(store, FILE, _LOG_FILE_MECHANICS)
     key = store.key(LOG, "repaired")
     ts.append(key, {"i": 0})
     path = store.path(key)
@@ -396,6 +495,7 @@ def test_an_appender_repairs_a_torn_tail_before_adding_its_own_entry(store):
 
 
 def test_an_appender_repairs_a_log_that_is_nothing_but_a_fragment(store):
+    only_on(store, FILE, _LOG_FILE_MECHANICS)
     key = store.key(LOG, "all-fragment")
     ts.append(key, {"i": 0})
     path = store.path(key)
@@ -406,6 +506,33 @@ def test_an_appender_repairs_a_log_that_is_nothing_but_a_fragment(store):
     page = ts.read_log(key)
     assert [r["i"] for r in page.records] == [1]
     assert not page.torn_tail and page.corrupt == ()
+
+
+def test_a_committed_entry_is_never_a_torn_tail_and_a_damaged_one_is_still_reported(store):
+    """What replaces the torn-tail cases where an entry is a row rather than a line of a file.
+
+    An entry is committed or it is not there, so no read can catch a partial one and
+    ``torn_tail`` is structurally False. ``corrupt`` still has to answer, because the tuning
+    route branches on both fields and a metrics stream that drops a row and one that says it
+    dropped a row are different things.
+    """
+    only_on(store, SQLITE, "there is no partial row for a reader to catch, which is the fact "
+                           "this pins; the cases above pin the file backend's torn tail")
+    key = store.key(LOG, "damaged")
+    for i in range(3):
+        ts.append(key, {"i": i})
+    assert not ts.read_log(key).torn_tail
+
+    store.damage_log_entry(key, 1, b'{"i": bro')
+    page = ts.read_log(key)
+    assert [r["i"] for r in page.records] == [0, 2]
+    assert page.corrupt == (1,)
+    assert not page.torn_tail
+
+    ts.append(key, {"i": 3})
+    resumed = ts.read_log(key, after=page.cursor)
+    assert [r["i"] for r in resumed.records] == [3]
+    assert not resumed.torn_tail and resumed.corrupt == ()
 
 
 # ── refusals, each with the call it must still admit ────────────────────────────
@@ -566,6 +693,9 @@ def test_a_key_of_the_wrong_arity_refuses_and_names_the_key_fields(store):
 
 
 def test_absence_and_corruption_are_different_answers(store):
+    """Backend-general, and it stays that way: an unreadable measurement record presenting as an
+    absent one is the failure the no-silent-fallback invariant rests on, so every backend
+    answers it, with the damage reaching whatever that backend actually reads."""
     key = store.key(LWW, "sometimes-there")
     with pytest.raises(ts.NotFound) as raised:
         ts.read(key)
@@ -574,9 +704,57 @@ def test_absence_and_corruption_are_different_answers(store):
 
     ts.replace(key, {"n": 1})
     assert ts.read(key) == {"n": 1}
-    store.path(key).write_bytes(b"{not json at all")
+    store.damage_record(key, b"{not json at all")
     with pytest.raises(ts.DecodeError):
         ts.read(key, default={"fallback": True})
+
+
+def test_a_relative_scope_is_refused_before_it_resolves_against_a_working_directory(store):
+    """Every backend has to refuse first and canonicalize second, or the refusal turns into a
+    guess about which directory the process happened to be started in.
+
+    Enumeration refuses alongside the reads and writes, on both backends. An empty list back
+    from a scope that names nothing reads as "this scope holds no entries", which is the
+    silent-fallback shape: a caller asking whether any verdict exists would be told no.
+    """
+    relative_scope = "not/an/absolute/scope"
+    relative = ts.Key(LWW, relative_scope, ("x",))
+
+    with pytest.raises(ts.BadKey) as reading:
+        ts.read(relative, default=None)
+    assert "absolute" in str(reading.value)
+    with pytest.raises(ts.BadKey):
+        ts.replace(relative, {"n": 1})
+    with pytest.raises(ts.BadKey):
+        ts.exists(relative)
+    with pytest.raises(ts.BadKey) as enumerating:
+        ts.keys(LWW, relative_scope)
+    assert "absolute" in str(enumerating.value)
+
+    absolute = store.key(LWW, "absolute")
+    ts.replace(absolute, {"n": 1})
+    assert ts.read(absolute) == {"n": 1}
+    assert ts.keys(LWW, str(store.root)) == [absolute]
+
+
+def test_a_key_part_carrying_non_ascii_or_a_separator_round_trips(store):
+    """Parts are opaque identity, not path segments a backend may reinterpret."""
+    key = store.key(NESTED, "grüne/reihe", "ü_2")
+    held = ts.replace(key, {"note": "ü"})
+
+    assert ts.read(key) == {"note": "ü"}
+    assert ts.read_versioned(key).version == held
+    assert ts.read(store.key(NESTED, "grüne", "reihe"), default=None) is None
+
+
+def test_a_committed_record_is_readable_by_another_process(store):
+    key = store.key(LWW, "handed-over")
+    ts.replace(key, {"n": 7})
+    result = store.root / "handed-over.json"
+
+    reader = store.spawn("read-record", store.root, LWW, "handed-over", result)
+    assert reader.wait(timeout=60) == 0
+    assert json.loads(result.read_text(encoding="utf-8")) == {"value": {"n": 7}}
 
 
 def test_a_transaction_refuses_every_form_that_would_escape_it(store):
@@ -766,8 +944,14 @@ def test_a_transaction_reads_its_own_staged_write_and_shows_it_to_nobody_else(st
 
 # ── file backend annex ──────────────────────────────────────────────────────────
 
+_FILE_LAYOUT = (
+    "placement on disk and the flushes that make it durable are the file backend's own "
+    "mechanics, and a backend keying on (store, scope, parts) has no path to check"
+)
+
 
 def test_a_rooted_locator_inverts_its_own_placement(store):
+    only_on(store, FILE, _FILE_LAYOUT)
     locator = RootedFileLocator(prefix=("annotations",), suffix=".json")
     parts = ("2026-03-04", "img_0001")
     relative = locator.relative_path(str(store.root), parts)
@@ -813,6 +997,7 @@ class _RecordingBackend(FileBackend):
 
 
 def test_a_relaxed_store_flushes_nothing_and_a_durable_one_flushes_both(store):
+    only_on(store, FILE, _FILE_LAYOUT)
     backend = _RecordingBackend()
     ts.bind(backend)
     relaxed = store.key(RELAXED, "heartbeat")
@@ -836,6 +1021,7 @@ def test_a_relaxed_store_flushes_nothing_and_a_durable_one_flushes_both(store):
 
 
 def test_a_transaction_flushes_each_parent_before_the_next_replace(store):
+    only_on(store, FILE, _FILE_LAYOUT)
     backend = _RecordingBackend()
     ts.bind(backend)
     first = store.key(NESTED, "group", "alpha")
@@ -855,6 +1041,7 @@ def test_a_transaction_flushes_each_parent_before_the_next_replace(store):
 
 
 def test_lock_files_and_staged_temp_files_are_never_keys(store):
+    only_on(store, FILE, _FILE_LAYOUT)
     key = store.key(LWW, "enumerated")
     ts.replace(key, {"n": 1})
     directory = store.path(key).parent
@@ -864,6 +1051,157 @@ def test_lock_files_and_staged_temp_files_are_never_keys(store):
     (directory / "tmpabc123.tmp").write_bytes(b"{}")
 
     assert ts.keys(LWW, str(store.root)) == [key]
+
+
+# ── database backend annex ──────────────────────────────────────────────────────
+
+_DATABASE_MECHANICS = (
+    "the subject is what one database per scope does, and the file backend has no database "
+    "for any of it to be true of"
+)
+
+
+def test_the_database_backend_declares_exactly_these_guarantees(store):
+    """A capability is what a caller refuses on rather than degrades against, so a false
+    declaration cannot be allowed to ship quietly."""
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    assert ts.capabilities() == ts.Capabilities(
+        multi_key_atomic_commit=True,
+        cross_machine_exclusion=False,
+        durable_replace=os.name != "nt",
+        durable_append=True,
+        local_blob_paths=True,
+    )
+
+
+def test_a_database_and_its_sidecars_are_never_keys_of_the_store_they_sit_inside(store):
+    """The database backend keeps its files in ``.tcip/``, which is a directory a store's own
+    entries live in, so enumeration has to tell one from the other by name.
+
+    The build temp is asked for by the same helper the creation path names it with, so this
+    checks the name that is actually produced rather than a pattern restated here.
+    """
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    ts.replace(store.key(LWW, "opens-the-database"), {"n": 1})
+    entry = store.key(STATE_FILES, "note.txt")
+    ts.put_blob(entry, b"an entry of a store whose files share the database's directory")
+
+    tcip_dir = store.root / ".tcip"
+    (tcip_dir / creation_temp_name(DATABASE_FILENAME, "abc123")).write_bytes(b"")
+    present = {path.name for path in tcip_dir.iterdir()}
+    assert {DATABASE_FILENAME, f"{DATABASE_FILENAME}-wal", f"{DATABASE_FILENAME}-shm"} <= present
+
+    assert ts.keys(STATE_FILES, str(store.root)) == [entry]
+
+
+def test_two_spellings_of_one_scope_address_one_database(store):
+    """Scope strings arrive from callers that do not canonicalize them the same way, and a
+    second database for the same directory would silently split one store in two.
+
+    The connection slot is what this asserts on. Reading the same value back through both
+    spellings does not pin the backend: the filesystem resolves the detour on its own, so that
+    much passes even with canonicalization reduced to identity. One slot for two spellings is
+    only true if the backend canonicalized them itself.
+    """
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    detour = store.root / "detour"
+    detour.mkdir()
+    spelled_around = ts.Key(LWW, str(detour / ".."), ("shared",))
+
+    ts.replace(store.key(LWW, "shared"), {"n": 1})
+    assert ts.read(spelled_around) == {"n": 1}
+    ts.replace(spelled_around, {"n": 2}, expect=ts.read_versioned(spelled_around).version)
+    assert ts.read(store.key(LWW, "shared")) == {"n": 2}
+
+    slots = list(store.backend._connections)
+    assert len(slots) == 1
+    assert slots[0][2] == ts.canonical_path(str(store.root))
+    assert slots[0][2] == ts.canonical_path(str(detour / ".."))
+    assert list(store.root.rglob(DATABASE_FILENAME)) == [
+        store.root / ".tcip" / DATABASE_FILENAME
+    ]
+
+
+def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(store):
+    """The parts column's spelling, pinned here rather than left to whatever json.dumps
+    defaults to on the day: two spellings of one key would address two rows."""
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    key = store.key(NESTED, "grüne/reihe", "ü_2")
+    ts.replace(key, {"n": 1})
+
+    conn = store.connect()
+    try:
+        stored = [
+            row[0]
+            for row in conn.execute("select parts from records where store = ?", (NESTED,))
+        ]
+    finally:
+        conn.close()
+    assert stored == ['["gr\\u00fcne/reihe","\\u00fc_2"]']
+    assert ts.keys(NESTED, str(store.root)) == [key]
+
+
+def test_a_cursor_returns_every_entry_once_while_appenders_are_still_writing(store):
+    """A metrics tail reads a log other processes are appending to, so the cursor has to be
+    exact under concurrency: a gap loses an epoch and a repeat double-counts one."""
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    key = store.key(LOG, "streamed-live")
+    workers = [store.spawn("append", store.root, "streamed-live", f"proc{n}", 20) for n in range(2)]
+
+    seen: list[tuple[str, int]] = []
+    cursor = None
+    deadline = time.monotonic() + 120
+    while len(seen) < 40:
+        assert time.monotonic() < deadline, f"only {len(seen)} of 40 entries arrived"
+        page = ts.read_log(key, after=cursor)
+        seen.extend((r["tag"], r["i"]) for r in page.records)
+        assert not page.torn_tail and page.corrupt == ()
+        cursor = page.cursor
+    for worker in workers:
+        assert worker.wait(timeout=120) == 0
+
+    assert ts.read_log(key, after=cursor).records == []
+    assert len(set(seen)) == 40
+    for tag in ("proc0", "proc1"):
+        assert sorted(i for name, i in seen if name == tag) == list(range(20))
+
+
+class _RecordingSyncBackend(SqliteBackend):
+    """Records the synchronous level each write sets on its connection, in the order it sets it."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.levels: list[str] = []
+
+    def _apply_synchronous(self, conn, level):
+        self.levels.append(level)
+        super()._apply_synchronous(conn, level)
+
+
+def test_a_write_commits_at_the_synchronous_level_its_store_declares(store):
+    """The three live-state stores declare relaxed durability, and that declaration has to keep
+    meaning something once a commit rather than an fsync is what makes a write durable."""
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    backend = _RecordingSyncBackend()
+    ts.bind(backend)
+    try:
+        relaxed = store.key(RELAXED, "heartbeat")
+        durable = store.key(LWW, "durable")
+        ts.replace(durable, {"n": 0})
+        conn = backend._connection(str(store.root))
+
+        backend.levels.clear()
+        ts.replace(relaxed, {"n": 1})
+        assert backend.levels == ["NORMAL"]
+        assert conn.execute("pragma synchronous").fetchone()[0] == 1
+
+        backend.levels.clear()
+        ts.replace(durable, {"n": 1})
+        assert backend.levels == ["FULL"]
+        assert conn.execute("pragma synchronous").fetchone()[0] == 2
+    finally:
+        backend.close()
+        ts.bind(store.backend)
 
 
 # ── the platform's own stores: same codec, same path ────────────────────────────
@@ -1390,6 +1728,8 @@ def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_code
     store, tmp_path, monkeypatch, name
 ):
     """Nothing between a store's codec and the disk adds, translates or wraps a byte."""
+    only_on(store, FILE, "the subject is the bytes each store's locator puts on disk, which is "
+                         "what an export writes back out rather than what a database holds")
     case = REGISTERED[name]
     descriptor = ts.get_descriptor(name)
     seam_root = tmp_path / "seam"
@@ -1440,6 +1780,28 @@ def test_a_verdict_with_no_prediction_bucket_places_its_shard_under_the_review_d
     placed = locator.relative_path(str(state_dir), key.parts)
     assert placed == PurePosixPath("review/a_1.jpg.json")
     assert locator.parts_from(placed) == key.parts
+
+
+def test_enumerating_review_verdicts_answers_with_identities_that_read_back(store):
+    """``keys`` returns identities, not whatever a path happened to be able to spell.
+
+    The shard filename sanitizes a separator out of the image name and folds a bucket key into
+    one directory, so the path alone recovers a key that names a different entry. Both backends
+    answer with the key the payload states, and the proof that it is an identity rather than a
+    label is that reading it back works.
+    """
+    state_dir = _review_state_dir(store.root)
+    bucket, image = "predictions/live/2026-03-04", "a/b.jpg"
+    key = review_engine.review_verdict_key(state_dir, bucket, image)
+    ts.replace(
+        key,
+        {"bucket": bucket, "img_name": image, "state": {"img_status": "completed"}},
+        expect=ts.Version.ABSENT,
+    )
+
+    found = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(state_dir))
+    assert found == [key]
+    assert ts.read(found[0])["img_name"] == image
 
 
 # ── conditional blob writes ─────────────────────────────────────────────────────
@@ -1536,6 +1898,8 @@ def test_the_layout_key_and_the_generic_key_for_one_document_agree_on_it(store):
     the version derived from its bytes, or a create-only write through one would not see what the
     other already wrote.
     """
+    only_on(store, FILE, "the agreement asserted here is between two locators' paths, which "
+                         "the seam reaches through path_for and only the file backend answers")
     layout_key = dataset_layout.label_key(store.root, "2026-03-04", "a_1")
     generic_key = json_io.annotation_record_key(
         dataset_layout.annotation_dir(store.root, "2026-03-04"), "a_1"

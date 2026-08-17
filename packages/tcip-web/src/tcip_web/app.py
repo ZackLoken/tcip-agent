@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from tcip_store.file_backend import bind_default
+from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import VALID_PANELS
 from tcip_web.paths import is_loopback_host, origin_allowed

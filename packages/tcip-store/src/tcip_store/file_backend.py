@@ -50,6 +50,42 @@ _TAIL_SCAN_BYTES = 8192
 """How far back an append looks for the last entry boundary at a time, so a repair costs the
 size of the tail rather than the size of the log."""
 
+DATABASE_FILENAME = "store.db"
+"""The database file a scope's records live in under a database backend.
+
+Named here, where enumeration decides what is an entry, so the backend that creates the file
+and the backend that must never return it as a key cannot disagree about its name.
+"""
+
+_DATABASE_ARTIFACTS = frozenset(
+    {DATABASE_FILENAME, f"{DATABASE_FILENAME}-wal", f"{DATABASE_FILENAME}-shm"}
+)
+
+
+def creation_temp_name(destination: str, token: str) -> str:
+    """The name a file is built under before it is installed at ``destination``.
+
+    Hidden and temp-suffixed, which is what ``_is_bookkeeping`` already recognizes, so a build
+    in flight is never enumerated as an entry of whatever store owns the directory.
+    """
+    return f".{destination}.{token}{_TEMP_SUFFIX}"
+
+
+def require_absolute_scope(scope: str) -> Path:
+    """The scope as a path, or the refusal every backend owes a relative one.
+
+    Refused before anything resolves it, so no answer can depend on the directory the process
+    happens to be in. Enumeration refuses here too rather than answering with an empty list,
+    which would read as "this scope holds nothing" when it means "this scope names nothing".
+    """
+    root = Path(scope)
+    if not root.is_absolute():
+        raise BadKey(
+            f"scope {scope!r} is not an absolute path: a relative scope resolves against "
+            "whatever directory the process happens to be in"
+        )
+    return root
+
 
 class Locator(Protocol):
     """One store's identity map: where an entry of it lives under its scope root.
@@ -232,12 +268,7 @@ class FileBackend:
                 f"store {key.store!r} declares no locator, so the file backend cannot place "
                 "it: declare one beside the store's key constructor"
             )
-        root = Path(key.scope)
-        if not root.is_absolute():
-            raise BadKey(
-                f"scope {key.scope!r} is not an absolute path: a relative scope resolves "
-                "against whatever directory the process happens to be in"
-            )
+        root = require_absolute_scope(key.scope)
         relative = locator.relative_path(key.scope, key.parts)
         if relative.is_absolute() or ".." in relative.parts:
             raise BadKey(f"store {key.store!r} placed {list(key.parts)} outside its scope root")
@@ -361,10 +392,7 @@ class FileBackend:
         data = self._read_bytes(path)
         if data is None:
             if default is REQUIRED:
-                raise NotFound(
-                    f"{key.store}{list(key.parts)} has no record under {key.scope}. Pass "
-                    "default= if absence is meaningful to this caller"
-                )
+                raise _missing_record(key)
             return Versioned(default, Version.ABSENT)
         return Versioned(_decode(descriptor, key, data), _version_of(data))
 
@@ -405,19 +433,34 @@ class FileBackend:
             txn.apply()
 
     def keys(self, store: str, scope: str, prefix: tuple[str, ...] = ()) -> list[Key]:
+        """Every key of ``store`` under ``scope``, as identities a caller can read back.
+
+        A store whose layout cannot spell every key it holds (one that sanitizes a separator
+        out of a filename, say) declares ``true_parts_from_entry``, and the entry's own bytes
+        are what the identity comes from there. The locator still decides which files belong
+        to the store; the hook only corrects what the path could not carry.
+        """
         descriptor = get_descriptor(store)
         locator = descriptor.locator
         if locator is None:
             raise StoreError(f"store {store!r} declares no locator, so it cannot be enumerated")
-        root = Path(scope)
+        root = require_absolute_scope(scope)
         if not root.is_dir():
             return []
+        recover = descriptor.true_parts_from_entry
         found: list[Key] = []
         for path in root.rglob("*"):
             if not path.is_file() or _is_bookkeeping(path.name):
                 continue
             parts = locator.parts_from(PurePosixPath(path.relative_to(root).as_posix()))
-            if parts is None or len(parts) != len(descriptor.key_fields):
+            if parts is None:
+                continue
+            if recover is not None:
+                data = self._read_bytes(path)
+                recovered = None if data is None else recover(data)
+                if recovered is not None:
+                    parts = recovered
+            if len(parts) != len(descriptor.key_fields):
                 continue
             if parts[: len(prefix)] != tuple(prefix):
                 continue
@@ -432,11 +475,7 @@ class FileBackend:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
         data = _encode(descriptor, key, record)
-        if b"\n" in data:
-            raise ValueError(
-                f"log store {key.store!r} encoded an entry containing a newline: a log entry "
-                "is one line, so its codec must not indent or embed raw newlines"
-            )
+        _refuse_embedded_newline(key, data)
         with self._locked([key]):
             existed = path.exists()
             self._repair_torn_tail(path)
@@ -569,18 +608,13 @@ class FileBackend:
     def blob_path(self, key: Key) -> Path:
         return self.path_for(key)
 
+    def close(self) -> None:
+        """Release what this backend holds between calls, which is nothing.
 
-def bind_default(*, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> None:
-    """Bind a file backend for this process, at its entry point.
-
-    What every entry point calls while the file backend is the only backend: the MCP server, the
-    web backend, a training subprocess, a test fixture. Constructing the backend is what refuses
-    with ``BackendUnavailable`` when cross-process exclusion is unavailable, so a process that
-    cannot lock stops here rather than writing without one.
-    """
-    from tcip_store.store import bind
-
-    bind(FileBackend(lock_timeout_s=lock_timeout_s))
+        Every file handle is opened and closed inside the operation that needs it, so this
+        exists to give both backends one lifecycle a binder can call rather than to free
+        anything here.
+        """
 
 
 class _FileTxn:
@@ -593,11 +627,7 @@ class _FileTxn:
 
     def _held(self, key: Key) -> None:
         if key not in self._keys:
-            raise TransactionMisuse(
-                f"{key.store}{list(key.parts)} is not held by this transaction: name every "
-                "key the body touches in transaction(...). An unheld read inside a "
-                "transaction is the lost update this layer exists to prevent"
-            )
+            raise _unheld_key(key)
 
     def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
         self._held(key)
@@ -605,7 +635,7 @@ class _FileTxn:
         if staged is not None:
             if staged.removed:
                 if default is REQUIRED:
-                    raise NotFound(f"{key.store}{list(key.parts)} was deleted by this transaction")
+                    raise _deleted_in_transaction(key)
                 return default
             return staged.value
         return self._backend.read_versioned(key, default=default).value
@@ -679,16 +709,57 @@ def _decode(descriptor: StoreDescriptor, key: Key, data: bytes) -> Any:
         ) from exc
 
 
+def _missing_record(key: Key) -> NotFound:
+    """The refusal a required read of an absent record raises, worded once for every backend."""
+    return NotFound(
+        f"{key.store}{list(key.parts)} has no record under {key.scope}. Pass default= if "
+        "absence is meaningful to this caller"
+    )
+
+
+def _unheld_key(key: Key) -> TransactionMisuse:
+    """The refusal a transaction raises for a key it does not hold, on every backend."""
+    return TransactionMisuse(
+        f"{key.store}{list(key.parts)} is not held by this transaction: name every key the "
+        "body touches in transaction(...). An unheld read inside a transaction is the lost "
+        "update this layer exists to prevent"
+    )
+
+
+def _deleted_in_transaction(key: Key) -> NotFound:
+    """The refusal a required read of a key this transaction deleted raises, on every backend."""
+    return NotFound(f"{key.store}{list(key.parts)} was deleted by this transaction")
+
+
+def _refuse_embedded_newline(key: Key, data: bytes) -> None:
+    """Refuse an encoded log entry that is more than one line, whatever stores the entry.
+
+    A log entry is one line: the file backend terminates it with a newline and an export
+    writes database-held entries back out the same way, so an embedded newline would split one
+    entry into two wherever the bytes land.
+    """
+    if b"\n" in data:
+        raise ValueError(
+            f"log store {key.store!r} encoded an entry containing a newline: a log entry is "
+            "one line, so its codec must not indent or embed raw newlines"
+        )
+
+
 
 
 def _is_bookkeeping(name: str) -> bool:
-    """Whether a filename is this backend's own artifact rather than an entry.
+    """Whether a filename is a storage backend's own artifact rather than an entry.
 
-    Lock files outlive the writes that made them, and a temp file is visible for the
-    duration of a write; neither may ever surface as a key. Anything else that is not an
-    entry is rejected by the store's own locator instead of by pattern matching.
+    Lock files outlive the writes that made them, a temp file is visible for the duration of a
+    write or a database build, and a database and its WAL sidecars sit inside the very scope
+    whose entries are being enumerated; none of them may ever surface as a key. Anything else
+    that is not an entry is rejected by the store's own locator instead of by pattern matching.
     """
-    return name.endswith(_LOCK_SUFFIX) or (name.startswith(".") and name.endswith(_TEMP_SUFFIX))
+    return (
+        name in _DATABASE_ARTIFACTS
+        or name.endswith(_LOCK_SUFFIX)
+        or (name.startswith(".") and name.endswith(_TEMP_SUFFIX))
+    )
 
 
 def _remove_quietly(path: str) -> None:

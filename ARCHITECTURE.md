@@ -156,11 +156,13 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 5 | 0 |
+| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point, and the environment variable that decides. | 3 | 0 |
 | packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 4 |
-| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs. | 3 | 1 |
+| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs. | 3 | 3 |
 | packages/tcip-store/src/tcip_store/model.py | Identity and value types the seam speaks on every backend: Key, Version, Versioned, LogPage, Capabilities. | 0 | 5 |
 | packages/tcip-store/src/tcip_store/registry.py | The store catalogue: kind, key shape, the canonical JSON codec each kind encodes through and the exemption a store must state to carry another, concurrency policy, durability, enumeration. | 3 | 3 |
-| packages/tcip-store/src/tcip_store/store.py | The bound-backend surface and the rules that must mean the same thing on every backend. | 3 | 1 |
+| packages/tcip-store/src/tcip_store/sqlite_backend.py | The database backend: one verified WAL database per scope root for records and logs, with blobs forwarded to the file backend. | 4 | 1 |
+| packages/tcip-store/src/tcip_store/store.py | The bound-backend surface and the rules that must mean the same thing on every backend. | 3 | 2 |
 | packages/tcip-store/src/tcip_store/values.py | What a value must be before a store will carry it, and how a producer says it is not. | 0 | 1 |
 
 ## tcip-web
@@ -968,7 +970,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:766`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:788`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:215`.
 
@@ -1392,14 +1394,14 @@ Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
 `verdict_count`, `prediction_buckets.py:105`, opens a `ReviewEngine` on that root rather than
 composing a state dir of its own.
 
-Writer: `ReviewEngine._save_image`, `review_engine.py:262`, called by `mark_image_reviewed`
-(`review_engine.py:308`), `unmark_image_reviewed` (`review_engine.py:339`),
-`record_detection_action` (`review_engine.py:606`), `check_image_review_complete`
-(`review_engine.py:705`); `save_review_state`, `review_engine.py:282`, flushes every shard.
+Writer: `ReviewEngine._save_image`, `review_engine.py:284`, called by `mark_image_reviewed`
+(`review_engine.py:330`), `unmark_image_reviewed` (`review_engine.py:361`),
+`record_detection_action` (`review_engine.py:628`), `check_image_review_complete`
+(`review_engine.py:727`); `save_review_state`, `review_engine.py:304`, flushes every shard.
 
-Readers: `ReviewEngine.load_review_state`, `review_engine.py:241`, which enumerates the store's
-keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:490`,
-and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:471`.
+Readers: `ReviewEngine.load_review_state`, `review_engine.py:263`, which enumerates the store's
+keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:512`,
+and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:493`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
@@ -1593,7 +1595,7 @@ Phase 3 verdict: single. The browser still joins directory plus filename client-
 
 Must agree: the verdict writer and the bucket-immutability reader look at the same review store.
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:71` (`def review_state_dir_of(`, the one derivation of the store root; `verdict_count`, line 105, counts one bucket's verdicts through the store the engine writes into).
-Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:149` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
+Side B: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:170` (`REVIEW_VERDICTS_STORE`, which owns the shard layout inside that root). `packages/tcip-web/src/tcip_web/routes/review.py:72`, `routes/inference.py:428` and `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:1285` open on the derived root instead of composing a state dir each.
 Phase 3 verdict: single.
 
 ## S17. Canonical per-image annotation JSON schema
@@ -1797,7 +1799,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S45. Review verdicts promoted into a calibration reference
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
-Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:606` (`def record_detection_action(`, the one writer of a stored verdict entry).
+Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:628` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:72` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 16), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 

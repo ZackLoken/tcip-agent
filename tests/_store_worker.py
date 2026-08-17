@@ -6,9 +6,14 @@ that has no cross-process exclusion at all. This module is both the child script
 spawn (``python tests/_store_worker.py <command> ...``) and the parent's source of store
 declarations, so both sides address exactly the same stores.
 
-``TCIP_STORE_CONTRACT_UNLOCKED=1`` in the environment swaps in a backend whose writes skip
-the key's lock. That variant is what the isolation cases are observed failing against; it is
-test scaffolding and no shipped code path can reach it.
+``TCIP_STORE_CONTRACT_BACKEND`` names which backend both sides construct, so a spawned child
+writes through the same one the parametrized fixture bound in the parent.
+
+Two weakened variants exist, each selected by its own environment variable, each what a set of
+cases is observed failing against, and neither reachable from any shipped code path:
+``TCIP_STORE_CONTRACT_UNLOCKED=1`` swaps in a file backend whose writes skip the key's lock,
+and ``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1`` swaps in a database backend that never compares
+``expect``.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from pathlib import Path
 
 import tcip_store as ts
 from tcip_store.file_backend import FileBackend, RootedFileLocator
+from tcip_store.sqlite_backend import SqliteBackend
 
 CAS = "contract_cas"
 LWW = "contract_lww"
@@ -32,6 +38,10 @@ STRICT = "contract_strict"
 LOG = "contract_log"
 BLOB = "contract_blob"
 SEALED_BLOB = "contract_sealed_blob"
+STATE_FILES = "contract_state_files"
+
+BACKEND_ENV = "TCIP_STORE_CONTRACT_BACKEND"
+FILE, SQLITE = "file", "sqlite"
 
 _registered = False
 
@@ -41,8 +51,9 @@ def register_contract_stores() -> None:
 
     Each store isolates one declaration the contract makes: the two concurrency policies,
     relaxed durability, a two-part key, a store with no enumeration, a store the encode
-    refusals are exercised against, a log, and two blob stores that differ only in whether
-    they hand out a path.
+    refusals are exercised against, a log, two blob stores that differ only in whether they
+    hand out a path, and one whose entries sit in the very directory a database backend keeps
+    its own files in.
     """
     global _registered
     if _registered:
@@ -139,6 +150,15 @@ def register_contract_stores() -> None:
             locator=RootedFileLocator(prefix=("sealed",), suffix=".bin"),
         )
     )
+    ts.register_store(
+        ts.StoreDescriptor(
+            name=STATE_FILES,
+            kind="blob",
+            key_fields=("name",),
+            enumerable=True,
+            locator=RootedFileLocator(prefix=(".tcip",)),
+        )
+    )
 
 
 class UnlockedWriteBackend(FileBackend):
@@ -174,8 +194,52 @@ class PausingApplyBackend(FileBackend):
         time.sleep(self.pause_s)
 
 
-def make_backend(**kwargs) -> FileBackend:
+class IgnoredExpectBackend(SqliteBackend):
+    """A database backend whose writes never compare ``expect``, for observing what it holds up.
+
+    Everything else is the shipped path: the same transaction, the same rows, the same version
+    derived from the stored bytes. Only the comparison is gone, which is the difference between
+    a stale writer refused and one that lands on top of a committed write.
+    """
+
+    def _require_version(self, conn, key, expect):
+        return
+
+
+class PausingCommitBackend(SqliteBackend):
+    """A database backend that pauses after the first staged write has executed, so a kill lands
+    with real uncommitted rows in the transaction rather than before any of them.
+
+    ``pause_marker`` is written once the first insert has run, which is what lets the parent wait
+    until there is something for a rollback to take back before killing this process. With
+    ``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` each staged write is committed on its own
+    instead, which is the shape a kill cannot take back and what the crash case is observed
+    failing against.
+    """
+
+    def __init__(self, *, pause_marker: Path, pause_s: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.pause_marker = pause_marker
+        self.pause_s = pause_s
+        self._paused = False
+
+    def _put(self, conn, key, data):
+        super()._put(conn, key, data)
+        if os.environ.get("TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE") == "1":
+            conn.execute("commit")
+            conn.execute("begin immediate")
+        if not self._paused:
+            self._paused = True
+            self.pause_marker.write_text("staged", encoding="utf-8")
+            time.sleep(self.pause_s)
+
+
+def make_backend(**kwargs) -> FileBackend | SqliteBackend:
     """The backend this process writes through, weakened when the environment says so."""
+    if os.environ.get(BACKEND_ENV) == SQLITE:
+        if os.environ.get("TCIP_STORE_CONTRACT_IGNORES_EXPECT") == "1":
+            return IgnoredExpectBackend(**kwargs)
+        return SqliteBackend(**kwargs)
     if os.environ.get("TCIP_STORE_CONTRACT_UNLOCKED") == "1":
         return UnlockedWriteBackend(**kwargs)
     return FileBackend(**kwargs)
@@ -302,6 +366,16 @@ def _cmd_pause_mid_apply(root: str, first: str, second: str, marker: str, pause_
             txn.write(key, {"who": key.parts[-1]})
 
 
+def _cmd_pause_before_commit(root: str, first: str, second: str, marker: str, pause_s: str) -> None:
+    """Write both keys through a transaction that pauses once the first row is in it, so a kill
+    lands on an open transaction holding uncommitted rows rather than on an empty one."""
+    ts.bind(PausingCommitBackend(pause_marker=Path(marker), pause_s=float(pause_s)))
+    keys = (_record(LWW, root, first), _record(LWW, root, second))
+    with ts.transaction(*keys) as txn:
+        for key in keys:
+            txn.write(key, {"who": key.parts[-1]})
+
+
 _COMMANDS = {
     "rewrite": _cmd_rewrite,
     "hold-transaction": _cmd_hold_transaction,
@@ -314,6 +388,7 @@ _COMMANDS = {
     "count-log": _cmd_count_log,
     "hold-lock": _cmd_hold_lock,
     "pause-mid-apply": _cmd_pause_mid_apply,
+    "pause-before-commit": _cmd_pause_before_commit,
     "write-blob-after": _cmd_write_blob_after,
 }
 

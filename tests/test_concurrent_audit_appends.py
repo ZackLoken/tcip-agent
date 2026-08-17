@@ -40,7 +40,7 @@ def test_concurrent_processes_no_torn_or_lost_lines(tmp_path):
     """Two separate processes (mirroring the terminal + sidecar MCP instances)."""
     worker = (
         "import sys; import tcip_store as ts; "
-        "from tcip_store.file_backend import bind_default; "
+        "from tcip_store.binding import bind_default; "
         "from tcip_mcp.audit import audit_log_key; "
         "bind_default(); "
         "root, tag = sys.argv[1], sys.argv[2]; "

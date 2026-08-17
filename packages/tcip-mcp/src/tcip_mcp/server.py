@@ -62,7 +62,7 @@ def list_registered_tools() -> list[str]:
 
 def main() -> None:
     """Start the MCP server on stdio transport."""
-    from tcip_store.file_backend import bind_default
+    from tcip_store.binding import bind_default
 
     bind_default()
     # Pin the platform-state root before any tool resolves a ``.tcip`` path, so a server
