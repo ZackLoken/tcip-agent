@@ -1951,7 +1951,7 @@ Phase 3 verdict: single.
 ## S67. Local gate commands against the CI gate  <!-- queued: P5-308 unify -->
 
 Must agree: the checks a contributor runs locally are the checks CI runs.
-Side A: `CLAUDE.md` (documents `pytest -n auto`, `ruff`, `mypy`, and the frontend command chain).
+Side A: `CLAUDE.md` (documents `pytest -n 4`, `ruff`, `mypy`, and the frontend command chain).
 Side B: `.github/workflows/ci.yml` (mypy job, python job with `pytest -n auto` and `TCIP_MIN_TESTS`, typescript job with format:check/lint/typecheck/test/build).
 Phase 3 verdict: duplicated.
 

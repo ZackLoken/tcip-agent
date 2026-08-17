@@ -24,7 +24,7 @@ STAGES = [
     ("ruff", ["ruff", "check", "."], REPO_ROOT),
     # bare mypy reads its roots from mypy.ini's files list, the same source CI uses.
     ("mypy", ["mypy"], REPO_ROOT),
-    ("pytest", ["pytest", "tests/", "-n", "auto", "--tb=short", "-q"], REPO_ROOT),
+    ("pytest", ["pytest", "tests/", "-n", "4", "--tb=short", "-q"], REPO_ROOT),
     ("npm-format-check", [NPM, "run", "format:check"], FRONTEND),
     ("npm-lint", [NPM, "run", "lint"], FRONTEND),
     ("npm-typecheck", [NPM, "run", "typecheck"], FRONTEND),
