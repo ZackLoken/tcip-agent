@@ -40,6 +40,7 @@ from tcip_store.model import (
     Version,
     Versioned,
     canonical_order,
+    canonical_path,
 )
 from tcip_store.registry import StoreDescriptor, get_descriptor
 
@@ -164,7 +165,7 @@ def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) ->
     _, timeout_error = _filelock_classes()
     target = Path(path)
     lock_file = str(target) + _LOCK_SUFFIX
-    thread_lock, file_lock = _locks_for(_canonical(target), lock_file)
+    thread_lock, file_lock = _locks_for(canonical_path(target), lock_file)
     if not thread_lock.acquire(timeout=max(0.0, timeout_s)):
         raise timeout_error(lock_file)
     try:
@@ -175,10 +176,6 @@ def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) ->
             file_lock.release()
     finally:
         thread_lock.release()
-
-
-def _canonical(path: Path) -> str:
-    return os.path.normcase(str(path.resolve()))
 
 
 def _version_of(data: bytes) -> Version:
@@ -256,7 +253,7 @@ class FileBackend:
         seen: set[str] = set()
         for key in canonical_order(requested):
             path = self.path_for(key)
-            canonical = _canonical(path)
+            canonical = canonical_path(path)
             if canonical in seen:
                 continue
             seen.add(canonical)

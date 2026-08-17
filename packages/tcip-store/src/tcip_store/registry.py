@@ -55,8 +55,10 @@ class StoreDescriptor:
     answers or refuses. ``path_readable`` decides whether a blob store will hand out a real
     filesystem path for a library that cannot take a file object.
 
-    ``locator`` is the file backend's identity map for this store. Other backends key on
-    (store, scope, parts) and ignore it.
+    ``locator`` is the file backend's identity map for this store, required of a record or a
+    log and unused by a blob. Another backend keys on (store, scope, parts) and does not
+    consult it to read or write, but the file layout it names is what a record held anywhere
+    else is written back out as, so a store without one could only ever be half exported.
 
     ``codec_exemption`` is why this store does not encode through the canonical JSON codec.
     It is required of any record or log carrying some other JSON spelling, and reading it is
@@ -86,9 +88,12 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
     wearing the same identity, and whichever imported second would silently win. Refuses a
     record with no concurrency policy, and a log or blob that declares one, because the
     policy is a statement about read-modify-write that only a record can make. Refuses a
-    JSON spelling that is not the canonical one for the kind, unless the descriptor states
-    why in ``codec_exemption``, so a module nothing has imported cannot quietly hold a
-    bespoke codec that no test enumerating the registry would ever see.
+    record or log that declares no locator, which is the store's own statement of the file it
+    owns and the only thing that can put its bytes back on disk in the layout the tools
+    reading that layout expect. Refuses a JSON spelling that is not the canonical one for the
+    kind, unless the descriptor states why in ``codec_exemption``, so a module nothing has
+    imported cannot quietly hold a bespoke codec that no test enumerating the registry would
+    ever see.
     """
     if descriptor.name in _registry:
         owner = _registry[descriptor.name].declared_in
@@ -112,6 +117,13 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
         raise ValueError(f"{descriptor.kind} store {descriptor.name!r} must declare a codec")
     if descriptor.kind == "blob" and descriptor.codec is not None:
         raise ValueError(f"blob store {descriptor.name!r} takes bytes, so it has no codec")
+    if descriptor.kind in ("record", "log") and descriptor.locator is None:
+        raise ValueError(
+            f"{descriptor.kind} store {descriptor.name!r} must declare a locator: it is the "
+            "only statement of which file this store owns, so without it the file backend "
+            "cannot place the bytes and nothing can write a database-held record back out "
+            "as the file the tools that read the layout expect"
+        )
     if descriptor.kind == "log" and not descriptor.durable:
         raise ValueError(
             f"log store {descriptor.name!r} cannot relax durability: an append returns only "

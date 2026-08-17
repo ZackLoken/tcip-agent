@@ -22,7 +22,15 @@ from tcip_store.errors import (
     StoreNotBound,
     TransactionMisuse,
 )
-from tcip_store.model import REQUIRED, Capabilities, Key, LogPage, Version, Versioned
+from tcip_store.model import (
+    REQUIRED,
+    Capabilities,
+    Key,
+    LogPage,
+    Version,
+    Versioned,
+    canonical_path,
+)
 from tcip_store.registry import get_descriptor, validate_key
 
 
@@ -124,14 +132,22 @@ def _active_txn() -> Txn | None:
     return getattr(_open_transaction, "txn", None)
 
 
-def _refuse_inside_transaction(operation: str) -> None:
+_ESCAPES_THE_STAGING = (
+    "use txn.write or txn.delete, or name the key in transaction(...). A module-level write "
+    "would escape this transaction's staging here and commit separately on a database "
+    "backend, so the two backends would mean different things by one call"
+)
+
+_LOGS_ARE_NOT_TRANSACTIONAL = (
+    "close the transaction first. A transaction holds records, so a log key cannot be named "
+    "in one, and an append inside a transaction would join it on a database backend and roll "
+    "back with the body, while append returns only once the entry has survived"
+)
+
+
+def _refuse_inside_transaction(operation: str, reason: str = _ESCAPES_THE_STAGING) -> None:
     if _active_txn() is not None:
-        raise TransactionMisuse(
-            f"{operation} is not allowed inside an open transaction: use txn.write or "
-            "txn.delete, or name the key in transaction(...). A module-level write would "
-            "escape this transaction's staging here and commit separately on a database "
-            "backend, so the two backends would mean different things by one call"
-        )
+        raise TransactionMisuse(f"{operation} is not allowed inside an open transaction: {reason}")
 
 
 def _check_policy(key: Key, expect: Version | None, operation: str) -> None:
@@ -228,6 +244,11 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Iterator[Txn]:
     succeed on a counted lock and then the inner write would be overwritten by the outer
     apply, while on a database backend the inner one would commit separately.
 
+    Every named key hangs off one scope root, compared through ``canonical_path`` so two
+    spellings of one directory are one root; keys from two roots raise ``TransactionMisuse``
+    naming them. A backend that holds one database per scope has no place to commit the
+    second root's write from inside the first root's transaction.
+
     What this does not promise on a file backend: all-or-nothing application across more
     than one key. A crash during the apply can leave a prefix of the named key order on
     disk, each record individually intact and decodable. A caller needing crash consistency
@@ -246,6 +267,16 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Iterator[Txn]:
         )
     for key in keys:
         validate_key(key, expect_kind="record", operation="transaction")
+    roots: dict[str, str] = {}
+    for key in keys:
+        roots.setdefault(canonical_path(key.scope), key.scope)
+    if len(roots) > 1:
+        spelled = ", ".join(repr(scope) for scope in sorted(roots.values()))
+        raise TransactionMisuse(
+            f"a transaction's keys hang off one scope root, and these name {len(roots)}: "
+            f"{spelled}. Take one root's keys in one transaction and the other's in another, "
+            "ordered so a crash between them leaves a detectably stale state"
+        )
     named: list[Key] = []
     for key in keys:
         if key not in named:
@@ -282,9 +313,14 @@ def append(key: Key, record: Mapping[str, Any]) -> None:
     another process. Concurrent appenders from any process are serialized, so entries are
     never interleaved or lost. ``replace`` and ``delete`` against a log key raise
     ``WrongKind``: append-only is enforced by the interface, not by convention.
+
+    Raises ``TransactionMisuse`` if the calling thread holds an open transaction: a
+    transaction names records, and an entry that returned durable is not one a rollback of
+    somebody else's body may take back.
     """
     backend = _backend()
     validate_key(key, expect_kind="log", operation="append")
+    _refuse_inside_transaction("append", _LOGS_ARE_NOT_TRANSACTIONAL)
     backend.append(key, record)
 
 

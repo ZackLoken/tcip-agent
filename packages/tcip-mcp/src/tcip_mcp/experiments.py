@@ -414,22 +414,27 @@ def update_status(experiment_id: str, state: str, *, error: str | None = None) -
         status = txn.read(key, default={})
         current = status.get("state")
         # Terminal-state lock: a completed/failed run cannot be re-opened to a non-terminal state.
-        if current in _TERMINAL_STATES and state != current and state not in _TERMINAL_STATES:
-            _audit_refused(experiment_id, "update_status", {"from": current, "to": state})
-            return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
-                             f"re-open to {state!r}.", "state": current}
-        status["state"] = state
-        if error is not None:
-            status["error"] = error
+        refused_reopen = (
+            current in _TERMINAL_STATES and state != current and state not in _TERMINAL_STATES
+        )
+        if not refused_reopen:
+            status["state"] = state
+            if error is not None:
+                status["error"] = error
 
-        now = datetime.now(timezone.utc).isoformat()
-        status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
-        if state == "running" and not status.get("started"):
-            status["started"] = now
-        if state in ("completed", "failed"):
-            status["ended"] = now
+            now = datetime.now(timezone.utc).isoformat()
+            status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
+            if state == "running" and not status.get("started"):
+                status["started"] = now
+            if state in ("completed", "failed"):
+                status["ended"] = now
 
-        txn.write(key, status)
+            txn.write(key, status)
+
+    if refused_reopen:
+        _audit_refused(experiment_id, "update_status", {"from": current, "to": state})
+        return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
+                         f"re-open to {state!r}.", "state": current}
     return {"experiment_id": experiment_id, "state": state}
 
 
@@ -799,13 +804,15 @@ def record_artifact(
         current = (txn.read(state, default={}) or {}).get("state")
         # Terminal-state lock (additive-only): a new artifact name may be recorded post-completion,
         # but an existing one is frozen, no silent overwrite of a delivered pointer.
-        if name in artifacts and current in _TERMINAL_STATES:
-            _audit_refused(experiment_id, "record_artifact", {"artifact": name})
-            return {"error": f"Experiment {experiment_id} is terminal; artifact {name!r} already "
-                             f"recorded and is immutable.", "artifact": name}
-        artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
-        txn.write(key, artifacts)
+        refused_overwrite = name in artifacts and current in _TERMINAL_STATES
+        if not refused_overwrite:
+            artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
+            txn.write(key, artifacts)
 
+    if refused_overwrite:
+        _audit_refused(experiment_id, "record_artifact", {"artifact": name})
+        return {"error": f"Experiment {experiment_id} is terminal; artifact {name!r} already "
+                         f"recorded and is immutable.", "artifact": name}
     return {"experiment_id": experiment_id, "artifact": name, "path": path}
 
 
@@ -830,6 +837,7 @@ def update_lineage(
         _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
 
     key, state = lineage_key(experiment_id), status_key(experiment_id)
+    refused: dict[str, Any] = {}
     with store.transaction(key, state) as txn:
         lineage = txn.read(key, default={})
         # Terminal-state lock (additive-only): once terminal, a still-empty field may take its first
@@ -839,11 +847,12 @@ def update_lineage(
             refused = {k: v for k, v in updates.items()
                        if lineage.get(k) not in (None, "", [], {}) and lineage.get(k) != v}
             if refused:
-                _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused)})
                 updates = {k: v for k, v in updates.items() if k not in refused}
         lineage.update(updates)
         txn.write(key, lineage)
 
+    if refused:
+        _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused)})
     return {"experiment_id": experiment_id, "lineage": lineage}
 
 

@@ -1193,19 +1193,19 @@ are listed here with the rest rather than taking numbers of their own.
 - `config.json` (`config_key`, `experiments.py:113`): written by `create_experiment`,
   `experiments.py:321`, and `overwrite_config_if_pristine`, `experiments.py:376` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:893`, and `compare_experiments`, `experiments.py:965`.
+  `experiments.py:893`, and `compare_experiments`, `experiments.py:974`.
 - `status.json` (`status_key`, line 135): written by `create_experiment` (321), `update_status`
-  (`experiments.py:402`), `stamp_run_identity` (`experiments.py:436`), `_touch_heartbeat`
+  (`experiments.py:402`), `stamp_run_identity` (`experiments.py:441`), `_touch_heartbeat`
   (`experiments.py:567`). Read by `get_experiment` (893), `reconstruct_run_status`
-  (`experiments.py:512`), `resolve_experiment_dir_for_run` (`experiments.py:460`). `state` is
+  (`experiments.py:512`), `resolve_experiment_dir_for_run` (`experiments.py:465`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 158): written by `create_experiment` (321) and
-  `update_lineage`, `experiments.py:812`. Read by `get_experiment` (893) and
-  `get_experiment_lineage`, `experiments.py:1009`.
+  `update_lineage`, `experiments.py:819`. Read by `get_experiment` (893) and
+  `get_experiment_lineage`, `experiments.py:1018`.
 - `artifacts.json` (`artifacts_key`, line 180): written by `create_experiment` (321) and
-  `record_artifact`, `experiments.py:787`. Read by `get_experiment` (893).
+  `record_artifact`, `experiments.py:792`. Read by `get_experiment` (893).
 - `metrics.jsonl` (`metrics_key`, line 244, append-only): written by
-  `log_metrics`, `experiments.py:599`. Read by `read_metrics`, `experiments.py:586`, which
+  `log_metrics`, `experiments.py:604`. Read by `read_metrics`, `experiments.py:591`, which
   `get_experiment` (893, paginated) and `reconstruct_run_status` (512, last row only) go through.
 - `env.json` (`env_key`, line 202): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
@@ -1216,10 +1216,10 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:1011`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from.
 - `validations.jsonl` (`validations_key`, line 261, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:674`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:679`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual). Read by `read_validations`, `experiments.py:709`, `find_validation`,
-  `experiments.py:714` (matching rows by recomputed `validation_digest`, `experiments.py:664`),
+  residual). Read by `read_validations`, `experiments.py:714`, `find_validation`,
+  `experiments.py:714` (matching rows by recomputed `validation_digest`, `experiments.py:669`),
   and included whole by `get_experiment` (893). The one member appendable after a terminal
   state, because a validation is a statement made about a run after it ended.
 
@@ -1536,7 +1536,7 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:599` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:604` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -1691,7 +1691,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1030` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1039` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
