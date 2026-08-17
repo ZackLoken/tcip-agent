@@ -168,6 +168,25 @@ def test_export_import_roundtrip(tmp_path: Path):
         str(labels / "img_000.json"),
         [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))], 64, 64,
     )
+    # A multispectral capture the sensor wrote one file per band for: the manifest beside the
+    # bands is what makes those files one logical image, so the bundle has to carry all of them.
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    bands = {}
+    for band, wavelength in (("green", 560.0), ("red", 668.0)):
+        band_file = images / f"cap_001_{band}.tif"
+        Image.new("L", (64, 64)).save(band_file)
+        bands[band] = band_file
+    manifest = write_band_group_manifest(
+        images, "cap_001", bands, central_wavelength_nm={"green": 560.0, "red": 668.0},
+        source="explicit-manifest",
+    )
+    # A sensor that writes one multi-band file per capture instead of one file per band. It
+    # enumerates as a logical image on its own, so a bundle that drops it drops that capture.
+    import numpy as np
+
+    npz_image = images / "cap_002.npz"
+    np.savez(npz_image, bands=np.zeros((2, 64, 64), dtype=np.uint16))
     # The class registry decodes the labels' names: a self-contained bundle must carry it, or the
     # archived annotations are unreadable on the other end. One nested classes.json at the root.
     class_registry.write_registry(
@@ -189,8 +208,22 @@ def test_export_import_roundtrip(tmp_path: Path):
     status = inspect_project(str(dest))
     assert status["initialized"] is True
     assert status["has_config"] is True
-    assert status["image_count"] == 1
+    # inspect_project counts raw image files, so the two sibling bands count separately here;
+    # the logical-image count the band group folds them into is asserted below.
+    assert status["image_count"] == 3
     assert (dest / "annotations" / date / "img_000.json").is_file()
+    # Comparing the enumeration rather than a file list pins the archive to the same notion of
+    # "image" the platform reads the restored directory back with.
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    restored_images = dest / "images" / date
+    restored_manifest = restored_images / manifest.name
+    assert restored_manifest.is_file()
+    assert restored_manifest.read_bytes() == manifest.read_bytes()
+    assert (restored_images / npz_image.name).read_bytes() == npz_image.read_bytes()
+    assert sorted(list_logical_images(restored_images)) == sorted(
+        list_logical_images(images)
+    ) == ["cap_001", "cap_002", "img_000"]
     # The registry survived, so the restored labels are still decodable.
     restored = class_registry.read_registry(dest / "classes.json")
     assert [s.name for s in restored.subjects] == ["catkin"]

@@ -215,6 +215,58 @@ def check_trait_specs(root: Path, findings: list) -> None:
         findings.append(("error", f"trait spec {e['file']} failed to load: {e['reason']}"))
 
 
+def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
+    """Which database-held store each file-reading check depends on, and in which scope.
+
+    Exactly what the checks above read off disk, no wider: a store the doctor never reads
+    cannot make a check it does not run report anything. Live-state stores are not doctor
+    inputs and are not here.
+    """
+    return {
+        "check_negatives": ((root, "image_status"),),
+        "check_region_completeness": (
+            (root, "region_completeness"),
+            (root, "region_completeness_digest"),
+        ),
+        "check_state": ((root / ".tcip" / "state", "review_verdicts"),),
+        "check_provenance": ((root / ".tcip" / "experiments", "model_snapshot_manifest"),),
+    }
+
+
+def staleness_findings(root: Path) -> dict[str, str]:
+    """Per check, why its files cannot be trusted, for the checks whose stores are behind.
+
+    A scope with no database is on the file layout and every check reads the authority
+    directly. A store with no counter row was never written in its database and reads current.
+    Anything else stale is reported as this check being invalid rather than as clean, because a
+    check that read files older than the database found the state of an earlier session.
+    """
+    from tcip_store.errors import StoreError
+    from tcip_store.export import stale_stores
+    from tcip_store.file_backend import database_file
+
+    invalid: dict[str, str] = {}
+    for check, gated in gated_stores(root).items():
+        by_scope: dict[Path, list[str]] = {}
+        for scope, store in gated:
+            by_scope.setdefault(scope, []).append(store)
+        reasons: list[str] = []
+        for scope, stores in by_scope.items():
+            db_path = database_file(str(scope.absolute()))
+            if not db_path.is_file():
+                continue
+            try:
+                stale = stale_stores(db_path, tuple(stores))
+            except StoreError as exc:
+                reasons.append(f"{db_path} could not be read: {exc}")
+                continue
+            if stale:
+                reasons.append(f"{', '.join(stale)} in {db_path}")
+        if reasons:
+            invalid[check] = "; ".join(reasons)
+    return invalid
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("project_root", help="project directory holding images/ annotations/ .tcip/")
@@ -230,8 +282,16 @@ def main() -> int:
     bind_default()
 
     findings: list[tuple[str, str]] = []
+    invalid = staleness_findings(root)
     for check in (check_negatives, check_registry, check_provenance, check_state,
                  check_region_completeness, check_trait_specs):
+        reason = invalid.get(check.__name__)
+        if reason:
+            findings.append(("error", f"{check.__name__} reads state as files and those files "
+                            f"are behind the database that holds it ({reason}). This check is "
+                            "invalid, not clean: write the files out with "
+                            "'python scripts/export_store.py' and run the doctor again."))
+            continue
         check(root, findings)
 
     rank = {"error": 0, "warn": 1, "info": 2}

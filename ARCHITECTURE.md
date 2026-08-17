@@ -156,12 +156,14 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 5 | 0 |
+| packages/tcip-store/src/tcip_store/adoption.py | Moving a scope's existing record and log files into a database, exclusively and atomically, or refusing before it writes. | 4 | 0 |
 | packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point, and the environment variable that decides. | 3 | 0 |
-| packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 4 |
-| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs. | 3 | 3 |
+| packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 6 |
+| packages/tcip-store/src/tcip_store/export.py | Writing a scope's database-held records and logs back out as the file layout, and the per-store counters that say when those files are behind. | 4 | 0 |
+| packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and which backend owns a scope's records. | 3 | 5 |
 | packages/tcip-store/src/tcip_store/model.py | Identity and value types the seam speaks on every backend: Key, Version, Versioned, LogPage, Capabilities. | 0 | 5 |
-| packages/tcip-store/src/tcip_store/registry.py | The store catalogue: kind, key shape, the canonical JSON codec each kind encodes through and the exemption a store must state to carry another, concurrency policy, durability, enumeration. | 3 | 3 |
-| packages/tcip-store/src/tcip_store/sqlite_backend.py | The database backend: one verified WAL database per scope root for records and logs, with blobs forwarded to the file backend. | 4 | 1 |
+| packages/tcip-store/src/tcip_store/registry.py | The store catalogue: kind, key shape, the canonical JSON codec each kind encodes through and the exemption a store must state to carry another, concurrency policy, durability, enumeration. | 3 | 5 |
+| packages/tcip-store/src/tcip_store/sqlite_backend.py | The database backend: one verified WAL database per scope root for records and logs, with blobs forwarded to the file backend. | 4 | 3 |
 | packages/tcip-store/src/tcip_store/store.py | The bound-backend surface and the rules that must mean the same thing on every backend. | 3 | 2 |
 | packages/tcip-store/src/tcip_store/values.py | What a value must be before a store will carry it, and how a producer says it is not. | 0 | 1 |
 
@@ -604,8 +606,8 @@ Docstring is the function's docstring first line, verbatim.
 | `set_active_project` | `project_tools.py:248` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:287` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:334` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:395` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:485` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `archive_project` | `project_tools.py:441` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:567` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### training_tools.py (8 tools)
 

@@ -6,6 +6,10 @@ version is therefore derived from its content on every read rather than persiste
 
 Roots are resolved at use time, not at bind time: a scope is carried on the key, so a
 process that repins its platform root mid-run keeps writing where the caller says.
+
+Records and logs are refused on a scope that holds a store database: a file written beside one
+is a write the database never sees and the next read never returns. Reads and blobs are
+unaffected, which is what keeps every file-reading tool working on an exported scope.
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ from tcip_store.model import (
     canonical_order,
     canonical_path,
 )
-from tcip_store.registry import StoreDescriptor, get_descriptor
+from tcip_store.registry import StoreDescriptor, get_descriptor, registered_stores
 
 _TEMP_SUFFIX = ".tmp"
 _LOCK_SUFFIX = ".lock"
@@ -214,6 +218,91 @@ def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) ->
         thread_lock.release()
 
 
+def database_file(scope: str) -> Path:
+    """Where a scope's database sits, whether or not one exists.
+
+    Both backends ask here: the database backend to open or build it, the file backend to find
+    out whether this scope's records have already moved into one. Stating it once is what keeps
+    the file that must never be clobbered and the file that must never be written around from
+    being two different paths.
+    """
+    return require_absolute_scope(scope) / ".tcip" / DATABASE_FILENAME
+
+
+@contextmanager
+def transition_lock(scope: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
+    """Hold the one lock that decides whether a scope's records live in files or in a database.
+
+    Taken by whatever is about to publish a database (creation, adoption) and by a file-backend
+    record write on a scope that already has a ``.tcip`` directory, so a publication in flight
+    and a write to the layout it is loading cannot interleave. Creating the directory is this
+    side's first act, which is what makes it exist for the writer to find.
+    """
+    db_path = database_file(scope)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with path_lock(db_path, timeout_s=timeout_s):
+        yield
+
+
+def claimed_record_files(scope: str, *, limit: int = 0) -> tuple[Path, ...]:
+    """Files under ``scope`` that a record or log store's locator claims and no blob's does.
+
+    This is what "this scope's records are still files" means, asked through the locators the
+    stores themselves declare rather than through a list of filenames somebody maintains.
+
+    A blob's file stays a file under every backend, so a file some blob store could equally own
+    is not evidence that a scope's records were left behind. Locator shapes collide, and a
+    dataset root's ``classes.json`` is claimed by a plain ``<dir>/<name>.json`` record shape as
+    readily as by the blob store that actually owns it, so counting it would refuse every real
+    dataset. The cost of that reading is that a scope whose only records happen to sit at the
+    depth a blob store also addresses goes undetected here; what catches those is adoption's own
+    accounting, which names every claimed file no plan takes in. ``limit`` stops the walk once
+    that many are found, for a caller that only needs to know whether any exist.
+    """
+    root = require_absolute_scope(scope)
+    if not root.is_dir():
+        return ()
+    descriptors = [get_descriptor(name) for name in registered_stores()]
+    owners = [d for d in descriptors if d.kind in ("record", "log") and d.locator is not None]
+    blobs = [d for d in descriptors if d.kind == "blob" and d.locator is not None]
+    found: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or _is_bookkeeping(path.name):
+            continue
+        relative = PurePosixPath(path.relative_to(root).as_posix())
+        if not _any_claims(owners, relative) or _any_claims(blobs, relative):
+            continue
+        found.append(path)
+        if limit and len(found) >= limit:
+            break
+    return tuple(found)
+
+
+def _any_claims(descriptors: list[StoreDescriptor], relative: PurePosixPath) -> bool:
+    """Whether any of these stores' locators reads this path as one of its own entries."""
+    for descriptor in descriptors:
+        assert descriptor.locator is not None
+        parts = descriptor.locator.parts_from(relative)
+        if parts is not None and len(parts) == len(descriptor.key_fields):
+            return True
+    return False
+
+
+def fsync_directory(directory: Path) -> None:
+    """Flush a directory entry, so a rename or a created directory survives a power loss.
+
+    POSIX only. Windows has no directory-fsync equivalent, which is why
+    ``FileBackend.capabilities().durable_replace`` is false there instead of overstated.
+    """
+    if os.name == "nt":
+        return
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _version_of(data: bytes) -> Version:
     return Version(hashlib.sha256(data).hexdigest())
 
@@ -301,6 +390,45 @@ class FileBackend:
                     raise StoreBusy(requested, key, timeout) from None
             yield
 
+    @contextmanager
+    def _owns_the_layout(self, keys: Sequence[Key]) -> Iterator[None]:
+        """Hold each scope's transition lock and refuse if a database owns its records.
+
+        A write here cannot bump a database's counters, so writing a record beside a database
+        that already holds it loses the write with nothing to detect it by. The check is under
+        the transition lock, which creation and adoption also hold, so a publication cannot
+        land between the check and the write. Blobs never reach here: they stay files under
+        every backend.
+
+        A scope with no ``.tcip`` directory is passed over without taking anything: the lock
+        file lands inside that directory, and creating it here would put one in every split,
+        run and prediction directory the platform writes a record into. A publication creates
+        it as its own first step, so once any has begun the lock is taken and the answer is
+        under it.
+        """
+        scopes: list[str] = []
+        for key in keys:
+            if get_descriptor(key.store).kind in ("record", "log") and key.scope not in scopes:
+                scopes.append(key.scope)
+        with ExitStack() as held:
+            for scope in scopes:
+                db_path = database_file(scope)
+                if not db_path.parent.is_dir():
+                    continue
+                try:
+                    held.enter_context(path_lock(db_path, timeout_s=self.lock_timeout_s))
+                except self._timeout_error:
+                    raise StoreBusy(tuple(keys), keys[0], self.lock_timeout_s) from None
+                if db_path.is_file():
+                    raise StoreError(
+                        f"{db_path} exists, so this scope's records and logs live in the "
+                        "database and a file written beside it would be lost with nothing to "
+                        "detect it by. Write through the database backend, or write the files "
+                        "out with python scripts/export_store.py and bind the file backend "
+                        "deliberately with TCIP_STORE_BACKEND=file."
+                    )
+            yield
+
     # ── durability primitives ───────────────────────────────────────────────────
 
     def _fsync_file(self, handle: BinaryIO) -> None:
@@ -309,18 +437,8 @@ class FileBackend:
         os.fsync(handle.fileno())
 
     def _fsync_dir(self, directory: Path) -> None:
-        """Flush a directory entry, so a rename or a created directory survives a power loss.
-
-        POSIX only. Windows has no directory-fsync equivalent, which is why
-        ``capabilities().durable_replace`` is false there instead of overstated.
-        """
-        if os.name == "nt":
-            return
-        fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        """Flush a directory entry, so a rename or a created directory survives a power loss."""
+        fsync_directory(directory)
 
     def _ensure_parent(self, path: Path, *, durable: bool) -> None:
         parent = path.parent
@@ -402,7 +520,7 @@ class FileBackend:
     def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._locked([key]):
+        with self._owns_the_layout([key]), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             data = _encode(descriptor, key, value)
@@ -413,7 +531,7 @@ class FileBackend:
     def delete(self, key: Key, *, expect: Version | None = None) -> None:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._locked([key]):
+        with self._owns_the_layout([key]), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             self._remove_entry(path, durable=descriptor.durable)
@@ -427,7 +545,7 @@ class FileBackend:
     @contextmanager
     def transaction(self, keys: Sequence[Key], *, timeout_s: float | None = None) -> Iterator["_FileTxn"]:
         named = tuple(keys)
-        with self._locked(named, timeout_s):
+        with self._owns_the_layout(named), self._locked(named, timeout_s):
             txn = _FileTxn(self, named)
             yield txn
             txn.apply()
@@ -476,7 +594,7 @@ class FileBackend:
         path = self.path_for(key)
         data = _encode(descriptor, key, record)
         _refuse_embedded_newline(key, data)
-        with self._locked([key]):
+        with self._owns_the_layout([key]), self._locked([key]):
             existed = path.exists()
             self._repair_torn_tail(path)
             with open(path, "ab") as handle:

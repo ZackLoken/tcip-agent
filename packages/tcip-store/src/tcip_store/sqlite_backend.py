@@ -14,6 +14,10 @@ itself before a single row is read.
 Exclusion is the database rather than the key: one writer at a time per scope, readers never
 blocked. That is stronger for consistency and weaker for availability than a lock per path,
 and ``capabilities()`` says which of the two guarantees follow.
+
+A scope whose records are still files is refused rather than answered about: an empty database
+beside a populated layout would report every one of those entries as absent. Moving them in is
+``scripts/adopt_store.py``, and writing them back out again is :mod:`tcip_store.export`.
 """
 
 from __future__ import annotations
@@ -50,9 +54,10 @@ from tcip_store.file_backend import (
     _remove_quietly,
     _unheld_key,
     _version_of,
+    claimed_record_files,
     creation_temp_name,
-    path_lock,
-    require_absolute_scope,
+    database_file,
+    transition_lock,
 )
 from tcip_store.model import (
     REQUIRED,
@@ -128,10 +133,10 @@ def database_path(scope: str) -> Path:
     """Where this scope's database lives, or ``BadKey`` when the scope is not absolute.
 
     The refusal comes before canonicalization: resolving a relative scope would turn a refusal
-    into a cwd-dependent guess. It is the file backend's own refusal, called rather than
-    restated, so both backends answer a relative scope identically.
+    into a cwd-dependent guess. Both the path and the refusal are the file backend's, called
+    rather than restated, so the file both backends reason about is one file.
     """
-    return require_absolute_scope(scope) / ".tcip" / DATABASE_FILENAME
+    return database_file(scope)
 
 
 def _now() -> str:
@@ -189,6 +194,102 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
     else:
         os.link(temp, destination)
         os.unlink(temp)
+
+
+def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
+    """Refuse a database that is not this backend's, before a single row is read.
+
+    The version and the schema are both reads, so this runs before anything is set on the
+    connection: a file another tool wrote is refused while it is still exactly as that tool
+    left it. Export, adoption and the read-only gate all come through here, so one database is
+    never accepted by one of them and refused by another.
+
+    A file at this path that is not a SQLite database at all refuses as a typed store error
+    like every other database this backend will not read, rather than as the driver's own
+    exception: the gates that read counters here answer for a scope they could not read, and a
+    raw driver error would leave them tracebacking instead of reporting.
+    """
+    try:
+        version = conn.execute("pragma user_version").fetchone()[0]
+    except sqlite3.DatabaseError as exc:
+        raise StoreError(
+            f"{db_path} is not a SQLite database: {exc}. Something else holds the name this "
+            "backend's database has, so whether this scope's state is in a database cannot be "
+            "answered at all."
+        ) from exc
+    if version != SCHEMA_VERSION:
+        raise StoreError(
+            f"{db_path} carries user_version {version}, not {SCHEMA_VERSION}: it was written "
+            "by another tool or another version of this backend, and reading it here would be "
+            "a guess about what its rows mean"
+        )
+    found = _schema_of(conn)
+    expected = reference_schema()
+    if found == expected:
+        return
+    found_objects = {(kind, name) for kind, name, _ in found}
+    expected_objects = {(kind, name) for kind, name, _ in expected}
+    missing = sorted(expected_objects - found_objects)
+    extra = sorted(found_objects - expected_objects)
+    changed = sorted(
+        name
+        for kind, name, sql in found
+        if (kind, name) in expected_objects
+        and sql != next(s for k, n, s in expected if (k, n) == (kind, name))
+    )
+    raise StoreError(
+        f"{db_path} does not carry this backend's schema: missing {missing}, "
+        f"unexpected {extra}, differently defined {changed}. A database this backend did "
+        "not build is never half-read"
+    )
+
+
+def open_verified(db_path: Path) -> sqlite3.Connection:
+    """Open a published database, verify it, and leave it in WAL at full synchronous.
+
+    Identity is checked before anything is set, since switching a database to WAL is a write.
+    """
+    conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
+    try:
+        verify_identity(conn, db_path)
+        mode = str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
+        if mode != "wal":
+            mode = str(conn.execute("pragma journal_mode = wal").fetchone()[0]).lower()
+        if mode != "wal":
+            raise BackendUnavailable(
+                f"{db_path} would not take WAL journal mode and reported {mode!r}: a "
+                "rollback-journal database blocks every reader behind the writer, which is "
+                "not the exclusion this backend declares"
+            )
+        conn.execute("pragma synchronous = FULL")
+        level = conn.execute("pragma synchronous").fetchone()[0]
+        if level != _SYNCHRONOUS_LEVELS["FULL"]:
+            raise BackendUnavailable(
+                f"{db_path} reports synchronous={level} after it was set to FULL, so a "
+                "committed write's durability is not what this backend would declare"
+            )
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+def open_read_only(db_path: Path) -> sqlite3.Connection:
+    """Open a published database for reading only, verified, without changing a byte of it.
+
+    What a gate reading counters beside a live writer needs: a read-only handle cannot set the
+    journal mode, so this deliberately does not, and it is the one open that leaves a database
+    a caller does not own exactly as it found it.
+    """
+    if not db_path.is_file():
+        raise StoreError(f"{db_path} does not exist, so there are no store counters to read")
+    conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True, isolation_level=None)
+    try:
+        verify_identity(conn, db_path)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
 
 
 class SqliteBackend:
@@ -255,11 +356,40 @@ class SqliteBackend:
         if existing is not None:
             return existing
         if not db_path.is_file():
+            self.require_adopted(scope)
             self._publish(db_path, scope, keys, timeout_s)
-        conn = self._open(db_path)
+        conn = open_verified(db_path)
         with self._guard:
             self._connections[slot] = conn
         return conn
+
+    def require_adopted(self, scope: str) -> None:
+        """Refuse a scope whose records are still files, before this backend answers about it.
+
+        A scope holding registered record or log files and no database has state this backend
+        cannot see: creating an empty database beside those files would answer every read with
+        absence, which for a confirmed negative means an annotated image training as empty. The
+        answer is to move the files in deliberately, not to start beside them. A scope holding
+        no such files is fresh and proceeds; a scope that already holds a database has been
+        adopted or exported, and the files beside it are that export's own output.
+
+        The answer is never remembered. A scope with no database is exactly the scope the file
+        backend does not refuse writes to and the one an archive restores into, so a "fresh"
+        answer from a moment ago says nothing about the scope now; the walk is re-run, and the
+        creation path re-runs it again under the transition lock, which is the only moment a
+        database can come into being.
+        """
+        if database_path(scope).is_file():
+            return
+        legacy = claimed_record_files(scope, limit=5)
+        if legacy:
+            listed = ", ".join(str(path) for path in legacy)
+            raise StoreError(
+                f"{scope} holds record or log files but no {DATABASE_FILENAME}, so its state "
+                f"is still in the file layout: {listed}. Move it in with "
+                "python scripts/adopt_store.py before this backend touches the scope; an empty "
+                "database beside those files would read every one of them as absent."
+            )
 
     def _publish(
         self,
@@ -274,18 +404,24 @@ class SqliteBackend:
         so two creators serialize and the loser finds the winner's database and opens it. A
         wait that runs out is this layer's own refusal, never the lock library's timeout
         escaping raw: several processes binding one root at startup all reach here at once.
+
+        The layout is checked again here, under the lock, and not only by the caller: creation
+        is the one moment a scope's records stop being files, so a file that appeared since the
+        caller looked (a restored archive, a file-backend write that got in first) has to be
+        seen now or it never will be.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         self._files._ensure_parent(db_path, durable=True)
         started = time.monotonic()
         try:
-            held = path_lock(db_path, timeout_s=timeout)
+            held = transition_lock(scope, timeout_s=timeout)
             held.__enter__()
         except self._timeout_error:
             raise self._contended(scope, keys, time.monotonic() - started) from None
         try:
             if db_path.is_file():
                 return
+            self.require_adopted(scope)
             temp = db_path.parent / creation_temp_name(db_path.name, uuid.uuid4().hex)
             try:
                 self._build(temp)
@@ -330,66 +466,6 @@ class SqliteBackend:
             conn.execute(f"pragma user_version = {SCHEMA_VERSION}")
         finally:
             conn.close()
-
-    def _open(self, db_path: Path) -> sqlite3.Connection:
-        """Open a published database and verify everything about it before it is used.
-
-        Identity is checked before anything is set: the version and the schema are reads, and
-        switching a database to WAL is a write, so a file this backend did not build is refused
-        while it is still exactly as its own tool left it.
-        """
-        conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
-        try:
-            version = conn.execute("pragma user_version").fetchone()[0]
-            if version != SCHEMA_VERSION:
-                raise StoreError(
-                    f"{db_path} carries user_version {version}, not {SCHEMA_VERSION}: it was "
-                    "written by another tool or another version of this backend, and reading "
-                    "it here would be a guess about what its rows mean"
-                )
-            self._verify_schema(conn, db_path)
-
-            mode = str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
-            if mode != "wal":
-                mode = str(conn.execute("pragma journal_mode = wal").fetchone()[0]).lower()
-            if mode != "wal":
-                raise BackendUnavailable(
-                    f"{db_path} would not take WAL journal mode and reported {mode!r}: a "
-                    "rollback-journal database blocks every reader behind the writer, which is "
-                    "not the exclusion this backend declares"
-                )
-            self._apply_synchronous(conn, "FULL")
-            level = conn.execute("pragma synchronous").fetchone()[0]
-            if level != _SYNCHRONOUS_LEVELS["FULL"]:
-                raise BackendUnavailable(
-                    f"{db_path} reports synchronous={level} after it was set to FULL, so a "
-                    "committed write's durability is not what this backend would declare"
-                )
-        except BaseException:
-            conn.close()
-            raise
-        return conn
-
-    def _verify_schema(self, conn: sqlite3.Connection, db_path: Path) -> None:
-        found = _schema_of(conn)
-        expected = reference_schema()
-        if found == expected:
-            return
-        found_objects = {(kind, name) for kind, name, _ in found}
-        expected_objects = {(kind, name) for kind, name, _ in expected}
-        missing = sorted(expected_objects - found_objects)
-        extra = sorted(found_objects - expected_objects)
-        changed = sorted(
-            name
-            for kind, name, sql in found
-            if (kind, name) in expected_objects
-            and sql != next(s for k, n, s in expected if (k, n) == (kind, name))
-        )
-        raise StoreError(
-            f"{db_path} does not carry this backend's schema: missing {missing}, "
-            f"unexpected {extra}, differently defined {changed}. A database this backend did "
-            "not build is never half-read"
-        )
 
     def _apply_synchronous(self, conn: sqlite3.Connection, level: str) -> None:
         """Set how hard a commit on this connection flushes, from a store's declared durability."""
@@ -520,6 +596,8 @@ class SqliteBackend:
         if db_path.is_file():
             with self._mapped((key,)):
                 data = self._stored(self._connection(key.scope, (key,)), key)
+        else:
+            self.require_adopted(key.scope)
         if data is None:
             if default is REQUIRED:
                 raise _missing_record(key)
@@ -531,6 +609,7 @@ class SqliteBackend:
             return self._files.exists(key)
         db_path = database_path(key.scope)
         if not db_path.is_file():
+            self.require_adopted(key.scope)
             return False
         with self._mapped((key,)):
             return self._stored(self._connection(key.scope, (key,)), key) is not None
@@ -569,6 +648,7 @@ class SqliteBackend:
             return self._files.keys(store, scope, prefix)
         db_path = database_path(scope)
         if not db_path.is_file():
+            self.require_adopted(scope)
             return []
         with self._mapped(()):
             rows = self._connection(scope).execute(
@@ -606,6 +686,7 @@ class SqliteBackend:
         start = int(after) if after else 0
         db_path = database_path(key.scope)
         if not db_path.is_file():
+            self.require_adopted(key.scope)
             return LogPage(records=[], cursor=str(start))
         with self._mapped((key,)):
             rows = self._connection(key.scope, (key,)).execute(
