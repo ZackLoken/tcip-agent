@@ -223,7 +223,11 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   sight rather than preserving it. Two different things wear the word "legacy": TCIP's own history
   (delete it) and other tools' formats or browser APIs (interop, keep it, but do not call it legacy).
   Do not trust a "legacy" label in a docstring; check the callers, since the label is often wrong.
-  This rule expires the moment that premise stops being true: the first time a breeder has a
+  One earlier boundary is already real: this machine's own dev state and the sample projects,
+  the append-only audit log above all, are conformed to a substrate or schema change by a
+  deliberate one-off operator script, never by runtime migration logic, and never silently
+  destroyed. That is what conforming sample data means in practice, and it does not expire this
+  rule. This rule expires the moment that premise stops being true: the first time a breeder has a
   real project with real annotations/experiments/models on a schema this platform later changes.
   From that point, a schema/format change needs an actual migration path (this file's job then is to
   say how to write one safely, not to forbid it) and "no users yet" is no longer a fact you can cite.
