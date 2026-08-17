@@ -4,12 +4,12 @@ Byte-compatible with the layout it serves. Nothing moves on disk, and no envelop
 field, or metadata sidecar is added, because adding one would change bytes. A record's
 version is therefore derived from its content on every read rather than persisted.
 
-Roots are resolved at use time, not at bind time: a scope is carried on the key, so a
+Roots are resolved at use time, not at bind time: the key carries the root, so a
 process that repins its platform root mid-run keeps writing where the caller says.
 
-Records and logs are refused on a scope that holds a store database: a file written beside one
+Records and logs are refused on a root that holds a store database: a file written beside one
 is a write the database never sees and the next read never returns. Reads and blobs are
-unaffected, which is what keeps every file-reading tool working on an exported scope.
+unaffected, which is what keeps every file-reading tool working on an exported root.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ _TAIL_SCAN_BYTES = 8192
 size of the tail rather than the size of the log."""
 
 DATABASE_FILENAME = "store.db"
-"""The database file a scope's records live in under a database backend.
+"""The database file a root's records live in under a database backend.
 
 Named here, where enumeration decides what is an entry, so the backend that creates the file
 and the backend that must never return it as a key cannot disagree about its name.
@@ -75,47 +75,47 @@ def creation_temp_name(destination: str, token: str) -> str:
     return f".{destination}.{token}{_TEMP_SUFFIX}"
 
 
-def require_absolute_scope(scope: str) -> Path:
-    """The scope as a path, or the refusal every backend owes a relative one.
+def require_absolute_root(root: str) -> Path:
+    """The root as a path, or the refusal every backend owes a relative one.
 
     Refused before anything resolves it, so no answer can depend on the directory the process
     happens to be in. Enumeration refuses here too rather than answering with an empty list,
-    which would read as "this scope holds nothing" when it means "this scope names nothing".
+    which would read as "this root holds nothing" when it means "this root names nothing".
     """
-    root = Path(scope)
-    if not root.is_absolute():
+    directory = Path(root)
+    if not directory.is_absolute():
         raise BadKey(
-            f"scope {scope!r} is not an absolute path: a relative scope resolves against "
+            f"root {root!r} is not an absolute path: a relative root resolves against "
             "whatever directory the process happens to be in"
         )
-    return root
+    return directory
 
 
 class Locator(Protocol):
-    """One store's identity map: where an entry of it lives under its scope root.
+    """One store's identity map: where an entry of it lives under its root.
 
     The two methods are an inverse pair, which is what makes the mapping checkable:
-    enumeration is ``parts_from`` applied over the files under a scope, so it cannot drift
+    enumeration is ``parts_from`` applied over the files under a root, so it cannot drift
     from ``relative_path`` the way two independent callables would. ``parts_from`` returns
     None for a path that is not an entry of this store.
 
-    A locator exists for the file backend only. A backend that keys on (store, scope, parts)
+    A locator exists for the file backend only. A backend that keys on (store, root, parts)
     ignores it, which is why it is declared here and not in the shared model.
     """
 
-    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath: ...
+    def relative_path(self, root: str, parts: tuple[str, ...]) -> PurePosixPath: ...
 
     def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None: ...
 
 
 @dataclass(frozen=True)
 class RootedFileLocator:
-    """Addresses an entry by its own path segments under a fixed directory of the scope root.
+    """Addresses an entry by its own path segments under a fixed directory of the root.
 
-    ``prefix`` is the directory chain under the scope root, ``suffix`` the extension the
+    ``prefix`` is the directory chain under the root, ``suffix`` the extension the
     last part carries on disk. A key's parts are the remaining segments, so parts
     ``("2026-03-04", "img_0001")`` under prefix ``("annotations",)`` with suffix ``".json"``
-    is ``<scope>/annotations/2026-03-04/img_0001.json``.
+    is ``<root>/annotations/2026-03-04/img_0001.json``.
 
     This is the generic locator, for a store that is addressed by an explicit relative path
     and nothing more. A store with real layout rules wraps its own resolver instead, so the
@@ -125,8 +125,8 @@ class RootedFileLocator:
     prefix: tuple[str, ...] = ()
     suffix: str = ""
 
-    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
-        """The entry's path relative to its scope root."""
+    def relative_path(self, root: str, parts: tuple[str, ...]) -> PurePosixPath:
+        """The entry's path relative to its root."""
         if not parts:
             raise BadKey("a rooted-file key needs at least one part")
         segments = (*self.prefix, *parts[:-1], f"{parts[-1]}{self.suffix}")
@@ -218,58 +218,59 @@ def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) ->
         thread_lock.release()
 
 
-def database_file(scope: str) -> Path:
-    """Where a scope's database sits, whether or not one exists.
+def database_file(root: str) -> Path:
+    """Where a root's database sits, whether or not one exists.
 
     Both backends ask here: the database backend to open or build it, the file backend to find
-    out whether this scope's records have already moved into one. Stating it once is what keeps
+    out whether this root's records have already moved into one. Stating it once is what keeps
     the file that must never be clobbered and the file that must never be written around from
     being two different paths.
     """
-    return require_absolute_scope(scope) / ".tcip" / DATABASE_FILENAME
+    return require_absolute_root(root) / ".tcip" / DATABASE_FILENAME
 
 
 @contextmanager
-def transition_lock(scope: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
-    """Hold the one lock that decides whether a scope's records live in files or in a database.
+def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
+    """Hold the one lock that decides whether a root's records live in files or in a database.
 
     Taken by whatever is about to publish a database (creation, adoption) and by a file-backend
-    record write on a scope that already has a ``.tcip`` directory, so a publication in flight
+    record write on a root that already has a ``.tcip`` directory, so a publication in flight
     and a write to the layout it is loading cannot interleave. Creating the directory is this
     side's first act, which is what makes it exist for the writer to find.
     """
-    db_path = database_file(scope)
+    db_path = database_file(root)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with path_lock(db_path, timeout_s=timeout_s):
         yield
 
 
-def claimed_record_files(scope: str, *, limit: int = 0) -> tuple[Path, ...]:
-    """Files under ``scope`` that a record or log store's locator claims and no blob's does.
+def unconformed_record_files(root: str, *, limit: int = 0) -> tuple[Path, ...]:
+    """Files under ``root`` that a record or log store's locator claims and no blob's does.
 
-    This is what "this scope's records are still files" means, asked through the locators the
-    stores themselves declare rather than through a list of filenames somebody maintains.
+    Each one is evidence the root is unconformed: its records are still files rather than rows
+    in the database a database backend would read. The question is asked through the locators
+    the stores themselves declare rather than through a list of filenames somebody maintains.
 
     A blob's file stays a file under every backend, so a file some blob store could equally own
-    is not evidence that a scope's records were left behind. Locator shapes collide, and a
+    is not evidence that a root's records were left behind. Locator shapes collide, and a
     dataset root's ``classes.json`` is claimed by a plain ``<dir>/<name>.json`` record shape as
     readily as by the blob store that actually owns it, so counting it would refuse every real
-    dataset. The cost of that reading is that a scope whose only records happen to sit at the
+    dataset. The cost of that reading is that a root whose only records happen to sit at the
     depth a blob store also addresses goes undetected here; what catches those is adoption's own
     accounting, which names every claimed file no plan takes in. ``limit`` stops the walk once
     that many are found, for a caller that only needs to know whether any exist.
     """
-    root = require_absolute_scope(scope)
-    if not root.is_dir():
+    directory = require_absolute_root(root)
+    if not directory.is_dir():
         return ()
     descriptors = [get_descriptor(name) for name in registered_stores()]
     owners = [d for d in descriptors if d.kind in ("record", "log") and d.locator is not None]
     blobs = [d for d in descriptors if d.kind == "blob" and d.locator is not None]
     found: list[Path] = []
-    for path in root.rglob("*"):
+    for path in directory.rglob("*"):
         if not path.is_file() or _is_bookkeeping(path.name):
             continue
-        relative = PurePosixPath(path.relative_to(root).as_posix())
+        relative = PurePosixPath(path.relative_to(directory).as_posix())
         if not _any_claims(owners, relative) or _any_claims(blobs, relative):
             continue
         found.append(path)
@@ -357,11 +358,11 @@ class FileBackend:
                 f"store {key.store!r} declares no locator, so the file backend cannot place "
                 "it: declare one beside the store's key constructor"
             )
-        root = require_absolute_scope(key.scope)
-        relative = locator.relative_path(key.scope, key.parts)
+        directory = require_absolute_root(key.root)
+        relative = locator.relative_path(key.root, key.parts)
         if relative.is_absolute() or ".." in relative.parts:
-            raise BadKey(f"store {key.store!r} placed {list(key.parts)} outside its scope root")
-        return root.joinpath(*relative.parts)
+            raise BadKey(f"store {key.store!r} placed {list(key.parts)} outside its root")
+        return directory.joinpath(*relative.parts)
 
     # ── locking ─────────────────────────────────────────────────────────────────
 
@@ -391,8 +392,9 @@ class FileBackend:
             yield
 
     @contextmanager
-    def _owns_the_layout(self, keys: Sequence[Key]) -> Iterator[None]:
-        """Hold each scope's transition lock and refuse if a database owns its records.
+    def _conform_rail(self, keys: Sequence[Key]) -> Iterator[None]:
+        """The file backend's half of the conform rail: hold each root's transition lock and
+        refuse record and log writes to a conformed root, whose records live in its database.
 
         A write here cannot bump a database's counters, so writing a record beside a database
         that already holds it loses the write with nothing to detect it by. The check is under
@@ -400,19 +402,19 @@ class FileBackend:
         land between the check and the write. Blobs never reach here: they stay files under
         every backend.
 
-        A scope with no ``.tcip`` directory is passed over without taking anything: the lock
+        A root with no ``.tcip`` directory is passed over without taking anything: the lock
         file lands inside that directory, and creating it here would put one in every split,
         run and prediction directory the platform writes a record into. A publication creates
         it as its own first step, so once any has begun the lock is taken and the answer is
         under it.
         """
-        scopes: list[str] = []
+        roots: list[str] = []
         for key in keys:
-            if get_descriptor(key.store).kind in ("record", "log") and key.scope not in scopes:
-                scopes.append(key.scope)
+            if get_descriptor(key.store).kind in ("record", "log") and key.root not in roots:
+                roots.append(key.root)
         with ExitStack() as held:
-            for scope in scopes:
-                db_path = database_file(scope)
+            for root in roots:
+                db_path = database_file(root)
                 if not db_path.parent.is_dir():
                     continue
                 try:
@@ -421,7 +423,7 @@ class FileBackend:
                     raise StoreBusy(tuple(keys), keys[0], self.lock_timeout_s) from None
                 if db_path.is_file():
                     raise StoreError(
-                        f"{db_path} exists, so this scope's records and logs live in the "
+                        f"{db_path} exists, so this root's records and logs live in the "
                         "database and a file written beside it would be lost with nothing to "
                         "detect it by. Write through the database backend, or write the files "
                         "out with python scripts/export_store.py and bind the file backend "
@@ -520,7 +522,7 @@ class FileBackend:
     def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._owns_the_layout([key]), self._locked([key]):
+        with self._conform_rail([key]), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             data = _encode(descriptor, key, value)
@@ -531,7 +533,7 @@ class FileBackend:
     def delete(self, key: Key, *, expect: Version | None = None) -> None:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._owns_the_layout([key]), self._locked([key]):
+        with self._conform_rail([key]), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             self._remove_entry(path, durable=descriptor.durable)
@@ -545,13 +547,13 @@ class FileBackend:
     @contextmanager
     def transaction(self, keys: Sequence[Key], *, timeout_s: float | None = None) -> Iterator["_FileTxn"]:
         named = tuple(keys)
-        with self._owns_the_layout(named), self._locked(named, timeout_s):
+        with self._conform_rail(named), self._locked(named, timeout_s):
             txn = _FileTxn(self, named)
             yield txn
             txn.apply()
 
-    def keys(self, store: str, scope: str, prefix: tuple[str, ...] = ()) -> list[Key]:
-        """Every key of ``store`` under ``scope``, as identities a caller can read back.
+    def keys(self, store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
+        """Every key of ``store`` under ``root``, as identities a caller can read back.
 
         A store whose layout cannot spell every key it holds (one that sanitizes a separator
         out of a filename, say) declares ``true_parts_from_entry``, and the entry's own bytes
@@ -562,15 +564,15 @@ class FileBackend:
         locator = descriptor.locator
         if locator is None:
             raise StoreError(f"store {store!r} declares no locator, so it cannot be enumerated")
-        root = require_absolute_scope(scope)
-        if not root.is_dir():
+        directory = require_absolute_root(root)
+        if not directory.is_dir():
             return []
         recover = descriptor.true_parts_from_entry
         found: list[Key] = []
-        for path in root.rglob("*"):
+        for path in directory.rglob("*"):
             if not path.is_file() or _is_bookkeeping(path.name):
                 continue
-            parts = locator.parts_from(PurePosixPath(path.relative_to(root).as_posix()))
+            parts = locator.parts_from(PurePosixPath(path.relative_to(directory).as_posix()))
             if parts is None:
                 continue
             if recover is not None:
@@ -582,7 +584,7 @@ class FileBackend:
                 continue
             if parts[: len(prefix)] != tuple(prefix):
                 continue
-            found.append(Key(store, scope, parts))
+            found.append(Key(store, root, parts))
         return sorted(found, key=lambda k: k.parts)
 
     # ── logs ────────────────────────────────────────────────────────────────────
@@ -594,7 +596,7 @@ class FileBackend:
         path = self.path_for(key)
         data = _encode(descriptor, key, record)
         _refuse_embedded_newline(key, data)
-        with self._owns_the_layout([key]), self._locked([key]):
+        with self._conform_rail([key]), self._locked([key]):
             existed = path.exists()
             self._repair_torn_tail(path)
             with open(path, "ab") as handle:
@@ -673,7 +675,7 @@ class FileBackend:
         if data is None:
             if default is REQUIRED:
                 raise NotFound(
-                    f"{key.store}{list(key.parts)} has no blob under {key.scope}. Pass "
+                    f"{key.store}{list(key.parts)} has no blob under {key.root}. Pass "
                     "default= if absence is meaningful to this caller"
                 )
             return Versioned(default, Version.ABSENT)
@@ -717,7 +719,7 @@ class FileBackend:
         try:
             handle = _retry_while_denied(lambda: open(path, "rb"), self.lock_timeout_s)
         except FileNotFoundError:
-            raise NotFound(f"{key.store}{list(key.parts)} has no blob under {key.scope}") from None
+            raise NotFound(f"{key.store}{list(key.parts)} has no blob under {key.root}") from None
         try:
             yield handle
         finally:
@@ -811,7 +813,7 @@ def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:
         return descriptor.codec.encode(value)
     except (TypeError, ValueError) as exc:
         raise StoreError(
-            f"{key.store}{list(key.parts)} under {key.scope} does not encode: {exc}. "
+            f"{key.store}{list(key.parts)} under {key.root} does not encode: {exc}. "
             f"The value is a {type(value).__name__}; convert what it holds to a JSON type "
             "at the writer rather than leaving the codec to spell it."
         ) from exc
@@ -823,14 +825,14 @@ def _decode(descriptor: StoreDescriptor, key: Key, data: bytes) -> Any:
         return descriptor.codec.decode(data)
     except Exception as exc:
         raise DecodeError(
-            f"{key.store}{list(key.parts)} under {key.scope} exists but does not decode: {exc}"
+            f"{key.store}{list(key.parts)} under {key.root} exists but does not decode: {exc}"
         ) from exc
 
 
 def _missing_record(key: Key) -> NotFound:
     """The refusal a required read of an absent record raises, worded once for every backend."""
     return NotFound(
-        f"{key.store}{list(key.parts)} has no record under {key.scope}. Pass default= if "
+        f"{key.store}{list(key.parts)} has no record under {key.root}. Pass default= if "
         "absence is meaningful to this caller"
     )
 
@@ -869,7 +871,7 @@ def _is_bookkeeping(name: str) -> bool:
     """Whether a filename is a storage backend's own artifact rather than an entry.
 
     Lock files outlive the writes that made them, a temp file is visible for the duration of a
-    write or a database build, and a database and its WAL sidecars sit inside the very scope
+    write or a database build, and a database and its WAL sidecars sit inside the very root
     whose entries are being enumerated; none of them may ever surface as a key. Anything else
     that is not an entry is rejected by the store's own locator instead of by pattern matching.
     """

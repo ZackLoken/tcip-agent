@@ -2,8 +2,8 @@
 
 No identity here carries a storage location: mapping an identity onto storage is a backend's
 private job, so a record can move from files to a database without a consumer changing. A
-scope is the one string that holds a directory path, and ``canonical_path`` is where the seam
-and every backend agree on when two spellings of it name one root.
+key's root is the one string that holds a directory path, and ``canonical_path`` is where the
+seam and every backend agree on when two spellings of it name one directory.
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from typing import Any, ClassVar
 class Key:
     """The identity of one record, log, or blob: which store, which root, which entry.
 
-    ``store`` names a registered store. ``scope`` is the root that store's descriptor says
-    the entry hangs off, as an opaque string: a dataset root for stores that travel with the
-    data, a platform or project root for platform state, a sweep root for HPO trial state.
+    ``store`` names a registered store. ``root`` is the directory that store's descriptor
+    says the entry hangs off, as an opaque string: a dataset root for stores that travel with
+    the data, a platform or project root for platform state, a sweep root for HPO trial state.
     ``parts`` is the identity inside the store, ordered coarse to fine, so a prefix of it is
     a meaningful scan.
 
@@ -33,7 +33,7 @@ class Key:
     """
 
     store: str
-    scope: str
+    root: str
     parts: tuple[str, ...] = ()
 
 
@@ -117,7 +117,7 @@ def canonical_path(path: str | Path) -> str:
 
     Resolution collapses the relative segments and the links; the case rule is the platform's
     own, which is why the comparison lives here rather than in each caller. Every place that
-    has to decide whether two paths are the same one asks this: the seam comparing the scopes
+    has to decide whether two paths are the same one asks this: the seam comparing the roots
     a transaction names, and the backend keying its lock registry. A relative path resolves
     against the process's current directory, so a caller that must refuse one refuses before
     canonicalizing rather than after.
@@ -132,4 +132,4 @@ def canonical_order(keys: tuple[Key, ...]) -> tuple[Key, ...]:
     it is the order locks are acquired in. It is not the order a transaction applies its
     writes in: that is the declared order, which callers depend on.
     """
-    return tuple(sorted(keys, key=lambda k: (k.store, k.scope, k.parts)))
+    return tuple(sorted(keys, key=lambda k: (k.store, k.root, k.parts)))

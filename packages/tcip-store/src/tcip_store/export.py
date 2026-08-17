@@ -1,11 +1,11 @@
-"""Writing one scope's database back out as the file layout, and saying when it is stale.
+"""Writing one root's database back out as the file layout, and saying when it is stale.
 
 Every tool that reads TCIP's state as files rather than through the seam (the data-state
 doctor, an archive, an auditor tailing a log) keeps working under a database backend because
 this module puts the bytes back where each store's locator says they belong. It is the one
 sanctioned writer of database-owned record and log files, and it writes through the file
 backend's staging and durable-directory helpers, below the public write API where the
-file-backend ownership rail sits, so the rail never fires on an export by construction.
+file-backend conform rail sits, so the rail never fires on an export by construction.
 
 The counters are the other half: a store's ``change_counter`` moves on every write and its
 ``exported_counter`` only here, so a reader of the files can ask whether what it is about to
@@ -25,7 +25,7 @@ from tcip_store.file_backend import (
     DATABASE_FILENAME,
     FileBackend,
     database_file,
-    require_absolute_scope,
+    require_absolute_root,
 )
 from tcip_store.registry import StoreDescriptor, get_descriptor
 from tcip_store.sqlite_backend import decode_parts, encode_parts, open_read_only, open_verified
@@ -44,10 +44,10 @@ class StoreExport:
 
 
 @dataclass(frozen=True)
-class ScopeExport:
-    """One scope's whole export, per store."""
+class RootExport:
+    """One root's whole export, per store."""
 
-    scope: str
+    root: str
     database: Path
     stores: tuple[StoreExport, ...]
 
@@ -114,13 +114,13 @@ def stale_stores(db_path: Path, stores: tuple[str, ...] | None = None) -> tuple[
     return tuple(sorted(state.store for state in considered if not state.exported))
 
 
-def export_scope(
-    scope: str,
+def export_root(
+    root: str,
     *,
     backend: FileBackend | None = None,
     report: Callable[[str], None] = print,
-) -> ScopeExport:
-    """Write one scope's database-held records and logs back out as files.
+) -> RootExport:
+    """Write one root's database-held records and logs back out as files.
 
     The order is fixed and each step exists for a failure it prevents. Everything is collected
     from one read snapshot, so no store's files straddle a concurrent write. Every logical
@@ -132,11 +132,11 @@ def export_scope(
     neighbouring store's file. The stamps come last, one short write transaction per store,
     each landing only if that store has not moved since it was read.
     """
-    root = require_absolute_scope(scope)
-    db_path = database_file(scope)
+    directory = require_absolute_root(root)
+    db_path = database_file(root)
     if not db_path.is_file():
         raise StoreError(
-            f"{scope} holds no {DATABASE_FILENAME}, so its records are already files and there "
+            f"{root} holds no {DATABASE_FILENAME}, so its records are already files and there "
             "is nothing to export"
         )
     files = backend if backend is not None else FileBackend()
@@ -144,9 +144,9 @@ def export_scope(
     try:
         conn.execute("begin")
         try:
-            collected = _collect(conn, scope)
-            _refuse_colliding_targets(collected, root, scope)
-            written = _materialize(collected, scope, root, files, report)
+            collected = _collect(conn, root)
+            _refuse_colliding_targets(collected, directory, root)
+            written = _materialize(collected, root, directory, files, report)
             conn.execute("commit")
         except BaseException:
             if conn.in_transaction:
@@ -155,10 +155,10 @@ def export_scope(
         stores = tuple(_stamp(conn, item, written[item.store]) for item in collected)
     finally:
         conn.close()
-    return ScopeExport(scope=scope, database=db_path, stores=stores)
+    return RootExport(root=root, database=db_path, stores=stores)
 
 
-def _collect(conn: sqlite3.Connection, scope: str) -> tuple[_Collected, ...]:
+def _collect(conn: sqlite3.Connection, root: str) -> tuple[_Collected, ...]:
     """Every written store's rows, log entries and tombstones, plus the counter they sit at."""
     counters = conn.execute(
         "select store, change_counter from store_counters order by store"
@@ -169,7 +169,7 @@ def _collect(conn: sqlite3.Connection, scope: str) -> tuple[_Collected, ...]:
             descriptor = get_descriptor(store)
         except UnknownStore as exc:
             raise StoreError(
-                f"{scope} holds rows for store {store!r}, which nothing has registered, so "
+                f"{root} holds rows for store {store!r}, which nothing has registered, so "
                 "there is no locator to write them back out with. Import the module that "
                 "declares it in scripts/_store_bootstrap.py before exporting."
             ) from exc
@@ -210,21 +210,23 @@ def _grouped_log_entries(
     return tuple((decode_parts(parts), tuple(entries)) for parts, entries in grouped.items())
 
 
-def _target(descriptor: StoreDescriptor, scope: str, root: Path, parts: tuple[str, ...]) -> Path:
-    """Where one logical key's bytes belong under the scope root."""
+def _target(
+    descriptor: StoreDescriptor, root: str, directory: Path, parts: tuple[str, ...]
+) -> Path:
+    """Where one logical key's bytes belong under the root."""
     locator = descriptor.locator
     if locator is None:
         raise StoreError(
             f"store {descriptor.name!r} declares no locator, so its rows cannot be written out"
         )
-    relative = locator.relative_path(scope, parts)
+    relative = locator.relative_path(root, parts)
     if relative.is_absolute() or ".." in relative.parts:
-        raise BadKey(f"store {descriptor.name!r} placed {list(parts)} outside its scope root")
-    return root.joinpath(*PurePosixPath(relative).parts)
+        raise BadKey(f"store {descriptor.name!r} placed {list(parts)} outside its root")
+    return directory.joinpath(*PurePosixPath(relative).parts)
 
 
 def _refuse_colliding_targets(
-    collected: tuple[_Collected, ...], root: Path, scope: str
+    collected: tuple[_Collected, ...], directory: Path, root: str
 ) -> None:
     """Refuse before any file changes if two logical keys name one file.
 
@@ -238,13 +240,13 @@ def _refuse_colliding_targets(
         logical += [(parts, "log") for parts, _ in item.logs]
         logical += [(parts, "tombstone") for parts in item.tombstones]
         for parts, sort in logical:
-            path = _target(item.descriptor, scope, root, parts)
+            path = _target(item.descriptor, root, directory, parts)
             marker = os.path.normcase(str(path))
             previous = claimed.get(marker)
             if previous is not None:
                 first_store, first_parts, first_sort = previous
                 raise StoreError(
-                    f"exporting {scope} would write {path} twice: {first_store}"
+                    f"exporting {root} would write {path} twice: {first_store}"
                     f"{list(first_parts)} ({first_sort}) and {item.store}{list(parts)} "
                     f"({sort}) both land there. Nothing was written. One of the two keys is "
                     "mis-parted; fix it in the database before exporting."
@@ -254,8 +256,8 @@ def _refuse_colliding_targets(
 
 def _materialize(
     collected: tuple[_Collected, ...],
-    scope: str,
-    root: Path,
+    root: str,
+    directory: Path,
     files: FileBackend,
     report: Callable[[str], None],
 ) -> dict[str, tuple[int, int, tuple[str, ...]]]:
@@ -264,13 +266,13 @@ def _materialize(
     for item in collected:
         durable = item.descriptor.durable
         for parts, value in item.records:
-            _write_file(files, _target(item.descriptor, scope, root, parts), value, durable)
+            _write_file(files, _target(item.descriptor, root, directory, parts), value, durable)
         for parts, entries in item.logs:
             data = b"".join(entry + b"\n" for entry in entries)
-            _write_file(files, _target(item.descriptor, scope, root, parts), data, durable)
+            _write_file(files, _target(item.descriptor, root, directory, parts), data, durable)
         deleted: list[str] = []
         for parts in item.tombstones:
-            path = _target(item.descriptor, scope, root, parts)
+            path = _target(item.descriptor, root, directory, parts)
             if path.is_file():
                 files._remove_entry(path, durable=durable)
                 deleted.append(str(path))
@@ -328,10 +330,10 @@ def _stamp(
 
 
 __all__ = [
-    "ScopeExport",
+    "RootExport",
     "StoreExport",
     "StoreState",
-    "export_scope",
+    "export_root",
     "read_store_states",
     "stale_stores",
 ]

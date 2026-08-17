@@ -30,10 +30,10 @@ def bound(backend):
 
 
 def export_files(root) -> None:
-    """Write this scope's rows back out as the files every reader outside the seam sees."""
-    from tcip_store.export import export_scope
+    """Write this root's rows back out as the files every reader outside the seam sees."""
+    from tcip_store.export import export_root
 
-    export_scope(str(root), report=lambda line: None)
+    export_root(str(root), report=lambda line: None)
 
 
 def _project(tmp_path):

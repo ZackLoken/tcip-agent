@@ -1,21 +1,21 @@
-"""The SQLite backend: one WAL database per scope root, with blobs left as files.
+"""The SQLite backend: one WAL database per root, with blobs left as files.
 
-Records and log entries live in ``<scope>/.tcip/store.db``; blob bytes never enter a database
+Records and log entries live in ``<root>/.tcip/store.db``; blob bytes never enter a database
 and are served by a composed :class:`~tcip_store.file_backend.FileBackend`, so a dataset stays
 self-contained and ``blob_path`` keeps answering with a real path.
 
 A database only ever appears complete. Creation builds it under a unique temp name in
 rollback-journal mode, commits, closes, fsyncs, and installs it with a no-clobber primitive,
-all under a per-scope transition lock, so a crash leaves temp artifacts rather than a
+all under a per-root transition lock, so a crash leaves temp artifacts rather than a
 half-built database and the file's existence is a completeness marker by construction. Every
 open then verifies the journal mode, the synchronous level, the schema version and the schema
 itself before a single row is read.
 
-Exclusion is the database rather than the key: one writer at a time per scope, readers never
+Exclusion is the database rather than the key: one writer at a time per root, readers never
 blocked. That is stronger for consistency and weaker for availability than a lock per path,
 and ``capabilities()`` says which of the two guarantees follow.
 
-A scope whose records are still files is refused rather than answered about: an empty database
+A root whose records are still files is refused rather than answered about: an empty database
 beside a populated layout would report every one of those entries as absent. Moving them in is
 ``scripts/adopt_store.py``, and writing them back out again is :mod:`tcip_store.export`.
 """
@@ -54,10 +54,10 @@ from tcip_store.file_backend import (
     _remove_quietly,
     _unheld_key,
     _version_of,
-    claimed_record_files,
     creation_temp_name,
     database_file,
     transition_lock,
+    unconformed_record_files,
 )
 from tcip_store.model import (
     REQUIRED,
@@ -129,14 +129,14 @@ def decode_parts(text: str) -> tuple[str, ...]:
     return tuple(json.loads(text))
 
 
-def database_path(scope: str) -> Path:
-    """Where this scope's database lives, or ``BadKey`` when the scope is not absolute.
+def database_path(root: str) -> Path:
+    """Where this root's database lives, or ``BadKey`` when the root is not absolute.
 
-    The refusal comes before canonicalization: resolving a relative scope would turn a refusal
+    The refusal comes before canonicalization: resolving a relative root would turn a refusal
     into a cwd-dependent guess. Both the path and the refusal are the file backend's, called
     rather than restated, so the file both backends reason about is one file.
     """
-    return database_file(scope)
+    return database_file(root)
 
 
 def _now() -> str:
@@ -206,7 +206,7 @@ def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
 
     A file at this path that is not a SQLite database at all refuses as a typed store error
     like every other database this backend will not read, rather than as the driver's own
-    exception: the gates that read counters here answer for a scope they could not read, and a
+    exception: the gates that read counters here answer for a root they could not read, and a
     raw driver error would leave them tracebacking instead of reporting.
     """
     try:
@@ -214,7 +214,7 @@ def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
     except sqlite3.DatabaseError as exc:
         raise StoreError(
             f"{db_path} is not a SQLite database: {exc}. Something else holds the name this "
-            "backend's database has, so whether this scope's state is in a database cannot be "
+            "backend's database has, so whether this root's state is in a database cannot be "
             "answered at all."
         ) from exc
     if version != SCHEMA_VERSION:
@@ -293,7 +293,7 @@ def open_read_only(db_path: Path) -> sqlite3.Connection:
 
 
 class SqliteBackend:
-    """A storage backend holding records and logs in one SQLite database per scope root.
+    """A storage backend holding records and logs in one SQLite database per root.
 
     Blob operations are forwarded to a composed file backend, which is also what refuses to
     exist without cross-process locking, so this backend inherits that refusal rather than
@@ -341,60 +341,62 @@ class SqliteBackend:
     # ── database lifecycle ──────────────────────────────────────────────────────
 
     def _connection(
-        self, scope: str, keys: tuple[Key, ...] = (), timeout_s: float | None = None
+        self, root: str, keys: tuple[Key, ...] = (), timeout_s: float | None = None
     ) -> sqlite3.Connection:
-        """This process, thread and scope's connection, creating the database if it is absent.
+        """This process, thread and root's connection, creating the database if it is absent.
 
         The pid is in the slot because a forked worker inherits the parent's handles and must
         not reuse them; the thread is in it because one connection per thread is what lets a
         write hold the database without another thread's read joining its transaction.
         """
-        db_path = database_path(scope)
-        slot = (os.getpid(), threading.get_ident(), canonical_path(scope))
+        db_path = database_path(root)
+        slot = (os.getpid(), threading.get_ident(), canonical_path(root))
         with self._guard:
             existing = self._connections.get(slot)
         if existing is not None:
             return existing
         if not db_path.is_file():
-            self.require_adopted(scope)
-            self._publish(db_path, scope, keys, timeout_s)
+            self.require_conformed(root)
+            self._publish(db_path, root, keys, timeout_s)
         conn = open_verified(db_path)
         with self._guard:
             self._connections[slot] = conn
         return conn
 
-    def require_adopted(self, scope: str) -> None:
-        """Refuse a scope whose records are still files, before this backend answers about it.
+    def require_conformed(self, root: str) -> None:
+        """The database backend's half of the conform rail: refuse an unconformed root, whose
+        records are still files, before this backend answers about it.
 
-        A scope holding registered record or log files and no database has state this backend
-        cannot see: creating an empty database beside those files would answer every read with
-        absence, which for a confirmed negative means an annotated image training as empty. The
-        answer is to move the files in deliberately, not to start beside them. A scope holding
-        no such files is fresh and proceeds; a scope that already holds a database has been
-        adopted or exported, and the files beside it are that export's own output.
+        A database present is what conformed means here. A root holding registered record or
+        log files and no database has state this backend cannot see: creating an empty database
+        beside those files would answer every read with absence, which for a confirmed negative
+        means an annotated image training as empty. The answer is to move the files in
+        deliberately, not to start beside them. A root holding no such files is fresh and
+        proceeds; a root that already holds a database has been adopted or exported, and the
+        files beside it are that export's own output.
 
-        The answer is never remembered. A scope with no database is exactly the scope the file
+        The answer is never remembered. A root with no database is exactly the root the file
         backend does not refuse writes to and the one an archive restores into, so a "fresh"
-        answer from a moment ago says nothing about the scope now; the walk is re-run, and the
+        answer from a moment ago says nothing about the root now; the walk is re-run, and the
         creation path re-runs it again under the transition lock, which is the only moment a
         database can come into being.
         """
-        if database_path(scope).is_file():
+        if database_path(root).is_file():
             return
-        legacy = claimed_record_files(scope, limit=5)
-        if legacy:
-            listed = ", ".join(str(path) for path in legacy)
+        unconformed = unconformed_record_files(root, limit=5)
+        if unconformed:
+            listed = ", ".join(str(path) for path in unconformed)
             raise StoreError(
-                f"{scope} holds record or log files but no {DATABASE_FILENAME}, so its state "
+                f"{root} holds record or log files but no {DATABASE_FILENAME}, so its state "
                 f"is still in the file layout: {listed}. Move it in with "
-                "python scripts/adopt_store.py before this backend touches the scope; an empty "
+                "python scripts/adopt_store.py before this backend touches the root; an empty "
                 "database beside those files would read every one of them as absent."
             )
 
     def _publish(
         self,
         db_path: Path,
-        scope: str,
+        root: str,
         keys: tuple[Key, ...] = (),
         timeout_s: float | None = None,
     ) -> None:
@@ -406,7 +408,7 @@ class SqliteBackend:
         escaping raw: several processes binding one root at startup all reach here at once.
 
         The layout is checked again here, under the lock, and not only by the caller: creation
-        is the one moment a scope's records stop being files, so a file that appeared since the
+        is the one moment a root's records stop being files, so a file that appeared since the
         caller looked (a restored archive, a file-backend write that got in first) has to be
         seen now or it never will be.
         """
@@ -414,14 +416,14 @@ class SqliteBackend:
         self._files._ensure_parent(db_path, durable=True)
         started = time.monotonic()
         try:
-            held = transition_lock(scope, timeout_s=timeout)
+            held = transition_lock(root, timeout_s=timeout)
             held.__enter__()
         except self._timeout_error:
-            raise self._contended(scope, keys, time.monotonic() - started) from None
+            raise self._contended(root, keys, time.monotonic() - started) from None
         try:
             if db_path.is_file():
                 return
-            self.require_adopted(scope)
+            self.require_conformed(root)
             temp = db_path.parent / creation_temp_name(db_path.name, uuid.uuid4().hex)
             try:
                 self._build(temp)
@@ -435,16 +437,16 @@ class SqliteBackend:
         finally:
             held.__exit__(None, None, None)
 
-    def _contended(self, scope: str, keys: tuple[Key, ...], waited_s: float) -> StoreError:
+    def _contended(self, root: str, keys: tuple[Key, ...], waited_s: float) -> StoreError:
         """The refusal for a wait this backend gave up on, naming a key when the call named one.
 
         A call that named no key (an enumeration) has no key to attribute the wait to, so it is
-        told which scope it waited on instead of being handed a key it never asked about.
+        told which root it waited on instead of being handed a key it never asked about.
         """
         if keys:
             return StoreBusy(keys, keys[0], waited_s)
         return StoreError(
-            f"waited {waited_s:.1f}s for the store database under {scope} to be created by "
+            f"waited {waited_s:.1f}s for the store database under {root} to be created by "
             "another process and gave up; nothing was written"
         )
 
@@ -487,8 +489,8 @@ class SqliteBackend:
         )
         if contended and keys:
             return StoreBusy(keys, keys[0], waited_s)
-        scope = keys[0].scope if keys else "?"
-        return StoreError(f"the store database under {scope} refused the operation: {exc}")
+        root = keys[0].root if keys else "?"
+        return StoreError(f"the store database under {root} refused the operation: {exc}")
 
     @contextmanager
     def _mapped(self, keys: tuple[Key, ...], waited_s: float = 0.0) -> Iterator[None]:
@@ -506,7 +508,7 @@ class SqliteBackend:
     def _write(
         self, keys: tuple[Key, ...], *, timeout_s: float | None = None
     ) -> Iterator[sqlite3.Connection]:
-        """One ``begin immediate`` transaction over the single scope a call names.
+        """One ``begin immediate`` transaction over the single root a call names.
 
         The write lock is taken up front rather than upgraded from a read, which is what keeps
         the snapshot-conflict class (which no busy timeout covers) out of reach. A store that
@@ -515,7 +517,7 @@ class SqliteBackend:
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with self._mapped(keys, timeout):
-            conn = self._connection(keys[0].scope, keys, timeout)
+            conn = self._connection(keys[0].root, keys, timeout)
             self._set_busy_timeout(conn, timeout)
             self._apply_synchronous(conn, self._synchronous_for(keys))
         started = time.monotonic()
@@ -591,13 +593,13 @@ class SqliteBackend:
 
     def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
         descriptor = get_descriptor(key.store)
-        db_path = database_path(key.scope)
+        db_path = database_path(key.root)
         data = None
         if db_path.is_file():
             with self._mapped((key,)):
-                data = self._stored(self._connection(key.scope, (key,)), key)
+                data = self._stored(self._connection(key.root, (key,)), key)
         else:
-            self.require_adopted(key.scope)
+            self.require_conformed(key.root)
         if data is None:
             if default is REQUIRED:
                 raise _missing_record(key)
@@ -607,12 +609,12 @@ class SqliteBackend:
     def exists(self, key: Key) -> bool:
         if get_descriptor(key.store).kind == "blob":
             return self._files.exists(key)
-        db_path = database_path(key.scope)
+        db_path = database_path(key.root)
         if not db_path.is_file():
-            self.require_adopted(key.scope)
+            self.require_conformed(key.root)
             return False
         with self._mapped((key,)):
-            return self._stored(self._connection(key.scope, (key,)), key) is not None
+            return self._stored(self._connection(key.root, (key,)), key) is not None
 
     def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
@@ -642,20 +644,20 @@ class SqliteBackend:
             yield txn
             txn.apply()
 
-    def keys(self, store: str, scope: str, prefix: tuple[str, ...] = ()) -> list[Key]:
+    def keys(self, store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
         descriptor = get_descriptor(store)
         if descriptor.kind == "blob":
-            return self._files.keys(store, scope, prefix)
-        db_path = database_path(scope)
+            return self._files.keys(store, root, prefix)
+        db_path = database_path(root)
         if not db_path.is_file():
-            self.require_adopted(scope)
+            self.require_conformed(root)
             return []
         with self._mapped(()):
-            rows = self._connection(scope).execute(
+            rows = self._connection(root).execute(
                 "select parts from records where store = ?", (store,)
             ).fetchall()
         found = [
-            Key(store, scope, parts)
+            Key(store, root, parts)
             for parts in (decode_parts(text) for (text,) in rows)
             if parts[: len(prefix)] == tuple(prefix)
         ]
@@ -684,12 +686,12 @@ class SqliteBackend:
         """
         descriptor = get_descriptor(key.store)
         start = int(after) if after else 0
-        db_path = database_path(key.scope)
+        db_path = database_path(key.root)
         if not db_path.is_file():
-            self.require_adopted(key.scope)
+            self.require_conformed(key.root)
             return LogPage(records=[], cursor=str(start))
         with self._mapped((key,)):
-            rows = self._connection(key.scope, (key,)).execute(
+            rows = self._connection(key.root, (key,)).execute(
                 "select id, entry from log_entries where store = ? and parts = ? and id > ? "
                 "order by id",
                 (key.store, encode_parts(key.parts), start),

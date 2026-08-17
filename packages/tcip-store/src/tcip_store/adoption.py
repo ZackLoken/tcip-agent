@@ -1,6 +1,6 @@
-"""Moving a scope's existing record and log files into a database, atomically or not at all.
+"""Moving a root's existing record and log files into a database, atomically or not at all.
 
-The file layout came first, so the first database a scope ever sees must be built from what is
+The file layout came first, so the first database a root ever sees must be built from what is
 already on disk rather than beside it. Adoption reads every file a store's locator claims,
 decodes it through that store's own codec, and publishes a database holding exactly those
 entries, stamped as already exported so a file-reading tool is current the moment adoption
@@ -8,11 +8,11 @@ returns.
 
 Two rules make it safe to run against live state. It refuses before it writes: a file that
 will not decode, or one whose owning store cannot be told apart from another's, stops the whole
-scope. And it publishes exclusively: the per-scope transition lock is held from before the
+root. And it publishes exclusively: the per-root transition lock is held from before the
 preflight through the install, and the built database is installed with a no-clobber primitive,
 so a crash leaves temp artifacts rather than a half-loaded database.
 
-Which entries a store owns in a scope is the one thing a locator cannot answer on its own,
+Which entries a store owns in a root is the one thing a locator cannot answer on its own,
 because locator shapes collide: thirteen stores place a single json document under
 ``.tcip/state``. The caller supplies that inventory as :class:`StoreSource` patterns, stating
 per store which parts are constants and which vary.
@@ -33,12 +33,12 @@ from tcip_store.errors import DecodeError, StoreError
 from tcip_store.file_backend import (
     _is_bookkeeping,
     _remove_quietly,
-    claimed_record_files,
     creation_temp_name,
     database_file,
     fsync_directory,
-    require_absolute_scope,
+    require_absolute_root,
     transition_lock,
+    unconformed_record_files,
 )
 from tcip_store.registry import StoreDescriptor, get_descriptor
 from tcip_store.sqlite_backend import (
@@ -93,10 +93,10 @@ def starting_with(text: str) -> PartPattern:
 
 @dataclass(frozen=True)
 class StoreSource:
-    """Where one store's entries are found: the kind of scope it hangs off and its key shape.
+    """Where one store's entries are found: the kind of root it hangs off and its key shape.
 
-    ``layout`` names the kind of directory the store's scope is, since a locator's relative
-    path is only meaningful under the scope kind it was written for: the same
+    ``layout`` names the kind of directory the store's root is, since a locator's relative
+    path is only meaningful under the root kind it was written for: the same
     ``<dir>/<name>.json`` shape addresses a split's stem list under a split directory and an
     evaluation's results under a run directory.
     """
@@ -116,9 +116,9 @@ class PlanEntry:
 
 @dataclass(frozen=True)
 class AdoptionPlan:
-    """Every entry one scope contributes, and the files its layout claims but no store owns."""
+    """Every entry one root contributes, and the files its layout claims but no store owns."""
 
-    scope: str
+    root: str
     layout: str
     entries: tuple[PlanEntry, ...]
     claimed: tuple[Path, ...]
@@ -126,16 +126,16 @@ class AdoptionPlan:
 
 @dataclass(frozen=True)
 class AdoptionResult:
-    """What one scope's adoption loaded, per store."""
+    """What one root's adoption loaded, per store."""
 
-    scope: str
+    root: str
     database: Path
     records: dict[str, int]
     log_entries: dict[str, int]
 
 
-def plan_scope(scope: str, layout: str, sources: Mapping[str, StoreSource]) -> AdoptionPlan:
-    """Which store owns each record or log file under ``scope``, or a refusal naming the tie.
+def plan_root(root: str, layout: str, sources: Mapping[str, StoreSource]) -> AdoptionPlan:
+    """Which store owns each record or log file under ``root``, or a refusal naming the tie.
 
     Every store declared for this layout offers its locator's reading of a file; the store
     whose patterns say the most about the recovered parts wins, and two stores saying equally
@@ -143,15 +143,15 @@ def plan_scope(scope: str, layout: str, sources: Mapping[str, StoreSource]) -> A
     whose filename had a separator sanitized out of it) is held under the key the bytes state,
     through the same recovery hook enumeration uses, so adoption and ``keys`` cannot disagree.
     """
-    root = require_absolute_scope(scope)
+    directory = require_absolute_root(root)
     here = {name: source for name, source in sources.items() if source.layout == layout}
     entries: list[PlanEntry] = []
-    if not root.is_dir():
-        return AdoptionPlan(scope=scope, layout=layout, entries=(), claimed=())
-    for path in sorted(root.rglob("*")):
+    if not directory.is_dir():
+        return AdoptionPlan(root=root, layout=layout, entries=(), claimed=())
+    for path in sorted(directory.rglob("*")):
         if not path.is_file() or _is_bookkeeping(path.name):
             continue
-        relative = PurePosixPath(path.relative_to(root).as_posix())
+        relative = PurePosixPath(path.relative_to(directory).as_posix())
         best: list[tuple[str, tuple[str, ...]]] = []
         best_score = -1
         for name, source in here.items():
@@ -176,10 +176,10 @@ def plan_scope(scope: str, layout: str, sources: Mapping[str, StoreSource]) -> A
         name, parts = best[0]
         entries.append(PlanEntry(store=name, parts=_true_parts(name, path, parts), path=path))
     return AdoptionPlan(
-        scope=scope,
+        root=root,
         layout=layout,
         entries=tuple(entries),
-        claimed=claimed_record_files(scope),
+        claimed=unconformed_record_files(root),
     )
 
 
@@ -210,11 +210,11 @@ def _true_parts(store: str, path: Path, parts: tuple[str, ...]) -> tuple[str, ..
 
 
 def unaccounted_files(plans: tuple[AdoptionPlan, ...]) -> tuple[Path, ...]:
-    """Record or log files some locator claims that no plan adopts, across every scope planned.
+    """Record or log files some locator claims that no plan adopts, across every root planned.
 
     A file left behind would read as absent under a database backend while still sitting on
     disk, which for a confirmed negative means an annotated image training as empty. A file
-    that belongs to a neighbouring scope shows up here until that scope is planned too.
+    that belongs to a neighbouring root shows up here until that root is planned too.
     """
     adopted = {os.path.normcase(str(entry.path)) for plan in plans for entry in plan.entries}
     left: dict[str, Path] = {}
@@ -226,14 +226,14 @@ def unaccounted_files(plans: tuple[AdoptionPlan, ...]) -> tuple[Path, ...]:
     return tuple(sorted(left.values()))
 
 
-def adopt_scope(
-    scope: str,
+def adopt_root(
+    root: str,
     layout: str,
     sources: Mapping[str, StoreSource],
     *,
     report: Callable[[str], None] = print,
 ) -> AdoptionResult:
-    """Build this scope's database from the files it already holds, exclusively and atomically.
+    """Build this root's database from the files it already holds, exclusively and atomically.
 
     The transition lock is taken before anything is read and held through the install, so no
     write can land in the layout between the decode and the publication. Every adopted file is
@@ -242,16 +242,16 @@ def adopt_scope(
     published. The published file and the directory entry naming it are both flushed, so the
     database a crash leaves behind is either absent or complete.
     """
-    db_path = database_file(scope)
-    with transition_lock(scope):
+    db_path = database_file(root)
+    with transition_lock(root):
         if db_path.is_file():
             raise StoreError(
-                f"{db_path} already exists, so this scope's records are already in a database "
+                f"{db_path} already exists, so this root's records are already in a database "
                 "and adopting again would build one from files it no longer owns"
             )
-        plan = plan_scope(scope, layout, sources)
+        plan = plan_root(root, layout, sources)
         loaded = _preflight(plan)
-        report(f"{scope}: {len(plan.entries)} file(s) decode, building {db_path}")
+        report(f"{root}: {len(plan.entries)} file(s) decode, building {db_path}")
         temp = db_path.parent / creation_temp_name(db_path.name, uuid.uuid4().hex)
         try:
             result = _build(temp, plan, loaded)
@@ -264,7 +264,7 @@ def adopt_scope(
         _fsync_path(db_path)
         fsync_directory(db_path.parent)
     return AdoptionResult(
-        scope=scope, database=db_path, records=result[0], log_entries=result[1]
+        root=root, database=db_path, records=result[0], log_entries=result[1]
     )
 
 
@@ -279,7 +279,7 @@ class _Loaded:
 
 
 def _preflight(plan: AdoptionPlan) -> tuple[_Loaded, ...]:
-    """Read and decode every file the plan adopts, refusing the whole scope on the first that
+    """Read and decode every file the plan adopts, refusing the whole root on the first that
     will not decode.
 
     A record decodes whole; a log decodes line by line, because one unreadable line in an
@@ -324,7 +324,7 @@ def _revalidate(loaded: tuple[_Loaded, ...]) -> None:
         current = item.entry.path.read_bytes()
         if len(current) != item.size or hashlib.sha256(current).hexdigest() != item.digest:
             raise StoreError(
-                f"{item.entry.path} changed while this scope was being adopted, so the database "
+                f"{item.entry.path} changed while this root was being adopted, so the database "
                 "built from it is already stale. Nothing was installed; run adoption again."
             )
 
@@ -345,7 +345,7 @@ def _build(
         mode = conn.execute("pragma journal_mode = delete").fetchone()[0]
         if str(mode).lower() != "delete":
             raise StoreError(
-                f"the database being built for {plan.scope} would not take rollback-journal "
+                f"the database being built for {plan.root} would not take rollback-journal "
                 f"mode and reported {mode!r}, so the file installed could not hold its commits"
             )
         conn.executescript(SCHEMA_DDL)
@@ -389,9 +389,9 @@ __all__ = [
     "PartPattern",
     "PlanEntry",
     "StoreSource",
-    "adopt_scope",
+    "adopt_root",
     "literal",
-    "plan_scope",
+    "plan_root",
     "starting_with",
     "unaccounted_files",
 ]

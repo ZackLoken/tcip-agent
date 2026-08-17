@@ -36,10 +36,10 @@ def bound(backend):
 
 
 def export_files(root) -> None:
-    """Write this scope's rows back out as the files every reader outside the seam sees."""
-    from tcip_store.export import export_scope
+    """Write this root's rows back out as the files every reader outside the seam sees."""
+    from tcip_store.export import export_root
 
-    export_scope(str(root), report=lambda line: None)
+    export_root(str(root), report=lambda line: None)
 
 
 def _project(tmp_path: Path) -> Path:
@@ -158,7 +158,7 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
     into a fresh directory, and that directory adopted back into a database with the human's
     negative still saying negative."""
     from scripts._store_bootstrap import ADOPTION_SOURCES, ROOT
-    from tcip_store.adoption import adopt_scope
+    from tcip_store.adoption import adopt_root
 
     root = _project(tmp_path)
     with bound(SqliteBackend()):
@@ -171,7 +171,7 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
         assert "error" not in import_project(str(tmp_path / "bundle.zip"), str(restored))
         assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE
 
-    adopt_scope(str(restored), ROOT, ADOPTION_SOURCES, report=lambda line: None)
+    adopt_root(str(restored), ROOT, ADOPTION_SOURCES, report=lambda line: None)
 
     with bound(SqliteBackend()):
         assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE

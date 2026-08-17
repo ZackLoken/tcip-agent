@@ -120,9 +120,9 @@ def test_the_files_an_export_writes_are_the_files_the_file_backend_would_have_wr
 
     with bound(SqliteBackend()):
         _write_the_value_set(rows)
-        store_export.export_scope(str(rows), report=lambda line: None)
+        store_export.export_root(str(rows), report=lambda line: None)
         ts.delete(_key(LWW, rows, "removed"))
-        exported = store_export.export_scope(str(rows), report=lambda line: None)
+        exported = store_export.export_root(str(rows), report=lambda line: None)
 
     assert _entries(rows) == _entries(files)
     assert not exported.raced
@@ -143,7 +143,7 @@ def test_a_log_is_reassembled_one_entry_per_line_in_the_order_it_was_appended(tm
     with bound(SqliteBackend()):
         for epoch in (1, 2, 3):
             ts.append(_key(LOG, rows, "metrics"), {"epoch": epoch})
-        store_export.export_scope(str(rows), report=lambda line: None)
+        store_export.export_root(str(rows), report=lambda line: None)
 
     written = (rows / "logs" / "metrics.jsonl").read_bytes()
     assert written == (files / "logs" / "metrics.jsonl").read_bytes()
@@ -161,7 +161,7 @@ def test_two_keys_that_would_land_on_one_file_refuse_the_export_before_it_writes
     ts.replace(_key(STATE_BETA, database, "shared"), {"owner": "beta"})
 
     with pytest.raises(ts.StoreError) as raised:
-        store_export.export_scope(str(database), report=lambda line: None)
+        store_export.export_root(str(database), report=lambda line: None)
 
     message = str(raised.value)
     assert STATE_ALPHA in message and STATE_BETA in message and "shared" in message
@@ -174,7 +174,7 @@ def test_an_export_whose_keys_are_distinct_writes_both_stores_files(database):
     ts.replace(_key(STATE_ALPHA, database, "image_status"), {"owner": "alpha"})
     ts.replace(_key(STATE_BETA, database, "gui"), {"owner": "beta"})
 
-    exported = store_export.export_scope(str(database), report=lambda line: None)
+    exported = store_export.export_root(str(database), report=lambda line: None)
 
     state = database / ".tcip" / "state"
     assert ts.RECORD_JSON.decode(( state / "image_status.json").read_bytes()) == {"owner": "alpha"}
@@ -197,7 +197,7 @@ def test_a_store_written_again_while_its_files_were_being_written_is_reported_ra
         return result
 
     monkeypatch.setattr(store_export, "_materialize", write_again)
-    exported = store_export.export_scope(str(database), report=lambda line: None)
+    exported = store_export.export_root(str(database), report=lambda line: None)
 
     assert exported.raced == (LWW,)
     states = store_export.read_store_states(database_path(str(database)))
@@ -209,7 +209,7 @@ def test_a_store_that_was_not_written_during_the_export_is_stamped_current(datab
     every file reader consults then answers current."""
     ts.replace(_key(LWW, database, "settled"), {"n": 1})
 
-    exported = store_export.export_scope(str(database), report=lambda line: None)
+    exported = store_export.export_root(str(database), report=lambda line: None)
 
     assert exported.raced == ()
     assert store_export.stale_stores(database_path(str(database))) == ()
@@ -220,20 +220,20 @@ def test_a_store_written_after_its_export_reads_stale_until_it_is_exported_again
     """What the doctor and the archive ask before they read files."""
     key = _key(LWW, database, "moving")
     ts.replace(key, {"n": 1})
-    store_export.export_scope(str(database), report=lambda line: None)
+    store_export.export_root(str(database), report=lambda line: None)
     ts.replace(key, {"n": 2})
 
     db_path = database_path(str(database))
     assert store_export.stale_stores(db_path) == (LWW,)
 
-    store_export.export_scope(str(database), report=lambda line: None)
+    store_export.export_root(str(database), report=lambda line: None)
     assert store_export.stale_stores(db_path) == ()
 
 
 def test_a_store_the_database_never_recorded_a_write_against_reads_current(database):
     """A legitimately empty store must never leave a file reader permanently invalid."""
     ts.replace(_key(LWW, database, "only-one"), {"n": 1})
-    store_export.export_scope(str(database), report=lambda line: None)
+    store_export.export_root(str(database), report=lambda line: None)
 
     states = store_export.read_store_states(database_path(str(database)))
     assert STATE_ALPHA not in states
@@ -245,13 +245,13 @@ def test_a_deleted_record_takes_its_file_and_its_tombstone_with_it(database):
     gone and the stamp has landed it has done its work and is pruned."""
     key = _key(LWW, database, "removed")
     ts.replace(key, {"n": 1})
-    store_export.export_scope(str(database), report=lambda line: None)
+    store_export.export_root(str(database), report=lambda line: None)
     path = database / "lww" / "removed.json"
     assert path.is_file()
 
     ts.delete(key)
     deleted: list[str] = []
-    store_export.export_scope(str(database), report=deleted.append)
+    store_export.export_root(str(database), report=deleted.append)
 
     assert not path.exists()
     assert any(str(path) in line for line in deleted)
@@ -266,12 +266,12 @@ def test_a_deleted_record_takes_its_file_and_its_tombstone_with_it(database):
     assert rows[0] == 0
 
 
-def test_exporting_a_scope_that_never_had_a_database_refuses_rather_than_reporting_nothing(
+def test_exporting_a_root_that_never_had_a_database_refuses_rather_than_reporting_nothing(
     tmp_path
 ):
-    """"Nothing to export" and "this scope's records are files already" are different answers,
+    """"Nothing to export" and "this root's records are files already" are different answers,
     and only one of them is true here."""
     with pytest.raises(ts.StoreError) as raised:
-        store_export.export_scope(str(tmp_path), report=lambda line: None)
+        store_export.export_root(str(tmp_path), report=lambda line: None)
 
     assert "store.db" in str(raised.value)

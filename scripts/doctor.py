@@ -216,7 +216,7 @@ def check_trait_specs(root: Path, findings: list) -> None:
 
 
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
-    """Which database-held store each file-reading check depends on, and in which scope.
+    """Which database-held store each file-reading check depends on, and under which root.
 
     Exactly what the checks above read off disk, no wider: a store the doctor never reads
     cannot make a check it does not run report anything. Live-state stores are not doctor
@@ -236,7 +236,7 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
 def staleness_findings(root: Path) -> dict[str, str]:
     """Per check, why its files cannot be trusted, for the checks whose stores are behind.
 
-    A scope with no database is on the file layout and every check reads the authority
+    A root with no database is on the file layout and every check reads the authority
     directly. A store with no counter row was never written in its database and reads current.
     Anything else stale is reported as this check being invalid rather than as clean, because a
     check that read files older than the database found the state of an earlier session.
@@ -247,12 +247,12 @@ def staleness_findings(root: Path) -> dict[str, str]:
 
     invalid: dict[str, str] = {}
     for check, gated in gated_stores(root).items():
-        by_scope: dict[Path, list[str]] = {}
-        for scope, store in gated:
-            by_scope.setdefault(scope, []).append(store)
+        by_root: dict[Path, list[str]] = {}
+        for store_root, store in gated:
+            by_root.setdefault(store_root, []).append(store)
         reasons: list[str] = []
-        for scope, stores in by_scope.items():
-            db_path = database_file(str(scope.absolute()))
+        for store_root, stores in by_root.items():
+            db_path = database_file(str(store_root.absolute()))
             if not db_path.is_file():
                 continue
             try:

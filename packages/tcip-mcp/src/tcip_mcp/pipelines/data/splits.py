@@ -698,7 +698,7 @@ def cal_holdout_lock_path(identity_hash: str, *, scope_root: str | Path) -> Path
     of either, so this answers the path the seam reads and writes rather than a parallel one.
     """
     key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
-    return Path(key.scope, *_CalHoldoutLockLocator().relative_path(key.scope, key.parts).parts)
+    return Path(key.root, *_CalHoldoutLockLocator().relative_path(key.root, key.parts).parts)
 
 
 def cal_holdout_scope_root(labels_dir: str | Path) -> Path:

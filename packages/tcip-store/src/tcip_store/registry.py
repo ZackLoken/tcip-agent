@@ -56,7 +56,7 @@ class StoreDescriptor:
     filesystem path for a library that cannot take a file object.
 
     ``locator`` is the file backend's identity map for this store, required of a record or a
-    log and unused by a blob. Another backend keys on (store, scope, parts) and does not
+    log and unused by a blob. Another backend keys on (store, root, parts) and does not
     consult it to read or write, but the file layout it names is what a record held anywhere
     else is written back out as, so a store without one could only ever be half exported.
 
@@ -219,8 +219,8 @@ def validate_key(key: Key, *, expect_kind: Kind | tuple[Kind, ...], operation: s
     for field, part in zip(descriptor.key_fields, key.parts, strict=True):
         if not isinstance(part, str) or not part:
             raise BadKey(f"{key.store!r} key field {field!r} must be a non-empty string; got {part!r}")
-    if not key.scope:
-        raise BadKey(f"{key.store!r} key carries no scope: name the root the entry hangs off")
+    if not key.root:
+        raise BadKey(f"{key.store!r} key carries no root: name the root the entry hangs off")
     return descriptor
 
 
