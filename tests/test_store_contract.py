@@ -437,20 +437,26 @@ def test_every_operation_refuses_before_a_backend_is_bound(store):
 
 def test_the_registry_refuses_a_declaration_that_would_be_ignored_or_shadowed():
     with pytest.raises(ValueError) as duplicate:
-        ts.register_store(ts.StoreDescriptor(name=LWW, kind="record", key_fields=("name",)))
+        ts.register_store(
+            ts.StoreDescriptor(name=LWW, kind="record", key_fields=("name",),
+                               codec=ts.RECORD_JSON, concurrency="last_writer_wins",
+                               locator=RootedFileLocator(prefix=("shadow",), suffix=".json"))
+        )
     assert "already registered" in str(duplicate.value)
 
     with pytest.raises(ValueError) as unpoliced:
         ts.register_store(
             ts.StoreDescriptor(name="contract_unpoliced", kind="record", key_fields=("name",),
-                               codec=ts.RECORD_JSON)
+                               codec=ts.RECORD_JSON,
+                               locator=RootedFileLocator(prefix=("unpoliced",), suffix=".json"))
         )
     assert "concurrency=" in str(unpoliced.value)
 
     with pytest.raises(ValueError) as relaxed_log:
         ts.register_store(
             ts.StoreDescriptor(name="contract_relaxed_log", kind="log", key_fields=("name",),
-                               codec=ts.LOG_JSON, durable=False)
+                               codec=ts.LOG_JSON, durable=False,
+                               locator=RootedFileLocator(prefix=("relaxed",), suffix=".jsonl"))
         )
     assert "durability" in str(relaxed_log.value)
 
@@ -468,6 +474,37 @@ def test_the_registry_refuses_a_declaration_that_would_be_ignored_or_shadowed():
     assert "contract_late_declaration" in ts.registered_stores()
 
 
+def test_the_registry_refuses_a_record_that_declares_no_locator_and_admits_one_that_does():
+    """A locator is the store's own statement of the file it owns, so a record without one
+    can be written but never written back out as the file the tools reading the layout
+    expect. Blobs are unaffected: their bytes are files wherever they are stored."""
+    with pytest.raises(ValueError) as unplaceable:
+        ts.register_store(
+            ts.StoreDescriptor(
+                name="contract_unplaceable",
+                kind="record",
+                key_fields=("name",),
+                codec=ts.RECORD_JSON,
+                concurrency="last_writer_wins",
+            )
+        )
+    assert "locator" in str(unplaceable.value)
+    assert "contract_unplaceable" not in ts.registered_stores()
+
+    declared = ts.register_store(
+        ts.StoreDescriptor(
+            name="contract_placeable",
+            kind="record",
+            key_fields=("name",),
+            codec=ts.RECORD_JSON,
+            concurrency="last_writer_wins",
+            locator=RootedFileLocator(prefix=("placeable",), suffix=".json"),
+        )
+    )
+    assert declared.locator is not None
+    assert "contract_placeable" in ts.registered_stores()
+
+
 def test_the_registry_refuses_a_bespoke_json_spelling_and_admits_a_stated_exemption():
     """A store cannot quietly pick its own spelling: the check is in ``register_store``, so a
     module nothing has imported is caught too, and an exemption is written down where a
@@ -481,7 +518,8 @@ def test_the_registry_refuses_a_bespoke_json_spelling_and_admits_a_stated_exempt
         ts.register_store(
             ts.StoreDescriptor(name="contract_bespoke_codec", kind="record",
                                key_fields=("name",), codec=bespoke,
-                               concurrency="last_writer_wins")
+                               concurrency="last_writer_wins",
+                               locator=RootedFileLocator(prefix=("bespoke",), suffix=".json"))
         )
     assert "RECORD_JSON" in str(refused.value)
     assert "contract_bespoke_codec" not in ts.registered_stores()
@@ -561,6 +599,52 @@ def test_a_transaction_refuses_every_form_that_would_escape_it(store):
 
     assert ts.read(first) == {"n": 1}
     assert ts.read(second) == {"n": 2}
+
+
+def test_a_transaction_refuses_two_scope_roots_and_admits_two_spellings_of_one(store):
+    """One transaction is one root's exclusion: a backend holding a database per scope would
+    have to commit the second root's write somewhere the first root's transaction cannot
+    reach, so the seam refuses before any backend infers a root from the first key. Two
+    spellings of one directory are one root, or the refusal would reject work that is fine."""
+    elsewhere = store.root / "elsewhere"
+    elsewhere.mkdir()
+    here = store.key(LWW, "here")
+    there = ts.Key(LWW, str(elsewhere), ("there",))
+
+    with pytest.raises(ts.TransactionMisuse) as raised:
+        with ts.transaction(here, there):
+            pass
+    assert repr(str(store.root)) in str(raised.value)
+    assert repr(str(elsewhere)) in str(raised.value)
+    assert ts.read(here, default=None) is None
+
+    detour = store.root / "detour"
+    detour.mkdir()
+    spelled_around = ts.Key(LWW, str(detour / ".."), ("beta",))
+    with ts.transaction(store.key(LWW, "alpha"), spelled_around) as txn:
+        txn.write(store.key(LWW, "alpha"), {"n": 1})
+        txn.write(spelled_around, {"n": 2})
+
+    assert ts.read(store.key(LWW, "alpha")) == {"n": 1}
+    assert ts.read(store.key(LWW, "beta")) == {"n": 2}
+
+
+def test_an_append_inside_a_transaction_is_refused_and_the_same_append_outside_it_lands(store):
+    """An append returns only once its entry has survived, which a transaction that rolls
+    back would take away again, and a log key cannot be named in a transaction to begin
+    with."""
+    record = store.key(LWW, "under-transaction")
+    log = store.key(LOG, "appended-to")
+
+    with ts.transaction(record) as txn:
+        with pytest.raises(ts.TransactionMisuse) as raised:
+            ts.append(log, {"i": "inside"})
+        assert "close the transaction first" in str(raised.value)
+        txn.write(record, {"n": 1})
+
+    ts.append(log, {"i": "outside"})
+    assert [entry["i"] for entry in ts.read_log(log).records] == ["outside"]
+    assert ts.read(record) == {"n": 1}
 
 
 def test_a_backend_refuses_to_exist_without_cross_process_locking(store, monkeypatch):

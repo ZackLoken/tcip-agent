@@ -83,7 +83,10 @@ class StoreBusy(StoreError):
     """A lock was not acquired within the timeout, so nothing was written.
 
     The file backend cannot name the process holding the lock: its lock carries no owner
-    identity. It names the contended key and how long it waited.
+    identity. It names how long it waited and, in ``blocked_on``, a key the refused call
+    itself named, never the holder's. The file backend names the key whose lock it was
+    waiting on; a backend excluding writers more coarsely than one key at a time names the
+    first key the call named, since it cannot know which of them the contender holds.
     """
 
     def __init__(self, keys: tuple[Key, ...], blocked_on: Key, waited_s: float) -> None:

@@ -29,6 +29,7 @@ from tcip_store.model import (
     LogPage,
     Version,
     Versioned,
+    canonical_path,
 )
 from tcip_store.registry import (
     LOG_JSON,
@@ -99,6 +100,7 @@ __all__ = [
     "append",
     "bind",
     "blob_path",
+    "canonical_path",
     "capabilities",
     "check_json_value",
     "delete",

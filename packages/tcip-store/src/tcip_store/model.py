@@ -1,13 +1,17 @@
 """Identity and value types the storage seam speaks, identical on every backend.
 
-Nothing here names a filesystem path: mapping an identity onto storage is a backend's
-private job, so a record can move from files to a database without a consumer changing.
+No identity here carries a storage location: mapping an identity onto storage is a backend's
+private job, so a record can move from files to a database without a consumer changing. A
+scope is the one string that holds a directory path, and ``canonical_path`` is where the seam
+and every backend agree on when two spellings of it name one root.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 
@@ -106,6 +110,19 @@ class _Required:
 
 REQUIRED: Any = _Required()
 """Passed as ``default`` to mean the entry is required: absence raises ``NotFound``."""
+
+
+def canonical_path(path: str | Path) -> str:
+    """One spelling for a filesystem path, so two spellings of one directory compare equal.
+
+    Resolution collapses the relative segments and the links; the case rule is the platform's
+    own, which is why the comparison lives here rather than in each caller. Every place that
+    has to decide whether two paths are the same one asks this: the seam comparing the scopes
+    a transaction names, and the backend keying its lock registry. A relative path resolves
+    against the process's current directory, so a caller that must refuse one refuses before
+    canonicalizing rather than after.
+    """
+    return os.path.normcase(str(Path(path).resolve()))
 
 
 def canonical_order(keys: tuple[Key, ...]) -> tuple[Key, ...]:
