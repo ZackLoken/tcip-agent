@@ -11,10 +11,14 @@ See docs/vision.md §6 for the design rationale.
 from __future__ import annotations
 
 import json
+import re
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
+import tcip_store
 from tcip_store import (
     RECORD_JSON,
     DecodeError,
@@ -22,8 +26,6 @@ from tcip_store import (
     StoreDescriptor,
     Version,
     VersionConflict,
-    put_blob,
-    read_blob_versioned,
     register_store,
     text_codec,
 )
@@ -48,7 +50,7 @@ _REPORT_DOC = RootedFileLocator(prefix=(".tcip", "reports"), suffix=".json")
 """One friction report per document, under the project.
 
 A report is one whole JSON document, not a line of a stream, so it carries the extension
-that says so and every reader parses the file rather than its first line.
+that says so and every reader decodes the whole document rather than its first line.
 """
 
 _RETROSPECTIVE_DOC = RootedFileLocator(prefix=(".tcip", "retrospectives"), suffix=".md")
@@ -63,8 +65,11 @@ _RETROSPECTIVE_TEXT = text_codec()
 register_store(
     StoreDescriptor(
         name=FRICTION_REPORT_STORE,
-        kind="blob",
+        kind="record",
         key_fields=("report",),
+        codec=RECORD_JSON,
+        concurrency="last_writer_wins",
+        enumerable=True,
         locator=_REPORT_DOC,
     )
 )
@@ -72,8 +77,11 @@ register_store(
 register_store(
     StoreDescriptor(
         name=RETROSPECTIVE_STORE,
-        kind="blob",
+        kind="record",
         key_fields=("project",),
+        codec=_RETROSPECTIVE_TEXT,
+        concurrency="cas",
+        enumerable=True,
         locator=_RETROSPECTIVE_DOC,
     )
 )
@@ -82,10 +90,9 @@ register_store(
 def friction_report_key(project_path: str, report_id: str) -> Key:
     """One friction report.
 
-    A blob because every reader of this corpus enumerates the directory and orders by mtime,
-    so the documents have to be files. Written once, create-only: the identifier carries a
-    timestamp and a random suffix, so a conflict means some other call already owns that name.
-    The document is encoded through the canonical ``RECORD_JSON`` codec.
+    ``last_writer_wins``: the identifier carries a timestamp and a random suffix, so each
+    report is written once, whole, by the call that produced it, and a conflict on the
+    create-only write means some other call already owns that name.
     """
     return Key(FRICTION_REPORT_STORE, str(project_path), (report_id,))
 
@@ -93,10 +100,9 @@ def friction_report_key(project_path: str, report_id: str) -> Key:
 def retrospective_key(project_path: str, project_id: str) -> Key:
     """One project's retrospective document.
 
-    A blob for the same reason a report is: the corpus is read as files, by the GUI panel and
-    by the distillation pass alike. A retrospective is appended to by reading the existing text
-    and writing the concatenation, so :func:`project_retrospective` writes compare-and-set
-    against the version it read and re-merges on conflict rather than dropping a section.
+    ``cas``: a retrospective is appended to by reading the stored text and writing the
+    concatenation, so :func:`project_retrospective` writes against the version it read and
+    re-merges on conflict rather than dropping a section.
     """
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
 
@@ -111,59 +117,109 @@ def _retrospective_path(project_path: str, project_id: str) -> Path:
     return root.joinpath(*_RETROSPECTIVE_DOC.relative_path(str(root), (project_id,)).parts)
 
 
-def reports_dir(project_path: str) -> Path:
-    """Where the report documents live, without creating anything: the read side scans it."""
-    return Path(project_path, *_REPORT_DOC.prefix)
+def report_document_name(report_id: str) -> str:
+    """The file name one report's document carries, taken from the store's own locator.
 
-
-def report_documents(project_path: str) -> list[Path]:
-    """Every friction report under a project, most recently written first.
-
-    The one place a reader learns which files are reports, so the extension is stated by the
-    store's locator rather than restated as a glob by each consumer.
+    The extension is stated here and nowhere else, so a reader presenting a report by name
+    never restates it.
     """
-    directory = reports_dir(project_path)
-    if not directory.is_dir():
-        return []
-    return sorted(
-        directory.glob(f"*{_REPORT_DOC.suffix}"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-
-def retrospectives_dir(project_path: str) -> Path:
-    """Where the retrospective documents live, without creating anything."""
-    return Path(project_path, *_RETROSPECTIVE_DOC.prefix)
+    return f"{report_id}{_REPORT_DOC.suffix}"
 
 
 def read_report(project_path: str, report_id: str) -> dict:
     """One friction report's decoded document, or ``{}`` when nothing is recorded under that id.
 
-    The one decode of this store, so a consumer never re-spells the codec. Raises
+    The one read of this store, so a consumer never re-spells its decode. Raises
     ``DecodeError`` for a report whose bytes are present but will not read as JSON, which is
     the distinction a panel needs to show the row as malformed rather than drop it.
     """
-    data = read_blob_versioned(friction_report_key(project_path, report_id), default=None).value
-    if data is None:
+    entry = tcip_store.read(friction_report_key(project_path, report_id), default=None)
+    if entry is None:
         return {}
-    try:
-        entry = RECORD_JSON.decode(data)
-    except ValueError as exc:
-        raise DecodeError(f"friction report {report_id!r} does not decode as JSON: {exc}") from exc
     return entry if isinstance(entry, dict) else {"detail": str(entry), "category": "",
                                                   "malformed": True}
 
 
 def read_retrospective(project_path: str, project_id: str) -> str:
     """One project's retrospective text, or ``""`` when it has none."""
-    data = read_blob_versioned(retrospective_key(project_path, project_id), default=None).value
-    if data is None:
-        return ""
-    try:
-        return _RETROSPECTIVE_TEXT.decode(data)
-    except UnicodeDecodeError as exc:
-        raise DecodeError(f"retrospective {project_id!r} is not text: {exc}") from exc
+    return tcip_store.read(retrospective_key(project_path, project_id), default="")
+
+
+@dataclass(frozen=True)
+class MemoryDocument:
+    """One project-memory document: the key part naming it, its value, and the time it states.
+
+    ``timestamp`` is the document's own, read out of what it holds. It is empty for a document
+    that states none, and nothing supplies one from the filesystem: a copy, a restore or an
+    export rewrites when bytes landed, and ordering a corpus by that would reshuffle a session's
+    history every time the state moved.
+    """
+
+    name: str
+    value: Any
+    timestamp: str
+
+
+def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
+    """Documents ordered by the timestamp each states, newest first, undated ones last by name.
+
+    Two passes over a stable sort, so documents sharing a timestamp and the undated tail alike
+    come back in one deterministic order rather than whichever the enumeration happened to give.
+    """
+    documents.sort(key=lambda document: document.name)
+    documents.sort(key=lambda document: document.timestamp, reverse=True)
+    return documents
+
+
+def report_documents(project_path: str) -> list[MemoryDocument]:
+    """Every friction report under a project, newest stated timestamp first.
+
+    The one enumeration of this corpus: the memory tool, the GUI panel and the distillation
+    worksheet all read it through here, so they cannot answer with three different orders. A
+    report that will not decode is carried as a malformed row rather than dropped, since a
+    reader that silently omits it reports a corpus smaller than the one on record.
+    """
+    documents: list[MemoryDocument] = []
+    for key in tcip_store.keys(FRICTION_REPORT_STORE, str(project_path)):
+        name = key.parts[0]
+        try:
+            entry = read_report(project_path, name)
+        except DecodeError as exc:
+            entry = {"detail": str(exc), "category": "", "malformed": True}
+        documents.append(
+            MemoryDocument(name, entry, str(entry.get("timestamp") or ""))
+        )
+    return _newest_first(documents)
+
+
+_RETROSPECTIVE_SECTION = re.compile(r"^## Retrospective: (.+)$", re.MULTILINE)
+"""The section header :func:`project_retrospective` writes, which is where a retrospective's
+own dates are recorded."""
+
+
+def _latest_section(content: str) -> str:
+    """The most recent time a retrospective's own section headers state, or ``""`` for none.
+
+    The headers carry the writer's UTC ``isoformat``, one fixed-width spelling, so the greatest
+    string is the latest moment. A document whose headers do not parse states no time and is
+    never given one.
+    """
+    stated = [match.group(1).strip() for match in _RETROSPECTIVE_SECTION.finditer(content)]
+    return max(stated) if stated else ""
+
+
+def retrospective_documents(project_path: str) -> list[MemoryDocument]:
+    """Every retrospective under a project, latest stated section first.
+
+    The counterpart to :func:`report_documents`, and the one ordering of this corpus for the
+    same three readers.
+    """
+    documents: list[MemoryDocument] = []
+    for key in tcip_store.keys(RETROSPECTIVE_STORE, str(project_path)):
+        name = key.parts[0]
+        content = read_retrospective(project_path, name)
+        documents.append(MemoryDocument(name, content, _latest_section(content)))
+    return _newest_first(documents)
 
 
 @mcp.tool()
@@ -219,10 +275,8 @@ def claude_reports(
         "user_disagreement": user_disagreement,
     }
 
-    put_blob(
-        friction_report_key(project_path, report_id),
-        RECORD_JSON.encode(entry),
-        expect=Version.ABSENT,
+    tcip_store.replace(
+        friction_report_key(project_path, report_id), entry, expect=Version.ABSENT,
     )
     report_path = _report_path(project_path, report_id)
 
@@ -251,11 +305,11 @@ def load_project_memory(
 
     The read side of the session-start ritual. ``kind`` selects a single corpus (a
     selector, not an aggregator: one honest read of the chosen store):
-    ``'reports'`` reads ``.tcip/reports/`` (the counterpart to ``claude_reports``);
-    ``'retrospectives'`` reads ``.tcip/retrospectives/`` (the counterpart to
+    ``'reports'`` reads the friction reports (the counterpart to ``claude_reports``);
+    ``'retrospectives'`` reads the retrospectives (the counterpart to
     ``project_retrospective``). Call it early, once per kind, to pick up problems and
-    context a previous session surfaced but did not resolve. Returns the most recently
-    written entries first.
+    context a previous session surfaced but did not resolve. Entries come back newest
+    first, by the timestamp each one states rather than by when its bytes landed.
 
     Args:
         kind: Which corpus to read: 'reports' or 'retrospectives'.
@@ -283,36 +337,31 @@ def load_project_memory(
 def _load_reports(
     project_path: str, limit: int, category: str, filter_substring: str
 ) -> dict:
-    directory = reports_dir(project_path)
-    if not directory.exists():
+    documents = report_documents(project_path)
+    if not documents:
         return {
             "reports": [],
             "count": 0,
-            "note": f"{directory} does not exist yet, no friction reports.",
+            "total_available": 0,
+            "note": "no friction reports recorded under this project yet.",
         }
-
-    files = report_documents(project_path)
 
     cat = category.strip()
     needle = filter_substring.lower().strip()
     results: list[dict] = []
-    for path in files:
-        raw = path.read_text(encoding="utf-8").strip()
-        try:
-            entry = json.loads(raw) if raw else {}
-        except json.JSONDecodeError:
-            entry = {"detail": raw, "category": "", "malformed": True}
-
+    for document in documents:
+        entry = document.value
         if cat and entry.get("category") != cat:
             continue
+        filename = report_document_name(document.name)
         if needle:
-            haystack = (path.name + " " + json.dumps(entry)).lower()
+            haystack = (filename + " " + json.dumps(entry)).lower()
             if needle not in haystack:
                 continue
 
         results.append({
-            "file": path.name,
-            "path": str(path),
+            "file": filename,
+            "path": str(_report_path(project_path, document.name)),
             "timestamp": entry.get("timestamp"),
             "category": entry.get("category", ""),
             "detail": entry.get("detail", ""),
@@ -325,7 +374,7 @@ def _load_reports(
     return {
         "reports": results,
         "count": len(results),
-        "total_available": len(files),
+        "total_available": len(documents),
     }
 
 
@@ -407,15 +456,15 @@ def project_retrospective(
     # so a conflict re-reads and re-appends; the loop ends when this section is the one that lands.
     key = retrospective_key(project_path, project_id)
     while True:
-        stored = read_blob_versioned(key, default=None)
+        stored = tcip_store.read_versioned(key, default=None)
         if stored.value is None:
             content = f"# {project_id}\n\n{body}"
             appended = False
         else:
-            content = _RETROSPECTIVE_TEXT.decode(stored.value).rstrip() + "\n\n" + body
+            content = stored.value.rstrip() + "\n\n" + body
             appended = True
         try:
-            put_blob(key, _RETROSPECTIVE_TEXT.encode(content), expect=stored.version)
+            tcip_store.replace(key, content, expect=stored.version)
         except VersionConflict:
             continue
         break
@@ -456,32 +505,25 @@ def record_distillation_pass(project_path: str) -> dict:
 def _load_retrospectives(
     project_path: str, limit: int, filter_substring: str
 ) -> dict:
-    retros_dir = retrospectives_dir(project_path)
-    if not retros_dir.exists():
+    documents = retrospective_documents(project_path)
+    if not documents:
         return {
             "retrospectives": [],
             "count": 0,
-            "note": f"{retros_dir} does not exist yet, no prior retrospectives.",
+            "total_available": 0,
+            "note": "no retrospectives recorded under this project yet.",
         }
-
-    files = sorted(
-        retros_dir.glob(f"*{_RETROSPECTIVE_DOC.suffix}"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
 
     needle = filter_substring.lower().strip()
     results: list[dict] = []
-    for path in files:
-        content = path.read_text(encoding="utf-8")
-        if needle and needle not in path.name.lower() and needle not in content.lower():
+    for document in documents:
+        content = document.value
+        if needle and needle not in document.name.lower() and needle not in content.lower():
             continue
         results.append({
-            "project_id": path.stem,
-            "path": str(path),
-            "modified": datetime.fromtimestamp(
-                path.stat().st_mtime, tz=timezone.utc
-            ).isoformat(),
+            "project_id": document.name,
+            "path": str(_retrospective_path(project_path, document.name)),
+            "timestamp": document.timestamp,
             "content": content,
         })
         if len(results) >= limit:
@@ -490,5 +532,5 @@ def _load_retrospectives(
     return {
         "retrospectives": results,
         "count": len(results),
-        "total_available": len(files),
+        "total_available": len(documents),
     }

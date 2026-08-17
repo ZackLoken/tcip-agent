@@ -7,18 +7,20 @@ here, so a codec swapped for a re-spelled serializer, a dropped trailing newline
 ``ensure_ascii`` flip shows up as a failing byte comparison rather than as a dataset that reads
 differently a season later.
 
-Four cases drive the owning module's own writer end to end: ``write_registry``,
-``write_band_group_manifest``, ``write_trait_spec_fields`` and ``_scaffold_project``. The other
-four (dataset identity, friction report, retrospective, snapshot manifest) pin the codec and the
-path only, through the seam expression their writer makes, because those writers mint an id, stamp
-a timestamp, draw a random suffix or capture a live environment, none of which a fixed byte
-comparison can hold still. That those writers reach the store through this very expression is
-covered where each writer's own content is asserted: ``test_project_tools`` for the identity
-document, ``test_meta_tools`` for reports and retrospectives, and ``test_bespoke_provenance`` plus
+Three cases drive the owning module's own writer end to end: ``write_registry``,
+``write_band_group_manifest`` and ``write_trait_spec_fields``. The other four (dataset identity,
+friction report, retrospective, snapshot manifest) pin the codec and the path only, through the
+seam expression their writer makes, because those writers mint an id, stamp a timestamp, draw a
+random suffix or capture a live environment, none of which a fixed byte comparison can hold still.
+That those writers reach the store through this very expression is covered where each writer's own
+content is asserted: ``test_project_tools`` for the identity document, ``test_meta_tools`` for
+reports and retrospectives, and ``test_bespoke_provenance`` plus
 ``test_model_build_provenance_and_dims`` for the snapshot manifest.
 
 The bytes are the ones these documents carry on disk today; the placement of each file is pinned
-separately, for every registered store at once, by ``test_store_contract``.
+separately, for every registered store at once, by ``test_store_contract``. The cases whose store
+is a record bind the file backend, since only there is the file the bytes land in the store's own
+answer rather than an export's.
 """
 
 from __future__ import annotations
@@ -143,20 +145,6 @@ RETROSPECTIVE_BYTES = (
     "---\n"
 ).encode("utf-8")
 
-PROJECT_CONFIG_BYTES = (
-    "# TCIP project configuration\n"
-    "[project]\n"
-    'name = ""\n'
-    'crop = ""\n'
-    "\n"
-    "[data]\n"
-    'root = "data"\n'
-    "\n"
-    "[training]\n"
-    'device = "cuda"\n'
-    "seed = 42\n"
-).encode("utf-8")
-
 EXPERIMENT = "exp_042"
 SNAPSHOT_MANIFEST_VALUE = {
     "builder": "my_module:build",
@@ -259,11 +247,14 @@ def test_a_trait_spec_lands_as_the_yaml_a_breeder_opens_and_edits(tmp_path):
 
 def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus_parses(tmp_path):
     """The write ``claude_reports`` makes: the canonical record codec's bytes, create-only."""
+    from tcip_store.file_backend import FileBackend
+
     from tcip_mcp.tools import meta_tools
 
-    ts.put_blob(
+    ts.bind(FileBackend())
+    ts.replace(
         meta_tools.friction_report_key(str(tmp_path), REPORT_ID),
-        ts.RECORD_JSON.encode(REPORT_VALUE),
+        REPORT_VALUE,
         expect=ts.Version.ABSENT,
     )
 
@@ -272,24 +263,17 @@ def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus
 
 def test_a_retrospective_lands_as_the_markdown_text_and_nothing_around_it(tmp_path):
     """The first section ``project_retrospective`` writes: the text itself, no envelope."""
+    from tcip_store.file_backend import FileBackend
+
     from tcip_mcp.tools import meta_tools
 
+    ts.bind(FileBackend())
     key = meta_tools.retrospective_key(str(tmp_path), RETROSPECTIVE_ID)
-    stored = ts.read_blob_versioned(key, default=None)
-    content = f"# {RETROSPECTIVE_ID}\n\n{RETROSPECTIVE_BODY}"
-    ts.put_blob(key, content.encode("utf-8"), expect=stored.version)
+    stored = ts.read_versioned(key, default=None)
+    ts.replace(key, f"# {RETROSPECTIVE_ID}\n\n{RETROSPECTIVE_BODY}", expect=stored.version)
 
     path = meta_tools._retrospective_path(str(tmp_path), RETROSPECTIVE_ID)
     assert path.read_bytes() == RETROSPECTIVE_BYTES
-
-
-def test_the_project_config_lands_as_the_toml_the_scaffolding_writes_once(tmp_path):
-    """Written through ``_scaffold_project``, which creates it only while it is absent."""
-    from tcip_mcp.tools import project_tools
-
-    project_tools._scaffold_project(str(tmp_path))
-
-    assert (tmp_path / ".tcip" / "config.toml").read_bytes() == PROJECT_CONFIG_BYTES
 
 
 def test_a_snapshot_manifest_lands_in_its_experiment_directory_under_the_experiments_scope(tmp_path):

@@ -13,10 +13,8 @@ from tcip_store import (
     DecodeError,
     Key,
     StoreDescriptor,
-    Version,
     VersionConflict,
     register_store,
-    text_codec,
 )
 from tcip_store.file_backend import RootedFileLocator
 
@@ -163,48 +161,8 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     return {"dataset_root": str(root), **identity}
 
 
-PROJECT_CONFIG_STORE = "project_config"
-_PROJECT_CONFIG_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".toml")
-_PROJECT_CONFIG_PARTS = ("config",)
-_PROJECT_CONFIG_TEXT = text_codec()
-"""The config document's bytes: the text itself, with nothing added around it."""
-
-register_store(
-    StoreDescriptor(
-        name=PROJECT_CONFIG_STORE,
-        kind="blob",
-        key_fields=("document",),
-        locator=_PROJECT_CONFIG_DOC,
-    )
-)
-
-DEFAULT_PROJECT_CONFIG = (
-    "# TCIP project configuration\n"
-    "[project]\n"
-    'name = ""\n'
-    'crop = ""\n'
-    "\n"
-    "[data]\n"
-    'root = "data"\n'
-    "\n"
-    "[training]\n"
-    'device = "cuda"\n'
-    "seed = 42\n"
-)
-
-
-def project_config_key(project_root: str | Path) -> Key:
-    """The project's configuration document.
-
-    A blob because it is a TOML a human opens and edits, created once by scaffolding and never
-    re-serialized by the platform. The write that creates it is conditional on the document
-    being absent, which is what keeps a human's edits.
-    """
-    return Key(PROJECT_CONFIG_STORE, str(Path(project_root).absolute()), _PROJECT_CONFIG_PARTS)
-
-
 def _scaffold_project(project_path: str) -> dict:
-    """Create ``.tcip/`` (artifacts/models) + a default config.toml.
+    """Create ``.tcip/`` with its artifacts and models directories.
 
     The internals of :func:`init_project`, factored out so other tools that
     stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
@@ -213,15 +171,6 @@ def _scaffold_project(project_path: str) -> dict:
     tcip = _project_dir(project_path)
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
-
-    try:
-        tcip_store.put_blob(
-            project_config_key(project_path),
-            _PROJECT_CONFIG_TEXT.encode(DEFAULT_PROJECT_CONFIG),
-            expect=Version.ABSENT,
-        )
-    except VersionConflict:
-        pass  # a project that already has a config keeps it: this scaffolding is idempotent
 
     return {
         "project_path": project_path,
@@ -235,7 +184,7 @@ def _scaffold_project(project_path: str) -> dict:
 def init_project(project_path: str) -> dict:
     """Initialise a TCIP project directory.
 
-    Creates ``.tcip/`` with default config, artifacts dir, and models dir.
+    Creates ``.tcip/`` with its artifacts and models directories.
 
     Args:
         project_path: Root directory of the project.
@@ -344,9 +293,6 @@ def inspect_project(project_path: str = "") -> dict:
     status: dict = {"project_path": project_path, "initialized": tcip.is_dir()}
     if not tcip.is_dir():
         return status
-
-    # Config
-    status["has_config"] = tcip_store.exists(project_config_key(project_path))
 
     # Models
     models_dir = tcip / "models"
