@@ -390,6 +390,52 @@ def _recent_activity(project_path: str) -> dict:
     return activity
 
 
+_TCIP_ARCHIVED_SUFFIXES = frozenset(
+    {".toml", ".jsonl", ".txt", ".yaml", ".yml", ".json", ".py", ".bandgroup", ".md"}
+)
+"""What a bundle carries out of ``.tcip``.
+
+``.py`` because a bespoke run's snapshotted model, training and dataset source live under
+``model_src/``, and a manifest describing code the bundle does not carry is not provenance.
+``.bandgroup`` and ``.md`` because a band-group manifest is an enumerated logical image and a
+retrospective is a document a human wrote. A store database is deliberately absent: an archive
+is a file bundle, and the files are what this list names.
+"""
+
+
+def _store_databases(root: Path) -> list[Path]:
+    """Every store database under the tree an archive would bundle."""
+    from tcip_store.file_backend import DATABASE_FILENAME
+
+    return sorted(p for p in root.rglob(DATABASE_FILENAME) if p.parent.name == ".tcip")
+
+
+def _unexported_stores(root: Path) -> list[str]:
+    """Stores under this tree whose state is in a database and not in the files, as text.
+
+    Every record and log store of every database, not only the ones the doctor reads: an
+    archive ships audit logs, experiment members and registry state too, and a bundle whose
+    confirmed negatives restore as absent is the failure this exists to prevent.
+    """
+    from tcip_store.export import stale_stores
+
+    behind: list[str] = []
+    for db_path in _store_databases(root):
+        behind += [f"{store} in {db_path}" for store in stale_stores(db_path)]
+    return behind
+
+
+def _database_counters(root: Path) -> dict[tuple[str, str], int]:
+    """Every store's change counter across the tree, for comparing before and after a copy."""
+    from tcip_store.export import read_store_states
+
+    counters: dict[tuple[str, str], int] = {}
+    for db_path in _store_databases(root):
+        for store, state in read_store_states(db_path).items():
+            counters[(str(db_path), store)] = state.change_counter
+    return counters
+
+
 @mcp.tool()
 @audited
 def archive_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
@@ -411,6 +457,20 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     if not root.is_dir():
         return {"error": f"Project directory not found: {project_path}"}
 
+    from tcip_store import StoreError
+
+    try:
+        behind = _unexported_stores(root)
+        before = _database_counters(root)
+    except StoreError as exc:
+        return {"error": f"a store database under {root} could not be read, so whether this "
+                         f"project's files hold its state is unknown: {exc}"}
+    if behind:
+        return {"error": "this project's state is in a store database and not in the files this "
+                         f"archive bundles: {'; '.join(behind)}. Write it out with "
+                         "'python scripts/export_store.py' and archive again; a bundle taken "
+                         "now would restore without it."}
+
     if not output_path:
         output_path = str(root.parent / f"{root.name}.tcip.zip")
     else:
@@ -421,7 +481,11 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    image_exts = {".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp"}
+    # The one set deciding what enumerates as a logical image, so a bundle cannot carry a
+    # narrower notion of "image" than the platform that reads it back.
+    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+
+    image_exts = IMAGE_EXTS
     label_exts = {".txt", ".xml", ".json"}
     files_added = 0
 
@@ -460,7 +524,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
         tcip_dir = root / ".tcip"
         if tcip_dir.is_dir():
             for f in tcip_dir.rglob("*"):
-                if f.is_file() and f.suffix in (".toml", ".jsonl", ".txt", ".yaml", ".yml", ".json", ".py"):
+                if f.suffix in _TCIP_ARCHIVED_SUFFIXES and f.is_file():
                     zf.write(f, f.relative_to(root))
                     files_added += 1
 
@@ -471,6 +535,24 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
                 for m in models_dir.glob("*.pt"):
                     zf.write(m, m.relative_to(root))
                     files_added += 1
+
+    try:
+        after = _database_counters(root)
+    except StoreError as exc:
+        out.unlink(missing_ok=True)
+        return {"error": f"a store database under {root} became unreadable while this project "
+                         f"was being archived, so the bundle cannot be vouched for: {exc}. The "
+                         "incomplete archive was removed."}
+    moved = sorted(
+        f"{store} in {db_path}"
+        for (db_path, store), counter in after.items()
+        if before.get((db_path, store)) != counter
+    )
+    if moved:
+        out.unlink(missing_ok=True)
+        return {"error": "this project changed while it was being archived, so the bundle would "
+                         f"hold a mix of before and after: {'; '.join(moved)}. The incomplete "
+                         "archive was removed; stop the writers and archive again."}
 
     return {
         "output_path": str(out),
