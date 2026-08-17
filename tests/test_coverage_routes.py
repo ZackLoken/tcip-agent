@@ -3,7 +3,6 @@ merge semantics, its bucketing and refusals, and the audited write (routes/cover
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +35,15 @@ def dated_dataset(tmp_path: Path) -> tuple[Path, str]:
     path = img_dir / "plot.tif"
     Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
     return tmp_path / "ds", str(path)
+
+
+def _audit_entries(root: Path, tool: str) -> list[dict]:
+    """That root's audit entries for one tool, read through the seam rather than off disk."""
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+
+    page = ts.read_log(audit_log_key(root))
+    return [record for record in page.records if record["tool"] == tool]
 
 
 def _post_body(image_path: str, cells: list[str], grid: dict, **overrides) -> dict:
@@ -283,7 +291,8 @@ class TestCoverageRecord:
 
     def test_explicit_null_date_is_the_dateless_bucket(self, client, tmp_path):
         """A non-dated dataset passes date null and lands under the subject-only bucket."""
-        from tcip_mcp.dataset_layout import view_coverage_path
+        import tcip_store as ts
+        from tcip_mcp.dataset_layout import view_coverage_key
 
         img_dir = tmp_path / "flat" / "images"
         img_dir.mkdir(parents=True)
@@ -293,7 +302,7 @@ class TestCoverageRecord:
         resp = TestClient(app).post("/api/coverage",
                                     json=_post_body(str(path), ["A1"], grid, date=None))
         assert resp.status_code == 200, resp.text
-        store = json.loads(view_coverage_path(tmp_path / "flat").read_text(encoding="utf-8"))
+        store = ts.read(view_coverage_key(tmp_path / "flat"))
         assert list(store) == ["bush"]
 
     def test_cells_outside_the_grid_are_refused(self, client, dated_dataset):
@@ -367,9 +376,7 @@ class TestCoverageRecord:
         grid = _grid(client, path, tile_size=64)
         client.post("/api/coverage", json=_post_body(path, ["A1"], grid))
         client.post("/api/coverage", json=_post_body(path, ["B1"], grid))
-        audit = root / ".tcip" / "audit.jsonl"
-        entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()
-                   if json.loads(line)["tool"] == "gui_view_coverage"]
+        entries = _audit_entries(root, "gui_view_coverage")
         assert len(entries) == 1
         assert entries[0]["arguments"]["image_name"] == "plot.tif"
 
@@ -470,9 +477,7 @@ class TestCompletenessRoute:
         root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
         self._toggle(client, path, grid, "A1")
-        audit = root / ".tcip" / "audit.jsonl"
-        entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()
-                   if json.loads(line)["tool"] == "gui_set_region_completeness"]
+        entries = _audit_entries(root, "gui_set_region_completeness")
         assert len(entries) == 1
         assert entries[0]["arguments"] == {
             "image_name": "plot.tif", "subject": "catkin", "cell": "A1",

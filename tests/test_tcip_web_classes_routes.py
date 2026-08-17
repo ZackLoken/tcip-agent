@@ -23,6 +23,14 @@ def _catkin(x1, y1, x2, y2, *, subject: str = "catkin") -> Annotation:
     return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2))
 
 
+def _status_store_exists(dataset_root: Path) -> bool:
+    """Whether that root holds a confirmed-negative store, asked of whichever backend is bound."""
+    import tcip_store as ts
+    from tcip_mcp.dataset_layout import image_status_key
+
+    return ts.exists(image_status_key(dataset_root))
+
+
 def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
     resp = client.get("/api/classes/load", params={"project_root": str(tmp_path)})
     assert resp.status_code == 200
@@ -143,7 +151,7 @@ def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     )
     body = resp.json()
     assert body["statuses"]["IMG_0001.JPG"] == "complete"
-    assert (tmp_path / ".tcip" / "state" / "image_status.json").is_file()
+    assert _status_store_exists(tmp_path)
 
 
 def test_image_status_rejects_invalid(client: TestClient, tmp_path: Path) -> None:
@@ -209,8 +217,8 @@ def test_image_status_lands_at_dataset_root_not_an_unrelated_project(
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
               "image_name": "IMG_0001.JPG", "status": "negative", "subject": "catkin"},
     )
-    assert (dataset_root / ".tcip" / "state" / "image_status.json").is_file()
-    assert not (project_root / ".tcip" / "state" / "image_status.json").is_file()
+    assert _status_store_exists(dataset_root)
+    assert not _status_store_exists(project_root)
 
 
 def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path: Path) -> None:
@@ -385,10 +393,11 @@ def test_unrestricted_deployment_is_unaffected_by_the_confinement_guard(
 
 
 def _read_audit_entries(dataset_root: Path) -> list[dict]:
-    path = dataset_root / ".tcip" / "audit.jsonl"
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    """That root's audit trail, read through the seam so the claim holds on either backend."""
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+
+    return list(ts.read_log(audit_log_key(dataset_root)).records)
 
 
 def test_set_image_status_writes_a_dataset_scoped_audit_entry(
