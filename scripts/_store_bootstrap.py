@@ -5,7 +5,7 @@ about every store (writing a database back out as files, or reading files into o
 owning module imported first. No single package's own import set covers them all: the web
 package owns the learning-capture log the MCP server never imports. This module is that one
 import set, and :data:`ADOPTION_SOURCES` beside it states, per record and log store, the kind
-of directory its scope is and which of its key parts are constants.
+of root it hangs off and which of its key parts are constants.
 
 The second half exists because a locator alone cannot say which store owns a file: thirteen
 stores place a single json document under ``.tcip/state``, and their locators claim each
@@ -54,10 +54,10 @@ ROOT = "root"
 """A project or dataset root: the directory holding ``images/``, ``annotations/`` and ``.tcip/``."""
 
 STATE = "state"
-"""A root's ``.tcip/state`` directory, the scope the review shards and per-trait records hang off."""
+"""A root's ``.tcip/state`` directory, the root the review shards and per-trait records hang off."""
 
 EXPERIMENTS = "experiments"
-"""A root's ``.tcip/experiments`` directory, the one scope every experiment's members share."""
+"""A root's ``.tcip/experiments`` directory, the one root every experiment's members share."""
 
 WORKSPACE = "workspace"
 """The workspace directory holding the project folders and the active-project marker."""
@@ -92,7 +92,7 @@ LAYOUTS = (
     RUN,
     PREDICTION_BUCKET,
 )
-"""Every kind of directory a scope can be, for an operator naming one on a command line."""
+"""Every kind of directory a root can be, for an operator naming one on a command line."""
 
 ADOPTION_SOURCES: dict[str, StoreSource] = {
     # a project or dataset root
@@ -164,14 +164,14 @@ def bootstrapped_stores() -> tuple[str, ...]:
     return registered_stores()
 
 
-def project_scopes(project_root: str | Path) -> tuple[tuple[str, str], ...]:
-    """The scopes a whole project's records live in, each with the layout it is.
+def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
+    """The roots a whole project's records live in, each with the layout it is.
 
     The registered dataset roots come from the project's own registry rather than from a
     directory guess, so a dataset that lives outside the project tree still travels.
     """
     root = Path(project_root).absolute()
-    scopes: list[tuple[str, str]] = [
+    roots: list[tuple[str, str]] = [
         (str(root), ROOT),
         (str(root / ".tcip" / "state"), STATE),
         (str(root / ".tcip" / "experiments"), EXPERIMENTS),
@@ -185,6 +185,6 @@ def project_scopes(project_root: str | Path) -> tuple[tuple[str, str], ...]:
         if os.path.normcase(str(dataset_root)) in seen:
             continue
         seen.add(os.path.normcase(str(dataset_root)))
-        scopes.append((str(dataset_root), ROOT))
-        scopes.append((str(dataset_root / ".tcip" / "state"), STATE))
-    return tuple(scopes)
+        roots.append((str(dataset_root), ROOT))
+        roots.append((str(dataset_root / ".tcip" / "state"), STATE))
+    return tuple(roots)

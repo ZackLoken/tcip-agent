@@ -91,7 +91,7 @@ _WORKER = Path(__file__).with_name("_store_worker.py")
 
 @dataclass
 class Harness:
-    """The bound backend, the scope its keys hang off, and how to reach bytes behind it."""
+    """The bound backend, the root its keys hang off, and how to reach bytes behind it."""
 
     backend: FileBackend | SqliteBackend
     root: Path
@@ -106,7 +106,7 @@ class Harness:
         return self.backend.path_for(key)
 
     def connect(self) -> sqlite3.Connection:
-        """A connection of this test's own to the scope's database, for reaching behind the seam."""
+        """A connection of this test's own to the root's database, for reaching behind the seam."""
         return sqlite3.connect(str(database_path(str(self.root))), isolation_level=None)
 
     def damage_record(self, key: ts.Key, data: bytes) -> None:
@@ -708,16 +708,16 @@ def test_absence_and_corruption_are_different_answers(store):
         ts.read(key, default={"fallback": True})
 
 
-def test_a_relative_scope_is_refused_before_it_resolves_against_a_working_directory(store):
+def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directory(store):
     """Every backend has to refuse first and canonicalize second, or the refusal turns into a
     guess about which directory the process happened to be started in.
 
     Enumeration refuses alongside the reads and writes, on both backends. An empty list back
-    from a scope that names nothing reads as "this scope holds no entries", which is the
+    from a root that names nothing reads as "this root holds no entries", which is the
     silent-fallback shape: a caller asking whether any verdict exists would be told no.
     """
-    relative_scope = "not/an/absolute/scope"
-    relative = ts.Key(LWW, relative_scope, ("x",))
+    relative_root = "not/an/absolute/root"
+    relative = ts.Key(LWW, relative_root, ("x",))
 
     with pytest.raises(ts.BadKey) as reading:
         ts.read(relative, default=None)
@@ -727,7 +727,7 @@ def test_a_relative_scope_is_refused_before_it_resolves_against_a_working_direct
     with pytest.raises(ts.BadKey):
         ts.exists(relative)
     with pytest.raises(ts.BadKey) as enumerating:
-        ts.keys(LWW, relative_scope)
+        ts.keys(LWW, relative_root)
     assert "absolute" in str(enumerating.value)
 
     absolute = store.key(LWW, "absolute")
@@ -778,8 +778,8 @@ def test_a_transaction_refuses_every_form_that_would_escape_it(store):
     assert ts.read(second) == {"n": 2}
 
 
-def test_a_transaction_refuses_two_scope_roots_and_admits_two_spellings_of_one(store):
-    """One transaction is one root's exclusion: a backend holding a database per scope would
+def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(store):
+    """One transaction is one root's exclusion: a backend holding a database per root would
     have to commit the second root's write somewhere the first root's transaction cannot
     reach, so the seam refuses before any backend infers a root from the first key. Two
     spellings of one directory are one root, or the refusal would reject work that is fine."""
@@ -945,7 +945,7 @@ def test_a_transaction_reads_its_own_staged_write_and_shows_it_to_nobody_else(st
 
 _FILE_LAYOUT = (
     "placement on disk and the flushes that make it durable are the file backend's own "
-    "mechanics, and a backend keying on (store, scope, parts) has no path to check"
+    "mechanics, and a backend keying on (store, root, parts) has no path to check"
 )
 
 
@@ -1055,7 +1055,7 @@ def test_lock_files_and_staged_temp_files_are_never_keys(store):
 # ── database backend annex ──────────────────────────────────────────────────────
 
 _DATABASE_MECHANICS = (
-    "the subject is what one database per scope does, and the file backend has no database "
+    "the subject is what one database per root does, and the file backend has no database "
     "for any of it to be true of"
 )
 
@@ -1093,8 +1093,8 @@ def test_a_database_and_its_sidecars_are_never_keys_of_the_store_they_sit_inside
     assert ts.keys(STATE_FILES, str(store.root)) == [entry]
 
 
-def test_two_spellings_of_one_scope_address_one_database(store):
-    """Scope strings arrive from callers that do not canonicalize them the same way, and a
+def test_two_spellings_of_one_root_address_one_database(store):
+    """Root strings arrive from callers that do not canonicalize them the same way, and a
     second database for the same directory would silently split one store in two.
 
     The connection slot is what this asserts on. Reading the same value back through both
@@ -1322,7 +1322,7 @@ def _trait_spec_key(root: Path) -> ts.Key:
     return traits.trait_spec_key(traits.trait_specs_dir(root), TRAIT_UNDER_TEST)
 
 
-def _trait_specs_scope(root: Path) -> Path:
+def _trait_specs_root(root: Path) -> Path:
     return traits.trait_specs_dir(root)
 
 
@@ -1334,7 +1334,7 @@ def _operationalization_key(root: Path) -> ts.Key:
     )
 
 
-def _operationalizations_scope(root: Path) -> Path:
+def _operationalizations_root(root: Path) -> Path:
     return operationalization.operationalizations_scope(root)
 
 
@@ -1361,7 +1361,7 @@ class Registered:
     to compare against; each owner module's own tests are where its written content is
     asserted now. What remains here is placement and encoding, for every store at once.
 
-    ``relative`` is the path under the root the store is given. ``scope_of`` is the root the
+    ``relative`` is the path under the root the store is given. ``root_of`` is the root the
     store's own keys hang off, which for the review shards and the experiment members is a
     directory below that. ``pin`` sets the environment a store's key constructor resolves
     against, for the stores addressed relative to the platform root or the workspace.
@@ -1371,7 +1371,7 @@ class Registered:
     key_of: Callable[[Path], ts.Key]
     relative: str
     pin: Callable[[Path, object], None] | None = None
-    scope_of: Callable[[Path], Path] = lambda root: root
+    root_of: Callable[[Path], Path] = lambda root: root
 
 
 REGISTERED = {
@@ -1410,7 +1410,7 @@ REGISTERED = {
         {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
         lambda root: review_engine.review_verdict_key(
             _review_state_dir(root), "predictions", "a_1.jpg"),
-        ".tcip/state/review/predictions/a_1.jpg.json", scope_of=_review_state_dir),
+        ".tcip/state/review/predictions/a_1.jpg.json", root_of=_review_state_dir),
     "canvas_meta": Registered(
         {"schema_version": 1, "tab": "annotate", "image": "ü.jpg"},
         lambda root: canvas.canvas_meta_key(str(root)), ".tcip/state/canvas_live.json"),
@@ -1452,36 +1452,36 @@ REGISTERED = {
         {"model_source": {"builder": "my_module:build"}, "training": {"epochs": 3}},
         lambda root: experiments.config_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/config.json", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_status": Registered(
         {"state": "created", "created": "2026-03-04T12:00:00+00:00"},
         lambda root: experiments.status_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/status.json", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_lineage": Registered(
         {"data_source": "ds", "model_weights": "model_best.pt"},
         lambda root: experiments.lineage_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/lineage.json", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_artifacts": Registered(
         {"weights": {"path": "model_best.pt", "recorded": "2026-03-04T12:00:00+00:00"}},
         lambda root: experiments.artifacts_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/artifacts.json", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_env": Registered(
         {"env": {"python": "3.12"}, "seed": 42}, lambda root: experiments.env_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/env.json", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_split": Registered(
         {"train": ["img_001"], "val": ["img_002"], "seed": 42},
         lambda root: experiments.split_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/split.json", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "experiment_metrics": Registered(
         {"epoch": 1, "timestamp": "2026-03-04T12:00:00+00:00", "loss": 0.5},
         lambda root: experiments.metrics_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/metrics.jsonl", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     "operating_point_sidecar": Registered(
         {"trait": "catkin_50per_date", "dataset_hash": "9f2c1b0a4d6e8f31",
          "operating_point": {"conf": {"name": "conf", "value": 0.42, "source": "derived",
@@ -1489,45 +1489,45 @@ REGISTERED = {
          "id_map": {"catkin": 0}, "validated": True, "shippable_issues": [],
          "checkpoint": "ü_best", "raster_path": None},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "operating_point"),
-        "predictions/live/2026-03-04/operating_point.json", scope_of=_stamp_bucket),
+        "predictions/live/2026-03-04/operating_point.json", root_of=_stamp_bucket),
     "classifier_operating_point_sidecar": Registered(
         {"operating_point": {"classifier": {"validated_against": "held_out_annotations",
                                             "value": "elongiert"}},
          "validated": True, "failures": [], "sweep_data": {"kappa": 0.81}},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "classifier_operating_point"),
-        "predictions/live/2026-03-04/classifier_operating_point.json", scope_of=_stamp_bucket),
+        "predictions/live/2026-03-04/classifier_operating_point.json", root_of=_stamp_bucket),
     "ordinal_operating_point_sidecar": Registered(
         {"operating_point": {"ordinal": {"validated_against": "held_out_annotations",
                                          "criterion": "quadratic_weighted_kappa"}},
          "validated": True, "failures": [], "sweep_data": {"qwk": 0.77},
          "trait": "ü_ordinal_trait"},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "ordinal_operating_point"),
-        "predictions/live/2026-03-04/ordinal_operating_point.json", scope_of=_stamp_bucket),
+        "predictions/live/2026-03-04/ordinal_operating_point.json", root_of=_stamp_bucket),
     "regression_operating_point_sidecar": Registered(
         {"operating_point": {"regression": {"validated_against": "held_out_annotations",
                                             "criterion": "r_squared"}},
          "validated": False, "failures": ["insufficient_holdout"],
          "sweep_data": {"score": None, "score_state": "nan"}, "trait": "ü_regression_trait"},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "regression_operating_point"),
-        "predictions/live/2026-03-04/regression_operating_point.json", scope_of=_stamp_bucket),
+        "predictions/live/2026-03-04/regression_operating_point.json", root_of=_stamp_bucket),
     "resolve_scale_sidecar": Registered(
         {"operating_point": {"scale": {"validated_against": "physical_measurement",
                                        "value": 0.271, "units": "mm/px",
                                        "capture_id": "2026-03-04_handheld"}},
          "validated": True},
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
-        "predictions/live/2026-03-04/resolve_scale.json", scope_of=_stamp_bucket),
+        "predictions/live/2026-03-04/resolve_scale.json", root_of=_stamp_bucket),
     "trait_specs": Registered(
         TRAIT_SPEC_BYTES,
         _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.yml",
-        scope_of=_trait_specs_scope),
+        root_of=_trait_specs_root),
     "annotation_records": Registered(
         LABEL_BYTES, lambda root: json_io.annotation_record_key(_generic_label_dir(root), "a_1"),
-        "labels/a_1.json", scope_of=_generic_label_dir),
+        "labels/a_1.json", root_of=_generic_label_dir),
     "label_baselines": Registered(
         LABEL_BYTES,
         lambda root: review_engine.label_baseline_key(_generic_label_dir(root), "a_1"),
-        "labels/.original/a_1.json", scope_of=_generic_label_dir),
+        "labels/.original/a_1.json", root_of=_generic_label_dir),
     "annotation_stats": Registered(
         {"sessions": [{"user": "ü", "images_annotated": 1, "total_annotations": 3,
                        "total_time_seconds": 42.5}],
@@ -1536,7 +1536,7 @@ REGISTERED = {
     "band_group_manifest": Registered(
         BAND_GROUP_MANIFEST_BYTES,
         lambda root: band_groups.band_group_manifest_key(_band_group_dir(root), "cap_ü"),
-        f"images/cap_ü{band_groups.MANIFEST_EXT}", scope_of=_band_group_dir),
+        f"images/cap_ü{band_groups.MANIFEST_EXT}", root_of=_band_group_dir),
     "run_checkpoint": Registered(
         CHECKPOINT_BYTES, lambda root: generic_trainer.checkpoint_key(root, "model_best"),
         "model_best.pt"),
@@ -1565,18 +1565,18 @@ REGISTERED = {
          "param_space": {"lr": [0.1, 0.01]}},
         lambda root: training_tools.sweep_manifest_key(STUDY),
         f".tcip/hpo/{STUDY}/manifest.json", pin=_pin_platform_root,
-        scope_of=lambda root: training_tools.hpo_root()),
+        root_of=lambda root: training_tools.hpo_root()),
     "hpo_study_result": Registered(
         {"best_params": {"lr": 0.01}, "best_value": 0.25, "n_trials": 2,
          "all_trials": [{"params": {"lr": 0.1}, "value": None,
                          "value_state": "positive_infinity", "state": "ERROR"}]},
         lambda root: training_tools.study_result_key(STUDY), f".tcip/hpo/{STUDY}.json",
-        pin=_pin_platform_root, scope_of=lambda root: training_tools.hpo_root()),
+        pin=_pin_platform_root, root_of=lambda root: training_tools.hpo_root()),
     "hpo_trial_config": Registered(
         {"training": {"batch_size": 4}, "trial_params": {"lr": 0.01}, "unconsumed_params": []},
         lambda root: training_tools.trial_config_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
         f".tcip/hpo/{STUDY}/{TRIAL_DIR}/resolved_config.json", pin=_pin_platform_root,
-        scope_of=lambda root: training_tools.sweep_dir(STUDY)),
+        root_of=lambda root: training_tools.sweep_dir(STUDY)),
     "ray_dashboard": Registered(
         {"url": "http://127.0.0.1:8265", "pid": 4242, "started_at": "2026-01-01T00:00:00+00:00"},
         lambda root: hpo.ray_dashboard_key(), ".tcip/state/ray_dashboard.json",
@@ -1588,21 +1588,21 @@ REGISTERED = {
         PROJECT_CONFIG_BYTES, project_tools.project_config_key, ".tcip/config.toml"),
     "split_stem_list": Registered(
         ["a_1", "ü_2"], lambda root: data_tools.split_stem_list_key(_split_dir(root), "train"),
-        "splits/train.json", scope_of=_split_dir),
+        "splits/train.json", root_of=_split_dir),
     "split_manifest": Registered(
         {"seed": 42, "dataset_hash": "9f2c", "group_by": "stem_prefix",
          "splits": {"train": ["a_1", "ü_2"], "val": [], "test": []}},
         lambda root: data_tools.split_manifest_key(_split_dir(root)),
-        "splits/split_manifest.json", scope_of=_split_dir),
+        "splits/split_manifest.json", root_of=_split_dir),
     "curated_manifest": Registered(
         {"created": "2026-03-04T00:00:00+00:00", "subject": "catkin", "subjects": ["catkin"],
          "images": [{"image": "ü_2.jpg", "status": "hard_negative", "n_boxes": 0,
                      "rejected_count": 1, "label": "labels/ü_2.json"}]},
         lambda root: materialize.curated_manifest_key(_curated_dir(root)),
-        "curated/curated_manifest.json", scope_of=_curated_dir),
+        "curated/curated_manifest.json", root_of=_curated_dir),
     "coco_documents": Registered(
         COCO_BYTES, lambda root: format_io.coco_document_key(_coco_dir(root), "instances"),
-        "export/instances.json", scope_of=_coco_dir),
+        "export/instances.json", root_of=_coco_dir),
     "audit_log": Registered(
         {"timestamp": "2026-03-04T12:00:00+00:00", "tool": "gui_save_labels",
          "arguments": {"image_path": "images/2026-03-04/a_1.JPG", "n_annotations": 3},
@@ -1617,7 +1617,7 @@ REGISTERED = {
         {"epoch": 1, "val_loss": 0.25, "selection": 0.25},
         lambda root: training_tools.trial_metrics_key(training_tools.sweep_dir(STUDY), TRIAL_DIR),
         f".tcip/hpo/{STUDY}/{TRIAL_DIR}/metrics.jsonl", pin=_pin_platform_root,
-        scope_of=lambda root: training_tools.sweep_dir(STUDY)),
+        root_of=lambda root: training_tools.sweep_dir(STUDY)),
     "run_launch_config": Registered(
         {"model_source": {"builder": "my_module:build"}, "data": {"subject": "büsch"},
          "device": "cpu"},
@@ -1637,7 +1637,7 @@ REGISTERED = {
                          "accession_name": "ü", "source": "sequence", "distance_m": 1.25}]},
         lambda root: plant_mapping.plant_mapping_key(
             _plant_mapping_dir(root) / "plant_mapping.json"),
-        ".tcip/state/plant_mapping.json", scope_of=_plant_mapping_dir),
+        ".tcip/state/plant_mapping.json", root_of=_plant_mapping_dir),
     # the experiment record's validation member
     "experiment_validations": Registered(
         {"document": "operating_point", "trait": "catkin_50per_date",
@@ -1649,7 +1649,7 @@ REGISTERED = {
          "dataset_root": "dü", "recorded_at": "2026-03-04T12:00:00+00:00"},
         lambda root: experiments.validations_key(EXPERIMENT),
         f".tcip/experiments/{EXPERIMENT}/validations.jsonl", pin=_pin_platform_root,
-        scope_of=lambda root: Path(experiments.experiments_scope())),
+        root_of=lambda root: Path(experiments.experiments_scope())),
     # what one trait's delivered number means, for one delivery kind
     "trait_operationalizations": Registered(
         {"trait": TRAIT_UNDER_TEST, "delivery_kind": DELIVERY_KIND_UNDER_TEST,
@@ -1662,7 +1662,7 @@ REGISTERED = {
          "identity_from_request": True, "confirmed_fields": {"milestone_on": "positive_fraction"}},
         _operationalization_key,
         f".tcip/state/trait_operationalizations/{TRAIT_UNDER_TEST}/{DELIVERY_KIND_UNDER_TEST}.json",
-        scope_of=_operationalizations_scope),
+        root_of=_operationalizations_root),
 }
 
 CODEC_EXEMPT = {
@@ -1795,8 +1795,8 @@ def test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_code
     landed = store.backend.path_for(key)
     assert landed.read_bytes() == expected
     assert landed.relative_to(seam_root).as_posix() == case.relative
-    relative_to_scope = landed.relative_to(case.scope_of(seam_root)).as_posix()
-    assert descriptor.locator.parts_from(PurePosixPath(relative_to_scope)) == key.parts
+    relative_to_root = landed.relative_to(case.root_of(seam_root)).as_posix()
+    assert descriptor.locator.parts_from(PurePosixPath(relative_to_root)) == key.parts
 
 
 def test_a_sanitized_shard_name_places_the_file_the_review_engine_places_it_at(tmp_path):

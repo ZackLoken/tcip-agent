@@ -83,7 +83,7 @@ def confidence_sweep_path(inputs_hash: str) -> Path:
 
     key = confidence_sweep_key(inputs_hash)
     return project_root().joinpath(
-        *_SweepArtifactLocator().relative_path(key.scope, key.parts).parts
+        *_SweepArtifactLocator().relative_path(key.root, key.parts).parts
     )
 
 

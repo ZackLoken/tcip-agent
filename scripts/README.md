@@ -11,13 +11,13 @@ reaching for again versus one built narrowly for a specific past investigation.
   split of a labeled dir, derives a count-unbiased detection operating point, checks its
   held-out count bias, and prints the full provenance + sweep for inspection. It writes
   nothing; validated claims are minted only by the audited doors.
-- `adopt_store.py` - moves a scope's existing record and log files into a store database,
+- `adopt_store.py` - moves a root's existing record and log files into a store database,
   once, so the database backend can own state that predates it. Decodes every file it will
-  adopt and refuses the whole scope on the first that will not, publishes the database only
+  adopt and refuses the whole root on the first that will not, publishes the database only
   after re-checking that nothing changed under it, and leaves blob files exactly where they
-  are. `--project` conforms a project's own scopes and its registered datasets' at once.
+  are. `--project` conforms a project's own roots and its registered datasets' at once.
 - `_store_bootstrap.py` - imports every store-owning module and states, per record and log
-  store, the kind of directory its scope is and which of its key parts are constants. Not a
+  store, the kind of root it hangs off and which of its key parts are constants. Not a
   standalone script; `adopt_store.py` and `export_store.py` both read it.
 - `check_dataset_identity.py` - recomputes a dataset's on-disk fingerprint and compares it
   against the fingerprint recorded in `dataset.json` and the project's `.tcip/datasets.json`,
@@ -28,11 +28,11 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `doctor.py` - read-only scan of a live project for state inconsistencies code audits can't
   see: status-store vs disk disagreements on negatives, registry entries pointing at
   missing/test-fixture checkpoints, provenance smells, orphaned labels. Run at session start.
-- `export_store.py` - writes a scope's database-held records and logs back out as files, in
+- `export_store.py` - writes a root's database-held records and logs back out as files, in
   the layout each store's locator names, so the doctor, an archive and anything else that
   reads state off disk reads what the database currently holds. Refuses rather than writing
   when two keys would land on one file, and reports any store that was written again while
-  its files were being produced. `--project` covers a project's scopes at once.
+  its files were being produced. `--project` covers a project's roots at once.
 - `list_tools.py` - prints the live MCP tool registry (count + names); the single source of
   truth for "how many domain tools exist," since the count drifts as tools are added/renamed.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the

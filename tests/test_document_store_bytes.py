@@ -309,7 +309,7 @@ def test_a_snapshot_manifest_lands_in_its_experiment_directory_under_the_experim
     exp_dir = tmp_path / EXPERIMENT
     exp_dir.mkdir()
     key = snapshot_manifest_key(exp_dir)
-    assert key.scope == str(Path(tmp_path).resolve())
+    assert key.root == str(Path(tmp_path).resolve())
     assert key.parts == (EXPERIMENT, "manifest")
 
     ts.replace(key, SNAPSHOT_MANIFEST_VALUE, expect=ts.Version.ABSENT)

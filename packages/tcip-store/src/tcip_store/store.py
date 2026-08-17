@@ -69,7 +69,7 @@ class Store(Protocol):
         self, keys: Sequence[Key], *, timeout_s: float | None = None
     ) -> AbstractContextManager[Txn]: ...
 
-    def keys(self, store: str, scope: str, prefix: tuple[str, ...] = ()) -> list[Key]: ...
+    def keys(self, store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]: ...
 
     def append(self, key: Key, record: Mapping[str, Any]) -> None: ...
 
@@ -244,9 +244,9 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Iterator[Txn]:
     succeed on a counted lock and then the inner write would be overwritten by the outer
     apply, while on a database backend the inner one would commit separately.
 
-    Every named key hangs off one scope root, compared through ``canonical_path`` so two
+    Every named key hangs off one root, compared through ``canonical_path`` so two
     spellings of one directory are one root; keys from two roots raise ``TransactionMisuse``
-    naming them. A backend that holds one database per scope has no place to commit the
+    naming them. A backend that holds one database per root has no place to commit the
     second root's write from inside the first root's transaction.
 
     What this does not promise on a file backend: all-or-nothing application across more
@@ -269,11 +269,11 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Iterator[Txn]:
         validate_key(key, expect_kind="record", operation="transaction")
     roots: dict[str, str] = {}
     for key in keys:
-        roots.setdefault(canonical_path(key.scope), key.scope)
+        roots.setdefault(canonical_path(key.root), key.root)
     if len(roots) > 1:
-        spelled = ", ".join(repr(scope) for scope in sorted(roots.values()))
+        spelled = ", ".join(repr(root) for root in sorted(roots.values()))
         raise TransactionMisuse(
-            f"a transaction's keys hang off one scope root, and these name {len(roots)}: "
+            f"a transaction's keys hang off one root, and these name {len(roots)}: "
             f"{spelled}. Take one root's keys in one transaction and the other's in another, "
             "ordered so a crash between them leaves a detectably stale state"
         )
@@ -289,8 +289,8 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Iterator[Txn]:
             _open_transaction.txn = None
 
 
-def keys(store: str, scope: str, prefix: tuple[str, ...] = ()) -> list[Key]:
-    """Every key in ``store`` under ``scope`` whose parts begin with ``prefix``, sorted.
+def keys(store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
+    """Every key in ``store`` under ``root`` whose parts begin with ``prefix``, sorted.
 
     Raises ``ListingUnsupported`` naming the store when its descriptor declares no
     enumeration, rather than returning an empty list that reads as "none". Backend
@@ -303,7 +303,7 @@ def keys(store: str, scope: str, prefix: tuple[str, ...] = ()) -> list[Key]:
             f"store {store!r} declares no enumeration, so an empty list would be a guess "
             "rather than an answer"
         )
-    return backend.keys(store, scope, prefix)
+    return backend.keys(store, root, prefix)
 
 
 def append(key: Key, record: Mapping[str, Any]) -> None:

@@ -188,7 +188,7 @@ def test_an_ordinary_trial_name_still_addresses_its_own_documents(tmp_path):
 
     assert config.parts == ("trial_00000", "resolved_config")
     assert metrics.parts == ("trial_00000", "metrics")
-    assert config.scope == metrics.scope == str(sweep.resolve())
+    assert config.root == metrics.root == str(sweep.resolve())
 
 
 def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp_path):

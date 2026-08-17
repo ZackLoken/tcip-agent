@@ -17,9 +17,9 @@ from tcip_store import export as store_export
 from tcip_store.adoption import (
     ANY,
     StoreSource,
-    adopt_scope,
+    adopt_root,
     literal,
-    plan_scope,
+    plan_root,
     unaccounted_files,
 )
 from tcip_store.file_backend import FileBackend, RootedFileLocator, _is_bookkeeping
@@ -57,7 +57,7 @@ def _register_adoption_stores() -> None:
 
 _register_adoption_stores()
 
-LAYOUT = "a_scope_under_test"
+LAYOUT = "a_root_under_test"
 SOURCES = {
     LWW: StoreSource(LAYOUT, (ANY,)),
     NESTED: StoreSource(LAYOUT, (ANY, ANY)),
@@ -70,7 +70,7 @@ SOURCES = {
 
 @contextmanager
 def bound(backend):
-    """Bind one backend for a block: adoption hands a scope from one to the other."""
+    """Bind one backend for a block: adoption hands a root from one to the other."""
     ts.bind(backend)
     try:
         yield backend
@@ -93,7 +93,7 @@ def _entries(root) -> dict[str, bytes]:
 
 
 def _write_a_layout(root) -> None:
-    """A scope written the way it would have been before any database existed."""
+    """A root written the way it would have been before any database existed."""
     ts.replace(_key(ADOPT_ALPHA, root, "image_status"), {"a_1.jpg": "negative", "ü": "complete"})
     ts.replace(_key(ADOPT_BETA, root, "gui"), {"active_tab": "annotate"})
     ts.replace(_key(LWW, root, "kept"), {"n": 1})
@@ -109,7 +109,7 @@ def test_files_adopted_into_a_database_and_exported_again_are_the_same_files(tmp
         _write_a_layout(tmp_path)
     before = _entries(tmp_path)
 
-    adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     with bound(SqliteBackend()):
         assert ts.read(_key(ADOPT_ALPHA, tmp_path, "image_status")) == {
@@ -119,17 +119,17 @@ def test_files_adopted_into_a_database_and_exported_again_are_the_same_files(tmp
         page = ts.read_log(_key(LOG, tmp_path, "metrics"))
         assert [entry["epoch"] for entry in page.records] == [1, 2, 3]
 
-    store_export.export_scope(str(tmp_path), report=lambda line: None)
+    store_export.export_root(str(tmp_path), report=lambda line: None)
     assert _entries(tmp_path) == before
 
 
-def test_an_adopted_scope_is_stamped_current_so_a_file_reader_is_not_told_to_export(tmp_path):
+def test_an_adopted_root_is_stamped_current_so_a_file_reader_is_not_told_to_export(tmp_path):
     """Adoption loads exactly what the files already say, so the files are current the moment it
     returns; anything else would leave the doctor invalid until a redundant export ran."""
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
 
-    adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     assert store_export.stale_stores(database_path(str(tmp_path))) == ()
 
@@ -139,28 +139,28 @@ def test_a_blob_keeps_its_file_and_never_becomes_a_row(tmp_path):
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
 
-    adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     assert (tmp_path / "blobs" / "picture.bin").read_bytes() == b"\x89PNG"
     states = store_export.read_store_states(database_path(str(tmp_path)))
     assert BLOB not in states
 
 
-def test_a_file_that_will_not_decode_refuses_the_scope_before_anything_is_written(tmp_path):
+def test_a_file_that_will_not_decode_refuses_the_root_before_anything_is_written(tmp_path):
     """Bytes no reader can get back out are not something to load and find out about later, and
-    the refusal is the whole scope because a half-adopted scope has no owner."""
+    the refusal is the whole root because a half-adopted root has no owner."""
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
     (tmp_path / "lww" / "kept.json").write_bytes(b"{not json")
 
     with pytest.raises(ts.DecodeError) as raised:
-        adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+        adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     assert "kept" in str(raised.value)
     assert not database_path(str(tmp_path)).exists()
 
 
-def test_a_log_line_that_will_not_decode_refuses_the_scope(tmp_path):
+def test_a_log_line_that_will_not_decode_refuses_the_root(tmp_path):
     """A log is adopted entry by entry, so one unreadable line is one entry that would otherwise
     vanish between the file and the rows."""
     with bound(FileBackend()):
@@ -170,7 +170,7 @@ def test_a_log_line_that_will_not_decode_refuses_the_scope(tmp_path):
     path.write_bytes(path.read_bytes() + b"{torn\n")
 
     with pytest.raises(ts.DecodeError):
-        adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+        adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     assert not database_path(str(tmp_path)).exists()
 
@@ -197,7 +197,7 @@ def test_a_file_two_stores_claim_equally_refuses_rather_than_picking_one(tmp_pat
     )
 
     with pytest.raises(ts.StoreError) as raised:
-        plan_scope(str(tmp_path), LAYOUT, ambiguous)
+        plan_root(str(tmp_path), LAYOUT, ambiguous)
 
     message = str(raised.value)
     assert ADOPT_FREE in message and "second_free" in message
@@ -211,7 +211,7 @@ def test_a_constant_key_wins_over_a_varying_one_claiming_the_same_file(tmp_path)
     with_free = dict(SOURCES)
     with_free[ADOPT_FREE] = StoreSource(LAYOUT, (ANY,))
 
-    plan = plan_scope(str(tmp_path), LAYOUT, with_free)
+    plan = plan_root(str(tmp_path), LAYOUT, with_free)
 
     assert [(entry.store, entry.parts) for entry in plan.entries] == [
         (ADOPT_ALPHA, ("image_status",))
@@ -225,19 +225,19 @@ def test_a_record_file_no_store_in_the_plan_owns_is_named_rather_than_left_behin
         ts.replace(_key(LWW, tmp_path, "kept"), {"n": 1})
         ts.replace(_key(ADOPT_FREE, tmp_path, "unclaimed"), {"n": 2})
 
-    plan = plan_scope(str(tmp_path), LAYOUT, SOURCES)
+    plan = plan_root(str(tmp_path), LAYOUT, SOURCES)
     left = unaccounted_files((plan,))
 
     assert [path.name for path in left] == ["unclaimed.json"]
 
 
 def test_a_layout_whose_files_are_all_planned_leaves_nothing_unaccounted(tmp_path):
-    """The partner: the accounting must be quiet on a scope that is fully described, or an
+    """The partner: the accounting must be quiet on a root that is fully described, or an
     operator learns to ignore it."""
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
 
-    plan = plan_scope(str(tmp_path), LAYOUT, SOURCES)
+    plan = plan_root(str(tmp_path), LAYOUT, SOURCES)
 
     assert unaccounted_files((plan,)) == ()
 
@@ -260,7 +260,7 @@ def test_a_shard_whose_filename_cannot_spell_its_key_adopts_under_the_key_its_by
     assert [k.parts for k in as_files] == [(bucket, image)]
 
     sources = {review_engine.REVIEW_VERDICTS_STORE: StoreSource(LAYOUT, (ANY, ANY))}
-    adopt_scope(str(tmp_path), LAYOUT, sources, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, sources, report=lambda line: None)
 
     with bound(SqliteBackend()):
         as_rows = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(tmp_path))
@@ -268,25 +268,25 @@ def test_a_shard_whose_filename_cannot_spell_its_key_adopts_under_the_key_its_by
         assert ts.read(as_rows[0]) == payload
 
 
-def test_adopting_a_scope_that_already_has_a_database_is_refused(tmp_path):
+def test_adopting_a_root_that_already_has_a_database_is_refused(tmp_path):
     """Its records are rows now, so a second adoption would build a database out of files the
     database no longer owns."""
     with bound(SqliteBackend()):
         ts.replace(_key(LWW, tmp_path, "fresh"), {"n": 1})
 
     with pytest.raises(ts.StoreError) as raised:
-        adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+        adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     assert "already exists" in str(raised.value)
 
 
-def test_a_scope_holding_no_records_adopts_to_an_empty_database(tmp_path):
-    """A scope with nothing to move is still a scope an operator may conform, and it must end up
+def test_a_root_holding_no_records_adopts_to_an_empty_database(tmp_path):
+    """A root with nothing to move is still a root an operator may conform, and it must end up
     usable rather than refused."""
     with bound(FileBackend()):
         ts.put_blob(_key(BLOB, tmp_path, "picture"), b"\x89PNG", expect=ts.Version.ABSENT)
 
-    adopt_scope(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
 
     with bound(SqliteBackend()):
         ts.replace(_key(LWW, tmp_path, "later"), {"n": 1})

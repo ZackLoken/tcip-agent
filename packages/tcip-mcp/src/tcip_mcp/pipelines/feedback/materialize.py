@@ -65,7 +65,7 @@ def curated_manifest_key(output_dir: str | Path) -> Key:
 def curated_manifest_path(output_dir: str | Path) -> Path:
     """Where the manifest lands, for a caller reporting the artifact it just produced."""
     key = curated_manifest_key(output_dir)
-    return Path(key.scope, *_CURATED_DOC.relative_path(key.scope, key.parts).parts)
+    return Path(key.root, *_CURATED_DOC.relative_path(key.root, key.parts).parts)
 
 
 def partition_review_verdicts(review_state: dict, *, only_completed: bool = False) -> dict[str, dict]:
