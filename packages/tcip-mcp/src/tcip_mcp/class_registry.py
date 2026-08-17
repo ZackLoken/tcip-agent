@@ -197,19 +197,27 @@ def read_registry(path: str | Path) -> ClassRegistry:
     import tcip_store
 
     try:
-        document = tcip_store.read(_registry_key(path))
+        data = tcip_store.read_blob_versioned(_registry_key(path)).value
     except tcip_store.NotFound as exc:
         raise FileNotFoundError(f"no class registry at {path}") from exc
-    except tcip_store.DecodeError as exc:
+    try:
+        document = tcip_store.RECORD_JSON.decode(data)
+    except ValueError as exc:
         raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
     return registry_from_dict(document)
 
 
 def write_registry(path: str | Path, registry: ClassRegistry) -> None:
-    """Write a :class:`ClassRegistry` to ``classes.json``."""
+    """Write a :class:`ClassRegistry` to ``classes.json``.
+
+    Encoded through the canonical record codec object rather than a spelling of its own, so
+    the ordered subject and attribute sequences land exactly as every other JSON document does.
+    """
     import tcip_store
 
-    tcip_store.replace(_registry_key(path), registry_to_dict(registry))
+    tcip_store.put_blob(
+        _registry_key(path), tcip_store.RECORD_JSON.encode(registry_to_dict(registry))
+    )
 
 
 def stamp_unstamped_confirmations(path: str | Path, incoming: ClassRegistry) -> dict:
@@ -289,7 +297,9 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
     """
     import tcip_store
 
-    tcip_store.replace(_registry_key(destination), tcip_store.read(_registry_key(source)))
+    tcip_store.put_blob(
+        _registry_key(destination), tcip_store.read_blob_versioned(_registry_key(source)).value
+    )
 
 
 def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:

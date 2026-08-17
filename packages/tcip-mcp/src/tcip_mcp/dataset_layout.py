@@ -233,10 +233,8 @@ _CLASS_REGISTRY_PARTS = _document_of(CLASSES_FILENAME)
 register_store(
     StoreDescriptor(
         name=CLASS_REGISTRY_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("document",),
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
         locator=_DATASET_DOC,
     )
 )
@@ -245,8 +243,10 @@ register_store(
 def class_registry_key(dataset_root: str | Path) -> Key:
     """The dataset's class registry.
 
-    ``last_writer_wins``: ``class_registry.write_registry`` replaces the whole registry from a
-    value its caller already holds, and no writer merges into the stored document.
+    A blob because ``classes.json`` is part of the data: it travels with the image set, a
+    breeder may open it, and an archive carries it as a file. ``class_registry`` encodes and
+    decodes it through the canonical ``RECORD_JSON`` codec, whose ``sort_keys=False`` is what
+    keeps the subject and attribute sequences in the order they were declared.
     """
     return Key(CLASS_REGISTRY_STORE, str(dataset_root), _CLASS_REGISTRY_PARTS)
 
@@ -265,10 +265,8 @@ _DATASET_IDENTITY_PARTS = _document_of("dataset.json")
 register_store(
     StoreDescriptor(
         name=DATASET_IDENTITY_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("document",),
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
         locator=_DATASET_DOC,
     )
 )
@@ -277,9 +275,10 @@ register_store(
 def dataset_identity_key(dataset_root: str | Path) -> Key:
     """The dataset's identity document.
 
-    ``last_writer_wins``: ``register_dataset`` reads the existing document only to keep the
-    id it minted once, and every other field it writes is derived from the dataset's own
-    content, so two writers racing produce the same document rather than losing an edit.
+    A blob for the same reason ``classes.json`` is one: identity is part of the data and
+    travels with the image set as a file. ``register_dataset`` writes it compare-and-set
+    against the version it read, so the id is minted once even when two registrations race,
+    and encodes it through the canonical ``RECORD_JSON`` codec.
     """
     return Key(DATASET_IDENTITY_STORE, str(dataset_root), _DATASET_IDENTITY_PARTS)
 

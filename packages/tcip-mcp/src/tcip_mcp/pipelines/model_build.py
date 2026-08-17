@@ -20,7 +20,8 @@ imports lazily inside the builder so MCP-server startup stays fast.
 
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
@@ -178,16 +179,48 @@ def capture_env() -> dict:
 
 
 _SNAPSHOT_DIR = ("model_src",)
+_SNAPSHOT_MANIFEST_SUFFIX = ".json"
+
+
+@dataclass(frozen=True)
+class _SnapshotManifestLocator:
+    """Places one experiment's snapshot manifest under that experiment's own directory.
+
+    The store is keyed off the experiments root so every experiment's members share one scope,
+    while the file still lands at ``<experiment_id>/model_src/<document>.json``. The generic
+    rooted locator cannot spell that: its prefix precedes every part, and here the first part
+    precedes the prefix.
+    """
+
+    def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
+        experiment_id, document = parts
+        return PurePosixPath(
+            experiment_id, *_SNAPSHOT_DIR, f"{document}{_SNAPSHOT_MANIFEST_SUFFIX}"
+        )
+
+    def parts_from(self, relative_path: PurePosixPath) -> tuple[str, ...] | None:
+        segments = relative_path.parts
+        if len(segments) != len(_SNAPSHOT_DIR) + 2:
+            return None
+        if segments[1:-1] != _SNAPSHOT_DIR:
+            return None
+        if not segments[-1].endswith(_SNAPSHOT_MANIFEST_SUFFIX):
+            return None
+        document = segments[-1][: -len(_SNAPSHOT_MANIFEST_SUFFIX)]
+        if not document:
+            return None
+        return (segments[0], document)
+
 
 SNAPSHOT_MANIFEST_STORE = "model_snapshot_manifest"
 register_store(
     StoreDescriptor(
         name=SNAPSHOT_MANIFEST_STORE,
         kind="record",
-        key_fields=("document",),
+        key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
-        locator=RootedFileLocator(prefix=_SNAPSHOT_DIR, suffix=".json"),
+        locator=_SnapshotManifestLocator(),
     )
 )
 
@@ -208,8 +241,13 @@ def snapshot_manifest_key(exp_dir: Path | str) -> Key:
     A record and not a blob because it is a document the platform reads back and reasons
     about, while the files it lists are opaque bytes. ``last_writer_wins``: one snapshot pass
     composes the whole manifest and writes it once.
+
+    Keyed off the directory holding the experiment rather than the experiment's own directory,
+    so every experiment's records hang off the one experiments-root scope its other members
+    already use. The file lands exactly where it always did.
     """
-    return Key(SNAPSHOT_MANIFEST_STORE, str(Path(exp_dir).resolve()), ("manifest",))
+    directory = Path(exp_dir).resolve()
+    return Key(SNAPSHOT_MANIFEST_STORE, str(directory.parent), (directory.name, "manifest"))
 
 
 def snapshot_file_key(exp_dir: Path | str, content: str, filename: str) -> Key:

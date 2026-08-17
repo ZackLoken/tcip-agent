@@ -38,7 +38,14 @@ from datetime import datetime
 from pathlib import Path
 
 import tcip_store
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
+from tcip_store import (
+    RECORD_JSON,
+    Key,
+    StoreDescriptor,
+    Version,
+    VersionConflict,
+    register_store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 MANIFEST_EXT = ".bandgroup"
@@ -50,10 +57,8 @@ _MANIFEST_FILE = RootedFileLocator(suffix=MANIFEST_EXT)
 register_store(
     StoreDescriptor(
         name=BAND_GROUP_MANIFEST_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("stem",),
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
         locator=_MANIFEST_FILE,
     )
 )
@@ -66,8 +71,9 @@ def band_group_manifest_key(images_dir: str | Path, stem: str) -> Key:
     that sit beside each other, and detection runs against a directory that need not be
     inside a dataset at all.
 
-    ``last_writer_wins``: a manifest is written whole from bands the caller already resolved,
-    and nothing merges into a stored one.
+    A blob because a ``.bandgroup`` file is itself an enumerated logical image
+    (``image_utils``), so it has to sit in the image directory the enumerators walk. The
+    payload is encoded through the canonical ``RECORD_JSON`` codec.
     """
     return Key(BAND_GROUP_MANIFEST_STORE, str(images_dir), (stem,))
 
@@ -376,13 +382,21 @@ def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
 def write_band_group_manifest(
     images_dir: Path, stem: str, bands: dict[str, Path], *,
     central_wavelength_nm: dict[str, float] | None = None, source: str = "embedded-metadata",
+    expect: Version | None = None,
 ) -> Path:
     """Write ``<images_dir>/<stem>.bandgroup`` recording ``bands`` (by filename, not full path,
-    the originals never move) and return its path."""
+    the originals never move) and return its path.
+
+    ``expect`` carries the seam's own meaning: ``Version.ABSENT`` records a newly detected group
+    only while none is recorded, and raises ``VersionConflict`` rather than overwriting one a
+    concurrent detection pass just wrote.
+    """
     payload: dict = {"bands": {name: p.name for name, p in bands.items()}, "source": source}
     if central_wavelength_nm:
         payload["central_wavelength_nm"] = central_wavelength_nm
-    tcip_store.replace(band_group_manifest_key(images_dir, stem), payload)
+    tcip_store.put_blob(
+        band_group_manifest_key(images_dir, stem), RECORD_JSON.encode(payload), expect=expect,
+    )
     return band_group_manifest_path(images_dir, stem)
 
 
@@ -425,12 +439,14 @@ def detect_and_write_band_groups(
     manifests: list[str] = []
     for group in (*explicit_found, *embedded_found):
         stem = group["stem"]
-        if tcip_store.exists(band_group_manifest_key(d, stem)):
-            continue  # idempotent: a recorded fact is not re-inferred
-        mp = write_band_group_manifest(
-            d, stem, group["bands"],
-            central_wavelength_nm=group.get("central_wavelength_nm"), source=group["source"],
-        )
+        try:
+            mp = write_band_group_manifest(
+                d, stem, group["bands"],
+                central_wavelength_nm=group.get("central_wavelength_nm"), source=group["source"],
+                expect=Version.ABSENT,
+            )
+        except VersionConflict:
+            continue  # idempotent: a recorded fact is not re-inferred, whoever recorded it
         formed.append({"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]})
         manifests.append(str(mp))
 

@@ -663,7 +663,6 @@ def test_the_registry_refuses_a_bespoke_json_spelling_and_admits_a_stated_exempt
         )
     )
     assert declared.codec_exemption
-    assert ts.get_descriptor("trait_specs").codec_exemption
 
 
 def test_an_operation_refuses_a_store_of_the_wrong_kind(store):
@@ -1223,6 +1222,59 @@ IMAGE_STEM = "a_1"
 IMAGE_EXT = ".JPG"
 
 CHECKPOINT_BYTES = b"PK\x03\x04not a real archive, only bytes handed to the store\x00\xff"
+
+CLASS_REGISTRY_BYTES = (
+    '{\n'
+    '  "catkin": {\n'
+    '    "description": "a männlich flower",\n'
+    '    "attributes": {}\n'
+    '  }\n'
+    '}\n'
+).encode("utf-8")
+"""The documents a human or a tool reads as files hold bytes at the seam and are encoded by the
+module that owns them, so their spelling is written out here rather than reached for through a
+codec the descriptor no longer carries. What each writer produces is pinned separately, against
+these same spellings, by ``test_document_store_bytes``."""
+
+DATASET_IDENTITY_BYTES = (
+    '{\n'
+    '  "dataset_id": "a1",\n'
+    '  "crop": "hazelnut",\n'
+    '  "created": "2026-03-04T12:00:00+00:00"\n'
+    '}\n'
+).encode("utf-8")
+BAND_GROUP_MANIFEST_BYTES = (
+    '{\n'
+    '  "bands": {\n'
+    '    "Green": "cap_ü_G.tif",\n'
+    '    "Red": "cap_ü_R.tif"\n'
+    '  },\n'
+    '  "source": "embedded-metadata",\n'
+    '  "central_wavelength_nm": {\n'
+    '    "Green": 560.0,\n'
+    '    "Red": 650.0\n'
+    '  }\n'
+    '}\n'
+).encode("utf-8")
+FRICTION_REPORT_BYTES = (
+    '{\n'
+    '  "timestamp": "2026-03-04T12:00:00+00:00",\n'
+    '  "category": "missing_tool",\n'
+    '  "detail": "ü",\n'
+    '  "context": {},\n'
+    '  "user_disagreement": false\n'
+    '}\n'
+).encode("utf-8")
+TRAIT_SPEC_BYTES = (
+    "delivers:\n"
+    "- measure_one\n"
+    f"name: {TRAIT_UNDER_TEST}\n"
+    'notes: "\\xFC"\n'
+).encode("utf-8")
+RETROSPECTIVE_BYTES = (
+    f"# {RETROSPECTIVE_UNDER_TEST}\n\n## Retrospective: 2026-03-04T12:00:00+00:00\n\nü\n"
+).encode("utf-8")
+PROJECT_CONFIG_BYTES = '[project]\nname = "project_under_test"\n'.encode("utf-8")
 SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
 IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
 LABEL_BYTES = '{"annotations": [{"subject": "catkin", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
@@ -1343,10 +1395,9 @@ REGISTERED = {
         dataset_layout.region_completeness_digest_key,
         ".tcip/state/region_completeness_digest.json"),
     "class_registry": Registered(
-        {"catkin": {"description": "a männlich flower", "attributes": {}}},
-        dataset_layout.class_registry_key, "classes.json"),
+        CLASS_REGISTRY_BYTES, dataset_layout.class_registry_key, "classes.json"),
     "dataset_identity": Registered(
-        {"dataset_id": "a1", "crop": "hazelnut", "created": "2026-03-04T12:00:00+00:00"},
+        DATASET_IDENTITY_BYTES,
         dataset_layout.dataset_identity_key, "dataset.json", pin=_pin_platform_root),
     "labels": Registered(
         LABEL_BYTES, lambda root: dataset_layout.label_key(root, "2026-03-04", "a_1"),
@@ -1383,12 +1434,11 @@ REGISTERED = {
         {"last_activity": "2026-03-04T12:00:00+00:00", "reports_since_last_retrospective": 2},
         lambda root: project_status.project_status_key(root), ".tcip/state/project_status.json"),
     "friction_reports": Registered(
-        {"timestamp": "2026-03-04T12:00:00+00:00", "category": "missing_tool", "detail": "ü",
-         "context": {}, "user_disagreement": False},
+        FRICTION_REPORT_BYTES,
         lambda root: meta_tools.friction_report_key(str(root), REPORT_UNDER_TEST),
         f".tcip/reports/{REPORT_UNDER_TEST}.json"),
     "retrospectives": Registered(
-        f"# {RETROSPECTIVE_UNDER_TEST}\n\n## Retrospective: 2026-03-04T12:00:00+00:00\n\nü\n",
+        RETROSPECTIVE_BYTES,
         lambda root: meta_tools.retrospective_key(str(root), RETROSPECTIVE_UNDER_TEST),
         f".tcip/retrospectives/{RETROSPECTIVE_UNDER_TEST}.md"),
     "proposal_staging": Registered(
@@ -1468,7 +1518,7 @@ REGISTERED = {
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
         "predictions/live/2026-03-04/resolve_scale.json", scope_of=_stamp_bucket),
     "trait_specs": Registered(
-        {"name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "notes": "ü"},
+        TRAIT_SPEC_BYTES,
         _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.yml",
         scope_of=_trait_specs_scope),
     "annotation_records": Registered(
@@ -1484,9 +1534,7 @@ REGISTERED = {
          "image_status": {"a_1.jpg": "complete"}},
         lambda root: sessions.annotation_stats_key(str(root)), ".tcip/state/annotation_stats.json"),
     "band_group_manifest": Registered(
-        {"bands": {"Green": "cap_ü_G.tif", "Red": "cap_ü_R.tif"},
-         "source": "embedded-metadata",
-         "central_wavelength_nm": {"Green": 560.0, "Red": 650.0}},
+        BAND_GROUP_MANIFEST_BYTES,
         lambda root: band_groups.band_group_manifest_key(_band_group_dir(root), "cap_ü"),
         f"images/cap_ü{band_groups.MANIFEST_EXT}", scope_of=_band_group_dir),
     "run_checkpoint": Registered(
@@ -1497,7 +1545,8 @@ REGISTERED = {
          "files": [{"file": f"{SNAPSHOT_CONTENT}/{SNAPSHOT_FILENAME}", "sha256": "0" * 64,
                     "bytes": 27}],
          "missing": [], "snapshot_errors": [], "seed": 7, "notes": "ü"},
-        model_build.snapshot_manifest_key, "model_src/manifest.json"),
+        lambda root: model_build.snapshot_manifest_key(root / EXPERIMENT),
+        f"{EXPERIMENT}/model_src/manifest.json"),
     "model_snapshot_file": Registered(
         SNAPSHOT_BYTES,
         lambda root: model_build.snapshot_file_key(root, SNAPSHOT_CONTENT, SNAPSHOT_FILENAME),
@@ -1536,8 +1585,7 @@ REGISTERED = {
         [{"id": "a1", "path": "dü", "crop": "hazelnut", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
     "project_config": Registered(
-        '[project]\nname = "project_under_test"\n', project_tools.project_config_key,
-        ".tcip/config.toml"),
+        PROJECT_CONFIG_BYTES, project_tools.project_config_key, ".tcip/config.toml"),
     "split_stem_list": Registered(
         ["a_1", "ü_2"], lambda root: data_tools.split_stem_list_key(_split_dir(root), "train"),
         "splits/train.json", scope_of=_split_dir),
@@ -1618,10 +1666,7 @@ REGISTERED = {
 }
 
 CODEC_EXEMPT = {
-    "trait_specs": "the spec file is YAML a human edits, not JSON",
     "backend_port": "the value is the port text itself",
-    "project_config": "the value is a TOML document",
-    "retrospectives": "the value is markdown a human wrote",
     "workspace_active_project": "the value is the active project's name",
 }
 """Every registered record or log whose codec is deliberately not the canonical constant.
