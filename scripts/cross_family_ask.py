@@ -8,6 +8,10 @@ they ran under are recorded alongside them, so nothing here is optional.
 Conditions control what the harness could reach, not what it was asked. The question
 text is byte-identical across families in every condition.
 
+Antigravity in headless mode auto-denies shell commands, so a prompt sent to it must be
+answerable by file reads alone, with any material to review given as files inside the
+working tree it is pointed at.
+
 Runs on the standard library alone, so it needs no project environment and should be invoked as
 ``python scripts/cross_family_ask.py``. Wrapping it in ``conda run`` buys nothing and fails
 outright wherever conda is absent from PATH, which reports a launched-nothing run as exit 0.
@@ -253,6 +257,13 @@ def denied_write_text(payload: object) -> str:
     return best.strip()
 
 
+# Largest recorded legitimate answer is near 39k characters; observed extraction failures on
+# real runs sit at 127k and 303k characters, so 100k separates a real answer from a raw dump.
+MAX_RAW_STREAM_CHARS = 100_000
+
+ANSWER_KEYS = ("result", "response", "text", "content", "final_response")
+
+
 def extract_response(family: str, stdout: str, last_message: pathlib.Path | None) -> tuple[str, str]:
     """Pull the final assistant text out of whatever shape the harness emitted.
 
@@ -271,17 +282,29 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
     else:
         if isinstance(payload, dict):
             drafted = denied_write_text(payload)
-            for key in ("result", "response", "text", "content", "final_response"):
-                value = payload.get(key)
-                if isinstance(value, str) and value.strip():
-                    reply = value.strip()
-                    if len(drafted) > len(reply):
-                        return drafted, "denied_write_draft"
-                    return reply, "result_field"
+            empty_string_answer = False
+            non_string_answer = False
+            for key in ANSWER_KEYS:
+                if key not in payload:
+                    continue
+                value = payload[key]
+                if isinstance(value, str):
+                    if value.strip():
+                        reply = value.strip()
+                        if len(drafted) > len(reply):
+                            return drafted, "denied_write_draft"
+                        return reply, "result_field"
+                    empty_string_answer = True
+                else:
+                    # A non-string answer value is an unknown shape: dump it whole rather than misread it as empty.
+                    non_string_answer = True
             if drafted:
                 return drafted, "denied_write_draft"
+            if empty_string_answer and not non_string_answer:
+                return "", "empty_response"
         return json.dumps(payload, indent=2)[:20000], "whole_payload"
     tail = []
+    agent_messages = []
     for line in stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -290,13 +313,26 @@ def extract_response(family: str, stdout: str, last_message: pathlib.Path | None
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "item.completed":
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str):
+                    agent_messages.append(text)
         for key in ("text", "message", "result", "delta"):
-            value = event.get(key) if isinstance(event, dict) else None
+            value = event.get(key)
             if isinstance(value, str):
                 tail.append(value)
+    if agent_messages:
+        return agent_messages[-1], "stream_agent_message"
     if tail:
         return "\n".join(tail[-40:]), "stream_tail"
-    return stdout.strip(), "raw_stdout"
+    stripped = stdout.strip()
+    if len(stripped) > MAX_RAW_STREAM_CHARS:
+        return "", "extraction_failed"
+    return stripped, "raw_stdout"
 
 
 def run_one(family: str, question_id: str, condition_name: str, prompt: str,
@@ -456,7 +492,11 @@ def main() -> int:
     summary = args.out / args.question_id / args.condition / "summary.json"
     summary.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"\nwrote {summary}")
-    return 0 if all(m["exit_code"] == 0 for m in results) else 1
+    failed_extraction = {"extraction_failed", "empty_response"}
+    clean = all(
+        m["exit_code"] == 0 and m["response_source"] not in failed_extraction for m in results
+    )
+    return 0 if clean else 1
 
 
 if __name__ == "__main__":

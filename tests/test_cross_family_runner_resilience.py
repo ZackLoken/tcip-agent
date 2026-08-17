@@ -136,6 +136,140 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
     assert seen[0] == "question"
 
 
+def test_a_codex_agent_message_stream_yields_the_last_message(runner):
+    """Real codex JSONL carries the answer inside item.completed/agent_message events, not
+    at the top level, so the stream fallback must know that shape before it falls further."""
+    lines = [
+        json.dumps({"type": "item.completed",
+                    "item": {"id": "item_0", "type": "agent_message", "text": "first pass"}}),
+        json.dumps({"type": "item.completed",
+                    "item": {"id": "item_1", "type": "command_execution",
+                             "command": "ls", "exit_code": 0, "status": "completed"}}),
+        json.dumps({"type": "item.completed",
+                    "item": {"id": "item_2", "type": "agent_message",
+                             "text": "second and final pass"}}),
+        json.dumps({"type": "turn.completed"}),
+    ]
+    text, source = runner.extract_response("codex", "\n".join(lines), None)
+    assert text == "second and final pass"
+    assert source == "stream_agent_message"
+
+
+def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(runner):
+    """A stream past the size bound is dumped nowhere near a real answer; it reads as failed
+    extraction rather than as a 100k-character reply."""
+    huge = "not json, just noise " * 6000
+    assert len(huge.strip()) > runner.MAX_RAW_STREAM_CHARS
+    text, source = runner.extract_response("codex", huge, None)
+    assert (text, source) == ("", "extraction_failed")
+
+
+def test_an_oversized_raw_stream_through_main_fails_the_run(runner, tmp_path, monkeypatch):
+    """The exit gate must not read a run whose stream could not be extracted as clean."""
+    huge = "not json, just noise " * 6000
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run(huge))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"),
+        "--families", "codex",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() != 0
+
+    meta = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["response_source"] == "extraction_failed"
+
+
+def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(runner):
+    """The antigravity SUCCESS-with-empty-answer shape: a recognized key is present but blank,
+    so the payload is a genuinely empty answer, not an unknown shape to dump whole."""
+    stdout = json.dumps({
+        "conversation_id": "cadb33f6-6b32-413f-9ddd-0b2c168c573b",
+        "status": "SUCCESS",
+        "response": "",
+        "duration_seconds": 12.8666267,
+        "num_turns": 1,
+        "usage": {
+            "input_tokens": 19088, "output_tokens": 891, "thinking_tokens": 661,
+            "cache_read_tokens": 24842, "total_tokens": 19979,
+        },
+    })
+    text, source = runner.extract_response("antigravity", stdout, None)
+    assert (text, source) == ("", "empty_response")
+
+
+def test_an_empty_response_through_main_fails_the_run(runner, tmp_path, monkeypatch):
+    """An empty recognized answer must not read as a clean run through the exit gate."""
+    stdout = json.dumps({"status": "SUCCESS", "response": "  "})
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run(stdout))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "antigravity", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"),
+        "--families", "antigravity",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() != 0
+
+
+def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_main(
+    runner, tmp_path, monkeypatch
+):
+    """Hardening the extraction must not turn an ordinary short answer into a failure."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("a short plain-text answer"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "codex", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"),
+        "--families", "codex",
+        "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() == 0
+
+    meta = json.loads(
+        (tmp_path / "out" / "qid" / "as-shipped" / "codex" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["response_source"] == "raw_stdout"
+    assert meta["response_chars"] == len("a short plain-text answer")
+
+
+def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(runner):
+    """An unknown shape with none of the recognized keys still dumps whole: that recovery
+    path for shapes this runner has not learned yet must stay intact."""
+    stdout = json.dumps({"unexpected_field": "some value", "another_field": 42})
+    text, source = runner.extract_response("antigravity", stdout, None)
+    assert source == "whole_payload"
+    assert "unexpected_field" in text
+
+
+def test_a_non_string_answer_value_still_dumps_the_whole_payload(runner):
+    """A recognized key holding a non-string (a content-block list, a null) is an unknown
+    shape carrying possible data, never a confirmed-empty answer to discard."""
+    stdout = json.dumps({"content": [{"type": "text", "text": "the real answer"}]})
+    text, source = runner.extract_response("antigravity", stdout, None)
+    assert source == "whole_payload"
+    assert "the real answer" in text
+
+    text, source = runner.extract_response("antigravity", json.dumps({"result": None}), None)
+    assert source == "whole_payload"
+
+
 def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_child(
     runner, tmp_path, monkeypatch
 ) -> None:
