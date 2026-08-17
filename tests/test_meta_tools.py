@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
+
+import tcip_store as ts
 
 from tcip_mcp.project_status import read_project_status
 from tcip_mcp.tools.meta_tools import (
     claude_reports,
     load_project_memory,
     project_retrospective,
+    read_report,
+    read_retrospective,
     record_distillation_pass,
+    report_documents,
+    retrospective_key,
 )
 
 
@@ -23,12 +31,11 @@ def test_claude_reports_writes_one_json_document(tmp_path: Path):
     )
 
     report_path = Path(result["report_path"])
-    assert report_path.exists()
     assert report_path.suffix == ".json"
     assert report_path.parent == tmp_path / ".tcip" / "reports"
     assert result["category"] == "missing_tool"
 
-    entry = json.loads(report_path.read_text())
+    entry = read_report(str(tmp_path), report_path.stem)
     assert entry["category"] == "missing_tool"
     assert entry["context"]["trait"] == "efb_damage"
     assert "timestamp" in entry
@@ -45,7 +52,7 @@ def test_claude_reports_rejects_invalid_category(tmp_path: Path):
     assert "missing_tool" in result["valid_categories"]
 
 
-def test_claude_reports_one_file_per_report(tmp_path: Path):
+def test_claude_reports_one_document_per_report(tmp_path: Path):
     for i in range(3):
         claude_reports(
             str(tmp_path),
@@ -53,8 +60,7 @@ def test_claude_reports_one_file_per_report(tmp_path: Path):
             detail=f"report {i}",
         )
 
-    files = list((tmp_path / ".tcip" / "reports").glob("*.json"))
-    assert len(files) == 3
+    assert len(report_documents(str(tmp_path))) == 3
 
 
 def test_project_retrospective_creates_new_file(tmp_path: Path):
@@ -71,11 +77,10 @@ def test_project_retrospective_creates_new_file(tmp_path: Path):
     )
 
     retro_path = Path(result["retrospective_path"])
-    assert retro_path.exists()
     assert retro_path.name == "chestnut-bur-phase0.md"
     assert result["appended_to_existing"] is False
 
-    content = retro_path.read_text()
+    content = read_retrospective(str(tmp_path), "chestnut-bur-phase0")
     assert "# chestnut-bur-phase0" in content
     assert "Bootstrap bur detection from scratch" in content
     assert "Active learning selection stagnated" in content
@@ -98,8 +103,7 @@ def test_project_retrospective_appends_to_existing(tmp_path: Path):
         did_not_work="c",
     )
 
-    retro_path = tmp_path / ".tcip" / "retrospectives" / "chestnut-bur-phase0.md"
-    content = retro_path.read_text(encoding="utf-8")
+    content = read_retrospective(str(tmp_path), "chestnut-bur-phase0")
     # Only one top-level header, two dated sections
     assert content.count("# chestnut-bur-phase0") == 1
     # Count section headers without the em-dash (dash byte can differ by encoding).
@@ -132,8 +136,7 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
     for t in threads:
         t.join(timeout=60)
 
-    content = (tmp_path / ".tcip" / "retrospectives" / "project-under-test.md").read_text(
-        encoding="utf-8")
+    content = read_retrospective(str(tmp_path), "project-under-test")
     assert content.count("# project-under-test") == 1
     assert content.count("## Retrospective") == n_threads
     missing = [i for i in range(n_threads) if f"pass {i}" not in content]
@@ -141,27 +144,26 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
 
 
 def test_project_retrospective_handles_empty_optional_fields(tmp_path: Path):
-    result = project_retrospective(
+    project_retrospective(
         str(tmp_path),
         project_id="minimal",
         task="t",
         worked="w",
         did_not_work="d",
     )
-    content = Path(result["retrospective_path"]).read_text()
-    assert "_(none noted)_" in content
+    assert "_(none noted)_" in read_retrospective(str(tmp_path), "minimal")
 
 
-def test_load_retrospectives_returns_empty_when_dir_missing(tmp_path: Path):
+def test_load_retrospectives_returns_empty_when_none_recorded(tmp_path: Path):
     result = load_project_memory("retrospectives", str(tmp_path))
     assert result["count"] == 0
     assert result["retrospectives"] == []
-    assert "does not exist yet" in result["note"]
+    assert "no retrospectives recorded" in result["note"]
 
 
 def test_load_retrospectives_returns_recent_first(tmp_path: Path):
-    import time
-
+    # Each section is stamped from the clock, whose tick is coarser than these calls, so the writes
+    # are spaced far enough apart to state three different times rather than one.
     project_retrospective(str(tmp_path), project_id="first", task="t", worked="w", did_not_work="d")
     time.sleep(0.05)
     project_retrospective(str(tmp_path), project_id="second", task="t", worked="w", did_not_work="d")
@@ -215,11 +217,11 @@ def test_load_retrospectives_filter_substring(tmp_path: Path):
     assert result["retrospectives"][0]["project_id"] == "chestnut-bur"
 
 
-def test_load_reports_returns_empty_when_dir_missing(tmp_path: Path):
+def test_load_reports_returns_empty_when_none_recorded(tmp_path: Path):
     result = load_project_memory("reports", str(tmp_path))
     assert result["count"] == 0
     assert result["reports"] == []
-    assert "does not exist yet" in result["note"]
+    assert "no friction reports recorded" in result["note"]
 
 
 def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
@@ -239,11 +241,11 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
 
 
 def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
-    import time
-
+    # Each report is stamped from the clock, whose tick is coarser than these calls, so the writes
+    # are spaced far enough apart to state four different times rather than one.
     for i in range(4):
         claude_reports(str(tmp_path), category="unexpected_behavior", detail=f"r{i}")
-        time.sleep(0.02)
+        time.sleep(0.05)
 
     result = load_project_memory("reports", str(tmp_path), limit=2)
     assert result["count"] == 2
@@ -251,6 +253,72 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
     # Most recent first
     assert result["reports"][0]["detail"] == "r3"
     assert result["reports"][1]["detail"] == "r2"
+
+
+def test_reports_come_back_in_the_order_they_state_not_the_order_their_bytes_landed(
+    tmp_path: Path,
+):
+    """A report whose bytes are touched after a later one still reads as the earlier of the two.
+
+    Bound to the file backend because the divergence can only be built in a file layout, which is
+    the point: a copy, a restore or an export rewrites when bytes landed, so a corpus ordered by
+    that would reshuffle a project's own account of what happened to it.
+    """
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    earlier = claude_reports(str(tmp_path), category="missing_tool", detail="stated earlier")
+    time.sleep(0.05)
+    claude_reports(str(tmp_path), category="missing_tool", detail="stated later")
+
+    landed_last = time.time() + 60
+    os.utime(Path(earlier["report_path"]), (landed_last, landed_last))
+
+    result = load_project_memory("reports", str(tmp_path), limit=10)
+
+    assert [r["detail"] for r in result["reports"]] == ["stated later", "stated earlier"]
+
+
+def test_retrospectives_come_back_by_their_stated_sections_not_by_when_bytes_landed(
+    tmp_path: Path,
+):
+    """A retrospective whose bytes are touched after a later one still reads as the earlier one.
+
+    The section headers a retrospective carries are its only record of when the work happened, so
+    they are what orders the corpus. File backend for the reason the report case names.
+    """
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    earlier = project_retrospective(
+        str(tmp_path), project_id="earlier", task="t", worked="w", did_not_work="d")
+    time.sleep(0.05)
+    project_retrospective(
+        str(tmp_path), project_id="later", task="t", worked="w", did_not_work="d")
+
+    landed_last = time.time() + 60
+    os.utime(Path(earlier["retrospective_path"]), (landed_last, landed_last))
+
+    result = load_project_memory("retrospectives", str(tmp_path), limit=10)
+
+    assert [r["project_id"] for r in result["retrospectives"]] == ["later", "earlier"]
+
+
+def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(tmp_path: Path):
+    """A document that states no time is never given one, and lands in one fixed place by name."""
+    project_retrospective(
+        str(tmp_path), project_id="dated", task="t", worked="w", did_not_work="d")
+    for project_id in ("zzz-undated", "aaa-undated"):
+        ts.replace(
+            retrospective_key(str(tmp_path), project_id),
+            f"# {project_id}\n",
+            expect=ts.Version.ABSENT,
+        )
+
+    result = load_project_memory("retrospectives", str(tmp_path), limit=10)
+
+    assert [r["project_id"] for r in result["retrospectives"]] == [
+        "dated", "aaa-undated", "zzz-undated"]
 
 
 def test_load_reports_filters_by_category(tmp_path: Path):
@@ -275,7 +343,7 @@ def test_claude_reports_defaults_user_disagreement_false(tmp_path: Path):
     result = claude_reports(str(tmp_path), category="missing_tool", detail="x")
     assert result["user_disagreement"] is False
 
-    entry = json.loads(Path(result["report_path"]).read_text())
+    entry = read_report(str(tmp_path), Path(result["report_path"]).stem)
     assert entry["user_disagreement"] is False
 
 
@@ -288,7 +356,7 @@ def test_claude_reports_records_user_disagreement(tmp_path: Path):
     )
     assert result["user_disagreement"] is True
 
-    entry = json.loads(Path(result["report_path"]).read_text())
+    entry = read_report(str(tmp_path), Path(result["report_path"]).stem)
     assert entry["user_disagreement"] is True
 
 
@@ -334,10 +402,10 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
 def test_record_distillation_pass_never_touches_reports_or_retrospectives(tmp_path: Path):
     # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
     claude_reports(str(tmp_path), category="missing_tool", detail="a")
-    before = list((tmp_path / ".tcip" / "reports").glob("*.json"))
+    before = report_documents(str(tmp_path))
 
     record_distillation_pass(str(tmp_path))
 
-    after = list((tmp_path / ".tcip" / "reports").glob("*.json"))
-    assert before == after
-    assert json.loads(before[0].read_text())["detail"] == "a"
+    after = report_documents(str(tmp_path))
+    assert after == before
+    assert after[0].value["detail"] == "a"

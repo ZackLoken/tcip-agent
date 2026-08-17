@@ -112,6 +112,9 @@ ADOPTION_SOURCES: dict[str, StoreSource] = {
     "dataset_registry": StoreSource(ROOT, (literal("datasets"),)),
     "audit_log": StoreSource(ROOT, (literal("audit"),)),
     "learning_capture": StoreSource(ROOT, (literal("learning_capture"),)),
+    # one document per report and per project, each under its own directory of .tcip
+    "friction_reports": StoreSource(ROOT, (ANY,)),
+    "retrospectives": StoreSource(ROOT, (ANY,)),
     "proposal_staging": StoreSource(ROOT, (starting_with("proposals_"),)),
     # the one registry the platform persists (tcip_web/routes/inference.py); another name
     # would land in unaccounted_files rather than being taken for a neighbouring document

@@ -90,7 +90,7 @@ def test_init_project(tmp_path: Path):
     result = init_project(str(tmp_path))
     assert (tmp_path / ".tcip").is_dir()
     assert (tmp_path / ".tcip" / "artifacts").is_dir()
-    assert (tmp_path / ".tcip" / "config.toml").is_file()
+    assert (tmp_path / ".tcip" / "models").is_dir()
     assert ".tcip/" in result["created"]
 
 
@@ -101,7 +101,6 @@ def test_inspect_project(tmp_path: Path):
     init_project(str(tmp_path))
     status = inspect_project(str(tmp_path))
     assert status["initialized"] is True
-    assert status["has_config"] is True
 
 
 def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
@@ -207,7 +206,6 @@ def test_export_import_roundtrip(tmp_path: Path):
 
     status = inspect_project(str(dest))
     assert status["initialized"] is True
-    assert status["has_config"] is True
     # inspect_project counts raw image files, so the two sibling bands count separately here;
     # the logical-image count the band group folds them into is asserted below.
     assert status["image_count"] == 3
@@ -371,15 +369,15 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
     assert read_datasets(src) == []
 
 
-def test_scaffolding_twice_keeps_the_config_the_first_run_wrote(tmp_path: Path):
-    """Scaffolding is idempotent and never overwrites a config a human has since edited."""
+def test_scaffolding_twice_leaves_what_the_first_run_created(tmp_path: Path):
+    """Scaffolding is idempotent: a second run re-creates the directories and touches nothing."""
     from tcip_mcp.tools.project_tools import _scaffold_project
 
     _scaffold_project(str(tmp_path))
-    edited = b'[project]\nname = "edited by hand"\n'
-    (tmp_path / ".tcip" / "config.toml").write_bytes(edited)
+    (tmp_path / ".tcip" / "artifacts" / "kept.txt").write_text("kept", encoding="utf-8")
 
     _scaffold_project(str(tmp_path))
 
-    assert (tmp_path / ".tcip" / "config.toml").read_bytes() == edited
-    assert inspect_project(str(tmp_path))["has_config"] is True
+    assert (tmp_path / ".tcip" / "artifacts").is_dir()
+    assert (tmp_path / ".tcip" / "models").is_dir()
+    assert (tmp_path / ".tcip" / "artifacts" / "kept.txt").read_text(encoding="utf-8") == "kept"

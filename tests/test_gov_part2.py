@@ -25,13 +25,22 @@ def _load_distill():
     return mod
 
 
+def _seed_report(project_root: Path, report_id: str, entry: dict) -> None:
+    """Record one friction report through the seam, the way ``claude_reports`` does."""
+    import tcip_store as ts
+
+    from tcip_mcp.tools.meta_tools import friction_report_key
+
+    ts.replace(friction_report_key(str(project_root), report_id), entry,
+               expect=ts.Version.ABSENT)
+
+
 def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     distill = _load_distill()
-    reports = tmp_path / ".tcip" / "reports"
-    reports.mkdir(parents=True)
-    (reports / "r.json").write_text(
-        json.dumps({"category": "needs_human_judgment", "detail": "the EXIF orientation thing"}) + "\n",
-        encoding="utf-8")
+    _seed_report(tmp_path, "r", {"category": "needs_human_judgment",
+                                 "detail": "the EXIF orientation thing"})
+    # The capture backstop is a plain file the worksheet reads directly, so it is written once the
+    # seam already holds this root: a record file beside an empty database is what the store refuses.
     (tmp_path / ".tcip" / "learning_capture.jsonl").write_text(
         json.dumps({"ts": "2026-01-01T00:00:00Z", "session_id": "s1"}) + "\n", encoding="utf-8")
 
@@ -44,14 +53,12 @@ def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
 
 def test_distill_worksheet_surfaces_disagreements(tmp_path):
     distill = _load_distill()
-    reports = tmp_path / ".tcip" / "reports"
-    reports.mkdir(parents=True)
-    (reports / "r1.json").write_text(
-        json.dumps({"category": "needs_human_judgment", "detail": "kept the old default",
-                    "user_disagreement": False}) + "\n", encoding="utf-8")
-    (reports / "r2.json").write_text(
-        json.dumps({"category": "needs_human_judgment", "detail": "pushed back on the tiling default",
-                    "user_disagreement": True}) + "\n", encoding="utf-8")
+    _seed_report(tmp_path, "r1", {"category": "needs_human_judgment",
+                                  "detail": "kept the old default",
+                                  "user_disagreement": False})
+    _seed_report(tmp_path, "r2", {"category": "needs_human_judgment",
+                                  "detail": "pushed back on the tiling default",
+                                  "user_disagreement": True})
 
     ws = distill.build_worksheet(tmp_path)
     assert "Disagreements (1)" in ws
@@ -109,11 +116,8 @@ def test_build_workspace_worksheet_gathers_across_projects(tmp_path):
     distill = _load_distill()
     for name, detail in [("proj_a", "shared friction theme theme"),
                           ("proj_b", "shared friction theme theme")]:
-        reports = tmp_path / name / ".tcip" / "reports"
-        reports.mkdir(parents=True)
-        (reports / "r.json").write_text(
-            json.dumps({"category": "unexpected_behavior", "detail": detail}) + "\n",
-            encoding="utf-8")
+        (tmp_path / name).mkdir()
+        _seed_report(tmp_path / name, "r", {"category": "unexpected_behavior", "detail": detail})
 
     ws = distill.build_workspace_worksheet(tmp_path)
     assert "Cross-project recurring themes" in ws
@@ -131,13 +135,18 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
 
 
 def test_workspace_mode_never_writes_anything(tmp_path):
-    # The read-only invariant this whole governance surface depends on: a --workspace run must
-    # leave every project's .tcip/ untouched, same as the single-project mode already does.
+    """A --workspace run gathers and writes nothing, the invariant this governance surface rests on.
+
+    Bound to the file backend because the claim is about the bytes on disk, which is where a stray
+    write would land.
+    """
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
     distill = _load_distill()
-    reports_dir = tmp_path / "proj_a" / ".tcip" / "reports"
-    reports_dir.mkdir(parents=True)
-    (reports_dir / "r.json").write_text(
-        json.dumps({"category": "missing_tool", "detail": "x"}) + "\n", encoding="utf-8")
+    (tmp_path / "proj_a").mkdir()
+    _seed_report(tmp_path / "proj_a", "r", {"category": "missing_tool", "detail": "x"})
 
     before = {
         p: p.read_bytes()

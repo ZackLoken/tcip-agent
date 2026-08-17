@@ -135,7 +135,8 @@ def test_ingest_exif_buckets_and_undated(tmp_path):
     assert (proj / "images" / "2026-03-01" / "c.jpg").is_file()
     assert (proj / "images" / "undated" / "no_exif.png").is_file()
     # .tcip scaffolding created (the sessions/ event log was retired with its tools)
-    assert (proj / ".tcip" / "config.toml").is_file()
+    assert (proj / ".tcip" / "artifacts").is_dir()
+    assert (proj / ".tcip" / "models").is_dir()
 
 
 def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(tmp_path):

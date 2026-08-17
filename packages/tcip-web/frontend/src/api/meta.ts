@@ -11,9 +11,10 @@ export interface FrictionReport {
   context: Record<string, unknown>;
 }
 
+/** `timestamp` is the latest section header the document itself states, empty when it states none. */
 export interface Retrospective {
   project_id: string;
-  modified: string;
+  timestamp: string;
   content: string;
 }
 

@@ -1,7 +1,7 @@
 """Distill worksheet: gather one project's learning record in one place.
 
-Learning lands with the project (see the `self-improvement` skill): friction goes to
-`.tcip/reports/` via ``claude_reports``, and end-of-work findings to `.tcip/retrospectives/` via
+Learning lands with the project (see the `self-improvement` skill): friction goes to the friction
+reports via ``claude_reports``, and end-of-work findings to the retrospectives via
 ``project_retrospective``. This gathers both, plus the SessionEnd capture backstop, so a review is
 cheap and nothing is dropped.
 
@@ -109,10 +109,9 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
     per_project_retro_count: dict[str, int] = {}
     for proj in projects:
         reports = _read_reports(proj)
-        retros_dir = proj / ".tcip" / "retrospectives"
-        retros = sorted(retros_dir.glob("*.md")) if retros_dir.is_dir() else []
+        retros = _read_retrospectives(proj)
         report_text = " ".join(str(r.get("detail", "")) for r in reports)
-        retro_text = " ".join(p2.read_text(encoding="utf-8") for p2 in retros)
+        retro_text = " ".join(document.value for document in retros)
         per_project_tokens[proj.name] = _project_token_set(report_text, retro_text)
         per_project_report_count[proj.name] = len(reports)
         per_project_retro_count[proj.name] = len(retros)
@@ -149,22 +148,26 @@ def build_workspace_worksheet(workspace_root: Path) -> str:
 
 
 def _read_reports(project_root: Path) -> list[dict]:
-    """Every friction report of one project, parsed; an unreadable one is skipped.
+    """Every friction report of one project, decoded; an unreadable one is skipped.
 
-    The file list comes from the store's own owner rather than a glob restated here, so the
-    report extension is stated in one place.
+    The corpus, its decode and its order all come from the store's own owner rather than a
+    directory walk restated here, so this worksheet, the GUI panel and the agent's memory tool
+    read one project in one order.
     """
     from tcip_mcp.tools.meta_tools import report_documents
 
-    rows: list[dict] = []
-    for path in report_documents(str(project_root)):
-        try:
-            entry = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        if isinstance(entry, dict):
-            rows.append(entry)
-    return rows
+    return [
+        document.value
+        for document in report_documents(str(project_root))
+        if not document.value.get("malformed")
+    ]
+
+
+def _read_retrospectives(project_root: Path) -> list:
+    """Every retrospective of one project, latest stated section first, from the store's owner."""
+    from tcip_mcp.tools.meta_tools import retrospective_documents
+
+    return retrospective_documents(str(project_root))
 
 
 def build_worksheet(project_root: Path) -> str:
@@ -172,10 +175,9 @@ def build_worksheet(project_root: Path) -> str:
     lines: list[str] = [f"# Learning-review worksheet: {project_root}", ""]
 
     reports = _read_reports(project_root)
-    retros_dir = project_root / ".tcip" / "retrospectives"
-    retros = sorted(retros_dir.glob("*.md")) if retros_dir.is_dir() else []
+    retros = _read_retrospectives(project_root)
     report_text = " ".join(str(r.get("detail", "")) for r in reports)
-    retro_text = " ".join(p.read_text(encoding="utf-8") for p in retros)
+    retro_text = " ".join(document.value for document in retros)
 
     themes = _themes(report_text, retro_text)
     if themes:
@@ -200,8 +202,8 @@ def build_worksheet(project_root: Path) -> str:
 
     if retros:
         lines.append(f"\n## Retrospectives ({len(retros)})")
-        for p in retros:
-            lines.append(f"- {p.name}")
+        for document in retros:
+            lines.append(f"- {document.name}")
 
     # SessionEnd capture backstop (machine-local; agent_learning_capture.py writes it).
     cap_file = project_root / ".tcip" / "learning_capture.jsonl"
@@ -229,11 +231,18 @@ def build_worksheet(project_root: Path) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Gather learning-review material into one worksheet.")
     ap.add_argument("--project", default=str(REPO_ROOT),
-                    help="project root holding .tcip/reports + .tcip/retrospectives (default: repo root)")
+                    help="project root holding the friction reports and retrospectives "
+                         "(default: repo root)")
     ap.add_argument("--workspace", action="store_true",
                     help="cross-project mode: gather across every project under the TCIP workspace "
                          "(TCIP_WORKSPACE, default ~/tcip-projects/) instead of one --project root")
     args = ap.parse_args()
+
+    # Its own process entry point, so it binds the storage backend the seam has no default for.
+    from tcip_store.binding import bind_default
+
+    bind_default()
+
     if args.workspace:
         from tcip_mcp.workspace import workspace_root
 

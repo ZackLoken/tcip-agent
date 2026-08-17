@@ -94,7 +94,7 @@ class TestE2EPipeline:
         # ── Step 1: Init project ─────────────────────────────────────
         init_project(root)
         assert (project_dir / ".tcip").is_dir()
-        assert (project_dir / ".tcip" / "config.toml").is_file()
+        assert (project_dir / ".tcip" / "artifacts").is_dir()
 
         status = inspect_project(root)
         assert status["initialized"] is True

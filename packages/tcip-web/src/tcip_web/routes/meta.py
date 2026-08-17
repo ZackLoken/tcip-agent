@@ -1,9 +1,10 @@
 """Meta-loop routes: surface Claude's friction reports and retrospectives.
 
-Read-only views over ``<project_root>/.tcip/reports/*.json`` (written by the
-``claude_reports`` MCP tool) and ``<project_root>/.tcip/retrospectives/*.md``
-(written by ``project_retrospective``). These close the loop on the meta-tools:
-the agent writes friction/retrospectives, the human can read them in the GUI.
+Read-only views over the friction reports (written by the ``claude_reports`` MCP tool) and the
+retrospectives (written by ``project_retrospective``). Both corpora are enumerated, ordered and
+decoded by the module that owns their stores, so the panel and the agent's own memory tool
+cannot present the same project in two different orders. These close the loop on the
+meta-tools: the agent writes friction/retrospectives, the human can read them in the GUI.
 
 Endpoints are intentionally on-demand reads (not part of the live GUI state /
 WebSocket broadcast): this data is occasional and long-form.
@@ -12,7 +13,6 @@ WebSocket broadcast): this data is occasional and long-form.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -34,72 +34,45 @@ def _guard(project_root: str) -> None:
 
 @router.get("/reports")
 def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
-    """Return recent friction reports, most recent first."""
+    """Return recent friction reports, newest stated timestamp first."""
     _guard(project_root)
 
-    from tcip_mcp.tools.meta_tools import reports_dir
+    from tcip_mcp.tools.meta_tools import report_document_name, report_documents
 
-    if not reports_dir(project_root).exists():
-        return {"reports": [], "count": 0, "total_available": 0}
+    documents = report_documents(project_root)
+    reports: list[dict[str, Any]] = [
+        {
+            "file": report_document_name(document.name),
+            "timestamp": document.value.get("timestamp"),
+            "category": document.value.get("category", ""),
+            "detail": document.value.get("detail", ""),
+            "context": document.value.get("context", {}),
+        }
+        for document in documents[:limit]
+    ]
 
-    from tcip_mcp.tools.meta_tools import report_documents
-
-    files = report_documents(project_root)
-
-    from tcip_store import DecodeError
-
-    from tcip_mcp.tools.meta_tools import read_report
-
-    reports: list[dict[str, Any]] = []
-    for path in files[:limit]:
-        try:
-            entry = read_report(project_root, path.stem)
-        except DecodeError:
-            # Show the breeder what is in an unreadable report rather than dropping the row.
-            entry = {"detail": path.read_text(encoding="utf-8").strip(),
-                     "category": "", "malformed": True}
-        reports.append({
-            "file": path.name,
-            "timestamp": entry.get("timestamp"),
-            "category": entry.get("category", ""),
-            "detail": entry.get("detail", ""),
-            "context": entry.get("context", {}),
-        })
-
-    return {"reports": reports, "count": len(reports), "total_available": len(files)}
+    return {"reports": reports, "count": len(reports), "total_available": len(documents)}
 
 
 @router.get("/retrospectives")
 def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
-    """Return recent retrospectives (markdown), most recent first."""
+    """Return recent retrospectives (markdown), latest stated section first."""
     _guard(project_root)
 
-    from tcip_mcp.tools.meta_tools import retrospectives_dir
+    from tcip_mcp.tools.meta_tools import retrospective_documents
 
-    retros_dir = retrospectives_dir(project_root)
-    if not retros_dir.exists():
-        return {"retrospectives": [], "count": 0, "total_available": 0}
-
-    files = sorted(
-        retros_dir.glob("*.md"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-    from tcip_mcp.tools.meta_tools import read_retrospective
-
-    retrospectives: list[dict[str, Any]] = []
-    for path in files[:limit]:
-        retrospectives.append({
-            "project_id": path.stem,
-            "modified": datetime.fromtimestamp(
-                path.stat().st_mtime, tz=timezone.utc
-            ).isoformat(),
-            "content": read_retrospective(project_root, path.stem),
-        })
+    documents = retrospective_documents(project_root)
+    retrospectives: list[dict[str, Any]] = [
+        {
+            "project_id": document.name,
+            "timestamp": document.timestamp,
+            "content": document.value,
+        }
+        for document in documents[:limit]
+    ]
 
     return {
         "retrospectives": retrospectives,
         "count": len(retrospectives),
-        "total_available": len(files),
+        "total_available": len(documents),
     }

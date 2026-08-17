@@ -562,10 +562,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `claude_reports` | `meta_tools.py:171` | yes | Log structured friction when you get stuck, confused, or surprised. |
-| `load_project_memory` | `meta_tools.py:243` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
-| `project_retrospective` | `meta_tools.py:334` | yes | Write an end-of-project retrospective to markdown. |
-| `record_distillation_pass` | `meta_tools.py:437` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+| `claude_reports` | `meta_tools.py:227` | yes | Log structured friction when you get stuck, confused, or surprised. |
+| `load_project_memory` | `meta_tools.py:297` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
+| `project_retrospective` | `meta_tools.py:383` | yes | Write an end-of-project retrospective to markdown. |
+| `record_distillation_pass` | `meta_tools.py:486` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
 
 ### model_tools.py (3 tools)
 
@@ -601,13 +601,13 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `register_dataset` | `project_tools.py:96` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
-| `init_project` | `project_tools.py:235` | yes | Initialise a TCIP project directory. |
+| `register_dataset` | `project_tools.py:94` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
+| `init_project` | `project_tools.py:184` | yes | Initialise a TCIP project directory. |
 | `set_active_project` | `project_tools.py:248` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:287` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:334` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:441` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:567` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `view_gui_state` | `project_tools.py:236` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:283` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:387` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:513` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### training_tools.py (8 tools)
 
@@ -748,7 +748,7 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/reports` | `get_reports` | `routes/meta.py:36` |
-| GET | `/retrospectives` | `get_retrospectives` | `routes/meta.py:73` |
+| GET | `/retrospectives` | `get_retrospectives` | `routes/meta.py:58` |
 
 ### routes/projects.py, prefix `/api/projects` (3 routes)  <!-- queued: P5-88 unify -->
 
@@ -1039,7 +1039,7 @@ read.
 Path: `<dataset_root>/dataset.json`.
 
 Writer: `tcip_mcp.tools.project_tools.register_dataset`,
-`packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:96`.
+`packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:94`.
 
 Reader: `tcip_mcp.pipelines.resolution.dataset_fingerprint` (recompute-on-read is the stated
 authority; the stored value is a cache),
@@ -1418,9 +1418,9 @@ check counts, and the promotion reads that same store.
 
 Path: `<project_root>/.tcip/datasets.json`.
 
-Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:79`.
+Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:77`.
 
-Reader: `read_datasets`, `project_tools.py:69`.
+Reader: `read_datasets`, `project_tools.py:67`.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.json` (distinct from
 `dataset.json`, format 4, which S26 covers).
@@ -1555,7 +1555,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:97` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:303` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:252` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
@@ -1567,9 +1567,9 @@ Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
 
-Must agree: the GUI reader finds and parses what the MCP writer produced.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:114` (`def reports_dir(`, the placement, with `report_documents`, line 119, the one enumeration of which files are reports, and `retrospectives_dir`, line 135). A report is one whole JSON document, extension `.json`, not a line of a stream.
-Side B: `packages/tcip-web/src/tcip_web/routes/meta.py:40` and `:79` (both routes import the MCP-side resolvers directly and read each document through `read_report` / `read_retrospective`, the owning module's own decode).
+Must agree: the GUI reader finds, decodes and orders what the MCP writer produced.
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:174` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, line 211, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
+Side B: `packages/tcip-web/src/tcip_web/routes/meta.py:40` and `:62` (both routes import those MCP-side enumerators directly and present the rows they return, rather than walking a directory of their own).
 Phase 3 verdict: single.
 
 ## S13. image_status carried in annotation_stats.json

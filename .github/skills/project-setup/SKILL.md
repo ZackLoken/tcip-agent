@@ -62,7 +62,7 @@ ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
 `ingest_images` does not annotate, split, choose a task, or write `classes.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.
 
-`ingest_images` scaffolds `.tcip/` (`config.toml`, `artifacts/`, `models/`) as a side effect of
+`ingest_images` scaffolds `.tcip/` (`artifacts/`, `models/`) as a side effect of
 structuring images. If you need that scaffold before there are images to ingest, call
 `init_project(project_path)` directly; it creates the identical layout without touching image
 files (both share the same internal scaffolding, so calling one after the other is idempotent,

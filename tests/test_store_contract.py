@@ -1256,25 +1256,12 @@ BAND_GROUP_MANIFEST_BYTES = (
     '  }\n'
     '}\n'
 ).encode("utf-8")
-FRICTION_REPORT_BYTES = (
-    '{\n'
-    '  "timestamp": "2026-03-04T12:00:00+00:00",\n'
-    '  "category": "missing_tool",\n'
-    '  "detail": "ü",\n'
-    '  "context": {},\n'
-    '  "user_disagreement": false\n'
-    '}\n'
-).encode("utf-8")
 TRAIT_SPEC_BYTES = (
     "delivers:\n"
     "- measure_one\n"
     f"name: {TRAIT_UNDER_TEST}\n"
     'notes: "\\xFC"\n'
 ).encode("utf-8")
-RETROSPECTIVE_BYTES = (
-    f"# {RETROSPECTIVE_UNDER_TEST}\n\n## Retrospective: 2026-03-04T12:00:00+00:00\n\nü\n"
-).encode("utf-8")
-PROJECT_CONFIG_BYTES = '[project]\nname = "project_under_test"\n'.encode("utf-8")
 SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
 IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
 LABEL_BYTES = '{"annotations": [{"subject": "catkin", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
@@ -1434,11 +1421,12 @@ REGISTERED = {
         {"last_activity": "2026-03-04T12:00:00+00:00", "reports_since_last_retrospective": 2},
         lambda root: project_status.project_status_key(root), ".tcip/state/project_status.json"),
     "friction_reports": Registered(
-        FRICTION_REPORT_BYTES,
+        {"timestamp": "2026-03-04T12:00:00+00:00", "category": "missing_tool", "detail": "ü",
+         "context": {}, "user_disagreement": False},
         lambda root: meta_tools.friction_report_key(str(root), REPORT_UNDER_TEST),
         f".tcip/reports/{REPORT_UNDER_TEST}.json"),
     "retrospectives": Registered(
-        RETROSPECTIVE_BYTES,
+        f"# {RETROSPECTIVE_UNDER_TEST}\n\n## Retrospective: 2026-03-04T12:00:00+00:00\n\nü\n",
         lambda root: meta_tools.retrospective_key(str(root), RETROSPECTIVE_UNDER_TEST),
         f".tcip/retrospectives/{RETROSPECTIVE_UNDER_TEST}.md"),
     "proposal_staging": Registered(
@@ -1584,8 +1572,6 @@ REGISTERED = {
     "dataset_registry": Registered(
         [{"id": "a1", "path": "dü", "crop": "hazelnut", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
-    "project_config": Registered(
-        PROJECT_CONFIG_BYTES, project_tools.project_config_key, ".tcip/config.toml"),
     "split_stem_list": Registered(
         ["a_1", "ü_2"], lambda root: data_tools.split_stem_list_key(_split_dir(root), "train"),
         "splits/train.json", root_of=_split_dir),
@@ -1667,6 +1653,7 @@ REGISTERED = {
 
 CODEC_EXEMPT = {
     "backend_port": "the value is the port text itself",
+    "retrospectives": "the value is the markdown document itself",
     "workspace_active_project": "the value is the active project's name",
 }
 """Every registered record or log whose codec is deliberately not the canonical constant.

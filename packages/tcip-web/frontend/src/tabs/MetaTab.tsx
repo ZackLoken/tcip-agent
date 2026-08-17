@@ -154,7 +154,7 @@ export function MetaTab() {
               >
                 <div className="flex items-center gap-2 text-[11px] text-tcip-muted">
                   <span className="font-semibold text-tcip-fg">{rt.project_id}</span>
-                  <span className="font-mono">{rt.modified}</span>
+                  <span className="font-mono">{rt.timestamp}</span>
                 </div>
                 <div className="mt-1">
                   <ReactMarkdown components={MARKDOWN_COMPONENTS}>{rt.content}</ReactMarkdown>
