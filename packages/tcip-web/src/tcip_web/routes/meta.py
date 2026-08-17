@@ -46,20 +46,18 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
 
     files = report_documents(project_root)
 
-    from tcip_store import DecodeError, read
+    from tcip_store import DecodeError
 
-    from tcip_mcp.tools.meta_tools import friction_report_key
+    from tcip_mcp.tools.meta_tools import read_report
 
     reports: list[dict[str, Any]] = []
     for path in files[:limit]:
         try:
-            entry = read(friction_report_key(project_root, path.stem), default={})
+            entry = read_report(project_root, path.stem)
         except DecodeError:
             # Show the breeder what is in an unreadable report rather than dropping the row.
             entry = {"detail": path.read_text(encoding="utf-8").strip(),
                      "category": "", "malformed": True}
-        if not isinstance(entry, dict):
-            entry = {"detail": str(entry), "category": "", "malformed": True}
         reports.append({
             "file": path.name,
             "timestamp": entry.get("timestamp"),
@@ -88,9 +86,7 @@ def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
         reverse=True,
     )
 
-    from tcip_store import read
-
-    from tcip_mcp.tools.meta_tools import retrospective_key
+    from tcip_mcp.tools.meta_tools import read_retrospective
 
     retrospectives: list[dict[str, Any]] = []
     for path in files[:limit]:
@@ -99,7 +95,7 @@ def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
             "modified": datetime.fromtimestamp(
                 path.stat().st_mtime, tz=timezone.utc
             ).isoformat(),
-            "content": read(retrospective_key(project_root, path.stem), default=""),
+            "content": read_retrospective(project_root, path.stem),
         })
 
     return {

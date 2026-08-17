@@ -103,6 +103,12 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     + registry + confirmed negatives), recomputed here, but the stored value is a cache, and
     recompute-on-read (``resolution.dataset_fingerprint``) is the authority.
 
+    The identity write is compare-and-set against the version this call read, so two first-time
+    registrations cannot each mint an id and leave the loser's id cited by records the winner's
+    document no longer names. A conflict re-reads what committed and keeps the id it carries, and
+    the project registry is reconciled against that committed id rather than the one this call
+    proposed.
+
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``classes.json``).
         crop: The crop this dataset's imagery is of (e.g. ``hazelnut``). Required; the expert's fact.
@@ -118,34 +124,56 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
 
     ident_key = dataset_identity_key(root)
-    try:
-        existing = tcip_store.read(ident_key, default={})
-    except tcip_store.DecodeError as exc:
-        return {"error": f"{dataset_identity_path(root)} exists but does not decode ({exc}); "
-                         "minting a fresh id over it would sever every record that cites the old one"}
-    if not isinstance(existing, dict):
-        return {"error": f"{dataset_identity_path(root)} is not an identity document; "
-                         "minting a fresh id over it would sever every record that cites the old one"}
-    ds_id = existing.get("id") or uuid.uuid4().hex[:12]  # minted once; stable across re-runs and moves
     fingerprint = dataset_fingerprint(root)
-    identity = {"crop": crop, "id": ds_id, "fingerprint": fingerprint}
-    tcip_store.replace(ident_key, identity)
+    # A conflict means another registration committed, so the loop only repeats while the
+    # identity is actually changing under it and ends when this write is the one that lands.
+    while True:
+        stored = tcip_store.read_blob_versioned(ident_key, default=None)
+        if stored.value is None:
+            existing: dict = {}
+        else:
+            try:
+                decoded = RECORD_JSON.decode(stored.value)
+            except ValueError as exc:
+                return {"error": f"{dataset_identity_path(root)} exists but does not decode ({exc}); "
+                                 "minting a fresh id over it would sever every record that cites "
+                                 "the old one"}
+            if not isinstance(decoded, dict):
+                return {"error": f"{dataset_identity_path(root)} is not an identity document; "
+                                 "minting a fresh id over it would sever every record that cites "
+                                 "the old one"}
+            existing = decoded
+        candidate = {
+            "crop": crop,
+            "id": existing.get("id") or uuid.uuid4().hex[:12],  # minted once, then kept
+            "fingerprint": fingerprint,
+        }
+        try:
+            tcip_store.put_blob(
+                ident_key, RECORD_JSON.encode(candidate), expect=stored.version,
+            )
+        except VersionConflict:
+            continue
+        identity = candidate
+        break
 
     proj = Path(project_root) if project_root else root
-    upsert_dataset(proj, {"id": ds_id, "path": str(root), "crop": crop, "fingerprint": fingerprint})
+    upsert_dataset(proj, {"id": identity["id"], "path": str(root), "crop": crop,
+                          "fingerprint": fingerprint})
     return {"dataset_root": str(root), **identity}
 
 
 PROJECT_CONFIG_STORE = "project_config"
 _PROJECT_CONFIG_DOC = RootedFileLocator(prefix=(".tcip",), suffix=".toml")
 _PROJECT_CONFIG_PARTS = ("config",)
+_PROJECT_CONFIG_TEXT = text_codec()
+"""The config document's bytes: the text itself, with nothing added around it."""
+
 register_store(
     StoreDescriptor(
         name=PROJECT_CONFIG_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("document",),
-        codec=text_codec(),
-        concurrency="last_writer_wins",
         locator=_PROJECT_CONFIG_DOC,
     )
 )
@@ -168,9 +196,9 @@ DEFAULT_PROJECT_CONFIG = (
 def project_config_key(project_root: str | Path) -> Key:
     """The project's configuration document.
 
-    ``last_writer_wins``: scaffolding writes it once and nothing in the platform reads it back
-    to re-serialize it, so there is no read-modify-write to lose. The write that creates it is
-    still conditional, on the document being absent, which is what keeps a human's edits.
+    A blob because it is a TOML a human opens and edits, created once by scaffolding and never
+    re-serialized by the platform. The write that creates it is conditional on the document
+    being absent, which is what keeps a human's edits.
     """
     return Key(PROJECT_CONFIG_STORE, str(Path(project_root).absolute()), _PROJECT_CONFIG_PARTS)
 
@@ -187,8 +215,10 @@ def _scaffold_project(project_path: str) -> dict:
     (tcip / "models").mkdir(exist_ok=True)
 
     try:
-        tcip_store.replace(
-            project_config_key(project_path), DEFAULT_PROJECT_CONFIG, expect=Version.ABSENT,
+        tcip_store.put_blob(
+            project_config_key(project_path),
+            _PROJECT_CONFIG_TEXT.encode(DEFAULT_PROJECT_CONFIG),
+            expect=Version.ABSENT,
         )
     except VersionConflict:
         pass  # a project that already has a config keeps it: this scaffolding is idempotent

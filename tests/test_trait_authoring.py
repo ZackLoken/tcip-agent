@@ -296,15 +296,13 @@ def test_a_spec_write_that_lost_the_race_is_refused_rather_than_silently_winning
 
     _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
     key = traits.trait_spec_key(tmp_path, "leaf")
-    stale = ts.read_versioned(key).version
+    stale = ts.read_blob_versioned(key).version
     traits.write_trait_spec_fields(
         "leaf", {"count_bias_tolerance_frac": 1.0}, ["count_bias_tolerance_frac: agent_proposed_unvalidated"],
         specs_dir=tmp_path)
 
     with pytest.raises(ts.VersionConflict):
-        ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]}, expect=stale)
-    with pytest.raises(ts.PolicyViolation):
-        ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]})
+        ts.put_blob(key, b"name: leaf\ndelivers:\n- leaf_length\n", expect=stale)
 
     assert load_trait_specs(specs_dir=tmp_path)[0].count_bias_tolerance_frac == 1.0
 

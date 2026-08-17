@@ -17,12 +17,15 @@ from pathlib import Path
 
 from tcip_store import (
     RECORD_JSON,
+    DecodeError,
     Key,
     StoreDescriptor,
+    Version,
+    VersionConflict,
+    put_blob,
+    read_blob_versioned,
     register_store,
-    replace,
     text_codec,
-    transaction,
 )
 from tcip_store.file_backend import RootedFileLocator
 
@@ -54,13 +57,14 @@ _RETROSPECTIVE_DOC = RootedFileLocator(prefix=(".tcip", "retrospectives"), suffi
 FRICTION_REPORT_STORE = "friction_reports"
 RETROSPECTIVE_STORE = "retrospectives"
 
+_RETROSPECTIVE_TEXT = text_codec()
+"""The retrospective's bytes: the markdown itself, with nothing added around it."""
+
 register_store(
     StoreDescriptor(
         name=FRICTION_REPORT_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("report",),
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
         locator=_REPORT_DOC,
     )
 )
@@ -68,10 +72,8 @@ register_store(
 register_store(
     StoreDescriptor(
         name=RETROSPECTIVE_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("project",),
-        codec=text_codec(),
-        concurrency="cas",
         locator=_RETROSPECTIVE_DOC,
     )
 )
@@ -80,8 +82,10 @@ register_store(
 def friction_report_key(project_path: str, report_id: str) -> Key:
     """One friction report.
 
-    ``last_writer_wins``: the identifier carries a timestamp and random suffix, so each
-    report is written once, whole, by the call that produced it.
+    A blob because every reader of this corpus enumerates the directory and orders by mtime,
+    so the documents have to be files. Written once, create-only: the identifier carries a
+    timestamp and a random suffix, so a conflict means some other call already owns that name.
+    The document is encoded through the canonical ``RECORD_JSON`` codec.
     """
     return Key(FRICTION_REPORT_STORE, str(project_path), (report_id,))
 
@@ -89,9 +93,10 @@ def friction_report_key(project_path: str, report_id: str) -> Key:
 def retrospective_key(project_path: str, project_id: str) -> Key:
     """One project's retrospective document.
 
-    ``cas``: a retrospective is appended to by reading the existing text and writing the
-    concatenation, so two sessions finishing at once would otherwise drop one of the two
-    sections. :func:`project_retrospective` names this key in a transaction.
+    A blob for the same reason a report is: the corpus is read as files, by the GUI panel and
+    by the distillation pass alike. A retrospective is appended to by reading the existing text
+    and writing the concatenation, so :func:`project_retrospective` writes compare-and-set
+    against the version it read and re-merges on conflict rather than dropping a section.
     """
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
 
@@ -130,6 +135,35 @@ def report_documents(project_path: str) -> list[Path]:
 def retrospectives_dir(project_path: str) -> Path:
     """Where the retrospective documents live, without creating anything."""
     return Path(project_path, *_RETROSPECTIVE_DOC.prefix)
+
+
+def read_report(project_path: str, report_id: str) -> dict:
+    """One friction report's decoded document, or ``{}`` when nothing is recorded under that id.
+
+    The one decode of this store, so a consumer never re-spells the codec. Raises
+    ``DecodeError`` for a report whose bytes are present but will not read as JSON, which is
+    the distinction a panel needs to show the row as malformed rather than drop it.
+    """
+    data = read_blob_versioned(friction_report_key(project_path, report_id), default=None).value
+    if data is None:
+        return {}
+    try:
+        entry = RECORD_JSON.decode(data)
+    except ValueError as exc:
+        raise DecodeError(f"friction report {report_id!r} does not decode as JSON: {exc}") from exc
+    return entry if isinstance(entry, dict) else {"detail": str(entry), "category": "",
+                                                  "malformed": True}
+
+
+def read_retrospective(project_path: str, project_id: str) -> str:
+    """One project's retrospective text, or ``""`` when it has none."""
+    data = read_blob_versioned(retrospective_key(project_path, project_id), default=None).value
+    if data is None:
+        return ""
+    try:
+        return _RETROSPECTIVE_TEXT.decode(data)
+    except UnicodeDecodeError as exc:
+        raise DecodeError(f"retrospective {project_id!r} is not text: {exc}") from exc
 
 
 @mcp.tool()
@@ -185,7 +219,11 @@ def claude_reports(
         "user_disagreement": user_disagreement,
     }
 
-    replace(friction_report_key(project_path, report_id), entry)
+    put_blob(
+        friction_report_key(project_path, report_id),
+        RECORD_JSON.encode(entry),
+        expect=Version.ABSENT,
+    )
     report_path = _report_path(project_path, report_id)
 
     from tcip_mcp.project_status import record_report
@@ -365,18 +403,22 @@ def project_retrospective(
 ---
 """
 
-    # The read, the concatenation and the write are one serialized step: two sessions
-    # finishing at once would otherwise each append to the text they read and drop a section.
+    # Two sessions finishing at once would each append to the text they read and drop a section,
+    # so a conflict re-reads and re-appends; the loop ends when this section is the one that lands.
     key = retrospective_key(project_path, project_id)
-    with transaction(key) as txn:
-        existing = txn.read(key, default=None)
-        if existing is not None:
-            content = existing.rstrip() + "\n\n" + body
-            appended = True
-        else:
+    while True:
+        stored = read_blob_versioned(key, default=None)
+        if stored.value is None:
             content = f"# {project_id}\n\n{body}"
             appended = False
-        txn.write(key, content)
+        else:
+            content = _RETROSPECTIVE_TEXT.decode(stored.value).rstrip() + "\n\n" + body
+            appended = True
+        try:
+            put_blob(key, _RETROSPECTIVE_TEXT.encode(content), expect=stored.version)
+        except VersionConflict:
+            continue
+        break
 
     from tcip_mcp.project_status import record_retrospective
 

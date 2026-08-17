@@ -432,3 +432,43 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
 
     manifest = ingest_images(source=str(src), name="plain_proj")
     assert manifest["band_groups"] == {"formed": [], "refused": [], "manifests": []}
+
+
+def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(tmp_path, monkeypatch):
+    """A recorded band group is a fact, and a detection pass that reached the same stem a moment
+    later must not replace it with its own inference.
+
+    The window is between deciding a stem has no manifest and writing one. Here a competing
+    manifest lands inside that window, so the write has to be conditional on the stem still being
+    unrecorded: it conflicts, the pass leaves the recorded manifest exactly as it found it, and
+    reports the stem as neither formed nor written.
+    """
+    from tcip_mcp.pipelines.data import band_groups
+
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.tif").write_bytes(b"a")
+    (images / "b.tif").write_bytes(b"b")
+    (images / "c.tif").write_bytes(b"c")
+    recorded = b'{"bands": {"Red": "b.tif", "Blue": "c.tif"}, "source": "explicit-manifest"}\n'
+
+    manifest_path = band_groups.band_group_manifest_path(images, "cap")
+    original = band_groups.write_band_group_manifest
+    raced: list[str] = []
+
+    def racing_writer(images_dir, stem, bands, **kwargs):
+        if not raced:
+            raced.append(stem)
+            manifest_path.write_bytes(recorded)
+        return original(images_dir, stem, bands, **kwargs)
+
+    monkeypatch.setattr(band_groups, "write_band_group_manifest", racing_writer)
+
+    result = band_groups.detect_and_write_band_groups(
+        images, explicit_groups={"cap": {"Green": "a.tif", "Red": "b.tif"}},
+    )
+
+    assert raced == ["cap"]
+    assert manifest_path.read_bytes() == recorded
+    assert result["formed"] == []
+    assert result["manifests"] == []

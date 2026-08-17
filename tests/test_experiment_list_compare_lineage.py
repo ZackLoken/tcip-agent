@@ -1,5 +1,41 @@
 """Experiment-tool coverage (list / compare / lineage)."""
 
+import pytest
+
+
+@pytest.mark.parametrize("backend_name", ["file", "sqlite"])
+def test_a_created_experiment_is_listed_whichever_backend_holds_its_record(
+    tmp_path, monkeypatch, backend_name
+):
+    """What names an experiment is a status record, not a directory some backend happens to make.
+
+    The listing and the run resolver have to answer over the same set: an experiment the resolver
+    finds and the listing omits is a run the breeder cannot see in the GUI's experiment list while
+    the tools resolve it fine.
+    """
+    import tcip_store as ts
+    from tcip_store.binding import BACKEND_ENV, bind_default
+
+    monkeypatch.setenv(BACKEND_ENV, backend_name)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    backend = bind_default()
+    try:
+        from tcip_mcp.experiments import (
+            create_experiment,
+            list_experiments,
+            resolve_experiment_for_run,
+        )
+
+        create_experiment("e1", {"model_source": {"builder": "my_models:fcos_det"}})
+
+        assert resolve_experiment_for_run("e1") == "e1"
+        listed = list_experiments()
+        assert [e["experiment_id"] for e in listed] == ["e1"]
+        assert listed[0]["state"] == "created"
+    finally:
+        ts.unbind()
+        backend.close()
+
 
 def test_experiment_list_compare_lineage(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

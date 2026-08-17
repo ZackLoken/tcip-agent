@@ -105,6 +105,7 @@ register_store(
         key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
+        enumerable=True,
         locator=_MEMBER_DOC,
     )
 )
@@ -127,9 +128,13 @@ register_store(
         key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="cas",
+        enumerable=True,
         locator=_MEMBER_DOC,
     )
 )
+
+
+STATUS_DOCUMENT = "status"
 
 
 def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
@@ -139,7 +144,7 @@ def status_key(experiment_id: str, *, root: Path | str | None = None) -> Key:
     training subprocess and the tool process at once, so an unconditional write drops the
     heartbeat or the run identity another writer just stamped.
     """
-    return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, "status", root)
+    return _member_key(EXPERIMENT_STATUS_STORE, experiment_id, STATUS_DOCUMENT, root)
 
 
 EXPERIMENT_LINEAGE_STORE = "experiment_lineage"
@@ -150,6 +155,7 @@ register_store(
         key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="cas",
+        enumerable=True,
         locator=_MEMBER_DOC,
     )
 )
@@ -172,6 +178,7 @@ register_store(
         key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="cas",
+        enumerable=True,
         locator=_MEMBER_DOC,
     )
 )
@@ -194,6 +201,7 @@ register_store(
         key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
+        enumerable=True,
         locator=_MEMBER_DOC,
     )
 )
@@ -215,6 +223,7 @@ register_store(
         key_fields=("experiment_id", "document"),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
+        enumerable=True,
         locator=_MEMBER_DOC,
     )
 )
@@ -236,6 +245,7 @@ register_store(
         kind="log",
         key_fields=("experiment_id", "document"),
         codec=LOG_JSON,
+        enumerable=True,
         locator=_MEMBER_LOG,
     )
 )
@@ -253,6 +263,7 @@ register_store(
         kind="log",
         key_fields=("experiment_id", "document"),
         codec=LOG_JSON,
+        enumerable=True,
         locator=_MEMBER_LOG,
     )
 )
@@ -476,42 +487,52 @@ def resolve_experiment_for_run(run_id: str, *, root: Path | str | None = None) -
     """Find the experiment id for ``run_id`` without assuming ``experiment_id == run_id``.
 
     Tries the exact match first (the common case, ``experiment_id == run_id``). Then the
-    fresh-id relaunch format (``f"{experiment_id}_{run_id}"``, always suffixed ``_<run_id>``) via a
-    glob. Neither naming convention covers a *custom-named* experiment (an agent/breeder
+    fresh-id relaunch format (``f"{experiment_id}_{run_id}"``, always suffixed ``_<run_id>``), by
+    the suffix. Neither naming convention covers a *custom-named* experiment (an agent/breeder
     pre-created it via the standalone ``create_experiment`` tool, e.g. ``"exp-001-<crop>-<trait>-
     det"``, before any ``run_id`` existed, then launched training against it later, a real, tested
-    workflow, not theoretical: ``_ensure_experiment``'s pristine-reuse branch), its directory name
-    bears no naming relationship to ``run_id`` at all. For that case, falls back to scanning every
-    experiment directory's own stamped ``status.json["run_id"]`` (the authoritative fact
+    workflow, not theoretical: ``_ensure_experiment``'s pristine-reuse branch), its id
+    bears no naming relationship to ``run_id`` at all. For that case, falls back to reading every
+    experiment's own stamped ``status.json["run_id"]`` (the authoritative fact
     ``stamp_run_identity`` records, not a naming guess), a full scan, but reached only once both
     naming shortcuts miss, and it's also what disambiguates the (negligible-probability, per
-    ``run_id``'s own timestamp+uuid entropy) case of more than one glob match, rather than refusing
-    a resolvable run just because the fast path was ambiguous. Returns ``None`` only when no
-    directory's stamped identity matches at all, the caller (``cancel_run``'s disk fallback,
+    ``run_id``'s own timestamp+uuid entropy) case of more than one suffix match, rather than
+    refusing a resolvable run just because the fast path was ambiguous. Returns ``None`` only when no
+    record's stamped identity matches at all, the caller (``cancel_run``'s disk fallback,
     ``reconstruct_run_status``) must then refuse honestly rather than act against an unverified path.
+
+    The candidates come from enumerating the status records, not from listing directories: what
+    names an experiment is a record the store holds, and a directory the store's own backend keeps
+    beside them is not a candidate id.
 
     ``root`` names a platform root other than this process's own, for the web backend serving a
     run of the project the browser has open.
     """
-    store_root = Path(experiments_scope(root))
     try:
         if store.exists(status_key(run_id, root=root)):
             return run_id
     except BadKey:
         return None
-    if not store_root.is_dir():
-        return None
-    matches = [p.name for p in store_root.glob(f"*_{run_id}") if p.is_dir()]
+    candidates = _experiment_ids_with_status(root)
+    matches = [name for name in candidates if name.endswith(f"_{run_id}")]
     if len(matches) == 1:
         return matches[0]
 
-    for d in sorted(store_root.iterdir()):
-        if not d.is_dir():
-            continue
-        status = _read_member(status_key(d.name, root=root), {})
+    for name in candidates:
+        status = _read_member(status_key(name, root=root), {})
         if isinstance(status, dict) and status.get("run_id") == run_id:
-            return d.name
+            return name
     return None
+
+
+def _experiment_ids_with_status(root: Path | str | None) -> list[str]:
+    """Every experiment id the store holds a status record for, sorted.
+
+    The member stores share one file layout, so enumerating any of them answers with every
+    member document under the scope; the document part is what says which member a key names.
+    """
+    found = store.keys(EXPERIMENT_STATUS_STORE, experiments_scope(root))
+    return sorted(key.parts[0] for key in found if key.parts[1] == STATUS_DOCUMENT)
 
 
 def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict[str, Any] | None:
@@ -951,19 +972,17 @@ def get_experiment(
 
 
 def list_experiments() -> list[dict[str, Any]]:
-    """List all experiments with summary info."""
-    root = experiments_dir()
-    if not root.exists():
-        return []
+    """List all experiments with summary info.
 
+    The ids come from the same status-record enumeration :func:`resolve_experiment_for_run`
+    resolves against, so a record the resolver finds is a record this lists.
+    """
     experiments = []
-    for d in sorted(root.iterdir()):
-        if not d.is_dir():
-            continue
-        status = _read_member(status_key(d.name))
+    for experiment_id in _experiment_ids_with_status(None):
+        status = _read_member(status_key(experiment_id))
         if isinstance(status, dict):
             experiments.append({
-                "experiment_id": d.name,
+                "experiment_id": experiment_id,
                 "state": status.get("state", "unknown"),
                 "created": status.get("created"),
             })

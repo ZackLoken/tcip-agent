@@ -286,6 +286,43 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(t
         read_datasets(project)
 
 
+def test_an_identity_minted_while_this_registration_ran_is_adopted_not_overwritten(
+    tmp_path: Path, monkeypatch
+):
+    """A dataset's id is minted once. Two first-time registrations both read no identity, so the
+    write has to be conditional on there still being none: the loser adopts what committed instead
+    of stamping its own id over an id other records may already cite.
+
+    The window is between reading the absent identity and writing the minted one, which is exactly
+    where the id is drawn. A competing identity lands there, so the second write conflicts, the
+    call re-reads the committed document, and the id it reports and registers is that one.
+    """
+    import json
+    import uuid as uuid_module
+
+    src = tmp_path / "proj"
+    _make_dataset(src)
+    committed = b'{"crop": "hazelnut", "id": "committed_id", "fingerprint": "written first"}\n'
+    real_uuid4 = uuid_module.uuid4
+    raced: list[str] = []
+
+    def racing_uuid4():
+        if not raced:
+            raced.append("minted")
+            (src / "dataset.json").write_bytes(committed)
+        return real_uuid4()
+
+    monkeypatch.setattr(uuid_module, "uuid4", racing_uuid4)
+
+    result = register_dataset(str(src), crop="hazelnut")
+
+    assert raced == ["minted"]
+    assert "error" not in result
+    assert result["id"] == "committed_id"
+    assert json.loads((src / "dataset.json").read_text(encoding="utf-8"))["id"] == "committed_id"
+    assert [r["id"] for r in read_datasets(src)] == ["committed_id"]
+
+
 def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id(tmp_path: Path):
     """Minting a new id over an identity that will not decode severs every experiment, split and
     delivered number citing the old one, so the tool refuses and names the document."""

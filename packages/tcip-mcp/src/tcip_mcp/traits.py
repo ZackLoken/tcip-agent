@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import tcip_store as ts
-from tcip_store import DecodeError, Key, NotFound, StoreDescriptor, register_store
+from tcip_store import DecodeError, Key, NotFound, StoreDescriptor, VersionConflict, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -328,7 +328,11 @@ def _resolve_specs_dir(specs_dir: Path | None, project_root: str | Path | None) 
 
 @dataclass(frozen=True)
 class _YamlCodec:
-    """The spec files' bytes: what ``yaml.safe_dump`` writes and ``yaml.safe_load`` reads back."""
+    """The spec files' bytes: what ``yaml.safe_dump`` writes and ``yaml.safe_load`` reads back.
+
+    Owned here rather than by the seam because the spec file is a blob: this module is what
+    turns a spec into bytes and back, so the one spelling stays beside the store it belongs to.
+    """
 
     def encode(self, value: Any) -> bytes:
         import yaml
@@ -338,19 +342,20 @@ class _YamlCodec:
     def decode(self, data: bytes) -> Any:
         import yaml
 
-        return yaml.safe_load(data.decode("utf-8"))
+        try:
+            return yaml.safe_load(data.decode("utf-8"))
+        except (UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise DecodeError(f"the spec's bytes do not read as YAML: {exc}") from exc
 
 
 TRAIT_SPECS_STORE = "trait_specs"
 _SPEC_FILE = RootedFileLocator(suffix=SPEC_SUFFIX)
+_SPEC_CODEC = _YamlCodec()
 register_store(
     StoreDescriptor(
         name=TRAIT_SPECS_STORE,
-        kind="record",
+        kind="blob",
         key_fields=("trait",),
-        codec=_YamlCodec(),
-        codec_exemption="a trait spec is YAML a human edits by hand, not JSON",
-        concurrency="cas",
         enumerable=True,
         locator=_SPEC_FILE,
     )
@@ -360,9 +365,11 @@ register_store(
 def trait_spec_key(specs_dir: str | Path, trait_name: str) -> Key:
     """One trait's spec file under a spec directory.
 
-    ``cas``: a spec is read, merged into and written back (a derived localization kind, a recorded
-    count objective, a breeder correction), from the MCP server and the web backend alike, so an
-    unconditional write drops whichever field the other writer had just recorded.
+    A blob because hand-written YAML is the only path that authors a spec, and the suffix
+    reconciliation renames those files on disk; a spec held anywhere a human cannot open would
+    make an authored trait vanish silently. Enumeration still answers, over the files
+    themselves. :func:`write_trait_spec_fields` merges compare-and-set against the version it
+    read, so a field another writer recorded is never dropped.
     """
     return Key(TRAIT_SPECS_STORE, str(specs_dir), (trait_name,))
 
@@ -438,7 +445,7 @@ def load_trait_specs_with_errors(
     for key in ts.keys(TRAIT_SPECS_STORE, str(directory)):
         filename = _spec_filename(directory, key.parts[0])
         try:
-            data = ts.read(key)
+            data = _SPEC_CODEC.decode(ts.read_blob_versioned(key).value)
         except NotFound:
             continue
         except DecodeError as e:
@@ -481,9 +488,10 @@ def write_trait_spec_fields(
     through ``_spec_from_config``, the same crops.yml cross-check and field validation every
     config-authored spec already goes through, reused rather than a second implementation, and
     refuses to write anything that would silently fail to load or fall out of
-    ``registered_traits()`` afterward. The read, the merge and the write are one transaction over
-    the spec's own key, so a second writer recording a different field cannot be overwritten by
-    whatever this caller had read before it landed.
+    ``registered_traits()`` afterward. The read, the merge and the write are one compare-and-set
+    against the version read, retried on conflict against whatever landed meanwhile, so a second
+    writer recording a different field cannot be overwritten by what this caller had read before
+    it landed.
 
     This is the only write path for updating a trait spec anywhere in the platform: initial
     authoring is still hand-written YAML with no ``@audited`` record (a separate, still-manual
@@ -497,10 +505,13 @@ def write_trait_spec_fields(
     _reconcile_spec_suffixes(directory, adopt=True)
 
     key = trait_spec_key(directory, trait_name)
-    with ts.transaction(key) as txn:
-        data = txn.read(key, default=None)
-        if data is None:
+    # A conflict means another writer committed, so the loop only repeats while the spec is
+    # actually changing under it and ends when this merge is the one that lands.
+    while True:
+        stored = ts.read_blob_versioned(key, default=None)
+        if stored.value is None:
             raise _no_spec_error(trait_name, directory)
+        data = _SPEC_CODEC.decode(stored.value)
         if not isinstance(data, dict):
             filename = _spec_filename(directory, trait_name)
             raise ValueError(f"{directory / filename} is not a valid trait spec (not a mapping)")
@@ -516,11 +527,15 @@ def write_trait_spec_fields(
                 "Refusing to write."
             )
 
-        txn.write(key, {
+        written = {
             k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dataclasses.asdict(spec).items()
-        })
-    return spec
+        }
+        try:
+            ts.put_blob(key, _SPEC_CODEC.encode(written), expect=stored.version)
+        except VersionConflict:
+            continue
+        return spec
 
 
 def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
