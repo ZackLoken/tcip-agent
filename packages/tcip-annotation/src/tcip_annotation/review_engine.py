@@ -146,6 +146,27 @@ class _ShardLocator:
         return (bucket, segments[-1][: -len(_SHARD_SUFFIX)])
 
 
+def true_verdict_parts(entry: bytes) -> tuple[str, ...] | None:
+    """The (bucket, image) a shard's own payload states, or None when it states neither.
+
+    The shard filename is sanitized, so a key carrying a separator is not recoverable from the
+    path. It is recoverable from the payload, which is where the writer puts it, and that is
+    the identity enumeration answers with on every backend. Bytes that will not decode state
+    no key: that shard still enumerates under the parts its path spells, so reading it reports
+    the corruption rather than enumeration hiding the entry.
+    """
+    try:
+        payload = RECORD_JSON.decode(entry)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    bucket, img_name = payload.get("bucket"), payload.get("img_name")
+    if isinstance(bucket, str) and isinstance(img_name, str):
+        return (bucket, img_name)
+    return None
+
+
 REVIEW_VERDICTS_STORE = "review_verdicts"
 _SHARD_LOCATOR = _ShardLocator()
 register_store(
@@ -157,6 +178,7 @@ register_store(
         concurrency="cas",
         enumerable=True,
         locator=_SHARD_LOCATOR,
+        true_parts_from_entry=true_verdict_parts,
     )
 )
 

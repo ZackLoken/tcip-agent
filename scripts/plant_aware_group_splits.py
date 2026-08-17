@@ -143,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.file_backend import bind_default
+    from tcip_store.binding import bind_default
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
     from tcip_mcp.tools.data_tools import _scan_dataset, make_splits

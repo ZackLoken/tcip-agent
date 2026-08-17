@@ -54,7 +54,7 @@ def main() -> None:
     except Exception:
         payload = {}
     try:
-        from tcip_store.file_backend import bind_default
+        from tcip_store.binding import bind_default
 
         bind_default()
         try:

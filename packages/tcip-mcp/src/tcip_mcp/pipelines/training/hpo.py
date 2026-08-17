@@ -411,7 +411,7 @@ def tune_search(
 
     def trainable(config: dict) -> None:
         # A trial body runs in a Ray worker process, which is its own storage entry point.
-        from tcip_store.file_backend import bind_default
+        from tcip_store.binding import bind_default
 
         bind_default()
         objective_fn(config, lambda value: tune.report({metric: float(value)}))

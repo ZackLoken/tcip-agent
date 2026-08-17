@@ -30,7 +30,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
-    from tcip_store.file_backend import bind_default
+    from tcip_store.binding import bind_default
 
     bind_default()
 

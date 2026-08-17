@@ -13,7 +13,7 @@ import socket
 
 import uvicorn
 from tcip_store import replace
-from tcip_store.file_backend import bind_default
+from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import backend_port_key
 from tcip_web.paths import is_loopback_host

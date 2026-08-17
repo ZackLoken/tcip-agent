@@ -147,7 +147,7 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     configure_gdal_cache()
     # Its own process entry point, so it binds its own storage backend too.
     from tcip_store import store
-    from tcip_store.file_backend import bind_default
+    from tcip_store.binding import bind_default
 
     bind_default()
 

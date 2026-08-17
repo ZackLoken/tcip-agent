@@ -63,6 +63,14 @@ class StoreDescriptor:
     ``codec_exemption`` is why this store does not encode through the canonical JSON codec.
     It is required of any record or log carrying some other JSON spelling, and reading it is
     how a reviewer finds every store that opted out.
+
+    ``true_parts_from_entry`` recovers a key's real parts from one entry's own bytes, for a
+    store whose file layout cannot spell every key it holds: a locator that sanitizes a
+    separator out of a filename places the file correctly but cannot invert it, so enumeration
+    would otherwise answer with a name nothing can read back. Declaring it is what keeps
+    ``keys`` returning the same identities on every backend. It returns None for an entry
+    whose bytes do not state a key, and a store whose layout is already invertible declares
+    nothing.
     """
 
     name: str
@@ -75,6 +83,7 @@ class StoreDescriptor:
     path_readable: bool = False
     locator: "Locator | None" = None
     codec_exemption: str = ""
+    true_parts_from_entry: Callable[[bytes], tuple[str, ...] | None] | None = None
     declared_in: str = ""
 
 
