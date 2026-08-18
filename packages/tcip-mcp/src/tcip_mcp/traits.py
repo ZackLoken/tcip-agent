@@ -32,8 +32,10 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
 
 import tcip_store as ts
 from tcip_store import (
@@ -46,6 +48,9 @@ from tcip_store import (
     register_store,
 )
 from tcip_store.file_backend import RootedFileLocator
+
+from tcip_mcp.identity import user_identity
+from tcip_mcp.statements import canonical, content_hash, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -475,9 +480,291 @@ def write_trait_spec_fields(
 def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
     return ValueError(
         f"no existing trait spec file for {trait_name!r} under {directory}, "
-        "write_trait_spec_fields only updates an already-registered trait; author the "
-        "initial spec file first."
+        "write_trait_spec_fields only updates an already-registered trait; register it first "
+        "with author_trait_spec."
     )
+
+
+# ── the trait-spec authoring statement store ─────────────────────────────────
+
+_AUTHORED_SPEC_FIELDS = (
+    "delivers", "positive_class_name", "milestone_fractions", "milestone_on", "majority_milestone",
+    "majority_provisional", "phenology_prefix", "majority_label", "count_objective",
+    "count_bias_tolerance_frac", "count_error_tolerance", "classifier_agreement_floor",
+    "ordinal_agreement_floor", "regression_skill_floor", "notes",
+)
+"""Every ``TraitSpec`` field ``author_trait_spec`` accepts; see its own docstring for why the rest
+of ``TraitSpec`` is not here."""
+
+_CARRIED_FORWARD_SPEC_FIELDS = (
+    "localization", "localization_tolerance", "localization_tolerance_frac",
+    "sliver_policy", "sliver_frac", "provenance",
+)
+"""Fields ``author_trait_spec`` never authors: copied unchanged from an existing spec on a
+restatement, or left at ``TraitSpec``'s own dataclass defaults on first creation."""
+
+TRAIT_SPEC_STATEMENT_FIELDS = ("statement_fields", "rationale", "stated_by", "stated_at", "relayed_note")
+"""Every field a trait-spec authoring statement owns. The confirmation compare-and-set hashes all
+of them, the same discipline ``operationalization.STATEMENT_FIELDS`` already uses."""
+
+TRAIT_SPEC_CONFIRMATION_FIELDS = ("confirmed_by", "confirmed_at", "identity_from_request", "record_seen")
+"""Every field only :func:`confirm_trait_spec` sets. A statement write refuses a payload with one."""
+
+TRAIT_SPEC_STATEMENT_SURFACE = "author_trait_spec"
+"""The producing surface stamped into ``stated_by``, never accepted from a caller: it says a
+statement came in through the authoring tool rather than through a file edit, nothing more."""
+
+TRAIT_SPEC_STATEMENTS_STORE = "trait_spec_statements"
+_STATEMENT_FILE = RootedFileLocator(prefix=("trait_spec_statements",), suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=TRAIT_SPEC_STATEMENTS_STORE,
+        kind="record",
+        key_fields=("trait",),
+        codec=RECORD_JSON,
+        concurrency="cas",
+        enumerable=True,
+        locator=_STATEMENT_FILE,
+    )
+)
+
+_STATE_RELPATH = Path(".tcip") / "state"
+
+
+def trait_spec_statements_scope(project_root: str | Path | None = None) -> Path:
+    """Where a project's trait-spec authoring statements live: ``<root>/.tcip/state``.
+
+    Mirrors ``operationalization.operationalizations_scope``'s own placement and reasoning: a
+    statement is a claim about a trait spec it does not own, kept in the project's general state
+    directory beside the spec's own registry rather than folded into it. ``project_root`` names the
+    project explicitly, for a caller serving more than one project per process; omitting it
+    resolves against this process's pinned platform root.
+    """
+    if project_root is not None:
+        return Path(project_root) / _STATE_RELPATH
+    from tcip_mcp.project_paths import resolve_state
+
+    return resolve_state(_STATE_RELPATH)
+
+
+def trait_spec_statement_key(scope: str | Path, trait_name: str) -> Key:
+    """One trait's authoring-statement record.
+
+    ``cas``: ``author_trait_spec`` and ``confirm_trait_spec`` are two processes writing the same
+    record, so an unconditional write would drop whichever one landed first.
+    """
+    return Key(TRAIT_SPEC_STATEMENTS_STORE, str(scope), (trait_name,))
+
+
+def trait_spec_statement_seen_hash(record: dict[str, Any]) -> str:
+    """A content hash over every field a trait-spec statement owns, in canonical form.
+
+    The confirmation carries this back, so a breeder's click confirms the record they read rather
+    than whatever an agent rewrote while the card was open.
+    """
+    return content_hash(record, TRAIT_SPEC_STATEMENT_FIELDS)
+
+
+def _require_text(value: Any, field: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(
+            f"{field} is required and must say something: a trait-spec statement with an empty "
+            f"{field} states nothing"
+        )
+    return text
+
+
+def _spec_collision_text(trait_name: str) -> str:
+    return (
+        f"author_trait_spec cannot register trait {trait_name!r}: a trait spec and its authoring "
+        "statement are both already on record for it. author_trait_spec only creates a trait that "
+        "does not yet exist; change an already-registered spec's fields with "
+        "write_trait_spec_fields instead."
+    )
+
+
+def author_trait_spec(
+    project_root: str | Path,
+    trait: str,
+    *,
+    delivers: Sequence[str],
+    positive_class_name: str = "",
+    milestone_fractions: Sequence[float] = (),
+    milestone_on: str = "",
+    majority_milestone: str = "",
+    majority_provisional: bool = False,
+    phenology_prefix: str = "",
+    majority_label: str = "",
+    count_objective: str = "",
+    count_bias_tolerance_frac: float | None = None,
+    count_error_tolerance: float | None = None,
+    classifier_agreement_floor: float | None = None,
+    ordinal_agreement_floor: float | None = None,
+    regression_skill_floor: float | None = None,
+    notes: str = "",
+    rationale: str,
+    relayed_note: str = "",
+    **payload: Any,
+) -> dict[str, Any]:
+    """Author a trait spec that does not yet exist, and record the statement of why, unconfirmed.
+
+    Writes the effective spec into ``trait_specs`` first, cross-checked against crops.yml's
+    controlled vocabulary through the same ``_spec_from_config`` every config-authored spec already
+    goes through, then writes the unconfirmed statement into ``trait_spec_statements`` second.
+    Refuses before writing anything when a spec is already registered for this trait *and* a
+    statement record already exists for it: a real collision. When a spec exists with no statement
+    behind it (the recovery state after a second write that failed partway), this call proceeds as
+    a restatement rather than refusing, since there is nothing to collide with.
+
+    ``localization``, ``localization_tolerance``, ``localization_tolerance_frac``,
+    ``sliver_policy`` and ``sliver_frac`` are not accepted here: they carry forward unchanged from
+    an existing spec on a restatement, or stay at ``TraitSpec``'s own dataclass defaults on first
+    creation, and remain ``write_trait_spec_fields``'s job to change. ``rationale`` is the agent's
+    account of why it chose these values from the breeder's own words, prose read by a breeder,
+    never parsed; it is required.
+
+    Refuses a payload naming one of the four confirmation fields
+    (``confirmed_by``/``confirmed_at``/``identity_from_request``/``record_seen``): only the
+    breeder's own confirmation, from the web backend, writes those.
+    """
+    if payload:
+        offered = sorted(payload)
+        confirmation = [key for key in offered if key in TRAIT_SPEC_CONFIRMATION_FIELDS]
+        if confirmation:
+            raise ValueError(
+                f"author_trait_spec cannot carry the confirmation field(s) {confirmation}: only "
+                "the breeder's own confirmation writes those, from the web backend, and a "
+                "statement that filled them would be the agent confirming its own trait"
+            )
+        raise ValueError(f"unknown field(s) {offered} for {TRAIT_SPEC_STATEMENTS_STORE}")
+
+    directory = trait_specs_dir(project_root)
+    statements_scope = trait_spec_statements_scope(project_root)
+    spec_key = trait_spec_key(directory, trait)
+    statement_key = trait_spec_statement_key(statements_scope, trait)
+
+    existing_spec = ts.read_versioned(spec_key, default=None)
+    existing_statement = ts.read_versioned(statement_key, default=None)
+    if existing_spec.value is not None and existing_statement.value is not None:
+        raise ValueError(_spec_collision_text(trait))
+
+    authored: dict[str, Any] = {
+        "name": trait,
+        "delivers": tuple(delivers),
+        "positive_class_name": positive_class_name,
+        "milestone_fractions": tuple(milestone_fractions),
+        "milestone_on": milestone_on,
+        "majority_milestone": majority_milestone,
+        "majority_provisional": majority_provisional,
+        "phenology_prefix": phenology_prefix,
+        "majority_label": majority_label,
+        "count_objective": count_objective,
+        "count_bias_tolerance_frac": count_bias_tolerance_frac,
+        "count_error_tolerance": count_error_tolerance,
+        "classifier_agreement_floor": classifier_agreement_floor,
+        "ordinal_agreement_floor": ordinal_agreement_floor,
+        "regression_skill_floor": regression_skill_floor,
+        "notes": notes,
+    }
+    if existing_spec.value is not None:
+        authored.update({
+            field: existing_spec.value[field]
+            for field in _CARRIED_FORWARD_SPEC_FIELDS
+            if field in existing_spec.value
+        })
+
+    spec, reason = _spec_from_config(authored, _crops_vocab())
+    if spec is None:
+        raise ValueError(f"author_trait_spec cannot register trait {trait!r}: {reason}")
+
+    written = {
+        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
+    }
+    ts.replace(spec_key, written, expect=existing_spec.version)
+
+    statement = {
+        "trait": trait,
+        "statement_fields": {field: canonical(written[field]) for field in _AUTHORED_SPEC_FIELDS},
+        "rationale": _require_text(rationale, "rationale"),
+        "stated_by": TRAIT_SPEC_STATEMENT_SURFACE,
+        "stated_at": now_iso(),
+        "relayed_note": str(relayed_note or ""),
+        **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
+    }
+    ts.replace(statement_key, statement, expect=existing_statement.version)
+    return statement
+
+
+class TraitSpecStatementNotFound(ValueError):
+    """Raised when a confirmation arrives for a trait nothing has been stated for."""
+
+
+class TraitSpecStatementMoved(ValueError):
+    """Raised when the statement record moved since the surface read it, carrying what is on
+    file now. Defined here rather than reused from ``operationalization.RecordMoved``, since
+    ``operationalization`` already imports from this module and the reverse import would be
+    circular.
+    """
+
+    def __init__(self, message: str, record: dict[str, Any], record_seen: str) -> None:
+        super().__init__(message)
+        self.record = dict(record)
+        self.record_seen = record_seen
+
+
+def confirm_trait_spec(
+    project_root: str | Path,
+    trait: str,
+    *,
+    user: str,
+    record_seen: str,
+    identity_from_request: bool,
+    confirmed: bool = True,
+) -> dict[str, Any]:
+    """Record that the breeder confirmed the trait-spec statement on file, or withdraw one.
+
+    Exposed by no MCP tool and called only by the web backend, from a route the breeder's own GUI
+    action posts, mirroring ``operationalization.confirm_trait_operationalization``'s own "no MCP
+    tool" discipline exactly. Reads and writes only ``trait_spec_statements``, never ``trait_specs``
+    directly. ``record_seen`` is :func:`trait_spec_statement_seen_hash` over the record the surface
+    rendered, compared against what is on file now, so a click cannot land on text the breeder
+    never read; a mismatch raises :class:`TraitSpecStatementMoved` carrying the current record.
+
+    ``confirmed=False`` withdraws, clearing exactly the four confirmation fields and leaving the
+    statement intact.
+    """
+    scope = trait_spec_statements_scope(project_root)
+    key = trait_spec_statement_key(scope, trait)
+    existing = ts.read_versioned(key, default=None)
+    stated = existing.value
+    if not stated:
+        raise TraitSpecStatementNotFound(
+            f"nothing is stated for trait {trait!r}, so there is no trait-spec statement to "
+            "confirm; the agent records one with author_trait_spec first"
+        )
+    current_seen = trait_spec_statement_seen_hash(stated)
+    if record_seen != current_seen:
+        raise TraitSpecStatementMoved(
+            f"the trait-spec statement for {trait!r} moved since it was read, so confirming now "
+            "would confirm text nobody displayed; re-read it and confirm what is on file",
+            stated,
+            current_seen,
+        )
+
+    updated = dict(stated)
+    if confirmed:
+        updated.update({
+            "confirmed_by": user_identity(user),
+            "confirmed_at": now_iso(),
+            "identity_from_request": bool(identity_from_request),
+            "record_seen": current_seen,
+        })
+    else:
+        updated.update({field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS})
+
+    ts.replace(key, updated, expect=existing.version)
+    return updated
 
 
 def _all_traits() -> dict[str, TraitSpec]:

@@ -1308,6 +1308,14 @@ def _trait_specs_root(root: Path) -> Path:
     return traits.trait_specs_dir(root)
 
 
+def _trait_spec_statement_key(root: Path) -> ts.Key:
+    return traits.trait_spec_statement_key(traits.trait_spec_statements_scope(root), TRAIT_UNDER_TEST)
+
+
+def _trait_spec_statements_root(root: Path) -> Path:
+    return traits.trait_spec_statements_scope(root)
+
+
 def _operationalization_key(root: Path) -> ts.Key:
     return operationalization.operationalization_key(
         operationalization.operationalizations_scope(root),
@@ -1644,6 +1652,18 @@ REGISTERED = {
         _operationalization_key,
         f".tcip/state/trait_operationalizations/{TRAIT_UNDER_TEST}/{DELIVERY_KIND_UNDER_TEST}.json",
         root_of=_operationalizations_root),
+    # what a trait spec means and why the agent chose it, proposed and confirmed separately from
+    # the spec record itself
+    "trait_spec_statements": Registered(
+        {"trait": TRAIT_UNDER_TEST,
+         "statement_fields": {"delivers": ["measure_one"], "positive_class_name": "büsch"},
+         "rationale": "the breeder described the state directly", "stated_by": "author_trait_spec",
+         "stated_at": "2026-03-04T12:00:00+00:00", "relayed_note": "",
+         "confirmed_by": "user:ü", "confirmed_at": "2026-03-04T12:30:00+00:00",
+         "identity_from_request": True,
+         "record_seen": "7f3a1b9c2d4e5f60"},
+        _trait_spec_statement_key, f".tcip/state/trait_spec_statements/{TRAIT_UNDER_TEST}.json",
+        root_of=_trait_spec_statements_root),
     # one completed delivery, carrying the real per-bucket StampBinding evidence it shipped under
     "delivery_events": Registered(
         {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
