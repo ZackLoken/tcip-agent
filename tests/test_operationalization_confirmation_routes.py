@@ -523,3 +523,321 @@ def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:
         for module in TOOLS_DIR.glob("*.py")
         if writer in module.read_text(encoding="utf-8")
     ]
+
+
+# ── the operationalization confirm route's audit line must not land silently (A8 retrofit) ───
+
+
+class _AppendRefused(RuntimeError):
+    """Stands in for whatever stops a real append: a busy lock, a refused root, a bad key."""
+
+
+def _refuse_append(*args: object, **kwargs: object) -> None:
+    raise _AppendRefused("the audit log could not be appended to")
+
+
+def test_confirm_operationalization_still_returns_200_with_a_warning_when_the_audit_append_fails(
+    client: TestClient, project: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A8: the confirmation already committed by the time the audit append can fail, so a lost
+    line must not read as a refused confirmation. It rides back as ``audit_warning`` on an
+    ordinary 200 whose confirmation fields are populated exactly as a healthy append's would be."""
+    import tcip_mcp.audit as audit_module
+
+    record = fx.state_crossing(project)
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+
+    resp = _confirm(
+        client, project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES,
+        op.record_seen_hash(record), user="rosalind",
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["confirmed_by"] == "user:rosalind"
+    assert body["audit_warning"] is not None
+    assert "do not retry it blind" in body["audit_warning"]
+    _, stored, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
+    assert stored.value["confirmed_by"] == "user:rosalind"
+
+
+def test_confirm_operationalization_carries_no_warning_against_a_healthy_log(
+    client: TestClient, project: Path,
+) -> None:
+    """The rail must admit the work it exists beside: a healthy append leaves the field null."""
+    record = fx.state_crossing(project)
+
+    resp = _confirm(
+        client, project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES,
+        op.record_seen_hash(record), user="rosalind",
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["audit_warning"] is None
+
+
+# ── trait-spec authoring statements: the same confirmation surface, generalized ──────────────
+
+
+GET_STATEMENT_ROUTE = "/api/results/trait-spec-statement"
+LIST_STATEMENT_ROUTE = "/api/results/trait-spec-statements"
+CONFIRM_STATEMENT_ROUTE = "/api/results/trait-spec-statement/confirm"
+DELIVERY_EVENTS_ROUTE = "/api/results/delivery-events"
+
+STATEMENT_TRAIT = "astringency"
+
+
+def _author_statement(root: Path, trait: str = STATEMENT_TRAIT, **overrides: object) -> dict:
+    from tcip_mcp import traits
+
+    fields: dict[str, object] = dict(
+        delivers=(trait,),
+        rationale="the breeder described the state directly, in their own field-scoring terms",
+    )
+    fields.update(overrides)
+    return traits.author_trait_spec(str(root), trait, **fields)
+
+
+def _read_statement(client: TestClient, root: Path, trait: str):
+    return client.get(GET_STATEMENT_ROUTE, params={"project_root": str(root), "trait": trait})
+
+
+def _confirm_statement(client: TestClient, root: Path, trait: str, seen: str, **extra: object):
+    body = {"project_root": str(root), "trait": trait, "record_seen": seen}
+    body.update(extra)
+    return client.post(CONFIRM_STATEMENT_ROUTE, json=body)
+
+
+def test_the_statement_read_route_shows_the_authored_fields_and_the_confirmation_state(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    from tcip_mcp import traits
+
+    statement = _author_statement(tmp_path)
+
+    body = _read_statement(client, tmp_path, STATEMENT_TRAIT).json()
+
+    assert body["trait"] == STATEMENT_TRAIT
+    assert body["statement_fields"] == statement["statement_fields"]
+    assert body["rationale"] == statement["rationale"]
+    assert body["stated_by"] == traits.TRAIT_SPEC_STATEMENT_SURFACE
+    assert body["confirmed_by"] is None
+    assert body["confirmed_current"] is False
+    assert body["record_seen"] == traits.trait_spec_statement_seen_hash(statement)
+
+
+def test_the_statement_read_route_answers_for_a_trait_nothing_is_stated_for(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A registered spec with no statement behind it (S4/A1's own recovery state) is a real
+    answer, not an error: the panel needs to say nothing is on file."""
+    import tcip_store as ts
+    from tcip_mcp import traits
+
+    directory = traits.trait_specs_dir(str(tmp_path))
+    key = traits.trait_spec_key(directory, "unstated_trait")
+    ts.replace(key, {"name": "unstated_trait", "delivers": ["astringency"]},
+               expect=ts.Version.ABSENT)
+
+    resp = _read_statement(client, tmp_path, "unstated_trait")
+    body = resp.json()
+
+    assert resp.status_code == 200
+    assert body["statement_fields"] is None
+    assert body["rationale"] is None
+    assert body["confirmed_by"] is None
+    assert body["confirmed_current"] is False
+
+
+def test_the_statement_read_route_refuses_an_unregistered_trait(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    resp = _read_statement(client, tmp_path, "not_a_registered_trait")
+
+    assert resp.status_code == 400
+    assert "not_a_registered_trait" in resp.json()["detail"]
+
+
+def test_confirm_statement_route_refuses_when_nothing_is_stated(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    resp = _confirm_statement(client, tmp_path, "no_such_trait", "a hash of nothing")
+
+    assert resp.status_code == 400
+    assert "author_trait_spec" in resp.json()["detail"]
+
+
+def test_confirm_statement_route_returns_409_when_the_record_moved(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A statement rewritten while the panel was open re-renders instead of harvesting the click."""
+    import tcip_store as ts
+    from tcip_mcp import traits
+
+    statement = _author_statement(tmp_path)
+    seen = traits.trait_spec_statement_seen_hash(statement)
+
+    # A second write, simulated directly since the subject here is the confirm route, not the
+    # writer that would otherwise produce this state.
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    key = traits.trait_spec_statement_key(scope, STATEMENT_TRAIT)
+    moved = dict(statement)
+    moved["rationale"] = "a different rationale entirely"
+    ts.replace(key, moved, expect=ts.read_versioned(key).version)
+
+    resp = _confirm_statement(client, tmp_path, STATEMENT_TRAIT, seen, user="rosalind")
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["kind"] == "trait_spec_authoring"
+    assert detail["record"]["rationale"] == "a different rationale entirely"
+    assert detail["record"]["record_seen"] == traits.trait_spec_statement_seen_hash(moved)
+
+    assert _confirm_statement(
+        client, tmp_path, STATEMENT_TRAIT, detail["record"]["record_seen"], user="rosalind",
+    ).status_code == 200
+
+
+def test_confirm_statement_route_confirms_and_withdraws(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    from tcip_mcp import traits
+
+    statement = _author_statement(tmp_path)
+    seen = traits.trait_spec_statement_seen_hash(statement)
+
+    confirmed = _confirm_statement(client, tmp_path, STATEMENT_TRAIT, seen, user="rosalind")
+    assert confirmed.status_code == 200
+    body = confirmed.json()
+    assert body["confirmed_by"] == "user:rosalind"
+    assert body["audit_warning"] is None
+
+    after_read = _read_statement(client, tmp_path, STATEMENT_TRAIT).json()
+    assert after_read["confirmed_current"] is True
+
+    withdraw_seen = after_read["record_seen"]
+    withdrawn = _confirm_statement(
+        client, tmp_path, STATEMENT_TRAIT, withdraw_seen, user="rosalind", confirmed=False,
+    )
+    assert withdrawn.status_code == 200
+    assert all(
+        withdrawn.json()[f] is None for f in traits.TRAIT_SPEC_CONFIRMATION_FIELDS
+    )
+
+
+def test_confirm_statement_route_still_returns_200_with_a_warning_when_the_audit_append_fails(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A8, proven for the new route: the write to ``trait_spec_statements`` already committed by
+    the time the audit append can fail, so a lost line must not read as a refused confirmation."""
+    import tcip_mcp.audit as audit_module
+    from tcip_mcp import traits
+
+    statement = _author_statement(tmp_path)
+    seen = traits.trait_spec_statement_seen_hash(statement)
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+
+    resp = _confirm_statement(client, tmp_path, STATEMENT_TRAIT, seen, user="rosalind")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["confirmed_by"] == "user:rosalind"
+    assert body["audit_warning"] is not None
+    assert "do not retry it blind" in body["audit_warning"]
+
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    key = traits.trait_spec_statement_key(scope, STATEMENT_TRAIT)
+    import tcip_store as ts
+
+    assert ts.read(key)["confirmed_by"] == "user:rosalind"
+
+
+def test_the_statement_list_route_returns_every_traits_row(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    from tcip_mcp import traits
+
+    _author_statement(tmp_path, trait="astringency", delivers=("astringency",))
+    _author_statement(tmp_path, trait="fruit_diameter", delivers=("fruit_diameter",))
+
+    listed = client.get(LIST_STATEMENT_ROUTE, params={"project_root": str(tmp_path)}).json()
+
+    assert listed["unresolved"] == []
+    by_trait = {row["trait"] for row in listed["records"]}
+    assert by_trait == {"astringency", "fruit_diameter"}
+    assert listed["statement_fields"] == list(traits.TRAIT_SPEC_STATEMENT_FIELDS)
+
+
+def test_the_statement_list_route_names_a_record_whose_trait_is_no_longer_registered(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    from tcip_mcp import traits
+
+    _author_statement(tmp_path)
+    key = traits.trait_spec_key(traits.trait_specs_dir(tmp_path), STATEMENT_TRAIT)
+    import tcip_store as ts
+
+    ts.delete(key, expect=ts.read_versioned(key).version)
+
+    listed = client.get(LIST_STATEMENT_ROUTE, params={"project_root": str(tmp_path)}).json()
+
+    assert listed["records"] == []
+    assert listed["unresolved"][0]["trait"] == STATEMENT_TRAIT
+
+
+def test_no_mcp_tool_reaches_the_trait_spec_confirmation_writer() -> None:
+    """The agent has an authoring tool and no confirmation tool, checked against the live
+    registry rather than a hand-kept list, so a tool added later is covered automatically."""
+    writer = "confirm_trait_spec"
+    listing = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "list_tools.py")],
+        capture_output=True, text=True, cwd=REPO_ROOT, check=True,
+    ).stdout
+    registered = {line.strip() for line in listing.splitlines() if line.startswith("  ")}
+
+    assert "author_trait_spec" in registered
+    assert not [name for name in registered if writer in name]
+    assert writer in ROUTES_MODULE.read_text(encoding="utf-8"), (
+        "the writer's name moved, so this test would be searching for nothing"
+    )
+    assert not [
+        module.name
+        for module in TOOLS_DIR.glob("*.py")
+        if writer in module.read_text(encoding="utf-8")
+    ]
+
+
+# ── delivery events: a read-only fact, not a statement ───────────────────────────────────────
+
+
+def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_path: Path) -> None:
+    from tcip_mcp.operationalization import PER_IMAGE_COUNT
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+
+    record_delivery_binding_event(
+        "test_door", None, [], {}, trait=STATEMENT_TRAIT, delivery_kind=PER_IMAGE_COUNT,
+        project_root=tmp_path,
+    )
+
+    resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(tmp_path)})
+
+    assert resp.status_code == 200
+    records = resp.json()["records"]
+    assert len(records) == 1
+    assert records[0]["door"] == "test_door"
+    assert records[0]["trait"] == STATEMENT_TRAIT
+    assert records[0]["delivery_kind"] == PER_IMAGE_COUNT
+
+
+def test_delivery_events_route_confines_project_root_to_allowed_roots(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+
+    resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(outside)})
+
+    assert resp.status_code == 403

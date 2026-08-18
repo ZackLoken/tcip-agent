@@ -678,18 +678,202 @@ def confirm_operationalization(payload: ConfirmOperationalizationPayload) -> dic
     except (TraitUnknownError, ValueError) as e:
         raise HTTPException(400, str(e)) from e
 
-    _audit(
-        str(root),
-        "results.confirm_trait_operationalization",
-        {
-            "trait": payload.trait,
-            "delivery_kind": payload.delivery_kind,
-            "confirmed": payload.confirmed,
-            "identity_from_request": identity_from_request,
-        },
-        user=user_id(actor),
-    )
-    return {field: record[field] for field in op.CONFIRMATION_FIELDS}
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+
+    audit_warning: Optional[str] = None
+    try:
+        record_event_or_raise(
+            "results.confirm_trait_operationalization",
+            {
+                "trait": payload.trait,
+                "delivery_kind": payload.delivery_kind,
+                "confirmed": payload.confirmed,
+                "identity_from_request": identity_from_request,
+            },
+            source="gui",
+            scope=str(root),
+            user=user_id(actor),
+        )
+    except AuditEntryNotWritten as e:
+        audit_warning = str(e)
+
+    body = {field: record[field] for field in op.CONFIRMATION_FIELDS}
+    body["audit_warning"] = audit_warning
+    return body
+
+
+# ── What a trait's own semantics mean: the authoring statement, and its confirmation ──
+
+
+def _trait_spec_statement_body(project_root: Path, trait: str) -> dict:
+    """One trait's authoring statement as the confirming surface reads it.
+
+    Mirrors ``_operationalization_body``: ``confirmed_current`` is read-time drift detection
+    against the live spec (``traits.trait_spec_statement_current``, A1's own mechanism), so the
+    panel and any future delivery precondition cannot disagree about whether a confirmation still
+    holds. ``statement_fields`` carries the authored ``TraitSpec`` fields exactly as the statement
+    recorded them, a flat mapping the record itself already holds, never re-nested or re-derived
+    here. Nothing stated yet reads as null statement fields with ``confirmed_current`` false.
+    """
+    import tcip_store as ts
+    from tcip_mcp import traits
+
+    spec = traits.get_trait_for(trait, project_root)
+    scope = traits.trait_spec_statements_scope(project_root)
+    key = traits.trait_spec_statement_key(scope, trait)
+    stored = ts.read_versioned(key, default=None)
+    stated = stored.value or {}
+    return {
+        "trait": trait,
+        **{field: stated.get(field) for field in traits.TRAIT_SPEC_STATEMENT_FIELDS},
+        "confirmed_by": stated.get("confirmed_by"),
+        "confirmed_at": stated.get("confirmed_at"),
+        "identity_from_request": stated.get("identity_from_request"),
+        "confirmed_current": traits.trait_spec_statement_current(spec, stated),
+        "record_seen": traits.trait_spec_statement_seen_hash(stated),
+    }
+
+
+@router.get("/trait-spec-statement")
+def get_trait_spec_statement(project_root: str, trait: str) -> dict:
+    """What this trait's own semantics were authored to mean, and whether that is confirmed now.
+
+    The panel renders every field this returns and posts ``record_seen`` back with the
+    confirmation, so what the breeder authorizes is what they were shown.
+    """
+    from tcip_mcp.traits import TraitUnknownError
+
+    root = _guarded_project_root(project_root)
+    try:
+        return _trait_spec_statement_body(root, trait)
+    except TraitUnknownError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.get("/trait-spec-statements")
+def list_trait_spec_statements(project_root: str) -> dict:
+    """Every trait-spec authoring statement this project holds, one row per trait.
+
+    ``unresolved`` names a statement whose trait is no longer registered, rather than dropping it:
+    an unlistable statement and no statement at all would otherwise read identically.
+    """
+    import tcip_store as ts
+    from tcip_mcp import traits
+    from tcip_mcp.traits import TraitUnknownError
+
+    root = _guarded_project_root(project_root)
+    records: list[dict] = []
+    unresolved: list[dict] = []
+    scope = traits.trait_spec_statements_scope(root)
+    for key in ts.keys(traits.TRAIT_SPEC_STATEMENTS_STORE, str(scope)):
+        (trait,) = key.parts
+        try:
+            records.append(_trait_spec_statement_body(root, trait))
+        except TraitUnknownError as e:
+            unresolved.append({"trait": trait, "reason": str(e)})
+    return {
+        "records": records,
+        "unresolved": unresolved,
+        "statement_fields": list(traits.TRAIT_SPEC_STATEMENT_FIELDS),
+    }
+
+
+class ConfirmTraitSpecPayload(BaseModel):
+    """One breeder confirmation, or one withdrawal, for one trait's authoring statement.
+
+    ``record_seen`` is the content hash of the statement the surface rendered, the same
+    read-what-was-shown discipline the operationalization confirmation already uses.
+    """
+
+    project_root: str
+    trait: str
+    record_seen: str
+    user: Optional[str] = None
+    confirmed: bool = True
+
+
+@router.post("/trait-spec-statement/confirm")
+def confirm_trait_spec_statement(payload: ConfirmTraitSpecPayload) -> dict:
+    """Record the breeder's confirmation of a trait's own authored semantics, or withdraw one.
+
+    The one path a trait-spec confirmation is ever written by. No MCP tool reaches this writer:
+    an agent that could confirm its own authoring statement would be confirming its own definition
+    of the trait.
+
+    Refused with 400 when nothing is stated for this trait, and with 409 when the statement moved
+    since the surface read it, the body then carrying what is on file so the panel re-renders that
+    and the breeder confirms what they see.
+
+    The confirmation write itself must not land silently unrecorded (A8): a failed audit append
+    does not refuse an otherwise-successful confirmation, it rides back as ``audit_warning`` on an
+    ordinary 200 body, since the confirmation itself already committed.
+    """
+    from tcip_mcp import traits
+    from tcip_mcp.audit import AuditEntryNotWritten, record_event_or_raise
+
+    from tcip_web.identity import resolve_user, user_id
+
+    root = _guarded_project_root(payload.project_root)
+    actor = resolve_user(payload.user)
+    identity_from_request = bool((payload.user or "").strip())
+    try:
+        record = traits.confirm_trait_spec(
+            root,
+            payload.trait,
+            user=actor,
+            record_seen=payload.record_seen,
+            identity_from_request=identity_from_request,
+            confirmed=payload.confirmed,
+        )
+    except traits.TraitSpecStatementMoved as e:
+        raise HTTPException(
+            409,
+            {
+                "kind": "trait_spec_authoring",
+                "message": str(e),
+                "record": _trait_spec_statement_body(root, payload.trait),
+            },
+        ) from e
+    except (traits.TraitSpecStatementNotFound, ValueError) as e:
+        raise HTTPException(400, str(e)) from e
+
+    audit_warning: Optional[str] = None
+    try:
+        record_event_or_raise(
+            "results.confirm_trait_spec",
+            {"trait": payload.trait, "confirmed": payload.confirmed,
+             "identity_from_request": identity_from_request},
+            source="gui",
+            scope=str(root),
+            user=user_id(actor),
+        )
+    except AuditEntryNotWritten as e:
+        audit_warning = str(e)
+
+    body = {field: record[field] for field in traits.TRAIT_SPEC_CONFIRMATION_FIELDS}
+    body["audit_warning"] = audit_warning
+    return body
+
+
+# ── What has shipped: the delivery-event record, read-only ─────────────
+
+
+@router.get("/delivery-events")
+def list_delivery_events(project_root: str) -> dict:
+    """Every delivery event this project holds: what shipped, under which trait and kind, and the
+    real per-bucket verification evidence the delivering door reconciled at the time.
+
+    Read-only, no confirmation action: a delivery event is a fact recorded after an artifact
+    already shipped under a meaning the breeder already confirmed elsewhere, not a statement of
+    its own to confirm.
+    """
+    import tcip_store as ts
+    from tcip_mcp.pipelines.resolution import DELIVERY_EVENTS_STORE, delivery_events_scope
+
+    root = _guarded_project_root(project_root)
+    scope = delivery_events_scope(root)
+    records = [ts.read(key) for key in ts.keys(DELIVERY_EVENTS_STORE, str(scope))]
+    return {"records": records}
 
 
 # ── Registered traits (drives the Results tab's trait selection) ───────
