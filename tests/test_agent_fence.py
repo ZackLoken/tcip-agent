@@ -56,6 +56,8 @@ _EXPECTED_DENY = {
     "Edit(.gitignore)",
     "Edit(README.md)",
     "Edit(.tcip/state/trait_operationalizations/**)",
+    "Edit(.tcip/state/trait_spec_statements/**)",
+    "Edit(.tcip/state/trait_specs/**)",
     "Bash(rm:*)",
     "Bash(rmdir:*)",
     "Bash(git push:*)",
