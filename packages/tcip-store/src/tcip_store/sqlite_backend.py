@@ -18,6 +18,11 @@ and ``capabilities()`` says which of the two guarantees follow.
 A root whose records are still files is refused rather than answered about: an empty database
 beside a populated layout would report every one of those entries as absent. Moving them in is
 ``scripts/adopt_store.py``, and writing them back out again is :mod:`tcip_store.export`.
+
+Every operation says which stores it is serving, and their layouts are what the rail reasons
+about: which files under the root would be those stores' own. A directory serves whatever
+stores a caller roots there, so an operation may span layouts, and each layout is checked on
+its first use by each connection.
 """
 
 from __future__ import annotations
@@ -57,7 +62,14 @@ from tcip_store.file_backend import (
     creation_temp_name,
     database_file,
     transition_lock,
-    unconformed_record_files,
+)
+from tcip_store.layout_claims import (
+    claim_of,
+    claimed_files,
+    contested_claimants,
+    layouts_in_play,
+    layouts_of,
+    unconformed_files,
 )
 from tcip_store.model import (
     REQUIRED,
@@ -68,7 +80,7 @@ from tcip_store.model import (
     Versioned,
     canonical_path,
 )
-from tcip_store.registry import get_descriptor
+from tcip_store.registry import claim_generation, get_descriptor
 
 SCHEMA_VERSION = 1
 """What ``pragma user_version`` carries. This is the backend's own table shape, not the
@@ -112,6 +124,13 @@ create index if not exists log_entries_by_key on log_entries (store, parts, id);
 """
 
 _SYNCHRONOUS_LEVELS = {"NORMAL": 1, "FULL": 2}
+
+_HELD_STORES = """
+select store from records
+union select store from log_entries
+union select store from tombstones
+union select store from store_counters where exported_counter is not null
+"""
 
 
 def encode_parts(parts: tuple[str, ...]) -> str:
@@ -306,6 +325,8 @@ class SqliteBackend:
         self._timeout_error = timeout_error
         self._files = FileBackend(lock_timeout_s=lock_timeout_s)
         self._connections: dict[tuple[int, int, str], sqlite3.Connection] = {}
+        self._checked: dict[tuple[int, int, str], tuple[set[str], int]] = {}
+        self._marked: dict[str, set[str]] = {}
         self._guard = threading.Lock()
 
     def capabilities(self) -> Capabilities:
@@ -336,54 +357,128 @@ class SqliteBackend:
             for conn in self._connections.values():
                 conn.close()
             self._connections.clear()
+            self._checked.clear()
+            self._marked.clear()
         self._files.close()
 
     # ── database lifecycle ──────────────────────────────────────────────────────
 
     def _connection(
-        self, root: str, keys: tuple[Key, ...] = (), timeout_s: float | None = None
+        self,
+        root: str,
+        stores: Sequence[str],
+        keys: tuple[Key, ...] = (),
+        timeout_s: float | None = None,
     ) -> sqlite3.Connection:
         """This process, thread and root's connection, creating the database if it is absent.
 
         The pid is in the slot because a forked worker inherits the parent's handles and must
         not reuse them; the thread is in it because one connection per thread is what lets a
         write hold the database without another thread's read joining its transaction.
+
+        ``stores`` is what the operation is serving, and the layouts they hang off are what
+        the root is checked against, each on its first use by this connection. Reusing a
+        connection is what makes the check cheap, never what lets it be skipped.
         """
+        layouts = layouts_of(stores)
         db_path = database_path(root)
         slot = (os.getpid(), threading.get_ident(), canonical_path(root))
         with self._guard:
             existing = self._connections.get(slot)
         if existing is not None:
+            self._verify_layouts(existing, root, layouts, slot)
             return existing
         if not db_path.is_file():
-            self.require_conformed(root)
-            self._publish(db_path, root, keys, timeout_s)
+            for layout in layouts:
+                self._refuse_unconformed(root, layout)
+            self._publish(db_path, root, layouts, keys, timeout_s)
         conn = open_verified(db_path)
+        try:
+            self._verify_layouts(conn, root, layouts, slot)
+        except BaseException:
+            conn.close()
+            raise
         with self._guard:
             self._connections[slot] = conn
         return conn
 
-    def require_conformed(self, root: str) -> None:
+    def require_conformed(self, root: str, stores: Sequence[str]) -> None:
         """The database backend's half of the conform rail: refuse an unconformed root, whose
         records are still files, before this backend answers about it.
 
-        A database present is what conformed means here. A root holding registered record or
-        log files and no database has state this backend cannot see: creating an empty database
-        beside those files would answer every read with absence, which for a confirmed negative
-        means an annotated image training as empty. The answer is to move the files in
-        deliberately, not to start beside them. A root holding no such files is fresh and
-        proceeds; a root that already holds a database has been adopted or exported, and the
-        files beside it are that export's own output.
+        A root holding files that a claim of this operation's layout matches, and no database,
+        has state this backend cannot see: creating an empty database beside those files would
+        answer every read with absence, which for a confirmed negative means an annotated image
+        training as empty. The answer is to move the files in deliberately, not to start beside
+        them. A root holding no such files is fresh and proceeds.
 
-        The answer is never remembered. A root with no database is exactly the root the file
-        backend does not refuse writes to and the one an archive restores into, so a "fresh"
-        answer from a moment ago says nothing about the root now; the walk is re-run, and the
-        creation path re-runs it again under the transition lock, which is the only moment a
-        database can come into being.
+        A database present is not on its own an answer either. Export legitimately writes
+        claimed paths beside it, so the check becomes per store: a claimed file refuses only
+        when the database has never held the store that claims it, which no export can produce
+        and a store whose files arrived since adoption can.
+
+        Nothing is remembered across the answers that can go stale. A root with no database is
+        exactly the root the file backend does not refuse writes to and the one an archive
+        restores into, so a "fresh" answer from a moment ago says nothing about the root now;
+        the walk runs again under the transition lock at the one moment a database can come
+        into being, once per layout on each connection that serves that layout, and again for
+        every layout once a declared claim has joined the catalogue.
         """
-        if database_path(root).is_file():
+        layouts = layouts_of(stores)
+        if not database_path(root).is_file():
+            for layout in layouts:
+                self._refuse_unconformed(root, layout)
             return
-        unconformed = unconformed_record_files(root, limit=5)
+        self._connection(root, stores)
+
+    def _serving(
+        self, root: str, stores: Sequence[str], keys: tuple[Key, ...] = ()
+    ) -> sqlite3.Connection | None:
+        """The checked connection for these stores, or None when this root holds no database.
+
+        A read never creates a database: the root may be one nothing has written yet, and a
+        reader is not the caller that decides a directory becomes a database's home.
+        """
+        layouts = layouts_of(stores)
+        if not database_path(root).is_file():
+            for layout in layouts:
+                self._refuse_unconformed(root, layout)
+            return None
+        return self._connection(root, stores, keys)
+
+    def _verify_layouts(
+        self,
+        conn: sqlite3.Connection,
+        root: str,
+        layouts: tuple[str, ...],
+        slot: tuple[int, int, str],
+    ) -> None:
+        """Check this root against every layout this connection has not checked it against yet.
+
+        A connection carries the set of layouts it has verified, so the walk is first use per
+        layout rather than once per connection: a directory that serves two kinds of root is
+        ordinary, and a connection opened for the first kind must still answer for the second
+        before it serves it. Reuse can never skip the check, only repeat work already done.
+
+        A claim set that has grown empties the set, because every layout's answer was derived
+        from the claims in force when it was given.
+        """
+        with self._guard:
+            verified, generation = self._checked.get(slot, (set(), claim_generation()))
+        current = claim_generation()
+        if current != generation:
+            verified = set()
+        for layout in layouts:
+            if layout in verified:
+                continue
+            self._refuse_never_held_files(conn, root, layout)
+            verified = verified | {layout}
+        with self._guard:
+            self._checked[slot] = (verified, current)
+
+    def _refuse_unconformed(self, root: str, layout: str) -> None:
+        """Refuse a root with no database that still holds files of this layout's stores."""
+        unconformed = unconformed_files(root, layout, limit=5)
         if unconformed:
             listed = ", ".join(str(path) for path in unconformed)
             raise StoreError(
@@ -393,10 +488,110 @@ class SqliteBackend:
                 "database beside those files would read every one of them as absent."
             )
 
+    def _refuse_never_held_files(
+        self, conn: sqlite3.Connection, root: str, layout: str
+    ) -> None:
+        """Refuse a claimed file beside a database that has never held the store claiming it.
+
+        With a database present a claimed file is ordinarily that store's own export, so the
+        accounting is per store and comes from the database itself: rows, tombstones or an
+        export stamp all say the store has been held here. A file whose every claimant is
+        unknown to this database is state that arrived outside it.
+
+        A directory serves whatever stores a caller roots there, and two layouts' templates can
+        describe one path, so the contenders are gathered across the layouts this root actually
+        serves rather than only the one being checked. Contenders that disagree, one holding
+        markers and another never held, are a file whose owner cannot be told from the database
+        at all: that is refused naming all of them rather than resolved by picking, the same way
+        the planner refuses a tie rather than attributing one store's document to another.
+        """
+        claimed = claimed_files(root, layout)
+        if not claimed:
+            return
+        held = {store for (store,) in conn.execute(_HELD_STORES)}
+        in_play = layouts_in_play(sorted(held), (layout,))
+        stranded: list[tuple[Path, tuple[str, ...]]] = []
+        ambiguous: list[tuple[Path, tuple[str, ...]]] = []
+        for item in claimed:
+            across = contested_claimants(root, item.path, in_play)
+            dispositions = {store in held for store in across}
+            if dispositions == {False}:
+                stranded.append((item.path, across))
+            elif len(dispositions) > 1:
+                ambiguous.append((item.path, across))
+        if ambiguous:
+            raise self._ambiguous_claim(root, ambiguous)
+        if stranded:
+            listed = ", ".join(f"{path} ({'/'.join(stores)})" for path, stores in stranded[:5])
+            raise StoreError(
+                f"{root} holds a database that has never held the stores claiming these files, "
+                f"so their state is still in the file layout beside it: {listed}. Take them in "
+                "with python scripts/adopt_store.py, which loads exactly the stores this "
+                "database has no record of; reading past them would answer every one of them "
+                "with absence."
+            )
+
+    def _ambiguous_claim(
+        self, root: str, ambiguous: list[tuple[Path, tuple[str, ...]]]
+    ) -> StoreError:
+        """The refusal for a file whose claimants this database cannot be read to agree about."""
+        listed = ", ".join(f"{path} ({', '.join(stores)})" for path, stores in ambiguous[:5])
+        return StoreError(
+            f"{root} holds files more than one store could own, and this database holds state "
+            f"for some of those stores and none for the others: {listed}. Which store each "
+            "file belongs to cannot be told from the database, and taking it in under the wrong "
+            "one would count another store's document as this one's. Move the file to a root "
+            "only one of the stores hangs off, or export and conform the root deliberately."
+        )
+
+    def _guard_first_marker(self, conn: sqlite3.Connection, keys: tuple[Key, ...]) -> None:
+        """Refuse a store's first write here while a file that store claims already exists.
+
+        A store with no rows, no tombstones and no export counter has never been held in this
+        database, so the per-store accounting reads any file claiming it as state left behind.
+        The moment this write lands, that store holds markers and the same file starts reading
+        as its own export instead, which is how a file that predates the store's arrival would
+        stop being visible to the accounting. The walk is this store's own claim rather than a
+        whole layout's, and it runs only while the store is unmarked, so it costs one targeted
+        walk per store per database.
+
+        Adoption sits below this: its supplement case exists to mint a never-held store's
+        markers from exactly these files, under the transition lock, so it writes its rows
+        through its own transaction rather than through this door.
+        """
+        marked = self._marked.setdefault(canonical_path(keys[0].root), set())
+        unknown = sorted({key.store for key in keys} - marked)
+        if not unknown:
+            return
+        placeholders = ", ".join("?" for _ in unknown)
+        held = {
+            store
+            for (store,) in conn.execute(
+                f"select store from ({_HELD_STORES}) where store in ({placeholders})", unknown
+            )
+        }
+        marked |= held
+        for store in unknown:
+            if store in held:
+                continue
+            claim = claim_of(store)
+            first = claimed_files(
+                keys[0].root, claim.layout, claims={store: claim}, limit=1
+            )
+            if first:
+                raise StoreError(
+                    f"{first[0].path} is a file {store} owns, and this database has never held "
+                    f"{store}, so this would be its first write here and the file would then "
+                    "read as its own export rather than as state nothing took in. Take the file "
+                    "in with python scripts/adopt_store.py, or remove it if it is not this "
+                    "store's."
+                )
+
     def _publish(
         self,
         db_path: Path,
         root: str,
+        layouts: tuple[str, ...],
         keys: tuple[Key, ...] = (),
         timeout_s: float | None = None,
     ) -> None:
@@ -407,10 +602,10 @@ class SqliteBackend:
         wait that runs out is this layer's own refusal, never the lock library's timeout
         escaping raw: several processes binding one root at startup all reach here at once.
 
-        The layout is checked again here, under the lock, and not only by the caller: creation
-        is the one moment a root's records stop being files, so a file that appeared since the
-        caller looked (a restored archive, a file-backend write that got in first) has to be
-        seen now or it never will be.
+        Every layout the operation serves is checked again here, under the lock, and not only
+        by the caller: creation is the one moment a root's records stop being files, so a file
+        that appeared since the caller looked (a restored archive, a file-backend write that
+        got in first) has to be seen now or it never will be.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         self._files._ensure_parent(db_path, durable=True)
@@ -423,7 +618,8 @@ class SqliteBackend:
         try:
             if db_path.is_file():
                 return
-            self.require_conformed(root)
+            for layout in layouts:
+                self._refuse_unconformed(root, layout)
             temp = db_path.parent / creation_temp_name(db_path.name, uuid.uuid4().hex)
             try:
                 self._build(temp)
@@ -514,10 +710,16 @@ class SqliteBackend:
         the snapshot-conflict class (which no busy timeout covers) out of reach. A store that
         relaxed durability commits at NORMAL; a transaction spanning both takes the stricter
         of the two, since one commit cannot be half flushed.
+
+        A store's first marker in this database is guarded inside the transaction, so a write
+        that would make a file predating it read as that store's own export is refused with
+        nothing written.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with self._mapped(keys, timeout):
-            conn = self._connection(keys[0].root, keys, timeout)
+            conn = self._connection(
+                keys[0].root, tuple(key.store for key in keys), keys, timeout
+            )
             self._set_busy_timeout(conn, timeout)
             self._apply_synchronous(conn, self._synchronous_for(keys))
         started = time.monotonic()
@@ -527,6 +729,7 @@ class SqliteBackend:
             raise self._translate(exc, keys, time.monotonic() - started) from exc
         try:
             with self._mapped(keys, timeout):
+                self._guard_first_marker(conn, keys)
                 yield conn
                 conn.execute("commit")
         except BaseException:
@@ -593,13 +796,11 @@ class SqliteBackend:
 
     def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
         descriptor = get_descriptor(key.store)
-        db_path = database_path(key.root)
         data = None
-        if db_path.is_file():
-            with self._mapped((key,)):
-                data = self._stored(self._connection(key.root, (key,)), key)
-        else:
-            self.require_conformed(key.root)
+        with self._mapped((key,)):
+            conn = self._serving(key.root, (key.store,), (key,))
+            if conn is not None:
+                data = self._stored(conn, key)
         if data is None:
             if default is REQUIRED:
                 raise _missing_record(key)
@@ -609,12 +810,9 @@ class SqliteBackend:
     def exists(self, key: Key) -> bool:
         if get_descriptor(key.store).kind == "blob":
             return self._files.exists(key)
-        db_path = database_path(key.root)
-        if not db_path.is_file():
-            self.require_conformed(key.root)
-            return False
         with self._mapped((key,)):
-            return self._stored(self._connection(key.root, (key,)), key) is not None
+            conn = self._serving(key.root, (key.store,), (key,))
+            return conn is not None and self._stored(conn, key) is not None
 
     def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
@@ -648,12 +846,11 @@ class SqliteBackend:
         descriptor = get_descriptor(store)
         if descriptor.kind == "blob":
             return self._files.keys(store, root, prefix)
-        db_path = database_path(root)
-        if not db_path.is_file():
-            self.require_conformed(root)
-            return []
         with self._mapped(()):
-            rows = self._connection(root).execute(
+            conn = self._serving(root, (store,))
+            if conn is None:
+                return []
+            rows = conn.execute(
                 "select parts from records where store = ?", (store,)
             ).fetchall()
         found = [
@@ -686,12 +883,11 @@ class SqliteBackend:
         """
         descriptor = get_descriptor(key.store)
         start = int(after) if after else 0
-        db_path = database_path(key.root)
-        if not db_path.is_file():
-            self.require_conformed(key.root)
-            return LogPage(records=[], cursor=str(start))
         with self._mapped((key,)):
-            rows = self._connection(key.root, (key,)).execute(
+            conn = self._serving(key.root, (key.store,), (key,))
+            if conn is None:
+                return LogPage(records=[], cursor=str(start))
+            rows = conn.execute(
                 "select id, entry from log_entries where store = ? and parts = ? and id > ? "
                 "order by id",
                 (key.store, encode_parts(key.parts), start),

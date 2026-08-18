@@ -14,35 +14,48 @@ import pytest
 
 import tcip_store as ts
 from tcip_store import export as store_export
-from tcip_store.adoption import (
-    ANY,
-    StoreSource,
-    adopt_root,
-    literal,
-    plan_root,
-    unaccounted_files,
-)
+from tcip_store.adoption import adopt_root, plan_root, unaccounted_files
 from tcip_store.file_backend import FileBackend, RootedFileLocator, _is_bookkeeping
+from tcip_store.layout_claims import STATE, literal, unconformed_files
 from tcip_store.sqlite_backend import SqliteBackend, database_path
-from tests._store_worker import BLOB, LOG, LWW, NESTED, register_contract_stores
+from tests._store_worker import (
+    BLOB,
+    CONTRACT_LAYOUT,
+    LOG,
+    LWW,
+    NESTED,
+    OVERLAP_DIR,
+    OVERLAP_SERVED,
+    OVERLAP_STRANDED,
+    document_claim,
+    register_contract_stores,
+)
 
 register_contract_stores()
 
 ADOPT_ALPHA = "adopt_state_alpha"
 ADOPT_BETA = "adopt_state_beta"
 ADOPT_FREE = "adopt_state_free"
-_SHARED_SHAPE = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
+ADOPT_RIVAL = "adopt_state_rival"
+_SHARED_SHAPE = RootedFileLocator(prefix=("documents",), suffix=".json")
+_CLAIMS = {
+    ADOPT_ALPHA: document_claim(literal("image_status")),
+    ADOPT_BETA: document_claim(literal("gui")),
+    ADOPT_FREE: document_claim(),
+    ADOPT_RIVAL: document_claim(),
+}
+"""Four stores over one file shape: two naming their document, two claiming any of them."""
 
 _declared = False
 
 
 def _register_adoption_stores() -> None:
-    """Three stores over one file shape: two constants and one varying key."""
+    """Declare the four, once per process, since a claim is in force while its store is."""
     global _declared
     if _declared:
         return
     _declared = True
-    for name in (ADOPT_ALPHA, ADOPT_BETA, ADOPT_FREE):
+    for name, claim in _CLAIMS.items():
         ts.register_store(
             ts.StoreDescriptor(
                 name=name,
@@ -51,21 +64,14 @@ def _register_adoption_stores() -> None:
                 codec=ts.RECORD_JSON,
                 concurrency="last_writer_wins",
                 locator=_SHARED_SHAPE,
+                claim=claim,
             )
         )
 
 
 _register_adoption_stores()
 
-LAYOUT = "a_root_under_test"
-SOURCES = {
-    LWW: StoreSource(LAYOUT, (ANY,)),
-    NESTED: StoreSource(LAYOUT, (ANY, ANY)),
-    LOG: StoreSource(LAYOUT, (ANY,)),
-    ADOPT_ALPHA: StoreSource(LAYOUT, (literal("image_status"),)),
-    ADOPT_BETA: StoreSource(LAYOUT, (literal("gui"),)),
-}
-"""The inventory these cases adopt against, the shape scripts/_store_bootstrap.py carries."""
+LAYOUT = CONTRACT_LAYOUT
 
 
 @contextmanager
@@ -109,7 +115,7 @@ def test_files_adopted_into_a_database_and_exported_again_are_the_same_files(tmp
         _write_a_layout(tmp_path)
     before = _entries(tmp_path)
 
-    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     with bound(SqliteBackend()):
         assert ts.read(_key(ADOPT_ALPHA, tmp_path, "image_status")) == {
@@ -129,7 +135,7 @@ def test_an_adopted_root_is_stamped_current_so_a_file_reader_is_not_told_to_expo
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
 
-    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     assert store_export.stale_stores(database_path(str(tmp_path))) == ()
 
@@ -139,7 +145,7 @@ def test_a_blob_keeps_its_file_and_never_becomes_a_row(tmp_path):
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
 
-    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     assert (tmp_path / "blobs" / "picture.bin").read_bytes() == b"\x89PNG"
     states = store_export.read_store_states(database_path(str(tmp_path)))
@@ -154,7 +160,7 @@ def test_a_file_that_will_not_decode_refuses_the_root_before_anything_is_written
     (tmp_path / "lww" / "kept.json").write_bytes(b"{not json")
 
     with pytest.raises(ts.DecodeError) as raised:
-        adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+        adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     assert "kept" in str(raised.value)
     assert not database_path(str(tmp_path)).exists()
@@ -170,7 +176,7 @@ def test_a_log_line_that_will_not_decode_refuses_the_root(tmp_path):
     path.write_bytes(path.read_bytes() + b"{torn\n")
 
     with pytest.raises(ts.DecodeError):
-        adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+        adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     assert not database_path(str(tmp_path)).exists()
 
@@ -181,26 +187,12 @@ def test_a_file_two_stores_claim_equally_refuses_rather_than_picking_one(tmp_pat
     store's export stamp."""
     with bound(FileBackend()):
         ts.replace(_key(ADOPT_FREE, tmp_path, "anything"), {"n": 1})
-    ambiguous = dict(SOURCES)
-    ambiguous[ADOPT_FREE] = StoreSource(LAYOUT, (ANY,))
-    ambiguous[LWW] = StoreSource(LAYOUT, (ANY,))
-    ambiguous["second_free"] = StoreSource(LAYOUT, (ANY,))
-    ts.register_store(
-        ts.StoreDescriptor(
-            name="second_free",
-            kind="record",
-            key_fields=("document",),
-            codec=ts.RECORD_JSON,
-            concurrency="last_writer_wins",
-            locator=_SHARED_SHAPE,
-        )
-    )
 
     with pytest.raises(ts.StoreError) as raised:
-        plan_root(str(tmp_path), LAYOUT, ambiguous)
+        plan_root(str(tmp_path), LAYOUT)
 
     message = str(raised.value)
-    assert ADOPT_FREE in message and "second_free" in message
+    assert ADOPT_FREE in message and ADOPT_RIVAL in message
 
 
 def test_a_constant_key_wins_over_a_varying_one_claiming_the_same_file(tmp_path):
@@ -208,27 +200,26 @@ def test_a_constant_key_wins_over_a_varying_one_claiming_the_same_file(tmp_path)
     more about that file than one whose key is any name at all, so there is no tie to refuse."""
     with bound(FileBackend()):
         ts.replace(_key(ADOPT_ALPHA, tmp_path, "image_status"), {"n": 1})
-    with_free = dict(SOURCES)
-    with_free[ADOPT_FREE] = StoreSource(LAYOUT, (ANY,))
 
-    plan = plan_root(str(tmp_path), LAYOUT, with_free)
+    plan = plan_root(str(tmp_path), LAYOUT)
 
     assert [(entry.store, entry.parts) for entry in plan.entries] == [
         (ADOPT_ALPHA, ("image_status",))
     ]
 
 
-def test_a_record_file_no_store_in_the_plan_owns_is_named_rather_than_left_behind(tmp_path):
-    """A file left in the layout reads as absent once a database exists, which for a confirmed
-    negative means an annotated image training as empty."""
+def test_the_files_the_rail_refuses_are_exactly_the_files_a_plan_accounts_for(tmp_path):
+    """One claim set answers both questions, so a file cannot be evidence a root is unconformed
+    and at the same time be a file no plan takes in: that gap is a file read as absent once the
+    database exists, which for a confirmed negative means an annotated image training as empty."""
     with bound(FileBackend()):
-        ts.replace(_key(LWW, tmp_path, "kept"), {"n": 1})
-        ts.replace(_key(ADOPT_FREE, tmp_path, "unclaimed"), {"n": 2})
+        _write_a_layout(tmp_path)
 
-    plan = plan_root(str(tmp_path), LAYOUT, SOURCES)
-    left = unaccounted_files((plan,))
+    plan = plan_root(str(tmp_path), LAYOUT)
+    refused = set(unconformed_files(str(tmp_path), LAYOUT))
 
-    assert [path.name for path in left] == ["unclaimed.json"]
+    assert refused == {entry.path for entry in plan.entries} | set(unaccounted_files((plan,)))
+    assert refused == set(plan.claimed)
 
 
 def test_a_layout_whose_files_are_all_planned_leaves_nothing_unaccounted(tmp_path):
@@ -237,7 +228,7 @@ def test_a_layout_whose_files_are_all_planned_leaves_nothing_unaccounted(tmp_pat
     with bound(FileBackend()):
         _write_a_layout(tmp_path)
 
-    plan = plan_root(str(tmp_path), LAYOUT, SOURCES)
+    plan = plan_root(str(tmp_path), LAYOUT)
 
     assert unaccounted_files((plan,)) == ()
 
@@ -259,8 +250,7 @@ def test_a_shard_whose_filename_cannot_spell_its_key_adopts_under_the_key_its_by
         as_files = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(tmp_path))
     assert [k.parts for k in as_files] == [(bucket, image)]
 
-    sources = {review_engine.REVIEW_VERDICTS_STORE: StoreSource(LAYOUT, (ANY, ANY))}
-    adopt_root(str(tmp_path), LAYOUT, sources, report=lambda line: None)
+    adopt_root(str(tmp_path), STATE, report=lambda line: None)
 
     with bound(SqliteBackend()):
         as_rows = ts.keys(review_engine.REVIEW_VERDICTS_STORE, str(tmp_path))
@@ -268,16 +258,67 @@ def test_a_shard_whose_filename_cannot_spell_its_key_adopts_under_the_key_its_by
         assert ts.read(as_rows[0]) == payload
 
 
-def test_adopting_a_root_that_already_has_a_database_is_refused(tmp_path):
-    """Its records are rows now, so a second adoption would build a database out of files the
-    database no longer owns."""
+def test_adopting_a_root_whose_database_already_holds_everything_changes_nothing(tmp_path):
+    """A root run through adoption twice is ordinary operator work, and the second run must not
+    read a served store's own export back in on top of the rows it came from."""
     with bound(SqliteBackend()):
         ts.replace(_key(LWW, tmp_path, "fresh"), {"n": 1})
+        store_export.export_root(str(tmp_path), report=lambda line: None)
+    before = _entries(tmp_path)
+
+    result = adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
+
+    assert (result.records, result.log_entries) == ({}, {})
+    assert _entries(tmp_path) == before
+    with bound(SqliteBackend()):
+        assert ts.keys(LWW, str(tmp_path)) == [_key(LWW, tmp_path, "fresh")]
+
+
+def test_a_file_two_layouts_claim_refuses_rather_than_being_taken_in_under_one(tmp_path):
+    """A directory serves whatever stores a caller roots there, so one path can be a legal entry
+    of two stores under two layouts. Where the database holds state for one and none for the
+    other, no marker says whose the file is, and adopting it under the planner's winner would
+    count another store's document as this one's."""
+    with bound(SqliteBackend()):
+        ts.replace(_key(OVERLAP_SERVED, tmp_path, "served"), {"n": 1})
+    overlap = tmp_path / OVERLAP_DIR
+    overlap.mkdir(exist_ok=True)
+    (overlap / "planted.json").write_text('{"n": 2}', encoding="utf-8")
 
     with pytest.raises(ts.StoreError) as raised:
-        adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+        adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
-    assert "already exists" in str(raised.value)
+    message = str(raised.value)
+    assert OVERLAP_SERVED in message and OVERLAP_STRANDED in message
+    assert "Nothing was written" in message
+
+
+def test_a_store_whose_files_arrived_after_adoption_is_taken_in_on_a_second_run(tmp_path):
+    """A store the database has never held is exactly what the rail refuses a conformed root
+    for, so the remediation it names has to load those files and leave every served store's
+    rows and export files alone."""
+    with bound(FileBackend()):
+        ts.replace(_key(LWW, tmp_path, "kept"), {"n": 1})
+    adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
+    with bound(SqliteBackend()):
+        store_export.export_root(str(tmp_path), report=lambda line: None)
+    exported = (tmp_path / "lww" / "kept.json").read_bytes()
+    (tmp_path / "documents").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "documents" / "image_status.json").write_bytes(b'{\n  "a_1.jpg": "negative"\n}\n')
+
+    with bound(SqliteBackend()):
+        with pytest.raises(ts.StoreError) as refused:
+            ts.read(_key(LWW, tmp_path, "kept"))
+    assert "image_status.json" in str(refused.value)
+
+    result = adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
+
+    assert result.records == {ADOPT_ALPHA: 1}
+    assert (tmp_path / "lww" / "kept.json").read_bytes() == exported
+    with bound(SqliteBackend()):
+        assert ts.read(_key(LWW, tmp_path, "kept")) == {"n": 1}
+        assert ts.read(_key(ADOPT_ALPHA, tmp_path, "image_status")) == {"a_1.jpg": "negative"}
+    assert store_export.stale_stores(database_path(str(tmp_path))) == ()
 
 
 def test_a_root_holding_no_records_adopts_to_an_empty_database(tmp_path):
@@ -286,7 +327,7 @@ def test_a_root_holding_no_records_adopts_to_an_empty_database(tmp_path):
     with bound(FileBackend()):
         ts.put_blob(_key(BLOB, tmp_path, "picture"), b"\x89PNG", expect=ts.Version.ABSENT)
 
-    adopt_root(str(tmp_path), LAYOUT, SOURCES, report=lambda line: None)
+    adopt_root(str(tmp_path), LAYOUT, report=lambda line: None)
 
     with bound(SqliteBackend()):
         ts.replace(_key(LWW, tmp_path, "later"), {"n": 1})

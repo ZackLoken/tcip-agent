@@ -18,6 +18,7 @@ from tcip_store.model import Key
 
 if TYPE_CHECKING:  # a database backend imports this module and must not import a path type
     from tcip_store.file_backend import Locator
+    from tcip_store.layout_claims import Claim
 
 Kind = Literal["record", "log", "blob"]
 Concurrency = Literal["cas", "last_writer_wins"]
@@ -71,6 +72,12 @@ class StoreDescriptor:
     ``keys`` returning the same identities on every backend. It returns None for an entry
     whose bytes do not state a key, and a store whose layout is already invertible declares
     nothing.
+
+    ``claim`` states which files under which kind of root belong to this store, for a record
+    or log store the platform's own claim table does not already speak for. Without it the
+    conform rail cannot tell this store's leftover files from anything else under a root, so
+    every database operation on the store refuses. A store already in the platform table
+    declares nothing here: one home per store.
     """
 
     name: str
@@ -84,10 +91,22 @@ class StoreDescriptor:
     locator: "Locator | None" = None
     codec_exemption: str = ""
     true_parts_from_entry: Callable[[bytes], tuple[str, ...] | None] | None = None
+    claim: "Claim | None" = None
     declared_in: str = ""
 
 
 _registry: dict[str, StoreDescriptor] = {}
+_claim_generation = 0
+
+
+def claim_generation() -> int:
+    """How many declared claims have joined this process's catalogue.
+
+    The conform rail derives freshness from the claim set in force at the moment it answers,
+    never from anything it persisted, so a reader holding an open database compares this
+    integer to the one its last check ran under and re-checks when it has moved.
+    """
+    return _claim_generation
 
 
 def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
@@ -102,7 +121,8 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
     reading that layout expect. Refuses a JSON spelling that is not the canonical one for the
     kind, unless the descriptor states why in ``codec_exemption``, so a module nothing has
     imported cannot quietly hold a bespoke codec that no test enumerating the registry would
-    ever see.
+    ever see. Refuses a claim declared by a store the platform table already speaks for, since
+    two statements of where one store's files live are two answers the rail could get.
     """
     if descriptor.name in _registry:
         owner = _registry[descriptor.name].declared_in
@@ -139,11 +159,35 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
             "once the entry will survive a crash, so the declaration would be ignored"
         )
     _check_canonical_codec(descriptor)
+    _check_claim(descriptor)
 
     frame = sys._getframe(1)
     registered = replace(descriptor, declared_in=str(frame.f_globals.get("__name__", "?")))
     _registry[descriptor.name] = registered
+    if registered.claim is not None:
+        global _claim_generation
+        _claim_generation += 1
     return registered
+
+
+def _check_claim(descriptor: StoreDescriptor) -> None:
+    """Refuse a second statement of where a store the platform table already places lives."""
+    # imported here rather than at module scope: the claims module reads this catalogue
+    from tcip_store.layout_claims import platform_claim_stores
+
+    if descriptor.claim is None:
+        return
+    if descriptor.name in platform_claim_stores():
+        raise ValueError(
+            f"store {descriptor.name!r} is in the platform claim table and also declares a "
+            "claim of its own. One store states where its files live in one place: drop the "
+            "declaration, or change the table row if the layout itself moved."
+        )
+    if descriptor.kind == "blob":
+        raise ValueError(
+            f"blob store {descriptor.name!r} declares a layout claim, but a blob's bytes stay "
+            "a file under every backend, so nothing about it is ever left behind in a layout"
+        )
 
 
 def _check_canonical_codec(descriptor: StoreDescriptor) -> None:

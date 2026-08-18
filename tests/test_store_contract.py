@@ -1187,7 +1187,7 @@ def test_a_write_commits_at_the_synchronous_level_its_store_declares(store):
         relaxed = store.key(RELAXED, "heartbeat")
         durable = store.key(LWW, "durable")
         ts.replace(durable, {"n": 0})
-        conn = backend._connection(str(store.root))
+        conn = backend._connection(str(store.root), (LWW,))
 
         backend.levels.clear()
         ts.replace(relaxed, {"n": 1})

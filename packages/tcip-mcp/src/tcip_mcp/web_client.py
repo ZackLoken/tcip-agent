@@ -114,11 +114,11 @@ _META_PARTS = ("canvas_live",)
 _GEOMETRY_PARTS = ("canvas_shapes",)
 
 
-def _register_canvas_store(name: str) -> None:
-    """Declare one of the pair: same codec, same relaxed durability, same policy."""
+for _canvas_store in (CANVAS_META_STORE, CANVAS_GEOMETRY_STORE):
+    # declared here rather than through a helper: a call in a function body is not an import
     register_store(
         StoreDescriptor(
-            name=name,
+            name=_canvas_store,
             kind="record",
             key_fields=("document",),
             codec=RECORD_JSON,
@@ -127,10 +127,6 @@ def _register_canvas_store(name: str) -> None:
             locator=_CANVAS_DOC,
         )
     )
-
-
-_register_canvas_store(CANVAS_META_STORE)
-_register_canvas_store(CANVAS_GEOMETRY_STORE)
 
 
 def canvas_meta_key(project_root: str) -> Key:

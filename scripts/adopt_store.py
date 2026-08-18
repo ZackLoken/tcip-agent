@@ -1,10 +1,13 @@
-"""Move a root's existing record and log files into a store database, once.
+"""Move a root's existing record and log files into a store database.
 
 A root that has been written by the file backend holds state no database beside it could see,
 so the database backend refuses such a root until this has run. It reads every record and log
 file the root's stores own, decodes all of them, and publishes a database holding exactly
 those entries, stamped as already exported. Blob files (imagery, labels, predictions,
 checkpoints, hand-authored documents) stay exactly where they are under every backend.
+
+A root that already holds a database is planned too: a store whose files arrived after that
+database was built is one the database has never held, and this takes exactly those in.
 
     python scripts/adopt_store.py --project <project_root>
     python scripts/adopt_store.py --layout <layout> <root> [<root> ...]
@@ -24,11 +27,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _store_bootstrap import ADOPTION_SOURCES, LAYOUTS, project_roots  # noqa: E402
+from _store_bootstrap import project_roots  # noqa: E402
 
 from tcip_store.adoption import AdoptionPlan, adopt_root, plan_root, unaccounted_files  # noqa: E402
 from tcip_store.errors import StoreError  # noqa: E402
-from tcip_store.file_backend import FileBackend, database_file  # noqa: E402
+from tcip_store.file_backend import FileBackend  # noqa: E402
+from tcip_store.layout_claims import LAYOUTS  # noqa: E402
 from tcip_store.store import bind  # noqa: E402
 
 
@@ -57,13 +61,8 @@ def main() -> int:
         print("error: name at least one root with --layout, or pass --project <project_root>")
         return 2
 
-    pending = [(root, layout) for root, layout in targets if not database_file(root).is_file()]
-    for root, _layout in targets:
-        if database_file(root).is_file():
-            print(f"{root}: already holds a store database, leaving it alone")
-
     try:
-        plans = tuple(plan_root(root, layout, ADOPTION_SOURCES) for root, layout in pending)
+        plans = tuple(plan_root(root, layout) for root, layout in targets)
         left = unaccounted_files(plans)
         if left:
             listed = "\n  ".join(str(path) for path in left)
@@ -77,7 +76,7 @@ def main() -> int:
         if args.plan:
             return 0
         for plan in plans:
-            result = adopt_root(plan.root, plan.layout, ADOPTION_SOURCES)
+            result = adopt_root(plan.root, plan.layout)
             loaded = sum(result.records.values()) + sum(result.log_entries.values())
             print(f"{plan.root}: adopted {loaded} entr(ies) into {result.database}")
     except StoreError as exc:
