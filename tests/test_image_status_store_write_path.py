@@ -14,7 +14,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp.dataset_layout import image_status_path, normalize_status_store
+import tcip_store
+from tcip_mcp.dataset_layout import (
+    image_status_digest_key,
+    image_status_key,
+    image_status_path,
+    normalize_status_store,
+)
 from tcip_web.app import app
 
 
@@ -48,11 +54,23 @@ def _on_disk(root: Path) -> dict[str, dict[str, str]]:
         json.loads(image_status_path(root).read_text(encoding="utf-8")))
 
 
+def _stored(root: Path) -> dict[str, dict[str, str]]:
+    """The store's content through the seam, wherever the selected backend actually keeps it."""
+    return normalize_status_store(tcip_store.read(image_status_key(root), default={}))
+
+
 def test_a_status_write_lands_at_the_shared_locator_and_creates_no_second_store(
     client: TestClient, tmp_path: Path
 ) -> None:
     """The store the readers resolve through is the store the route wrote, and it is the only
-    state file the write produced: a second, locally built path would strand the confirmation."""
+    state file the write produced: a second, locally built path would strand the confirmation.
+
+    Bound to the file backend on purpose: the claim is about the exact set of files the write
+    leaves on disk, which only the file backend produces at all.
+    """
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     _single(client, tmp_path, "IMG_0001.JPG", "complete", "catkin")
 
     assert image_status_path(tmp_path).is_file()
@@ -77,7 +95,7 @@ def test_confirmations_for_other_subjects_and_dates_survive_a_later_write(
     _bulk(client, tmp_path, {"A.JPG": "negative", "E.JPG": "complete"}, "catkin", "2026-03-09")
     _single(client, tmp_path, "F.JPG", "unannotated", "catkin")
 
-    assert _on_disk(tmp_path) == {
+    assert _stored(tmp_path) == {
         "catkin": {"A.JPG": "complete", "B.JPG": "negative", "C.JPG": "partial",
                    "F.JPG": "unannotated"},
         "bush": {"D.JPG": "negative"},
@@ -95,7 +113,7 @@ def test_the_read_route_returns_the_bucket_the_write_routes_built(
     _single(client, tmp_path, "D.JPG", "negative", "bush")
     _bulk(client, tmp_path, {"A.JPG": "negative", "E.JPG": "complete"}, "catkin", "2026-03-09")
 
-    on_disk = _on_disk(tmp_path)
+    on_disk = _stored(tmp_path)
     assert len(on_disk) == 3
 
     def read(subject: str, date: str | None) -> dict[str, str]:
@@ -125,11 +143,11 @@ def test_a_status_the_readers_do_not_understand_is_refused_before_it_reaches_the
 
     with pytest.raises(ValueError, match="reviewed"):
         record_image_statuses(tmp_path, "catkin", {"A.JPG": "reviewed"}, recorded_by="user:ada")
-    assert not image_status_path(tmp_path).exists()
+    assert not tcip_store.exists(image_status_key(tmp_path))
 
     record_image_statuses(tmp_path, "catkin", {f"{s}.JPG": s for s in IMAGE_STATUSES},
                           recorded_by="user:ada")
-    assert _on_disk(tmp_path)["catkin"] == {f"{s}.JPG": s for s in IMAGE_STATUSES}
+    assert _stored(tmp_path)["catkin"] == {f"{s}.JPG": s for s in IMAGE_STATUSES}
 
 
 def test_a_status_with_no_actor_behind_it_is_refused(tmp_path: Path) -> None:
@@ -150,16 +168,15 @@ def test_a_merge_refuses_rather_than_deleting_entries_it_cannot_read(tmp_path: P
     """
     from tcip_mcp.dataset_layout import record_image_statuses
 
-    store = image_status_path(tmp_path)
-    store.parent.mkdir(parents=True, exist_ok=True)
-    store.write_text(json.dumps({"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}),
-                     encoding="utf-8")
+    tcip_store.replace(image_status_key(tmp_path),
+                       {"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}},
+                       expect=tcip_store.Version.ABSENT)
 
     with pytest.raises(ValueError, match="does not recognize"):
         record_image_statuses(tmp_path, "catkin", {"NEW.JPG": "negative"},
                               recorded_by="user:breeder")
 
-    still_there = json.loads(store.read_text(encoding="utf-8"))
+    still_there = tcip_store.read(image_status_key(tmp_path))
     assert still_there == {"catkin": {"OLD_A.JPG": "negative", "OLD_B.JPG": "complete"}}
 
 
@@ -203,7 +220,7 @@ def test_a_materialized_output_carries_only_the_negatives_that_run_derived(tmp_p
     replace_image_status_store(tmp_path, {"catkin": negatives("OLD.JPG")})
     replace_image_status_store(tmp_path, {"catkin": negatives("NEW.JPG")})
 
-    assert _on_disk(tmp_path) == {"catkin": {"NEW.JPG": "negative"}}
+    assert _stored(tmp_path) == {"catkin": {"NEW.JPG": "negative"}}
 
 
 def test_a_schema_stamp_leaves_every_other_image_stamp_in_place(tmp_path: Path) -> None:
@@ -212,13 +229,13 @@ def test_a_schema_stamp_leaves_every_other_image_stamp_in_place(tmp_path: Path) 
     A whole-document write would drop a stamp another image's confirmation was quarantined by,
     which un-quarantines a confirmation made under a schema that has since changed.
     """
-    from tcip_mcp.dataset_layout import image_status_digest_path, stamp_image_status_digests
+    from tcip_mcp.dataset_layout import stamp_image_status_digests
 
     stamp_image_status_digests(tmp_path, "catkin", ["A.JPG", "B.JPG"], "digest-one")
     stamp_image_status_digests(tmp_path, "bush", ["C.JPG"], "digest-two")
     stamp_image_status_digests(tmp_path, "catkin", ["B.JPG"], "digest-three")
 
-    assert json.loads(image_status_digest_path(tmp_path).read_text(encoding="utf-8")) == {
+    assert tcip_store.read(image_status_digest_key(tmp_path)) == {
         "bush": {"C.JPG": "digest-two"},
         "catkin": {"A.JPG": "digest-one", "B.JPG": "digest-three"},
     }

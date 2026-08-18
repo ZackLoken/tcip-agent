@@ -93,13 +93,21 @@ def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(tmp_pat
     A row's bytes land on disk before its terminator does, so a stream that consumed the
     fragment would skip the completed row permanently. The stream reads through the log's own
     cursor, which holds that fragment back until it is whole.
+
+    Bound to the file backend on purpose: a torn tail is bytes an appender left mid-write, an
+    on-disk file mechanic the fragment below fabricates directly; a database backend commits a
+    row whole or not at all and has no such state to defer.
     """
     import asyncio
 
+    import tcip_store
     from tcip_mcp.experiments import (
         create_experiment, experiments_dir, log_metrics, update_status,
     )
+    from tcip_store.file_backend import FileBackend
     from tcip_web.routes.training import _stream_metrics
+
+    tcip_store.bind(FileBackend())
 
     run_id = "exp-streamed"
     create_experiment(run_id, {"model_source": {"builder": "m:f"}})

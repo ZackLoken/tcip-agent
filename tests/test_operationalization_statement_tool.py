@@ -8,13 +8,14 @@ project's own measurement is recorded in that project's own log rather than the 
 from __future__ import annotations
 
 import inspect
-import json
 from pathlib import Path
 
 import pytest
 
 import tcip_mcp.audit as audit_module
+import tcip_store as ts
 from tcip_mcp import operationalization as op
+from tcip_mcp.audit import audit_log_key
 from tcip_mcp.tools.operationalization_tools import state_trait_operationalization
 from tests import _operationalization_fixtures as fx
 
@@ -34,11 +35,8 @@ def platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _entries(root: Path, tool: str) -> list[dict]:
-    log = root / ".tcip" / "audit.jsonl"
-    if not log.is_file():
-        return []
-    rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
-    return [row for row in rows if row["tool"] == tool]
+    page = ts.read_log(audit_log_key(root))
+    return [row for row in page.records if row["tool"] == tool]
 
 
 def _state(project: Path, **overrides) -> dict:

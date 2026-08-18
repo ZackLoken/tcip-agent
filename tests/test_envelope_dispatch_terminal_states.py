@@ -10,27 +10,25 @@ Provenance is re-snapshotted after the body ran, so ``env.json`` carries the rea
 
 from __future__ import annotations
 
-import json
-
 import pytest
+
+import tcip_store as ts
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.audit import audit_log_key  # noqa: E402
+from tcip_mcp.experiments import env_key, status_key  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
 
 
 def _audit_statuses(root, tool="training_run"):
-    path = root / ".tcip" / "audit.jsonl"
-    if not path.is_file():
-        return []
-    events = [json.loads(x) for x in path.read_text().splitlines()]
+    events = ts.read_log(audit_log_key(root)).records
     return [e["status"] for e in events if e.get("tool") == tool]
 
 
 def _experiment_state(root, experiment_id):
-    return json.loads(
-        (root / ".tcip" / "experiments" / experiment_id / "status.json").read_text())["state"]
+    return ts.read(status_key(experiment_id, root=root))["state"]
 
 
 def _start(tmp_path, experiment_id, body_name):
@@ -159,7 +157,7 @@ def test_env_provenance_carries_an_outcome_only_known_after_the_body_ran(tmp_pat
     ctx = _start(tmp_path, "expRng", "_train_restores_rng_state")
 
     assert ctx.run.status == "completed"
-    env = json.loads((tmp_path / ".tcip" / "experiments" / "expRng" / "env.json").read_text())
+    env = ts.read(env_key("expRng"))
     assert env["rng_state_restored"] is True
     assert env["run_id"] == ctx.run.run_id
     assert env["seed"] == ctx.run.config["seed"]

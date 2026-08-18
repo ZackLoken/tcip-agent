@@ -1,7 +1,5 @@
 """Web job lifecycle: memory cap, persistence, and inference cancellation."""
 
-import json
-
 import pytest
 
 
@@ -21,12 +19,11 @@ def test_evict_terminal_caps_and_keeps_running():
     assert "done0" not in jobs      # oldest terminal evicted first
 
 
-def test_persist_writes_state_file(tmp_path, monkeypatch):
+def test_persist_writes_state_that_reads_back(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    from tcip_web.jobstore import persist
+    from tcip_web.jobstore import load, persist
     persist("inference_jobs", [{"job_id": "a", "status": "completed"}])
-    data = json.loads((tmp_path / ".tcip" / "state" / "inference_jobs.json").read_text())
-    assert data == [{"job_id": "a", "status": "completed"}]
+    assert load("inference_jobs") == [{"job_id": "a", "status": "completed"}]
 
 
 def test_load_roundtrips_persist_and_defaults_empty(tmp_path, monkeypatch):
@@ -121,5 +118,6 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
     assert job.status == "cancelled"
     assert job.done == 0
 
-    data = json.loads((tmp_path / ".tcip" / "state" / "inference_jobs.json").read_text())
+    from tcip_web.jobstore import load
+    data = load("inference_jobs")
     assert any(s["job_id"] == "j1" and s["status"] == "cancelled" for s in data)

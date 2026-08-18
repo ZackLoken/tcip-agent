@@ -12,7 +12,6 @@ mapping is refused by name, never carried forward into a phenology computed over
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -115,18 +114,20 @@ def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_proj
     """The audit row lands in the project that owns the state directory the mapping was written
     into, found from the ``.tcip`` marker itself, so a mapping stored deeper under state is still
     attributed to the project rather than to some directory a fixed number of levels up."""
+    import tcip_store
+
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
     payload = _capture_fixture(tmp_path)
     persist_path = tmp_path / ".tcip" / "state" / "mappings" / "valley" / "plant_mapping.json"
     resp = client.post(
         "/api/results/plant_mapping/build", json={**payload, "persist_path": str(persist_path)})
     assert resp.status_code == 200
-    assert json.loads(persist_path.read_text(encoding="utf-8")).keys() == {
-        "2026-02-11", "2026-02-25"}
+    assert plant_mapping.load_mapping(persist_path).keys() == {"2026-02-11", "2026-02-25"}
 
-    audit_path = tmp_path / ".tcip" / "audit.jsonl"
-    assert audit_path.is_file()
-    rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines() if line]
-    built = [r for r in rows if r["tool"] == "gui_build_plant_mapping"]
+    page = tcip_store.read_log(audit_log_key(tmp_path))
+    built = [r for r in page.records if r["tool"] == "gui_build_plant_mapping"]
     assert len(built) == 1
     assert built[0]["arguments"]["persist_path"] == str(persist_path)
     assert built[0]["arguments"]["n_dates"] == 2
@@ -138,13 +139,19 @@ def test_a_mapping_persisted_outside_platform_state_writes_no_audit_row(
 ) -> None:
     """The audit seam belongs to platform state. A mapping the breeder parks somewhere else is
     still built and persisted, and no project is credited with an audit row for it."""
+    import tcip_store
+
+    from tcip_mcp.audit import audit_log_key
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
     payload = _capture_fixture(tmp_path)
     persist_path = tmp_path / "exports" / "plant_mapping.json"
     resp = client.post(
         "/api/results/plant_mapping/build", json={**payload, "persist_path": str(persist_path)})
     assert resp.status_code == 200
-    assert persist_path.is_file()
-    assert list(tmp_path.rglob("audit.jsonl")) == []
+    assert plant_mapping.load_mapping(persist_path)
+    page = tcip_store.read_log(audit_log_key(tmp_path))
+    assert not any(r["tool"] == "gui_build_plant_mapping" for r in page.records)
 
 
 def test_every_phenology_door_refuses_a_mapping_path_that_names_no_mapping(

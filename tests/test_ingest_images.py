@@ -393,20 +393,16 @@ def test_ingest_non_recursive_skips_subfolders(tmp_path):
 
 
 def test_ingest_writes_audit_entry(tmp_path, monkeypatch):
+    import tcip_store as ts
     import tcip_mcp.audit as audit_mod
 
-    audit_path = tmp_path / ".tcip" / "audit.jsonl"
     monkeypatch.setattr(audit_mod, "AUDIT_ROOT", tmp_path)
 
     src = tmp_path / "raw"
     _make_image(src / "a.png")
     ingest_images(source=str(src), name="proj_audit")
 
-    assert audit_path.is_file()
-    lines = audit_path.read_text().strip().splitlines()
-    import json
-
-    entries = [json.loads(ln) for ln in lines]
+    entries = ts.read_log(audit_mod.audit_log_key(tmp_path)).records
     assert any(e["tool"] == "ingest_images" and e["status"] == "ok" for e in entries)
 
 

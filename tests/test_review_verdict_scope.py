@@ -21,8 +21,10 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import tcip_store
 from tcip_annotation import Annotation, BBox
 from tcip_mcp.dataset_layout import prediction_dir
+from tcip_mcp.pipelines.resolution import sidecar_key
 from tcip_mcp.prediction_buckets import stage_prediction_shapes
 from tcip_web.app import app
 
@@ -80,11 +82,11 @@ def _sidecar(bucket: Path) -> None:
     prediction document the reviewer is looking at, so the promotion has something recorded to
     compare the file on disk against.
     """
-    (bucket / "operating_point.json").write_text(json.dumps({
+    tcip_store.replace(sidecar_key(bucket, "operating_point"), {
         "checkpoint_sha256": "sha-detector", "experiment_id": None, "validated": False,
         "id_map": {"catkin": 0},
         "operating_point": {"tiled": {"value": False}, "conf": {"value": 0.25}},
-    }), encoding="utf-8")
+    }, expect=tcip_store.Version.ABSENT)
 
 
 def _project_root(tmp_path: Path) -> Path:
@@ -175,7 +177,9 @@ def test_gui_verdict_is_visible_to_the_bucket_guard(client: TestClient, tmp_path
     assert again["verdict_count"] == 1
     assert again["bucket"] == "detector@r2"
     # The verdict lives in the dataset's own store; the project directory holds no review state.
-    assert (dataset_root / ".tcip" / "state" / "review").is_dir()
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    assert tcip_store.keys(REVIEW_VERDICTS_STORE, str(dataset_root / ".tcip" / "state"))
     assert not (project_root / ".tcip").exists()
 
 
@@ -211,7 +215,7 @@ def test_promotion_refuses_a_changed_prediction_file(client: TestClient, tmp_pat
     assert replaced["validated"] is False
     assert f"{STEM}.jpg" in replaced["reason"]
     assert replaced["buckets_stamped"] == []
-    assert json.loads((bucket / "operating_point.json").read_text())["validated"] is False
+    assert tcip_store.read(sidecar_key(bucket, "operating_point"))["validated"] is False
 
     Path(staged["path"]).write_bytes(original)
     original_other = Path(staged_other["path"]).read_bytes()
@@ -252,7 +256,7 @@ def test_promotion_refuses_a_bucket_from_another_dataset_root(
     assert resp.status_code == 400
     detail = resp.json()["detail"]
     assert str(here) in detail and str(elsewhere) in detail
-    assert json.loads((bucket / "operating_point.json").read_text())["validated"] is False
+    assert tcip_store.read(sidecar_key(bucket, "operating_point"))["validated"] is False
 
 
 @pytest.mark.usefixtures("seed_catkin_trait_spec")
@@ -326,5 +330,7 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
     assert again["redirected"] is True
 
     # Every record these routes changed travels with the dataset; the project directory is untouched.
-    assert (dataset_root / ".tcip" / "audit.jsonl").is_file()
+    from tcip_mcp.audit import audit_log_key
+
+    assert tcip_store.read_log(audit_log_key(dataset_root)).records
     assert not (project_root / ".tcip").exists()

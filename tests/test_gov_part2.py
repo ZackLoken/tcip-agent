@@ -161,15 +161,17 @@ def test_workspace_mode_never_writes_anything(tmp_path):
 
 
 def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
+    import tcip_store as ts
     from tcip_web import agent_learning_capture
 
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s1", "cwd": str(tmp_path), "reason": "clear"})))
     agent_learning_capture.main()
 
-    cap = tmp_path / ".tcip" / "learning_capture.jsonl"
-    assert cap.is_file()
-    assert json.loads(cap.read_text(encoding="utf-8").strip())["session_id"] == "s1"
+    key = agent_learning_capture.learning_capture_key(tmp_path)
+    records = ts.read_log(key).records
+    assert len(records) == 1
+    assert records[0]["session_id"] == "s1"
 
     # Malformed / empty stdin must not raise: a capture backstop cannot break the session.
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json at all"))
@@ -179,25 +181,27 @@ def test_capture_hook_appends_and_never_raises(tmp_path, monkeypatch):
 def test_capture_hook_stamps_the_workspace_active_project(tmp_path, monkeypatch):
     """Entries pool in one platform-level file, so each stamps which workspace project was
     adopted at session end; no marker stamps None rather than guessing."""
+    import tcip_store as ts
+    from tcip_mcp.workspace import active_project_key
     from tcip_web import agent_learning_capture
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (workspace / ".active").write_text("hazelnut_catkins_valley-farm\n", encoding="utf-8")
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
+    ts.replace(active_project_key(), "hazelnut_catkins_valley-farm", expect=ts.Version.ABSENT)
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s2", "cwd": str(tmp_path)})))
     agent_learning_capture.main()
 
-    cap = tmp_path / ".tcip" / "learning_capture.jsonl"
-    entry = json.loads(cap.read_text(encoding="utf-8").strip())
+    key = agent_learning_capture.learning_capture_key(tmp_path)
+    entry = ts.read_log(key).records[0]
     assert entry["active_project"] == "hazelnut_catkins_valley-farm"
 
-    (workspace / ".active").unlink()
+    ts.delete(active_project_key())
     monkeypatch.setattr(sys, "stdin",
                         io.StringIO(json.dumps({"session_id": "s3", "cwd": str(tmp_path)})))
     agent_learning_capture.main()
-    entries = [json.loads(line) for line in cap.read_text(encoding="utf-8").splitlines()]
+    entries = ts.read_log(key).records
     assert entries[-1]["active_project"] is None
 
 

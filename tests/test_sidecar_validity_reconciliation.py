@@ -9,7 +9,6 @@ bucket repeated.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from tcip_mcp.pipelines.resolution import (
@@ -27,15 +26,25 @@ from tcip_mcp.pipelines.resolution import (
 def _sidecar(bucket: Path, filename: str, param_key: str, *, bundle_flag: bool,
              recorded_reference: str | None, **param_fields: object) -> str:
     """One bucket's sidecar, with its bundle-level flag and its param's recorded reference set
-    independently of each other."""
+    independently of each other.
+
+    Written through the seam, bypassing write_sidecar's own claim check (the stamp below asserts
+    no real validated_by), so the bucket genuinely has a sidecar rather than merely a file that
+    happens to sit where one would.
+    """
+    import tcip_store
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
     bucket.mkdir(parents=True, exist_ok=True)
     param: dict[str, object] = {"requires_validation": True,
                                 "validated_against": recorded_reference}
     param.update(param_fields)
-    (bucket / filename).write_text(json.dumps({
-        "validated": bundle_flag,
-        "operating_point": {param_key: param},
-    }), encoding="utf-8")
+    stamp = {"validated": bundle_flag, "operating_point": {param_key: param}}
+    document = filename.removesuffix(".json")
+    key = sidecar_key(bucket, document)
+    with tcip_store.transaction(key) as txn:
+        txn.write(key, stamp)
     return str(bucket)
 
 
@@ -53,6 +62,8 @@ def _bound_sidecar(bucket: Path, filename: str, param_key: str, *, recorded_refe
     clear rather than one that was merely claimed."""
     from tests._binding_fixtures import file_validation_record, write_prediction
 
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
     param: dict[str, object] = {"requires_validation": True, "validated_against": recorded_reference}
     param.update(param_fields)
     stamp = {"validated": True, "trait": "catkin", "operating_point": {param_key: param}}
@@ -62,8 +73,7 @@ def _bound_sidecar(bucket: Path, filename: str, param_key: str, *, recorded_refe
         pred_dirs = [bucket]
     bound = file_validation_record(stamp, document=document, dataset_root=dataset_root,
                                    pred_dirs=pred_dirs, experiment_id=experiment_id)
-    bucket.mkdir(parents=True, exist_ok=True)
-    (bucket / filename).write_text(json.dumps(bound), encoding="utf-8")
+    write_sidecar(bucket, bound, document)
     return str(bucket)
 
 

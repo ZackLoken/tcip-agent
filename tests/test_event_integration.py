@@ -212,11 +212,10 @@ class TestPortDiscovery:
         assert resolve_web_port() == 12345
 
     def test_port_file_used_when_env_absent(self, tmp_path: Path, monkeypatch) -> None:
-        from tcip_mcp.web_client import resolve_web_port
+        import tcip_store as ts
+        from tcip_mcp.web_client import backend_port_key, resolve_web_port
 
-        port_file = tmp_path / ".tcip" / "state" / "web_port.txt"
-        port_file.parent.mkdir(parents=True)
-        port_file.write_text("34567")
+        ts.replace(backend_port_key(root=tmp_path), "34567")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
         assert resolve_web_port(project_root=tmp_path) == 34567
 
@@ -253,11 +252,10 @@ class TestPortDiscovery:
         This lookup runs before the backend is known to be up, so it reports the default and
         lets the caller try rather than raising on a record it cannot use.
         """
-        from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
+        import tcip_store as ts
+        from tcip_mcp.web_client import DEFAULT_PORT, backend_port_key, resolve_web_port
 
-        port_file = tmp_path / ".tcip" / "state" / "web_port.txt"
-        port_file.parent.mkdir(parents=True)
-        port_file.write_text("not a port", encoding="utf-8")
+        ts.replace(backend_port_key(root=tmp_path), "not a port")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
         assert resolve_web_port(project_root=tmp_path) == DEFAULT_PORT
 
@@ -533,13 +531,14 @@ def test_resolve_web_port_falls_back_to_repo_root(tmp_path, monkeypatch):
     """After set_active_project repins the platform root to a project, the port file still
     lives under the backend's startup (repo) root: the lookup must find it there instead of
     silently degrading to the default port."""
+    import tcip_store as ts
     from tcip_mcp import web_client
 
-    project = tmp_path / "adopted_project"          # pinned root: no port file here
+    project = tmp_path / "adopted_project"          # pinned root: no port record here
     project.mkdir()
-    repo = tmp_path / "repo"                        # backend's startup root: has the file
-    (repo / ".tcip" / "state").mkdir(parents=True)
-    (repo / ".tcip" / "state" / "web_port.txt").write_text("23456")
+    repo = tmp_path / "repo"                        # backend's startup root: has the record
+    repo.mkdir()
+    ts.replace(web_client.backend_port_key(root=repo), "23456")
 
     monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))

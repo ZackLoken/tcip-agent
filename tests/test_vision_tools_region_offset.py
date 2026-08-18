@@ -9,7 +9,6 @@ that sits where no object is, under a bbox that looks right.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -119,15 +118,13 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
 ) -> None:
     """The bbox the tool reports and the rings it caches are two views of one candidate: both
     are read as full-frame, so they must not be translated by different origins."""
-    from tcip_mcp.project_paths import resolve_state
+    import tcip_store as ts
+    from tcip_mcp.tools.vision_tools import proposal_staging_key
 
     result = _propose_over_the_region(patched_frame)
     reported = result["candidates"][0]["bbox"]
 
-    envelope = json.loads(
-        resolve_state(Path(".tcip") / "state" / "proposals_region.json").read_text(
-            encoding="utf-8")
-    )
+    envelope = ts.read(proposal_staging_key("region"))
     rings = envelope["candidates"][0]["rings"]
     pts = [p for ring in rings for p in ring]
     assert pts

@@ -768,10 +768,11 @@ def _aggregate_rows(value_key: str | None = "count") -> list[dict]:
 
 def _bucket_recording(tmp_path: Path, id_map: dict) -> str:
     """A prediction bucket whose sidecar records which names its labels decoded to."""
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
     bucket = tmp_path / "ds" / "predictions" / "run"
     bucket.mkdir(parents=True)
-    (bucket / "operating_point.json").write_text(
-        json.dumps({"validated": False, "id_map": id_map}), encoding="utf-8")
+    write_sidecar(bucket, {"validated": False, "id_map": id_map}, "operating_point")
     return str(bucket)
 
 

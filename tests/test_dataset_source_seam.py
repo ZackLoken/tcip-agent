@@ -7,7 +7,6 @@ loaders stay the default, and the builder source is snapshotted for provenance.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -101,7 +100,8 @@ def test_preflight_accepts_dataset_source_without_image_dirs(tmp_path: Path):
 
 
 def test_snapshot_records_dataset_builder(tmp_path: Path):
-    from tcip_mcp.pipelines.model_build import snapshot_model_source
+    import tcip_store as ts
+    from tcip_mcp.pipelines.model_build import snapshot_manifest_key, snapshot_model_source
 
     config = {"data": {"dataset_source": DATASET_SOURCE}}
     manifest = snapshot_model_source(config, tmp_path)
@@ -109,5 +109,5 @@ def test_snapshot_records_dataset_builder(tmp_path: Path):
     assert manifest["dataset_builder"] == "tests.test_dataset_source_seam:build_bespoke_ds"
     assert any(e["src"] == __file__ and len(e["sha256"]) == 64
                for e in manifest["files"])
-    saved = json.loads((tmp_path / "model_src" / "manifest.json").read_text())
+    saved = ts.read(snapshot_manifest_key(tmp_path))
     assert saved["dataset_builder"] == manifest["dataset_builder"]

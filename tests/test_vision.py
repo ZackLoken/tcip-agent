@@ -783,14 +783,10 @@ class TestAcceptProposalsTool:
         assert "Run propose_annotations first" in result["error"]
 
     def test_with_cached_proposals(self, viz_dataset: Path):
-        import json
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        import tcip_store as ts
+        from tcip_mcp.tools.vision_tools import accept_proposals, proposal_staging_key
 
         # Simulate cached proposals from propose_annotations (neutral schema + engine envelope).
-        from tcip_mcp.project_paths import resolve_state
-
-        state_dir = resolve_state(Path(".tcip") / "state")
-        state_dir.mkdir(parents=True, exist_ok=True)
         candidates = [
             {
                 "candidate_id": 0,
@@ -811,9 +807,7 @@ class TestAcceptProposalsTool:
                 "rings": [[[300, 300], [400, 300], [400, 400], [300, 400]]],
             },
         ]
-        (state_dir / "proposals_img_001.json").write_text(
-            json.dumps({"engine": "sam", "candidates": candidates}), encoding="utf-8"
-        )
+        ts.replace(proposal_staging_key("img_001"), {"engine": "sam", "candidates": candidates})
 
         result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
@@ -1101,13 +1095,11 @@ class TestFullPipelineIntegration:
         return tmp_path
 
     def _cache_candidates(self, stem: str, candidates: list[dict]) -> None:
-        from tcip_mcp.project_paths import resolve_state
+        import tcip_store as ts
+        from tcip_mcp.tools.vision_tools import proposal_staging_key
 
-        state_dir = resolve_state(Path(".tcip") / "state")
-        state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / f"proposals_{stem}.json").write_text(
-            json.dumps({"engine": "sam", "candidates": candidates}, default=str), encoding="utf-8",
-        )
+        envelope = json.loads(json.dumps({"engine": "sam", "candidates": candidates}, default=str))
+        ts.replace(proposal_staging_key(stem), envelope)
 
     def test_accept_writes_json_detect(self, pipeline_dataset: Path):
         """SAM proposals are staged as predictions: pixel geometry, subject names, and score preserved."""
@@ -1406,13 +1398,12 @@ class TestSamPredictionStaging:
         return tmp_path
 
     def _cache(self, stem: str) -> None:
-        from tcip_mcp.project_paths import resolve_state
+        import tcip_store as ts
+        from tcip_mcp.tools.vision_tools import proposal_staging_key
 
-        state_dir = resolve_state(Path(".tcip") / "state")
-        state_dir.mkdir(parents=True, exist_ok=True)
-        (state_dir / f"proposals_{stem}.json").write_text(
-            json.dumps({"engine": "sam", "candidates": MOCK_CANDIDATES}, default=str), encoding="utf-8",
-        )
+        envelope = json.loads(
+            json.dumps({"engine": "sam", "candidates": MOCK_CANDIDATES}, default=str))
+        ts.replace(proposal_staging_key(stem), envelope)
 
     def test_json_detect_and_segment_written(self, format_dataset: Path):
         from tcip_annotation import bbox_of, json_io

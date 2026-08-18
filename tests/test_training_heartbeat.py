@@ -3,8 +3,9 @@ heartbeat is fresh (still training in another process, e.g. the MCP agent) and o
 'interrupted' once the heartbeat goes stale. Prevents the GUI mislabelling an
 agent-launched run as dead and inviting a duplicate launch."""
 
-import json
 from datetime import datetime, timedelta, timezone
+
+import tcip_store as ts
 
 
 def test_heartbeat_fresh_helper():
@@ -20,7 +21,7 @@ def test_heartbeat_fresh_helper():
 
 def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # EXPERIMENTS_DIR is .tcip/experiments (cwd-relative)
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.experiments import create_experiment, log_metrics, status_key, update_status
     from tcip_web.routes.training import _historical_training_runs
 
     # Live run: marked running, heartbeat refreshed by a fresh metric log.
@@ -31,10 +32,11 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     # Dead run: running state but a forced-stale heartbeat (process gone).
     create_experiment("dead", {"model_source": {"builder": "x:y"}}, data_source="imgs")
     update_status("dead", "running")
-    sp = tmp_path / ".tcip" / "experiments" / "dead" / "status.json"
-    s = json.loads(sp.read_text())
-    s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-    sp.write_text(json.dumps(s))
+    key = status_key("dead")
+    with ts.transaction(key) as txn:
+        s = txn.read(key)
+        s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        txn.write(key, s)
 
     by_id = {r["run_id"]: r for r in _historical_training_runs()}
     assert by_id["live"]["status"] == "running"

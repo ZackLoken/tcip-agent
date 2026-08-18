@@ -1,7 +1,7 @@
 """SessionStart ritual hook: fast, stdlib-only directive injection.
 
 Locks the compliant design (Anthropic guidance: SessionStart must be quick, context-loading only):
-it injects an ``additionalContext`` directive with live report/retro counts, and it spawns no
+it injects an ``additionalContext`` directive naming the active project, and it spawns no
 subprocess and imports nothing heavy (the standing check that guards against the reverted 30s
 regression).
 """
@@ -38,13 +38,14 @@ def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
     return str(proj)
 
 
-def test_session_start_injects_ritual_directive_with_live_counts(tmp_path, monkeypatch, capsys):
+def test_session_start_injects_ritual_directive_naming_the_active_project(
+    tmp_path, monkeypatch, capsys
+):
     _workspace(tmp_path, monkeypatch, reports=3, retros=2)
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert json.loads(out)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     assert "hazelnut_demo" in ctx
-    assert "3 friction report(s)" in ctx and "2 retrospective(s)" in ctx
     for step in ("load_project_memory", "inspect_project", "doctor.py"):
         assert step in ctx
 

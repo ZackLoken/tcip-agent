@@ -14,7 +14,6 @@ Proves the whole CV-scientist vision at once:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -49,10 +48,11 @@ def _save_png(path: Path) -> None:
 
 
 def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
-    path = root / ".tcip" / "audit.jsonl"
-    if not path.is_file():
-        return []
-    return [json.loads(x) for x in path.read_text().splitlines() if json.loads(x).get("tool") == tool]
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+
+    page = ts.read_log(audit_log_key(root))
+    return [record for record in page.records if record.get("tool") == tool]
 
 
 def test_bespoke_detector_end_to_end(tmp_path: Path):
@@ -133,10 +133,14 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert best["kind"] == KIND_TCIP_MODULE
     assert best["model_source"]["builder"].endswith(":build_bespoke_detector")
 
+    import tcip_store as ts
+    from tcip_mcp.experiments import env_key
+    from tcip_mcp.pipelines.model_build import snapshot_manifest_key
+
     exp_dir = tmp_path / ".tcip" / "experiments" / "expBespoke"
-    env = json.loads((exp_dir / "env.json").read_text())
+    env = ts.read(env_key("expBespoke"))
     assert env["model_kind"] == KIND_TCIP_MODULE and env["env"]["torch"]
-    manifest = json.loads((exp_dir / "model_src" / "manifest.json").read_text())
+    manifest = ts.read(snapshot_manifest_key(exp_dir))
     assert manifest["training_source"] == "tests.bespoke_models:train_bespoke"
     assert any(e["src"] == src_file and len(e["sha256"]) == 64
                for e in manifest["files"])                  # source snapshotted with sha256

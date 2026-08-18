@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
+import tcip_store as ts
+
 
 # ── Audit logging ──
 
@@ -17,7 +19,6 @@ import pytest
 class TestAuditLogging:
     def setup_method(self):
         self.tmpdir = Path(tempfile.mkdtemp())
-        self.audit_path = self.tmpdir / ".tcip" / "audit.jsonl"
 
     def teardown_method(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -42,10 +43,10 @@ class TestAuditLogging:
             result = my_tool(x=5)
             assert result == {"result": 6}
 
-            # Check audit log
-            lines = self.audit_path.read_text().strip().splitlines()
-            assert len(lines) == 1
-            entry = json.loads(lines[0])
+            # Check audit log, through the seam rather than the file backend's raw jsonl
+            page = ts.read_log(audit_mod.audit_log_key())
+            assert len(page.records) == 1
+            entry = page.records[0]
             assert entry["tool"] == "my_tool"
             assert entry["status"] == "ok"
             assert entry["arguments"] == {"x": 5}
@@ -68,9 +69,9 @@ class TestAuditLogging:
         with pytest.raises(ValueError, match="test error"):
             failing_tool()
 
-        lines = self.audit_path.read_text().strip().splitlines()
-        assert len(lines) == 1
-        entry = json.loads(lines[0])
+        page = ts.read_log(audit_mod.audit_log_key())
+        assert len(page.records) == 1
+        entry = page.records[0]
         assert entry["status"] == "exception"
         assert "test error" in entry["error"]
 
@@ -100,7 +101,7 @@ class TestAuditLogging:
 
         my_tool(5, "explicit")  # positional, the way the web routes call audited tools
 
-        entry = json.loads(self.audit_path.read_text().strip().splitlines()[0])
+        entry = ts.read_log(audit_mod.audit_log_key()).records[0]
         assert entry["arguments"] == {"x": 5, "y": "explicit"}
 
         audit_mod.AUDIT_ROOT = original
@@ -118,7 +119,7 @@ class TestAuditLogging:
 
         my_tool(5)  # positional, y left at its default
 
-        entry = json.loads(self.audit_path.read_text().strip().splitlines()[0])
+        entry = ts.read_log(audit_mod.audit_log_key()).records[0]
         assert entry["arguments"] == {"x": 5, "y": "default"}
 
         audit_mod.AUDIT_ROOT = original
@@ -139,9 +140,9 @@ class TestAuditLogging:
         with pytest.raises(TypeError):
             my_tool(1, 2, 3)  # too many positional args: the real call itself fails, not just binding
 
-        lines = self.audit_path.read_text().strip().splitlines()
-        assert len(lines) == 1
-        entry = json.loads(lines[0])
+        page = ts.read_log(audit_mod.audit_log_key())
+        assert len(page.records) == 1
+        entry = page.records[0]
         assert entry["status"] == "exception"
 
         audit_mod.AUDIT_ROOT = original
@@ -174,7 +175,7 @@ class TestAuditLogging:
         result = my_tool(5, y="explicit")  # the real call must still succeed
         assert result == {"result": 5}
 
-        entry = json.loads(self.audit_path.read_text().strip().splitlines()[0])
+        entry = ts.read_log(audit_mod.audit_log_key()).records[0]
         assert entry["status"] == "ok"
         # Degraded fallback: the positional x is lost, y survives via kwargs.
         assert entry["arguments"] == {"y": "explicit"}
@@ -201,13 +202,12 @@ class TestExperiments:
         assert result["experiment_id"] == "exp-001"
         assert result["state"] == "created"
 
-        # Directory created with files
-        d = self.tmpdir / "experiments" / "exp-001"
-        assert d.exists()
-        assert (d / "config.json").exists()
-        assert (d / "status.json").exists()
-        assert (d / "lineage.json").exists()
-        assert (d / "artifacts.json").exists()
+        # Every member document the record is made of exists, through the seam its own
+        # readers use (backend-general: creation is a claim about the record, not the layout).
+        assert ts.exists(exp.config_key("exp-001"))
+        assert ts.exists(exp.status_key("exp-001"))
+        assert ts.exists(exp.lineage_key("exp-001"))
+        assert ts.exists(exp.artifacts_key("exp-001"))
 
         exp.EXPERIMENTS_DIR = original
 
@@ -231,11 +231,10 @@ class TestExperiments:
         exp.log_metrics("exp-002", 0, {"loss": 1.5, "mAP50": 0.2})
         exp.log_metrics("exp-002", 1, {"loss": 0.8, "mAP50": 0.5})
 
-        metrics_path = self.tmpdir / "experiments" / "exp-002" / "metrics.jsonl"
-        lines = metrics_path.read_text().strip().splitlines()
-        assert len(lines) == 2
-        assert json.loads(lines[0])["epoch"] == 0
-        assert json.loads(lines[1])["mAP50"] == 0.5
+        rows = exp.read_metrics("exp-002")
+        assert len(rows) == 2
+        assert rows[0]["epoch"] == 0
+        assert rows[1]["mAP50"] == 0.5
 
         exp.EXPERIMENTS_DIR = original
 
@@ -246,12 +245,12 @@ class TestExperiments:
 
         exp.create_experiment("exp-003", {})
         exp.update_status("exp-003", "running")
-        status = json.loads((self.tmpdir / "experiments" / "exp-003" / "status.json").read_text())
+        status = ts.read(exp.status_key("exp-003"))
         assert status["state"] == "running"
         assert status["started"] is not None
 
         exp.update_status("exp-003", "completed")
-        status = json.loads((self.tmpdir / "experiments" / "exp-003" / "status.json").read_text())
+        status = ts.read(exp.status_key("exp-003"))
         assert status["state"] == "completed"
         assert status["ended"] is not None
 
@@ -265,7 +264,7 @@ class TestExperiments:
         exp.create_experiment("exp-004", {})
         exp.record_artifact("exp-004", "model_weights", "/path/to/model.pt")
 
-        artifacts = json.loads((self.tmpdir / "experiments" / "exp-004" / "artifacts.json").read_text())
+        artifacts = ts.read(exp.artifacts_key("exp-004"))
         assert "model_weights" in artifacts
         assert artifacts["model_weights"]["path"] == "/path/to/model.pt"
 
@@ -341,7 +340,7 @@ class TestExperiments:
         exp.create_experiment("exp-006", {"a": 1})
         result = exp.overwrite_config_if_pristine("exp-006", {"a": 2, "seed": 7})
         assert result["overwritten"] is True
-        config = json.loads((self.tmpdir / "experiments" / "exp-006" / "config.json").read_text())
+        config = ts.read(exp.config_key("exp-006"))
         assert config == {"a": 2, "seed": 7}
 
         exp.EXPERIMENTS_DIR = original
@@ -355,7 +354,7 @@ class TestExperiments:
         exp.log_metrics("exp-007", 0, {"loss": 1.0})
         result = exp.overwrite_config_if_pristine("exp-007", {"a": 2})
         assert "error" in result
-        config = json.loads((self.tmpdir / "experiments" / "exp-007" / "config.json").read_text())
+        config = ts.read(exp.config_key("exp-007"))
         assert config == {"a": 1}  # untouched
 
         exp.EXPERIMENTS_DIR = original
@@ -370,7 +369,7 @@ class TestExperiments:
         exp.update_status("exp-008", "completed")
         result = exp.overwrite_config_if_pristine("exp-008", {"a": 2})
         assert "error" in result
-        config = json.loads((self.tmpdir / "experiments" / "exp-008" / "config.json").read_text())
+        config = ts.read(exp.config_key("exp-008"))
         assert config == {"a": 1}
 
         exp.EXPERIMENTS_DIR = original
@@ -422,8 +421,7 @@ class TestModelRegistryReplaceAudit:
         second_sha = reg.get_model("exp1")["sha256"]
         assert first_sha != second_sha
 
-        lines = self.audit_path.read_text().strip().splitlines()
-        events = [json.loads(line) for line in lines]
+        events = ts.read_log(audit_mod.audit_log_key()).records
         replace_events = [e for e in events if e.get("tool") == "model_registry_replace"]
         assert len(replace_events) == 1
         assert replace_events[0]["arguments"]["name"] == "exp1"

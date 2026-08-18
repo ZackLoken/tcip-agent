@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import tifffile
 
+import tcip_store as ts
 from scripts.plant_aware_group_splits import derive_plant_group_key_map, main
 
 UTM_15N_EPSG = 32615
@@ -190,7 +191,7 @@ def _write_dataset_stem(dataset_root: Path, date: str, stem: str, tiepoint: tupl
 def test_make_splits_keeps_every_plants_stems_on_one_split_side(
     tmp_path: Path, two_plant_csv: Path,
 ) -> None:
-    from tcip_mcp.tools.data_tools import _scan_dataset, make_splits
+    from tcip_mcp.tools.data_tools import _scan_dataset, make_splits, split_manifest_key
 
     dataset_root = tmp_path / "dataset"
     # Two plants, two capture dates each: four stems total, two groups of two.
@@ -212,9 +213,7 @@ def test_make_splits_keeps_every_plants_stems_on_one_split_side(
     assert "error" not in result
     assert result["group_by"] == "explicit_map"
 
-    import json as _json
-
-    manifest = _json.loads((out_dir / "split_manifest.json").read_text(encoding="utf-8"))
+    manifest = ts.read(split_manifest_key(out_dir))
     stem_side = {s: side for side, stems in manifest["splits"].items() for s in stems}
     # Every group's stems (same plot_name) land on the identical side.
     for group_stems in (
@@ -229,6 +228,8 @@ def test_make_splits_keeps_every_plants_stems_on_one_split_side(
 
 
 def test_main_cli_end_to_end(tmp_path: Path, two_plant_csv: Path) -> None:
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
     dataset_root = tmp_path / "dataset"
     for date, tiepoint in (("2026-02-01", P1_TIEPOINT), ("2026-03-01", P1_TIEPOINT)):
         _write_dataset_stem(dataset_root, date, f"p1_{date}", tiepoint)
@@ -243,7 +244,7 @@ def test_main_cli_end_to_end(tmp_path: Path, two_plant_csv: Path) -> None:
     ])
 
     assert rc == 0
-    assert (out_dir / "split_manifest.json").is_file()
+    assert ts.exists(split_manifest_key(out_dir))
 
 
 def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, two_plant_csv: Path) -> None:

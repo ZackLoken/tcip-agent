@@ -507,9 +507,13 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
+    import tcip_store as ts
+
+    from tcip_mcp.pipelines.training.evaluation import evaluation_results_key
+
     r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "seg"))
     assert r["iou_type"] == "segm"
-    on_disk = json.loads((tmp_path / "seg" / "test_results.json").read_text())
+    on_disk = ts.read(evaluation_results_key(tmp_path / "seg"))
     assert on_disk["iou_type"] == "segm"
 
     r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(tmp_path / "det"))
@@ -524,10 +528,17 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
     """A result document holds the same bytes wherever it was produced.
 
     A text-mode writer emits CRLF on one platform and LF on another, so the same measurement
-    hashes differently depending on the machine that scored it.
+    hashes differently depending on the machine that scored it. Bound to the file backend on
+    purpose: the CRLF risk is a text-mode file-write concern, and a database backend stores the
+    codec's own bytes in a column with no OS line-ending translation to go wrong.
     """
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
     import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
+
+    ts.bind(FileBackend())
 
     class _DummyModel:
         def load_state_dict(self, state_dict):
@@ -552,9 +563,16 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
     """``results_path`` names the readable test_results.json under the caller's output_dir, and its
     contents are the same result the call returned. This is the only handle a caller keeps on a
     finished evaluation, so a path that does not open, or opens onto different numbers, loses the
-    evaluation."""
+    evaluation. Bound to the file backend on purpose: ``results_path`` is a real filesystem path,
+    and a database backend keeps the record in the database instead of at that path.
+    """
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
     import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.evaluation as evaluation
+
+    ts.bind(FileBackend())
 
     class _DummyModel:
         def load_state_dict(self, state_dict):

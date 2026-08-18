@@ -167,8 +167,12 @@ def test_generation_conf_confines_the_bucket_it_reads(
 
     bucket = allowed / "predictions" / "baseline" / "2-11-26"
     bucket.mkdir(parents=True)
-    (bucket / "operating_point.json").write_text(
-        json.dumps({"operating_point": {"conf": {"value": 0.44}}}), encoding="utf-8")
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    tcip_store.replace(sidecar_key(bucket, "operating_point"),
+                       {"operating_point": {"conf": {"value": 0.44}}},
+                       expect=tcip_store.Version.ABSENT)
     accepted = client.get("/api/review/generation_conf", params={"pred_dir": str(bucket)})
     assert accepted.status_code == 200
     assert accepted.json()["generation_conf"] == pytest.approx(0.44)

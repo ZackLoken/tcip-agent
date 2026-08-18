@@ -11,7 +11,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from tcip_mcp.model_registry import ModelRegistry
+import tcip_store as ts
+from tcip_mcp.model_registry import ModelRegistry, registry_index_key
 
 # Distinct payload sizes per run, so a size or hash attributed to the wrong entry is visible.
 _RUNS = {
@@ -38,7 +39,7 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
                            metrics={"val_map50": 0.42})
 
     models_dir = root / ".tcip" / "models"
-    assert (models_dir / "registry.json").is_file()
+    assert ts.exists(registry_index_key(root))
     assert list(models_dir.glob("*.pt")) == []
 
     reread = ModelRegistry(str(root)).list_models()

@@ -137,7 +137,9 @@ def test_export_predictions_raster_writes_bucket_with_explicit_tile_size(tmp_pat
     assert pred_path.is_file()
     assert pred_path.name == "mosaic.json"
 
-    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(out_dir)
     assert sidecar["operating_point"]["tile_size"]["value"] == TILE
     assert sidecar["operating_point"]["tile_size"]["validated_against"] == "explicit_caller_stated_geometry"
     assert sidecar["tile_size_validated"] == "explicit_caller_stated_geometry"
@@ -415,8 +417,10 @@ def test_deliver_orthomosaic_plant_counts_rotated_raster_refuses_cleanly(tmp_pat
     identity = dataclasses.asdict(raster_content_identity(
         str(raster_path), 3, seed=CONTENT_IDENTITY_SEED,
         window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS))
-    (bucket_dir / "operating_point.json").write_text(
-        json.dumps({"validated": False, "raster_content_identity": identity}))
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    write_sidecar(bucket_dir, {"validated": False, "raster_content_identity": identity},
+                 "operating_point")
 
     # Arbitrary geolocation, never derived from the rotated raster itself (which refuses to
     # resolve any pixel -> real-world coordinate at all): the point of this test is that
@@ -456,8 +460,10 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
         str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv),
         trait_name="stem_count", acknowledge_unvalidated=True)
 
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
     assert "error" not in result
-    stamped = json.loads((bucket_dir / "operating_point.json").read_text())
+    stamped = read_operating_point_sidecar(bucket_dir)
     assert result["checkpoint_sha256"] == stamped["checkpoint_sha256"]
     assert result["experiment_id"] is None
     assert result["validation_record"] == ""
@@ -465,8 +471,10 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     assert row["producer_model_sha256"] == stamped["checkpoint_sha256"]
     assert row["validation_record"] == ""
 
-    log = (tmp_path / "proj" / ".tcip" / "audit.jsonl").read_text(encoding="utf-8")
-    emitted = [json.loads(ln) for ln in log.splitlines() if ln]
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
+
+    emitted = ts.read_log(audit_log_key(tmp_path / "proj")).records
     door = [e for e in emitted if e["tool"] == "deliver_orthomosaic_plant_counts"
             and "verified_buckets" in e]
     assert len(door) == 1, emitted
@@ -486,10 +494,12 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
     _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
     plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
 
-    sidecar_path = bucket_dir / "operating_point.json"
-    stamped = json.loads(sidecar_path.read_text())
-    sidecar_path.write_text(json.dumps({**stamped, "checkpoint_sha256": "0" * 64,
-                                        "experiment_id": "exp_that_never_ran"}), encoding="utf-8")
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_sidecar
+
+    stamped = read_operating_point_sidecar(bucket_dir)
+    assert stamped is not None
+    write_sidecar(bucket_dir, {**stamped, "checkpoint_sha256": "0" * 64,
+                              "experiment_id": "exp_that_never_ran"}, "operating_point")
 
     from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
 

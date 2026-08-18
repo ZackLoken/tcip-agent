@@ -10,7 +10,6 @@ the writer behind any of it.
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import tcip_store as ts
 from tcip_mcp import operationalization as op
+from tcip_mcp.audit import audit_log_key
 from tcip_web.app import app
 from tests import _operationalization_fixtures as fx
 
@@ -71,10 +72,7 @@ def _confirm(client: TestClient, project: Path, trait: str, kind: str, seen: str
 
 
 def _audit_entries(project: Path) -> list[dict]:
-    log = project / ".tcip" / "audit.jsonl"
-    if not log.exists():
-        return []
-    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
+    return list(ts.read_log(audit_log_key(project)).records)
 
 
 # ── reading the record ───────────────────────────────────────────────────────

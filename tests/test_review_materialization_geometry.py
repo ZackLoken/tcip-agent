@@ -101,7 +101,10 @@ def test_box_counts_track_every_positive_not_every_image(tmp_path):
     r = materialize_dataset(state, str(src), str(out))
     assert (r["positive"], r["hard_negative"], r["total_boxes"]) == (2, 1, 4)
 
-    rows = {e["image"]: e for e in json.loads((out / "curated_manifest.json").read_text())["images"]}
+    import tcip_store
+    from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
+
+    rows = {e["image"]: e for e in tcip_store.read(curated_manifest_key(out))["images"]}
     assert set(rows) == {"three.png", "one.png", "none.png"}
     assert rows["three.png"]["n_boxes"] == 3
     assert rows["one.png"]["n_boxes"] == 1

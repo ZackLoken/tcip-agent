@@ -99,9 +99,16 @@ def test_save_review_state_writes_the_canonical_record_spelling(
     engine: ReviewEngine, bucket_dir: Path
 ) -> None:
     """A shard is spelled the way every record is, so a breeder who opens one and a reader
-    that parses one meet the same document."""
-    from tcip_store import RECORD_JSON
+    that parses one meet the same document.
 
+    Bound to the file backend on purpose: the claim is about the exact bytes on disk, which only
+    the file backend exposes as a file at all.
+    """
+    import tcip_store
+    from tcip_store import RECORD_JSON
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     engine.mark_image_reviewed(BUCKET, "IMG_0133.JPG")
     raw = (bucket_dir / "IMG_0133.JPG.json").read_bytes()
 
@@ -110,20 +117,25 @@ def test_save_review_state_writes_the_canonical_record_spelling(
 
 
 def test_verdict_writes_only_its_own_shard(
-    engine: ReviewEngine, ctx: ReviewContext, bucket_dir: Path
+    engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path
 ) -> None:
-    """A verdict on one image must not touch another image's shard file (O(dets on this
+    """A verdict on one image must not touch another image's shard record (O(dets on this
     image), not O(all-reviewed))."""
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE, review_verdict_key
+
     engine.mark_image_reviewed(BUCKET, "IMG_OTHER.JPG")
-    other_shard = bucket_dir / "IMG_OTHER.JPG.json"
-    before = other_shard.stat().st_mtime_ns
+    other_key = review_verdict_key(tmp_path, BUCKET, "IMG_OTHER.JPG")
+    before = tcip_store.read_versioned(other_key).version
 
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")
 
-    assert (bucket_dir / "IMG_0133.JPG.json").is_file()
-    assert other_shard.stat().st_mtime_ns == before  # untouched
+    assert tcip_store.exists(review_verdict_key(tmp_path, BUCKET, "IMG_0133.JPG"))
+    assert tcip_store.read_versioned(other_key).version == before  # untouched
+    assert {k.parts[1] for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(tmp_path))} == {
+        "IMG_OTHER.JPG", "IMG_0133.JPG"}
 
 
 def test_verdict_calls_shard_writer_exactly_once(
@@ -145,15 +157,18 @@ def test_verdict_calls_shard_writer_exactly_once(
 
 
 def test_verdicts_across_images_produce_one_shard_each(
-    engine: ReviewEngine, ctx: ReviewContext, bucket_dir: Path
+    engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path
 ) -> None:
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     dets = engine.build_detection_list(ctx, matches)
     engine.record_detection_action(BUCKET, dets[0], ctx, action="accepted")
     engine.mark_image_reviewed(BUCKET, "IMG_0200.JPG")
 
-    shards = sorted(p.name for p in bucket_dir.glob("*.json"))
-    assert shards == ["IMG_0133.JPG.json", "IMG_0200.JPG.json"]
+    shards = sorted(k.parts[1] for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(tmp_path)))
+    assert shards == ["IMG_0133.JPG", "IMG_0200.JPG"]
     # Each shard holds only its own image's data.
     assert engine.raw_state["verdicts"][(BUCKET, "IMG_0133.JPG")]["detections"]
     assert engine.raw_state["verdicts"][(BUCKET, "IMG_0200.JPG")]["detections"] == []
@@ -186,7 +201,10 @@ def test_shard_keys_colliding_after_sanitization_stay_distinct(tmp_path: Path) -
     eng.mark_image_reviewed(BUCKET, "a/b.jpg")       # completed
     eng.mark_image_reviewed(BUCKET, "a_b.jpg")
     eng.unmark_image_reviewed(BUCKET, "a_b.jpg")     # -> not_started (no detections)
-    assert len(list(eng.shard_dir.rglob("*.json"))) == 2  # two distinct files, no clobber
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    assert len(tcip_store.keys(REVIEW_VERDICTS_STORE, str(tmp_path))) == 2  # two distinct records
 
     reloaded = ReviewEngine(state_dir=tmp_path)
     # keys preserved, not merged
@@ -645,7 +663,15 @@ def test_a_shard_write_that_fails_to_land_is_refused_out_loud(
     that detection. The staging file it wrote through must also be gone whether or not the swap
     succeeded, since the review dir is enumerated as shards, and the verdict already confirmed on
     disk stays complete and readable.
+
+    Bound to the file backend on purpose: the shard-swap mechanism this monkeypatches
+    (``os.replace``) is the file backend's own atomic-write step, which a database backend never
+    calls.
     """
+    import tcip_store
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     matches = _unordered_matches(unordered_ctx)
     dets = engine.build_detection_list(unordered_ctx, matches)
     engine.record_detection_action(BUCKET, dets[0], unordered_ctx, action="accepted")

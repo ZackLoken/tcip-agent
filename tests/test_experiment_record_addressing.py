@@ -102,11 +102,10 @@ def test_a_split_manifest_is_read_from_the_store_the_experiment_module_resolves(
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", elsewhere)
     experiment_id = "exp-015-chestnut-burr-det"
     experiments.create_experiment(experiment_id, {"model_source": {"builder": "m:f"}})
-    manifest = elsewhere / experiment_id / "split.json"
     store.replace(experiments.split_key(experiment_id),
                   {"train": ["img_001"], "group_by": "stem"})
-    assert manifest.is_file()
 
+    # A hit here proves _train_disjointness resolved the relocated store, not the default one.
     checked = _train_disjointness(experiment_id, {"img_002"}, {"img_003"})
     assert checked["unresolvable"] is False
     assert checked["checked"] is True
@@ -208,5 +207,4 @@ def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp
     ctx._epoch_sink(1, {"val_loss": 0.25})
 
     page = read_log(trial_metrics_key(trial_dir.parent, trial_dir.name))
-    assert (Path(trial_dir) / "metrics.jsonl").is_file()
     assert page.records == [{"epoch": 1, "val_loss": 0.25}]

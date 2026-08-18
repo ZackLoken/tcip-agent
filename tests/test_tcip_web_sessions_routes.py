@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import tcip_store
 from tcip_mcp.dataset_layout import status_records
 from tcip_web.app import app
+from tcip_web.routes.sessions import annotation_stats_key
 
 
 @pytest.fixture
@@ -235,10 +237,8 @@ def test_end_marks_ended(client: TestClient, tmp_path: Path) -> None:
     )
     end = client.post("/api/sessions/end", json={"project_root": pr}).json()
     assert end["session"]["ended"] != ""
-    on_disk = json.loads(
-        (tmp_path / ".tcip" / "state" / "annotation_stats.json").read_text()
-    )
-    assert on_disk["sessions"][0]["ended"] != ""
+    stored = tcip_store.read(annotation_stats_key(pr))
+    assert stored["sessions"][0]["ended"] != ""
 
 
 def test_image_event_drops_empty_entry(client: TestClient, tmp_path: Path) -> None:

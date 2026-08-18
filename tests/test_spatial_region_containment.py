@@ -9,7 +9,6 @@ gap between regions, or coordinates the persisted geometry never covered.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -26,12 +25,12 @@ MOSAIC_W, MOSAIC_H = 4000, 3000
 
 
 def _write_split(tmp_path: Path, experiment_id: str, spatial: dict) -> None:
-    exp_dir = tmp_path / ".tcip" / "experiments" / experiment_id
-    exp_dir.mkdir(parents=True, exist_ok=True)
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["mosaic::strip_x_0"], "group_by": "spatial_strip",
-                    "spatial": spatial}),
-        encoding="utf-8")
+    import tcip_store as ts
+    from tcip_mcp.experiments import split_key
+
+    ts.replace(split_key(experiment_id, root=tmp_path), {
+        "train": ["mosaic::strip_x_0"], "group_by": "spatial_strip", "spatial": spatial,
+    })
 
 
 def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak(tmp_path):
@@ -99,7 +98,8 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     rect outside every persisted region (here beyond the mosaic's own extent, the shape a caller
     passing coordinates from a different raster produces) must read as a leak.
     """
-    from tcip_mcp.experiments import create_experiment, experiments_dir
+    import tcip_store as ts
+    from tcip_mcp.experiments import create_experiment, split_key
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
     images_dir, labels_dir, stem = _mosaic_dataset(tmp_path / "ds")
@@ -114,8 +114,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
 
     create_experiment("exp_four_way", {})
     _persist_split_manifest("exp_four_way", train_ds, val_ds, data_cfg)
-    spatial = json.loads(
-        (experiments_dir() / "exp_four_way" / "split.json").read_text(encoding="utf-8"))["spatial"]
+    spatial = ts.read(split_key("exp_four_way"))["spatial"]
     cal_region = spatial["calibration_region"]
     assert cal_region, "the writer produced no calibration region to read back"
 

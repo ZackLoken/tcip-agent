@@ -7,22 +7,22 @@ saved through ``ctx`` are stamped, and completion registers the model + lineage 
 
 from __future__ import annotations
 
-import json
-
 import pytest
+
+import tcip_store as ts
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.audit import audit_log_key  # noqa: E402
+from tcip_mcp.experiments import artifacts_key, env_key, lineage_key  # noqa: E402
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
 
 
 def _audit_events(root, tool="training_run"):
-    path = root / ".tcip" / "audit.jsonl"
-    if not path.is_file():
-        return []
-    return [json.loads(x) for x in path.read_text().splitlines() if json.loads(x).get("tool") == tool]
+    events = ts.read_log(audit_log_key(root)).records
+    return [e for e in events if e.get("tool") == tool]
 
 
 # --------------------------------------------------------------------------
@@ -72,16 +72,16 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert events[-1]["arguments"]["run_id"] == run.run_id
 
     # Env/source provenance snapshotted into the immutable experiment dir.
-    env = json.loads((tmp_path / ".tcip" / "experiments" / "expE" / "env.json").read_text())
+    env = ts.read(env_key("expE"))
     assert env["model_kind"] == KIND_TCIP_MODULE
     assert env["env"]["torch"]
 
     # Completion registered the model with the bespoke kind + recorded lineage + artifact.
     entry = ModelRegistry(str(tmp_path)).get_model("expE")
     assert entry is not None and entry["kind"] == KIND_TCIP_MODULE
-    lineage = json.loads((tmp_path / ".tcip" / "experiments" / "expE" / "lineage.json").read_text())
+    lineage = ts.read(lineage_key("expE"))
     assert lineage["model_weights"].endswith("model_best.pt")
-    artifacts = json.loads((tmp_path / ".tcip" / "experiments" / "expE" / "artifacts.json").read_text())
+    artifacts = ts.read(artifacts_key("expE"))
     assert "model_weights" in artifacts
 
 
@@ -206,7 +206,7 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     run_training_envelope(ctx)
 
     assert run.status == "completed"
-    env = json.loads((tmp_path / ".tcip" / "experiments" / "expH" / "env.json").read_text())
+    env = ts.read(env_key("expH"))
     assert env["resumed_from"] == str(ckpt)
     assert env["rng_state_restored"] is True
 

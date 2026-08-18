@@ -9,7 +9,6 @@ disjointness check, and the whole-raster export entry point (``export_prediction
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -319,15 +318,16 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
 
 
 def _rewrite_split_manifest_dims(root: Path, experiment_id: str, *, width: int, height: int) -> None:
-    """Hand-edits a persisted experiment's ``split.json`` ``spatial.width``/``spatial.height``,
+    """Hand-edits a persisted experiment's split manifest ``spatial.width``/``spatial.height``,
     simulating a manifest recorded against a raster that was later replaced or truncated."""
-    from tcip_mcp.experiments import experiments_dir
+    import tcip_store
 
-    split_path = experiments_dir() / experiment_id / "split.json"
-    split = json.loads(split_path.read_text(encoding="utf-8"))
+    from tcip_mcp.experiments import read_split_manifest, split_key
+
+    split = read_split_manifest(experiment_id)
     split["spatial"]["width"] = width
     split["spatial"]["height"] = height
-    split_path.write_text(json.dumps(split), encoding="utf-8")
+    tcip_store.replace(split_key(experiment_id), split)
 
 
 def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_raster(tmp_path: Path):
@@ -441,7 +441,9 @@ def test_export_predictions_raster_block_calibration_admits_and_uncaps_max_dets(
 
     assert "error" not in result, result
     assert result["conf_source"] == "block_calibration"
-    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(out_dir)
     assert sidecar["operating_point"]["max_dets"]["value"] is None
     assert sidecar["operating_point"]["max_dets"]["derived_from"].startswith("block calibration")
     assert sidecar["claim_scope_validated"] == "same_mosaic_content_identity"
@@ -566,7 +568,9 @@ def test_export_predictions_raster_applies_a_legitimate_zero_cross_tile_nms(
     # The last predict_tiled call is the raster export's own final full-mosaic pass (the band
     # passes inside resolve_block_calibration_records all run first).
     assert captured["global_nms_iou"] == 0.0
-    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(out_dir)
     assert sidecar["operating_point"]["cross_tile_nms"]["value"] == 0.0
 
 
@@ -633,7 +637,9 @@ def test_export_predictions_raster_with_no_trait_is_byte_identical_to_the_origin
         conf_threshold=0.0, tile_size=TILE, overlap=0.2, experiment_id=exp["experiment_id"])
     assert "error" not in result
     assert result["validated"] is False
-    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    op = read_operating_point_sidecar(out_dir)["operating_point"]
     assert op["conf"]["validated_against"] == "false"
 
 

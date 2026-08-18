@@ -17,6 +17,8 @@ from PIL import Image
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+import tcip_store  # noqa: E402
+from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key  # noqa: E402
 from tcip_web.app import app  # noqa: E402
 
 
@@ -46,11 +48,11 @@ def _payload(root: Path, image_path: str, shapes=None, **over) -> dict:
 
 
 def _meta(root: Path) -> dict:
-    return json.loads((root / ".tcip" / "state" / "canvas_live.json").read_text())
+    return tcip_store.read(canvas_meta_key(str(root)))
 
 
 def _shapes_doc(root: Path) -> dict:
-    return json.loads((root / ".tcip" / "state" / "canvas_shapes.json").read_text())
+    return tcip_store.read(canvas_geometry_key(str(root)))
 
 
 SHAPES = [
@@ -75,13 +77,13 @@ def test_full_push_writes_geometry_and_meta(client, tmp_path):
 
 def test_heartbeat_updates_meta_without_touching_geometry(client, tmp_path):
     client.post("/api/canvas/state", json=_payload(tmp_path, "C:/img/a.jpg", shapes=SHAPES))
-    before = (tmp_path / ".tcip" / "state" / "canvas_shapes.json").stat().st_mtime_ns
+    before = tcip_store.read_versioned(canvas_geometry_key(str(tmp_path))).version
     hb = _payload(tmp_path, "C:/img/a.jpg", shapes=None,
                   viewport={"x": 40, "y": 10, "w": 80, "h": 50, "scale": 2.0})
     r = client.post("/api/canvas/state", json=hb)
     assert r.json()["shapes_written"] is False
     assert _meta(tmp_path)["viewport"]["x"] == 40                       # meta moved
-    after = (tmp_path / ".tcip" / "state" / "canvas_shapes.json").stat().st_mtime_ns
+    after = tcip_store.read_versioned(canvas_geometry_key(str(tmp_path))).version
     assert after == before                                              # geometry blob untouched
 
 
@@ -103,8 +105,20 @@ def test_push_state_allows_project_root_inside_image_roots(client, tmp_path, mon
 
 
 def test_push_state_does_not_fsync(client, tmp_path, monkeypatch):
-    """canvas_live/canvas_shapes are ephemeral: a push must not depend on fsync."""
+    """canvas_live/canvas_shapes are ephemeral: a push must not depend on fsync.
+
+    Bound to the file backend on purpose: canvas records declare durable=False, and this
+    backend's own write path calls os.fsync only when a record's descriptor declares itself
+    durable, so the patch proves the push's per-record durability choice. A fresh sqlite root
+    also fsyncs once, unconditionally, to create its database file before any record is
+    written; that is bootstrap infrastructure a root incurs regardless of what it stores, not
+    something this push depends on, and it would trip the same patch for an unrelated reason.
+    """
     import os as _os
+
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
 
     def _boom(*_a, **_kw):
         raise AssertionError("fsync should not be called for canvas state")

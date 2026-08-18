@@ -161,9 +161,15 @@ def test_an_ordinary_stamp_is_still_written_and_merged(tmp_path):
 
 def test_sidecar_bytes_are_the_canonical_record_spelling(tmp_path):
     """A stamp is spelled the way every other record is, so a breeder opening one and a
-    reader parsing one meet the same document."""
-    from tcip_store import RECORD_JSON
+    reader parsing one meet the same document.
 
+    Bound to the file backend: the sidecar is a record, so this is a claim about the bytes
+    the store lands on disk, which only the file backend answers directly.
+    """
+    from tcip_store import RECORD_JSON
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     bucket = tmp_path / "bucket"
     stamp = _validated_stamp(tmp_path)
     write_sidecar(bucket, stamp)

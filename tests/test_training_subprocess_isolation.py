@@ -98,21 +98,17 @@ def test_resolve_run_id_map_none_for_attribute_scope_with_no_registry(tmp_path):
 
 
 def test_patch_experiment_config_id_map_merges_into_durable_config(tmp_path, monkeypatch):
-    import json
+    import tcip_store as ts
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import experiments_dir
+    from tcip_mcp.experiments import config_key, create_experiment
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
 
-    exp_dir = experiments_dir() / "exp1"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "config.json").write_text(
-        json.dumps({"model_source": {"builder": "x:y"}, "data": {"images_dir": "img"}}),
-        encoding="utf-8")
+    create_experiment("exp1", {"model_source": {"builder": "x:y"}, "data": {"images_dir": "img"}})
 
     _patch_experiment_config_id_map("exp1", "catkin", "elongation", {"dormant": 0, "elongated": 1})
 
-    cfg = json.loads((exp_dir / "config.json").read_text(encoding="utf-8"))
+    cfg = ts.read(config_key("exp1"))
     assert cfg["data"]["id_map"] == {"dormant": 0, "elongated": 1}
     assert cfg["data"]["subject"] == "catkin"
     assert cfg["data"]["attribute"] == "elongation"

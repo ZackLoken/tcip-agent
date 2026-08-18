@@ -5,7 +5,6 @@ confirmed-negatives store that decides what trains as empty."""
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 import numpy as np
@@ -13,13 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import tcip_store as ts
 from tcip_mcp.dataset_layout import (
     bucket_subject_date,
-    image_status_path,
+    image_status_key,
     normalize_status_store,
     status_bucket,
     status_records,
-    view_coverage_path,
+    view_coverage_key,
 )
 from tcip_web.app import app
 
@@ -76,12 +76,9 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
     """
     root, path = dated_dataset
     bucket = status_bucket("bush", "2026-03-01")
-    status = image_status_path(root)
-    status.parent.mkdir(parents=True, exist_ok=True)
-    status.write_text(
-        json.dumps({bucket: status_records(
-            {"plot.tif": "negative", "other.tif": "complete"}, recorded_by="user:breeder")}),
-        encoding="utf-8")
+    ts.replace(image_status_key(root), {bucket: status_records(
+        {"plot.tif": "negative", "other.tif": "complete"}, recorded_by="user:breeder")},
+        expect=ts.Version.ABSENT)
 
     grid = client.get("/api/coverage/grid", params={"path": path, "tile_size": 50}).json()
     cell = grid["cells"][0]["name"]
@@ -96,11 +93,11 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
     })
     assert resp.status_code == 200, resp.text
 
-    stored = normalize_status_store(json.loads(status.read_text(encoding="utf-8")))
+    stored = normalize_status_store(ts.read(image_status_key(root)))
     assert stored.get(bucket, {}).get("plot.tif") == "negative"
     assert stored.get(bucket, {}).get("other.tif") == "complete"
 
-    coverage = json.loads(view_coverage_path(root).read_text(encoding="utf-8"))
+    coverage = ts.read(view_coverage_key(root))
     record = coverage[bucket]["plot.tif"]
     assert record["cells_served_at_native"] == [cell]
     assert record["cells_swept"] == []

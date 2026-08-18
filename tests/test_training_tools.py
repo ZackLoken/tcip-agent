@@ -4,10 +4,11 @@ immutability on relaunch, and canonical-format confidence parsing in get_worst_p
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+
+import tcip_store as ts
 
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
 # test's pinned project root so trait="catkin" call sites keep resolving.
@@ -518,7 +519,7 @@ def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch
     """A swept key the training body never reads is surfaced by observation, not
     gated by a whitelist. resolved_config.json records which swept keys went unconsumed."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
     def fake_train(run, train_loader, val_loader, task="detection",
                    epoch_callback=None, resume_from=""):
@@ -531,7 +532,7 @@ def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch
     trial_dir = tmp_path / "trial_0"
     _run_hpo_trial({"lr": 3e-4, "totally_bogus_key": 5}, [].append, _detection_base(), str(trial_dir))
 
-    resolved = json.loads((trial_dir / "resolved_config.json").read_text())
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
     assert resolved["unconsumed_params"] == ["totally_bogus_key"]
 
 
@@ -547,7 +548,7 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
     falsely flagged unconsumed merely because generic_trainer.train() doesn't know it:
     tracking is genuine runtime access, not a static comparison against train()'s key list."""
     pytest.importorskip("torch")
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
     import tcip_mcp.tools.training_tools as tt
     monkeypatch.setattr(tt, "_auto_train_val",
@@ -562,7 +563,7 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
     trial_dir = tmp_path / "trial_0"
     _run_hpo_trial({"custom_axis": 42}, [].append, base, str(trial_dir))
 
-    resolved = json.loads((trial_dir / "resolved_config.json").read_text())
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
     assert resolved["unconsumed_params"] == []
 
 
@@ -612,9 +613,10 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
 
 def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
-    import json
-
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.experiments import (
+        config_key, create_experiment, lineage_key, log_metrics, read_metrics, status_key,
+        update_status,
+    )
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
     # A completed experiment with recorded history.
@@ -622,21 +624,19 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
     update_status("exp1", "running")
     log_metrics("exp1", 1, {"map50": 0.7})
     update_status("exp1", "completed")
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp1"
-    status_before = (exp_dir / "status.json").read_text()
-    metrics_before = (exp_dir / "metrics.jsonl").read_text()
+    status_before = ts.read(status_key("exp1"))
+    metrics_before = read_metrics("exp1")
 
     # Relaunching with the same experiment_id must not reuse it.
     eid = _ensure_experiment("exp1", {"a": 2}, "imgs_v2", resume_from="", run_id="run_9_0",
                              output_dir="out")
     assert eid == "exp1_run_9_0"
-    assert (exp_dir / "status.json").read_text() == status_before      # untouched
-    assert (exp_dir / "metrics.jsonl").read_text() == metrics_before   # untouched
-    assert json.loads((exp_dir / "config.json").read_text()) == {"a": 1}
+    assert ts.read(status_key("exp1")) == status_before      # untouched
+    assert read_metrics("exp1") == metrics_before             # untouched
+    assert ts.read(config_key("exp1")) == {"a": 1}
 
     # The fresh experiment exists and points back at the original.
-    fresh_dir = tmp_path / ".tcip" / "experiments" / "exp1_run_9_0"
-    lineage = json.loads((fresh_dir / "lineage.json").read_text())
+    lineage = ts.read(lineage_key("exp1_run_9_0"))
     assert lineage["parent_experiment"] == "exp1"
     assert lineage["data_source"] == "imgs_v2"
 
@@ -661,9 +661,7 @@ def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, 
     launched (tiling/seed resolved after create_experiment ran), not left describing the config
     as it stood before those were resolved."""
     monkeypatch.chdir(tmp_path)
-    import json
-
-    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.experiments import config_key, create_experiment
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
     create_experiment("pre", {"a": 1})
@@ -671,7 +669,7 @@ def test_ensure_experiment_attaches_to_precreated_and_rewrites_config(tmp_path, 
     assert _ensure_experiment("pre", effective_config, None, resume_from="", run_id="r1",
                               output_dir="out") == "pre"
 
-    config = json.loads((tmp_path / ".tcip" / "experiments" / "pre" / "config.json").read_text())
+    config = ts.read(config_key("pre"))
     assert config == effective_config
 
 
@@ -682,9 +680,7 @@ def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_
     ModelRegistry.register_model replace the original's registry entry by name with no record of
     what was superseded."""
     monkeypatch.chdir(tmp_path)
-    import json
-
-    from tcip_mcp.experiments import create_experiment, log_metrics, update_status
+    from tcip_mcp.experiments import create_experiment, lineage_key, log_metrics, update_status
     from tcip_mcp.tools.training_tools import _ensure_experiment
 
     create_experiment("res", {"a": 1})
@@ -694,9 +690,7 @@ def test_ensure_experiment_resume_into_populated_id_mints_fresh_parented_id(tmp_
                              run_id="r2", output_dir="out")
     assert eid == "res_r2"
 
-    fresh_dir = tmp_path / ".tcip" / "experiments" / "res_r2"
-    assert fresh_dir.is_dir()
-    lineage = json.loads((fresh_dir / "lineage.json").read_text())
+    lineage = ts.read(lineage_key("res_r2"))
     assert lineage["parent_experiment"] == "res"
 
 

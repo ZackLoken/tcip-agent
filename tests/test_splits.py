@@ -6,10 +6,11 @@ from collections import defaultdict
 
 import pytest
 
+import tcip_store as ts
 from tcip_mcp.pipelines.data.splits import (
     default_group_key,
     GROUP_KEY_FNS,
-    cal_holdout_lock_path,
+    cal_holdout_lock_key,
     cal_holdout_split,
     count_lines,
     group_balanced_split,
@@ -151,7 +152,7 @@ def test_resolve_locked_cal_holdout_split_persists_lock_file(tmp_path):
     stems = _grouped(4)
     resolve_locked_cal_holdout_split(
         stems, identity_hash="persist-test", scope_root=tmp_path, seed=3)
-    assert cal_holdout_lock_path("persist-test", scope_root=tmp_path).is_file()
+    assert ts.exists(cal_holdout_lock_key("persist-test", scope_root=tmp_path))
 
 
 def test_resolve_locked_cal_holdout_split_group_key_map_produces_working_split(tmp_path):
@@ -212,7 +213,7 @@ def test_lock_survives_an_active_project_repin(tmp_path, monkeypatch):
     assert after["holdout"] == first["holdout"]
     # The lock was read, not redrawn: the declared policy is reported as diverging from it.
     assert after["policy_divergence"]["locked"]["seed"] == 1
-    assert cal_holdout_lock_path("repin-test", scope_root=dataset_root).is_file()
+    assert ts.exists(cal_holdout_lock_key("repin-test", scope_root=dataset_root))
 
 
 # --- spatial_strip_split ---

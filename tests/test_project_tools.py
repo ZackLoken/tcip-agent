@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
@@ -17,6 +18,36 @@ from tcip_mcp.tools.project_tools import (
     register_dataset,
     upsert_dataset,
 )
+from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
+
+
+def _damage_record(key: tcip_store.Key, data: bytes) -> None:
+    """Put ``data`` behind a record, wherever the bound backend keeps it.
+
+    A record must already exist at the key; this corrupts the bytes behind it in place, on the
+    same path the bound backend actually reads, so the case is genuine on both backends rather
+    than reporting absence on one and corruption on the other.
+    """
+    from tcip_store.store import _backend
+
+    name = os.environ.get(BACKEND_ENV) or FILE_BACKEND
+    if name == FILE_BACKEND:
+        _backend().path_for(key).write_bytes(data)
+        return
+    if name != SQLITE_BACKEND:
+        raise ValueError(f"no bytes-corruption path for backend {name!r}")
+    import sqlite3
+
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute(
+            "update records set value = ? where store = ? and parts = ?",
+            (data, key.store, encode_parts(key.parts)),
+        )
+    finally:
+        conn.close()
 
 
 def _make_dataset(root: Path) -> None:
@@ -116,10 +147,11 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
 
 
 def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path):
+    from tcip_mcp.project_status import project_status_key, record_report
+
     init_project(str(tmp_path))
-    status_path = tmp_path / ".tcip" / "state" / "project_status.json"
-    status_path.parent.mkdir(parents=True, exist_ok=True)
-    status_path.write_text("{not valid json", encoding="utf-8")
+    record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
+    _damage_record(project_status_key(tmp_path), b"{not valid json")
 
     status = inspect_project(str(tmp_path))
     assert "status_unavailable" in status["recent_activity"]
@@ -194,6 +226,15 @@ def test_export_import_roundtrip(tmp_path: Path):
     )
     reg = register_dataset(str(src), crop="hazelnut")  # dataset.json identity travels with the data
 
+    # A database backend holds this project's state in store.db, which an archive bundles as
+    # files, not as a database; write it out first, the way a real export/archive pass would.
+    from tcip_store.file_backend import database_file
+    from tcip_store.export import export_root
+
+    src_abs = str(Path(src).absolute())
+    if database_file(src_abs).is_file():
+        export_root(src_abs)
+
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -203,6 +244,16 @@ def test_export_import_roundtrip(tmp_path: Path):
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported
     assert imported["files_extracted"] == exported["files_added"]
+
+    # A restored bundle is files, not a database: a database backend refuses to touch it until
+    # its own record/log files are moved in, the same conform step real usage runs.
+    from tcip_store.adoption import adopt_root
+    from tcip_store.file_backend import database_file
+    from tcip_store.layout_claims import ROOT
+
+    dest_abs = str(Path(dest).absolute())
+    if not database_file(dest_abs).is_file():
+        adopt_root(dest_abs, ROOT, report=lambda line: None)
 
     status = inspect_project(str(dest))
     assert status["initialized"] is True
@@ -307,12 +358,15 @@ def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
 def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(tmp_path: Path):
     """A registry read as empty would make the next registration write a one-entry list and drop
     every other dataset identity the project had recorded, so corruption is not absence here."""
+    from tcip_mcp.tools.project_tools import dataset_registry_key
+
     project = tmp_path / "proj"
     (project / ".tcip").mkdir(parents=True)
 
     assert read_datasets(project) == []  # a project with nothing registered yet
 
-    (project / ".tcip" / "datasets.json").write_bytes(b'[{"id": "aaa"')  # truncated mid-list
+    upsert_dataset(project, {"id": "aaa", "path": str(project), "crop": "hazelnut"})
+    _damage_record(dataset_registry_key(project), b'[{"id": "aaa"')  # truncated mid-list
     with pytest.raises(tcip_store.DecodeError):
         read_datasets(project)
 

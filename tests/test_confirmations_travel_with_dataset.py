@@ -240,7 +240,8 @@ def test_quarantine_is_per_image_not_per_bucket(tmp_path):
 # (g) materialize_dataset's review-harvested negatives must be quarantine-capable, not a permanent
 # no-op for lack of any classes.json to compare against.
 def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
-    from tcip_mcp.dataset_layout import image_status_digest_path
+    import tcip_store
+    from tcip_mcp.dataset_layout import image_status_digest_key
     from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
 
     src_root = tmp_path / "src"
@@ -261,5 +262,5 @@ def test_materialize_dataset_carries_a_quarantine_capable_stamp(tmp_path):
     materialize_dataset(review_state, str(src_images), str(out), subject="catkin")
 
     assert (out / "classes.json").is_file(), "the materialized dataset must be self-describing"
-    stamps = json.loads(image_status_digest_path(out).read_text()).get("catkin", {})
+    stamps = tcip_store.read(image_status_digest_key(out), default={}).get("catkin", {})
     assert stamps.get("imgB.jpg") == expected_digest

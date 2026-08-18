@@ -8,8 +8,6 @@ These are provenance additions, no measurement changes.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 
@@ -131,13 +129,14 @@ def exp_store(tmp_path, monkeypatch):
 
 
 def test_update_status_refuses_to_leave_terminal(exp_store):
+    import tcip_store as ts
+
     exp = exp_store
     exp.create_experiment("t1", {})
     exp.update_status("t1", "completed")
     res = exp.update_status("t1", "running")
     assert "error" in res
-    d = exp.experiments_dir() / "t1"
-    assert json.loads((d / "status.json").read_text())["state"] == "completed"
+    assert ts.read(exp.status_key("t1"))["state"] == "completed"
 
 
 def test_log_metrics_refuses_new_epoch_when_terminal(exp_store):
@@ -147,45 +146,49 @@ def test_log_metrics_refuses_new_epoch_when_terminal(exp_store):
     exp.update_status("t2", "completed")
     res = exp.log_metrics("t2", 1, {"loss": 0.5})
     assert "error" in res
-    lines = (exp.experiments_dir() / "t2" / "metrics.jsonl").read_text().strip().splitlines()
-    assert len(lines) == 1  # no new epoch appended
+    assert len(exp.read_metrics("t2")) == 1  # no new epoch appended
 
 
 def test_lineage_additive_first_write_allowed_overwrite_refused(exp_store):
+    import tcip_store as ts
+
     exp = exp_store
     exp.create_experiment("t3", {})
     exp.update_status("t3", "completed")
     # First write into a still-empty field is permitted (R1's predictions link relies on this).
     exp.update_lineage("t3", predictions="/preds/run")
-    lin = json.loads((exp.experiments_dir() / "t3" / "lineage.json").read_text())
+    lin = ts.read(exp.lineage_key("t3"))
     assert lin["predictions"] == "/preds/run"
     # Overwriting the now-populated field is refused; the recorded value stands.
     exp.update_lineage("t3", predictions="/preds/other")
-    lin2 = json.loads((exp.experiments_dir() / "t3" / "lineage.json").read_text())
+    lin2 = ts.read(exp.lineage_key("t3"))
     assert lin2["predictions"] == "/preds/run"
 
 
 def test_record_artifact_additive_only_when_terminal(exp_store):
+    import tcip_store as ts
+
     exp = exp_store
     exp.create_experiment("t4", {})
     exp.update_status("t4", "completed")
     exp.record_artifact("t4", "predictions", "/preds")   # new name -> allowed
     res = exp.record_artifact("t4", "predictions", "/other")  # existing -> refused
     assert "error" in res
-    arts = json.loads((exp.experiments_dir() / "t4" / "artifacts.json").read_text())
+    arts = ts.read(exp.artifacts_key("t4"))
     assert arts["predictions"]["path"] == "/preds"
 
 
 # ── R5: make_splits manifest embeds dataset_hash + seed ───────────────────────
 
 def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
-    from tcip_mcp.tools.data_tools import make_splits
+    import tcip_store as ts
+    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
 
     out = tmp_path / "splits"
     result = make_splits(str(data_dir), output_path=str(out), seed=7)
     assert result["dataset_hash"]
     assert result["seed"] == 7
-    manifest = json.loads((out / "split_manifest.json").read_text())
+    manifest = ts.read(split_manifest_key(out))
     assert manifest["seed"] == 7
     assert manifest["dataset_hash"] == result["dataset_hash"]
     assert set(manifest["splits"]) == {"train", "val", "test"}

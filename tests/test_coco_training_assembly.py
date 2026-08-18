@@ -595,9 +595,10 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
 def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     """A split's carried negatives must get their own classes.json + digest stamp too; without it
     quarantine can never fire on a split tree."""
+    import tcip_store as ts
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
-    from tcip_mcp.dataset_layout import image_status_digest_path, status_bucket
+    from tcip_mcp.dataset_layout import image_status_digest_key, status_bucket
     from tcip_mcp.tools.data_tools import make_splits
 
     images = tmp_path / "images"
@@ -630,10 +631,10 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     found = False
     for split in ("train", "val", "test"):
         split_root = out / split
-        digest_file = image_status_digest_path(split_root)
-        if not digest_file.is_file():
+        digest_key = image_status_digest_key(split_root)
+        if not ts.exists(digest_key):
             continue
-        stamps = json.loads(digest_file.read_text()).get(status_bucket("catkin", None), {})
+        stamps = ts.read(digest_key).get(status_bucket("catkin", None), {})
         carried_here = set(stamps) & neg_names
         if carried_here:
             assert (split_root / "classes.json").is_file()

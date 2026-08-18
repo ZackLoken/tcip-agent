@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import tcip_store as ts
 from PIL import Image
 
 from tcip_annotation import json_io
@@ -81,8 +82,14 @@ def test_make_splits_stats_golden(tmp_path: Path):
 
 
 def test_make_splits_materialize_tree_golden(tmp_path: Path):
+    """Bound to the file backend on purpose: the golden lists the split's own record documents
+    (train.json, split_manifest.json, ...) as sibling files, a fact about the file layout a
+    database backend does not reproduce."""
+    from tcip_store.file_backend import FileBackend
+
     from tcip_mcp.tools.data_tools import make_splits
 
+    ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
     result = make_splits(str(root), output_path=str(out), seed=1, materialize=True)
