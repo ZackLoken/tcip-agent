@@ -982,7 +982,8 @@ def compute_phenology(
     csv_path = phenology.write_phenology_csv(
         rows, Path(output_csv_path), spec, stamp=stamp, basis=still_stated.basis)
     record_delivery_binding_event("compute_phenology", str(csv_path),
-                                  list(predictions_by_date.values()), recon["bindings"])
+                                  list(predictions_by_date.values()), recon["bindings"],
+                                  trait=trait, delivery_kind=STATE_CROSSING_DATES)
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares,
     # not a single hardcoded "50per" key, a trait authored with different milestone fractions has
     # no fabricated zero for a crossing it was never asked to report.

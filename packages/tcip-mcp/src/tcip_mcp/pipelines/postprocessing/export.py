@@ -267,5 +267,6 @@ def export_detection_csv(
             })
 
     record_delivery_binding_event("export_detection_csv", output_path, pred_dirs,
-                                  measurement_recon["bindings"])
+                                  measurement_recon["bindings"],
+                                  trait=trait, delivery_kind=PER_IMAGE_COUNT)
     return output_path

@@ -1210,6 +1210,7 @@ RETROSPECTIVE_UNDER_TEST = "project_under_test"
 PROPOSAL_STEM = "a_1"
 TRAIT_UNDER_TEST = "trait_under_test"
 DELIVERY_KIND_UNDER_TEST = "state_crossing_dates"
+EVENT_ID_UNDER_TEST = "a1b2c3d4e5f60718"
 EXPERIMENT = "exp_042"
 STUDY = "hpo_1a2b3c4d"
 TRIAL_DIR = "trial_00000"
@@ -1649,6 +1650,20 @@ REGISTERED = {
         _operationalization_key,
         f".tcip/state/trait_operationalizations/{TRAIT_UNDER_TEST}/{DELIVERY_KIND_UNDER_TEST}.json",
         root_of=_operationalizations_root),
+    # one completed delivery, carrying the real per-bucket StampBinding evidence it shipped under
+    "delivery_events": Registered(
+        {"event_id": EVENT_ID_UNDER_TEST, "trait": TRAIT_UNDER_TEST,
+         "delivery_kind": DELIVERY_KIND_UNDER_TEST, "door": "compute_phenology",
+         "output_path": "büsch_phenology.csv",
+         "documents": {"predictions/live/2026-03-04": {
+             "ok": True, "claimed": True, "experiment_id": EXPERIMENT,
+             "producing_experiment_id": EXPERIMENT, "checkpoint_sha256": "0" * 64,
+             "record_digest": "7f3a1b9c2d4e5f60", "note": ""}},
+         "produced_at": "2026-03-04T12:00:00+00:00"},
+        lambda root: resolution.delivery_event_key(
+            resolution.delivery_events_scope(root), EVENT_ID_UNDER_TEST),
+        f".tcip/state/delivery_events/{EVENT_ID_UNDER_TEST}.json",
+        root_of=lambda root: resolution.delivery_events_scope(root)),
 }
 
 CODEC_EXEMPT = {

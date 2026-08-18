@@ -256,8 +256,12 @@ def deliver_orthomosaic_plant_counts(
                 "n_detections": len(assignments), "n_mapped": len(mapped),
                 "n_unmapped": n_unmapped}
 
+    # This door always delivers under the aggregate count kind (no task is threaded through to
+    # export_aggregated_csv); trait was already resolved above, at the meaning-refusal check.
+    delivery_kind = PER_PLANT_COUNT_AGGREGATE
     record_delivery_binding_event("deliver_orthomosaic_plant_counts", output_csv_path,
-                                  [predictions_dir], recon["bindings"])
+                                  [predictions_dir], recon["bindings"],
+                                  trait=trait, delivery_kind=delivery_kind)
 
     # The CSV's own measurement_validated column is what export_aggregated_csv's gate actually
     # stamped; read it back rather than re-deriving the same decision a second time here.
