@@ -7,15 +7,22 @@ here, so a codec swapped for a re-spelled serializer, a dropped trailing newline
 ``ensure_ascii`` flip shows up as a failing byte comparison rather than as a dataset that reads
 differently a season later.
 
-Three cases drive the owning module's own writer end to end: ``write_registry``,
-``write_band_group_manifest`` and ``write_trait_spec_fields``. The other four (dataset identity,
-friction report, retrospective, snapshot manifest) pin the codec and the path only, through the
-seam expression their writer makes, because those writers mint an id, stamp a timestamp, draw a
-random suffix or capture a live environment, none of which a fixed byte comparison can hold still.
-That those writers reach the store through this very expression is covered where each writer's own
-content is asserted: ``test_project_tools`` for the identity document, ``test_meta_tools`` for
-reports and retrospectives, and ``test_bespoke_provenance`` plus
-``test_model_build_provenance_and_dims`` for the snapshot manifest.
+Two cases drive the owning module's own writer end to end: ``write_registry`` and
+``write_band_group_manifest``. A third, ``write_trait_spec_fields``, no longer needs one: a trait
+spec now writes through the same ``RECORD_JSON`` codec every other record store uses, so its byte
+spelling is already the one ``test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out``
+pins centrally in ``test_store_contract.py``, and its own placement and codec application are
+already covered there by the ``trait_specs`` case of
+``test_a_registered_store_lands_where_its_locator_says_with_the_bytes_its_codec_produces``. Pinning
+a second literal byte sequence here would only restate that pin under a weaker, hand-picked field
+set; ``test_trait_authoring.py`` is where ``write_trait_spec_fields``'s own field-level content is
+asserted. The other four (dataset identity, friction report, retrospective, snapshot manifest) pin
+the codec and the path only, through the seam expression their writer makes, because those writers
+mint an id, stamp a timestamp, draw a random suffix or capture a live environment, none of which a
+fixed byte comparison can hold still. That those writers reach the store through this very
+expression is covered where each writer's own content is asserted: ``test_project_tools`` for the
+identity document, ``test_meta_tools`` for reports and retrospectives, and ``test_bespoke_provenance``
+plus ``test_model_build_provenance_and_dims`` for the snapshot manifest.
 
 The bytes are the ones these documents carry on disk today; the placement of each file is pinned
 separately, for every registered store at once, by ``test_store_contract``. The cases whose store
@@ -26,8 +33,6 @@ answer rather than an export's.
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 import tcip_store as ts
 
@@ -83,34 +88,6 @@ BAND_GROUP_BYTES = (
     '    "Red": 650.0\n'
     '  }\n'
     '}\n'
-).encode("utf-8")
-
-TRAIT_PROVENANCE = "breeder stated it für ü"
-TRAIT_SPEC_BYTES = (
-    "classifier_agreement_floor: null\n"
-    "count_bias_tolerance_frac: 0.25\n"
-    "count_error_tolerance: null\n"
-    "count_objective: ''\n"
-    "delivers:\n"
-    "- leaf_length\n"
-    "localization: ''\n"
-    "localization_tolerance: half_class_avg_size\n"
-    "localization_tolerance_frac: 0.5\n"
-    "majority_label: ''\n"
-    "majority_milestone: ''\n"
-    "majority_provisional: false\n"
-    "milestone_fractions: []\n"
-    "milestone_on: ''\n"
-    "name: leaf\n"
-    "notes: ''\n"
-    "ordinal_agreement_floor: null\n"
-    "phenology_prefix: ''\n"
-    "positive_class_name: ''\n"
-    "provenance:\n"
-    '- "breeder stated it f\\xFCr \\xFC"\n'
-    "regression_skill_floor: null\n"
-    "sliver_frac: 0.5\n"
-    "sliver_policy: class_avg_size\n"
 ).encode("utf-8")
 
 REPORT_ID = "20260304T120000Z_missing_tool_a1b2"
@@ -224,25 +201,6 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(tmp
     )
 
     assert path.read_bytes() == BAND_GROUP_BYTES
-
-
-def test_a_trait_spec_lands_as_the_yaml_a_breeder_opens_and_edits(tmp_path):
-    """Written through ``write_trait_spec_fields``, the platform's one spec update path: the
-    file stays the ``yaml.safe_dump`` spelling a hand-authored spec is written in."""
-    yaml = pytest.importorskip("yaml")
-
-    from tcip_mcp import traits
-
-    (tmp_path / "leaf.yml").write_text(
-        yaml.safe_dump({"name": "leaf", "delivers": ["leaf_length"],
-                        "count_bias_tolerance_frac": 1.0}),
-        encoding="utf-8",
-    )
-    traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 0.25}, [TRAIT_PROVENANCE], specs_dir=tmp_path,
-    )
-
-    assert (tmp_path / "leaf.yml").read_bytes() == TRAIT_SPEC_BYTES
 
 
 def test_a_friction_report_lands_as_the_json_document_every_reader_of_the_corpus_parses(tmp_path):
