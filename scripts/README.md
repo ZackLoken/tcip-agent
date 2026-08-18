@@ -11,14 +11,16 @@ reaching for again versus one built narrowly for a specific past investigation.
   split of a labeled dir, derives a count-unbiased detection operating point, checks its
   held-out count bias, and prints the full provenance + sweep for inspection. It writes
   nothing; validated claims are minted only by the audited doors.
-- `adopt_store.py` - moves a root's existing record and log files into a store database,
-  once, so the database backend can own state that predates it. Decodes every file it will
-  adopt and refuses the whole root on the first that will not, publishes the database only
-  after re-checking that nothing changed under it, and leaves blob files exactly where they
-  are. `--project` conforms a project's own roots and its registered datasets' at once.
-- `_store_bootstrap.py` - imports every store-owning module and states, per record and log
-  store, the kind of root it hangs off and which of its key parts are constants. Not a
-  standalone script; `adopt_store.py` and `export_store.py` both read it.
+- `adopt_store.py` - moves a root's existing record and log files into a store database, so
+  the database backend can own state that predates it. Decodes every file it will adopt and
+  refuses the whole root on the first that will not, publishes the database only after
+  re-checking that nothing changed under it, and leaves blob files exactly where they are. A
+  root that already holds a database is planned too, and takes in exactly the stores that
+  database has never held. `--project` conforms a project's own roots and its registered
+  datasets' at once.
+- `_store_bootstrap.py` - imports every store-owning module, which is what registers every
+  store, and names the roots a whole project's records live in. Not a standalone script;
+  `adopt_store.py` and `export_store.py` both read it.
 - `check_dataset_identity.py` - recomputes a dataset's on-disk fingerprint and compares it
   against the fingerprint recorded in `dataset.json` and the project's `.tcip/datasets.json`,
   to catch data that changed or moved since it was registered.

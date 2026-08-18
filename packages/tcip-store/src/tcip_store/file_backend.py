@@ -8,8 +8,9 @@ Roots are resolved at use time, not at bind time: the key carries the root, so a
 process that repins its platform root mid-run keeps writing where the caller says.
 
 Records and logs are refused on a root that holds a store database: a file written beside one
-is a write the database never sees and the next read never returns. Reads and blobs are
-unaffected, which is what keeps every file-reading tool working on an exported root.
+is a write the database never sees and the next read never returns. Reads are unaffected, which
+is what keeps every file-reading tool working on an exported root, and so is a blob write
+anywhere but on a record's own claimed path beside the database holding that record.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ from tcip_store.model import (
     canonical_order,
     canonical_path,
 )
-from tcip_store.registry import StoreDescriptor, get_descriptor, registered_stores
+from tcip_store.registry import StoreDescriptor, get_descriptor
 
 _TEMP_SUFFIX = ".tmp"
 _LOCK_SUFFIX = ".lock"
@@ -244,51 +245,6 @@ def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> 
         yield
 
 
-def unconformed_record_files(root: str, *, limit: int = 0) -> tuple[Path, ...]:
-    """Files under ``root`` that a record or log store's locator claims and no blob's does.
-
-    Each one is evidence the root is unconformed: its records are still files rather than rows
-    in the database a database backend would read. The question is asked through the locators
-    the stores themselves declare rather than through a list of filenames somebody maintains.
-
-    A blob's file stays a file under every backend, so a file some blob store could equally own
-    is not evidence that a root's records were left behind. Locator shapes collide, and a
-    dataset root's ``classes.json`` is claimed by a plain ``<dir>/<name>.json`` record shape as
-    readily as by the blob store that actually owns it, so counting it would refuse every real
-    dataset. The cost of that reading is that a root whose only records happen to sit at the
-    depth a blob store also addresses goes undetected here; what catches those is adoption's own
-    accounting, which names every claimed file no plan takes in. ``limit`` stops the walk once
-    that many are found, for a caller that only needs to know whether any exist.
-    """
-    directory = require_absolute_root(root)
-    if not directory.is_dir():
-        return ()
-    descriptors = [get_descriptor(name) for name in registered_stores()]
-    owners = [d for d in descriptors if d.kind in ("record", "log") and d.locator is not None]
-    blobs = [d for d in descriptors if d.kind == "blob" and d.locator is not None]
-    found: list[Path] = []
-    for path in directory.rglob("*"):
-        if not path.is_file() or _is_bookkeeping(path.name):
-            continue
-        relative = PurePosixPath(path.relative_to(directory).as_posix())
-        if not _any_claims(owners, relative) or _any_claims(blobs, relative):
-            continue
-        found.append(path)
-        if limit and len(found) >= limit:
-            break
-    return tuple(found)
-
-
-def _any_claims(descriptors: list[StoreDescriptor], relative: PurePosixPath) -> bool:
-    """Whether any of these stores' locators reads this path as one of its own entries."""
-    for descriptor in descriptors:
-        assert descriptor.locator is not None
-        parts = descriptor.locator.parts_from(relative)
-        if parts is not None and len(parts) == len(descriptor.key_fields):
-            return True
-    return False
-
-
 def fsync_directory(directory: Path) -> None:
     """Flush a directory entry, so a rename or a created directory survives a power loss.
 
@@ -429,6 +385,64 @@ class FileBackend:
                         "out with python scripts/export_store.py and bind the file backend "
                         "deliberately with TCIP_STORE_BACKEND=file."
                     )
+            yield
+
+    @contextmanager
+    def _blob_conform_rail(self, key: Key) -> Iterator[None]:
+        """Refuse a blob write onto a record's own path beside the database that owns it.
+
+        A blob write is not a record write, but a public path exists that writes a blob to a
+        location the caller names, so its bytes can land where a record store's file belongs,
+        beside a live database, in band. The target is matched against the claims in memory
+        first, with no lock and nothing read from disk, because the ordinary blob write is
+        imagery, labels and predictions and must not pay for this. Only a matching target
+        takes anything: it locks every root a match implies, in canonical path order so a
+        colliding writer and a database creation cannot deadlock, refuses when any of those
+        roots holds a database at all, and otherwise keeps the locks across its own publish,
+        so a creation racing it sees whichever landed first.
+
+        The refusal is unconditional rather than scoped to what the database currently holds.
+        A test against markers is defeatable in both directions: a cached connection can mint
+        a store's first markers without re-walking, and a reader can serve honest absence
+        while the file idles, and neither is reachable across processes. What it costs is
+        stated plainly: a caller-named document whose filename happens to match a claim (an
+        export named like a manifest) is refused beside any database even where no harm was
+        meant. The platform's own blob layouts match no anchored claim, so only caller-named
+        output pays, and renaming the output clears it.
+        """
+        # imported here rather than at module scope: the claims module is composed on this one
+        from tcip_store.layout_claims import anchored_matches
+
+        matches = anchored_matches(self.path_for(key))
+        if not matches:
+            yield
+            return
+        roots: dict[str, Path] = {}
+        for match in matches:
+            roots.setdefault(canonical_path(match.root), match.root)
+        with ExitStack() as held:
+            for canonical, root in sorted(roots.items()):
+                try:
+                    held.enter_context(transition_lock(str(root), timeout_s=self.lock_timeout_s))
+                except self._timeout_error:
+                    raise StoreBusy((key,), key, self.lock_timeout_s) from None
+                db_path = database_file(str(root))
+                if not db_path.is_file():
+                    continue
+                colliding = sorted(
+                    {
+                        match.store
+                        for match in matches
+                        if canonical_path(match.root) == canonical
+                    }
+                )
+                raise StoreError(
+                    f"writing a blob to {self.path_for(key)} would put it where "
+                    f"{', '.join(colliding)} keeps its own entries, and {db_path} holds this "
+                    "root's records, so the file would be state the database never sees. "
+                    "Rename the output, or write it to a directory no record store is rooted "
+                    "at."
+                )
             yield
 
     # ── durability primitives ───────────────────────────────────────────────────
@@ -684,7 +698,7 @@ class FileBackend:
     def put_blob(self, key: Key, data: bytes, *, expect: Version | None = None) -> Version:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._locked([key]):
+        with self._blob_conform_rail(key), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             temp = self._stage_bytes(path, data, durable=descriptor.durable)
@@ -695,7 +709,7 @@ class FileBackend:
     def write_blob(self, key: Key, *, expect: Version | None = None) -> Iterator[BinaryIO]:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
-        with self._locked([key]):
+        with self._blob_conform_rail(key), self._locked([key]):
             if expect is not None:
                 self._require_version(key, path, expect)
             fd, temp = tempfile.mkstemp(

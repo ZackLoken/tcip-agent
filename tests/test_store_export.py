@@ -20,14 +20,19 @@ import tcip_store as ts
 from tcip_store import export as store_export
 from tcip_store.file_backend import FileBackend, RootedFileLocator, _is_bookkeeping
 from tcip_store.sqlite_backend import SqliteBackend, database_path, encode_parts
-from tests._store_worker import LOG, LWW, register_contract_stores
+from tests._store_worker import LOG, LWW, register_contract_stores, document_claim
 
 register_contract_stores()
 
 STATE_ALPHA = "export_state_alpha"
 STATE_BETA = "export_state_beta"
-_SHARED_SHAPE = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""The shape thirteen shipped stores share, which is why the export cannot trust a directory."""
+_SHARED_SHAPE = RootedFileLocator(prefix=("documents",), suffix=".json")
+"""One locator handed to two stores, so their files are indistinguishable by shape.
+
+That is the property the export has to survive, and it is why the export cannot trust a
+directory: thirteen shipped stores place a single document under ``.tcip/state`` the same way.
+This fixture keeps the shape and puts it in a directory of the suite's own.
+"""
 
 _declared = False
 
@@ -47,6 +52,7 @@ def _register_export_stores() -> None:
                 codec=ts.RECORD_JSON,
                 concurrency="last_writer_wins",
                 locator=_SHARED_SHAPE,
+                claim=document_claim(),
             )
         )
 
@@ -165,7 +171,7 @@ def test_two_keys_that_would_land_on_one_file_refuse_the_export_before_it_writes
 
     message = str(raised.value)
     assert STATE_ALPHA in message and STATE_BETA in message and "shared" in message
-    assert not (database / ".tcip" / "state" / "shared.json").exists()
+    assert not (database / "documents" / "shared.json").exists()
 
 
 def test_an_export_whose_keys_are_distinct_writes_both_stores_files(database):
@@ -176,9 +182,9 @@ def test_an_export_whose_keys_are_distinct_writes_both_stores_files(database):
 
     exported = store_export.export_root(str(database), report=lambda line: None)
 
-    state = database / ".tcip" / "state"
-    assert ts.RECORD_JSON.decode(( state / "image_status.json").read_bytes()) == {"owner": "alpha"}
-    assert ts.RECORD_JSON.decode((state / "gui.json").read_bytes()) == {"owner": "beta"}
+    documents = database / "documents"
+    assert ts.RECORD_JSON.decode((documents / "image_status.json").read_bytes()) == {"owner": "alpha"}
+    assert ts.RECORD_JSON.decode((documents / "gui.json").read_bytes()) == {"owner": "beta"}
     assert not exported.raced
 
 

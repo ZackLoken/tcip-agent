@@ -27,7 +27,29 @@ from pathlib import Path
 
 import tcip_store as ts
 from tcip_store.file_backend import FileBackend, RootedFileLocator
+from tcip_store.layout_claims import ANY, Claim, Constant, PartPattern, Patterned
 from tcip_store.sqlite_backend import SqliteBackend
+
+CONTRACT_LAYOUT = "contract_root"
+"""The kind of root these stores hang off, which no shipped store shares.
+
+A store outside the platform's own claim table states where its entries live in its
+descriptor, and the database backend refuses to serve one that does not, so these say it
+here the same way a shipped store's row says it in the claim table.
+"""
+
+SECOND_LAYOUT = "another_root_kind"
+"""A second kind of root, for the case where one directory serves two of them.
+
+Two layouts' templates can describe one path, which is what the accounting has to notice
+rather than pick between, so the suite needs a second layout to put a store under.
+"""
+
+OVERLAP_DIR = "overlap"
+"""The directory the two overlapping stores below both place their documents in."""
+
+OVERLAP_SERVED = "contract_overlap_second_layout"
+OVERLAP_STRANDED = "contract_overlap_contract_layout"
 
 CAS = "contract_cas"
 LWW = "contract_lww"
@@ -44,6 +66,31 @@ BACKEND_ENV = "TCIP_STORE_CONTRACT_BACKEND"
 FILE, SQLITE = "file", "sqlite"
 
 _registered = False
+
+
+def directory_claim(directory: str, suffix: str) -> Claim:
+    """A claim over ``<directory>/<name><suffix>``, the shape most of these stores carry."""
+    return Claim(CONTRACT_LAYOUT, ((Constant(directory), Patterned(ANY, tail=suffix)),))
+
+
+DOCUMENT_DIR = "documents"
+"""The directory the suite's own single-document stores share.
+
+Several stores over one file shape is the property those cases are about, which is the shape
+thirteen shipped stores share under ``.tcip/state``. The directory is the suite's own so that
+sharing a shape with each other does not also mean sharing a path with a shipped store, which
+would make every one of their files a file two layouts claim.
+"""
+
+
+def document_claim(pattern: PartPattern = ANY) -> Claim:
+    """A claim over ``documents/<document>.json``, the shape these stores share with each other."""
+    return Claim(CONTRACT_LAYOUT, ((Constant(DOCUMENT_DIR), Patterned(pattern, tail=".json")),))
+
+
+def overlap_claim(layout: str) -> Claim:
+    """A claim over ``overlap/<document>.json``, spelled identically under two layouts."""
+    return Claim(layout, ((Constant(OVERLAP_DIR), Patterned(ANY, tail=".json")),))
 
 
 def register_contract_stores() -> None:
@@ -68,6 +115,7 @@ def register_contract_stores() -> None:
             concurrency="cas",
             enumerable=True,
             locator=RootedFileLocator(prefix=("cas",), suffix=".json"),
+            claim=directory_claim("cas", ".json"),
         )
     )
     ts.register_store(
@@ -79,6 +127,7 @@ def register_contract_stores() -> None:
             concurrency="last_writer_wins",
             enumerable=True,
             locator=RootedFileLocator(prefix=("lww",), suffix=".json"),
+            claim=directory_claim("lww", ".json"),
         )
     )
     ts.register_store(
@@ -90,6 +139,7 @@ def register_contract_stores() -> None:
             concurrency="last_writer_wins",
             durable=False,
             locator=RootedFileLocator(prefix=("relaxed",), suffix=".json"),
+            claim=directory_claim("relaxed", ".json"),
         )
     )
     ts.register_store(
@@ -101,6 +151,10 @@ def register_contract_stores() -> None:
             concurrency="last_writer_wins",
             enumerable=True,
             locator=RootedFileLocator(prefix=("nested",), suffix=".json"),
+            claim=Claim(
+                CONTRACT_LAYOUT,
+                ((Constant("nested"), Patterned(ANY), Patterned(ANY, tail=".json")),),
+            ),
         )
     )
     ts.register_store(
@@ -111,6 +165,7 @@ def register_contract_stores() -> None:
             codec=ts.RECORD_JSON,
             concurrency="last_writer_wins",
             locator=RootedFileLocator(prefix=("opaque",), suffix=".json"),
+            claim=directory_claim("opaque", ".json"),
         )
     )
     ts.register_store(
@@ -122,6 +177,7 @@ def register_contract_stores() -> None:
             concurrency="last_writer_wins",
             enumerable=True,
             locator=RootedFileLocator(prefix=("strict",), suffix=".json"),
+            claim=directory_claim("strict", ".json"),
         )
     )
     ts.register_store(
@@ -131,6 +187,7 @@ def register_contract_stores() -> None:
             key_fields=("name",),
             codec=ts.LOG_JSON,
             locator=RootedFileLocator(prefix=("logs",), suffix=".jsonl"),
+            claim=directory_claim("logs", ".jsonl"),
         )
     )
     ts.register_store(
@@ -150,6 +207,19 @@ def register_contract_stores() -> None:
             locator=RootedFileLocator(prefix=("sealed",), suffix=".bin"),
         )
     )
+    for name, layout in ((OVERLAP_SERVED, SECOND_LAYOUT), (OVERLAP_STRANDED, CONTRACT_LAYOUT)):
+        ts.register_store(
+            ts.StoreDescriptor(
+                name=name,
+                kind="record",
+                key_fields=("document",),
+                codec=ts.RECORD_JSON,
+                concurrency="last_writer_wins",
+                enumerable=True,
+                locator=RootedFileLocator(prefix=(OVERLAP_DIR,), suffix=".json"),
+                claim=overlap_claim(layout),
+            )
+        )
     ts.register_store(
         ts.StoreDescriptor(
             name=STATE_FILES,

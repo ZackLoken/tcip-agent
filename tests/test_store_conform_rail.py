@@ -4,8 +4,13 @@ A root is conformed once its records live in a store database; until then they a
 file-backend write cannot bump a database's counters and a database write leaves the files
 where they were, so a root written through both backends loses writes with nothing to detect
 it by. Each backend therefore refuses the half of that it can see: the database backend refuses
-an unconformed root, and the file backend refuses record and log writes to a conformed one.
-Both refusals ship with the legitimate call they must still admit.
+an unconformed root, and the file backend refuses record and log writes to a conformed one. Both
+refusals ship with the legitimate call they must still admit.
+
+The stores here are the suite's own, so what is under test is the rail's mechanics: which paths
+ask, what a database that has never held a store says about a file claiming it, and what a claim
+registered mid-process does to a connection already open. The shipped claim table meeting real
+project directories is ``test_store_conform_rail_layouts.py``.
 """
 
 from __future__ import annotations
@@ -15,11 +20,50 @@ from contextlib import contextmanager
 import pytest
 
 import tcip_store as ts
-from tcip_store.file_backend import FileBackend
-from tcip_store.sqlite_backend import SqliteBackend
-from tests._store_worker import BLOB, LOG, LWW, register_contract_stores
+from tcip_store.file_backend import FileBackend, RootedFileLocator
+from tcip_store.sqlite_backend import SqliteBackend, database_path
+from tests._store_worker import BLOB, LOG, LWW, directory_claim, register_contract_stores
 
 register_contract_stores()
+
+LATE_ARRIVAL = "rail_late_arrival"
+"""A store whose files can appear beside a database that has never held it."""
+
+UNCLAIMED = "rail_unclaimed"
+"""A store that states no claim, which is what the database backend has to refuse."""
+
+_declared = False
+
+
+def _register_rail_stores() -> None:
+    global _declared
+    if _declared:
+        return
+    _declared = True
+    ts.register_store(
+        ts.StoreDescriptor(
+            name=LATE_ARRIVAL,
+            kind="record",
+            key_fields=("name",),
+            codec=ts.RECORD_JSON,
+            concurrency="last_writer_wins",
+            locator=RootedFileLocator(prefix=("late",), suffix=".json"),
+            claim=directory_claim("late", ".json"),
+        )
+    )
+    ts.register_store(
+        ts.StoreDescriptor(
+            name=UNCLAIMED,
+            kind="record",
+            key_fields=("name",),
+            codec=ts.RECORD_JSON,
+            concurrency="last_writer_wins",
+            locator=RootedFileLocator(prefix=("unclaimed",), suffix=".json"),
+        )
+    )
+
+
+_register_rail_stores()
 
 
 @contextmanager
@@ -106,7 +150,7 @@ def test_an_exported_root_holds_both_and_is_not_refused(tmp_path):
     assert (tmp_path / "lww" / "fresh.json").is_file()
 
     with bound(SqliteBackend()) as backend:
-        backend.require_conformed(str(tmp_path))
+        backend.require_conformed(str(tmp_path), (LWW,))
         assert ts.read(_key(LWW, tmp_path, "fresh")) == {"n": 1}
 
 
@@ -232,3 +276,122 @@ def test_a_root_with_no_database_takes_file_writes_as_it_always_did(tmp_path):
         assert ts.read(_key(LWW, tmp_path, "plain")) == {"n": 1}
         ts.append(_key(LOG, tmp_path, "trail"), {"event": "one"})
         assert ts.read_log(_key(LOG, tmp_path, "trail")).records == [{"event": "one"}]
+
+
+# ── every path asks, in every state a root can be in ─────────────────────────
+
+
+def test_a_root_exported_and_then_reopened_by_a_fresh_process_is_admitted(tmp_path):
+    """A restart meets its own export: every claimed file beside the database belongs to a store
+    the database holds, which is what separates an export from state left behind."""
+    with bound(SqliteBackend()):
+        ts.replace(_key(LWW, tmp_path, "kept"), {"n": 1})
+        ts.append(_key(LOG, tmp_path, "trail"), {"event": "one"})
+        export_files(tmp_path)
+    assert (tmp_path / "lww" / "kept.json").is_file()
+
+    with bound(SqliteBackend()):
+        assert ts.read(_key(LWW, tmp_path, "kept")) == {"n": 1}
+        assert ts.read_log(_key(LOG, tmp_path, "trail")).records == [{"event": "one"}]
+
+
+# ── the layouts an operation serves, and what each connection has checked ────
+
+_EVERY_PATH = [
+    "append", "exists", "keys", "read_log", "read_versioned", "replace", "transaction"
+]
+
+
+def _refuses_on_every_path(root) -> dict[str, str]:
+    """Run one operation of each rail path and say which refused, so a gap is named not counted."""
+    outcomes: dict[str, str] = {}
+    calls = {
+        "read_versioned": lambda: ts.read(_key(LWW, root, "x"), default=None),
+        "exists": lambda: ts.exists(_key(LWW, root, "x")),
+        "keys": lambda: ts.keys(LWW, str(root)),
+        "read_log": lambda: ts.read_log(_key(LOG, root, "trail")),
+        "replace": lambda: ts.replace(_key(LWW, root, "x"), {"n": 1}),
+        "append": lambda: ts.append(_key(LOG, root, "trail"), {"event": "one"}),
+        "transaction": lambda: _write_in_transaction(root),
+    }
+    for name, call in calls.items():
+        try:
+            call()
+        except ts.StoreError as exc:
+            outcomes[name] = str(exc)
+    return outcomes
+
+
+def _write_in_transaction(root) -> None:
+    key = _key(LWW, root, "x")
+    with ts.transaction(key) as txn:
+        txn.write(key, {"n": 1})
+
+
+def test_every_rail_path_refuses_a_root_whose_records_are_still_files(tmp_path):
+    """A rail on the write door alone lets a read answer absence for a confirmed negative that
+    is sitting right there, so every path this backend answers on asks first."""
+    with bound(FileBackend()):
+        ts.replace(_key(LWW, tmp_path, "already_here"), {"n": 1})
+
+    with bound(SqliteBackend()):
+        refused = _refuses_on_every_path(tmp_path)
+
+    assert sorted(refused) == _EVERY_PATH
+    assert all("scripts/adopt_store.py" in message for message in refused.values())
+    assert not database_path(str(tmp_path)).exists()
+
+
+def test_every_rail_path_refuses_a_file_of_a_store_the_database_never_held(tmp_path):
+    """With a database present the accounting is per store, and a store the database has never
+    held is the one whose files an export cannot explain."""
+    with bound(SqliteBackend()):
+        ts.replace(_key(LWW, tmp_path, "owned"), {"n": 1})
+    (tmp_path / "late").mkdir()
+    (tmp_path / "late" / "arrived.json").write_text('{"n": 2}', encoding="utf-8")
+
+    with bound(SqliteBackend()):
+        refused = _refuses_on_every_path(tmp_path)
+
+    assert sorted(refused) == _EVERY_PATH
+    assert all(LATE_ARRIVAL in message for message in refused.values())
+
+
+def test_every_rail_path_refuses_on_a_cached_connection_once_the_claim_set_has_grown(tmp_path):
+    """A claim can arrive after a connection is open, and a connection that kept serving absence
+    for the store it now covers is the silent invisibility this rail exists for. The re-check is
+    per operation, so it belongs on every path rather than only on the next open."""
+    grown = "rail_grown_after_the_connection"
+    (tmp_path / "grown").mkdir()
+    (tmp_path / "grown" / "arrived.json").write_text('{"n": 2}', encoding="utf-8")
+
+    with bound(SqliteBackend()):
+        ts.replace(_key(LWW, tmp_path, "owned"), {"n": 1})
+        assert ts.read(_key(LWW, tmp_path, "owned")) == {"n": 1}
+
+        ts.register_store(
+            ts.StoreDescriptor(
+                name=grown,
+                kind="record",
+                key_fields=("name",),
+                codec=ts.RECORD_JSON,
+                concurrency="last_writer_wins",
+                locator=RootedFileLocator(prefix=("grown",), suffix=".json"),
+                claim=directory_claim("grown", ".json"),
+            )
+        )
+        refused = _refuses_on_every_path(tmp_path)
+
+    assert sorted(refused) == _EVERY_PATH
+    assert all(grown in message for message in refused.values())
+
+
+def test_a_store_that_states_no_claim_is_refused_rather_than_placed_by_guess(tmp_path):
+    """Where a store's files live is what the rail reasons about, so a store that never says is
+    one this backend cannot answer for at all."""
+    with bound(SqliteBackend()):
+        with pytest.raises(ts.StoreError) as raised:
+            ts.replace(_key(UNCLAIMED, tmp_path, "x"), {"n": 1})
+
+    assert UNCLAIMED in str(raised.value)
+    assert "claim=" in str(raised.value)
