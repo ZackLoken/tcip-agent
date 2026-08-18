@@ -17,9 +17,11 @@ from pathlib import Path
 
 import pytest
 
+import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.postprocessing import phenology
+from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tests._binding_fixtures import write_bound_sidecar
 from tests._trait_fixtures import CATKIN
 
@@ -273,11 +275,10 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
         _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=root)
     _write_classifier_sidecar(buckets["2026-03-01"], dataset_root=root, trait="catkin")
     mapping_path = tmp_path / "state" / "plant_mapping.json"
-    mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    mapping_path.write_text(json.dumps({
+    ts.replace(plant_mapping_key(mapping_path), {
         d: [{"stem": f"P1_{d}", "plot_name": "P1", "accession_name": "acc-noisy"}]
         for d in counts
-    }), encoding="utf-8")
+    })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(

@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 
 def _setup(tmp_path, monkeypatch, *, with_gui=True):
+    import tcip_store
+    from tcip_mcp.web_client import gui_snapshot_key
+    from tcip_mcp.workspace import active_project_key
+
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     proj = ws / "hazelnut_catkin_valley"
     (proj / ".tcip" / "state").mkdir(parents=True)
-    (ws / ".active").write_text("hazelnut_catkin_valley\n", encoding="utf-8")
+    tcip_store.replace(active_project_key(), "hazelnut_catkin_valley")
     if with_gui:
         gui = {
             "active_tab": "annotate",
@@ -26,7 +29,7 @@ def _setup(tmp_path, monkeypatch, *, with_gui=True):
                 "current_image_index": 1,
             },
         }
-        (proj / ".tcip" / "state" / "gui.json").write_text(json.dumps(gui), encoding="utf-8")
+        tcip_store.replace(gui_snapshot_key(str(proj)), gui)
     return proj
 
 

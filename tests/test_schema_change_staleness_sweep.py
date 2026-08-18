@@ -17,11 +17,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import tcip_store as ts
 from tcip_annotation.json_io import write_annotations
 from tcip_mcp.class_registry import attribute_schema_digest, registry_from_dict
 from tcip_mcp.dataset_layout import (
-    classes_path, image_status_digest_path, record_image_statuses, status_bucket,
+    classes_path, image_status_digest_key, image_status_digest_path, record_image_statuses,
+    status_bucket,
 )
+from tcip_store.file_backend import FileBackend
 from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 from tcip_mcp.tools.annotation_tools import write_class_map
 from tcip_web.app import app
@@ -95,14 +98,11 @@ def _confirm_negative_unstamped(root: Path, image_name: str, subject: str) -> No
     whenever the stamp transaction did not follow the status one."""
     record_image_statuses(root, status_bucket(subject, None), {image_name: "negative"},
                           recorded_by="user:breeder")
-    assert not image_status_digest_path(root).is_file()
+    assert not ts.exists(image_status_digest_key(root))
 
 
 def _stamps(root: Path, subject: str) -> dict:
-    path = image_status_digest_path(root)
-    if not path.is_file():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8")).get(status_bucket(subject, None), {})
+    return ts.read(image_status_digest_key(root), default={}).get(status_bucket(subject, None), {})
 
 
 def _read_negatives(root: Path, subject: str) -> tuple[set[str], set[str]]:
@@ -210,7 +210,12 @@ def test_the_save_route_writes_the_registry_and_reports_a_sweep_it_could_not_com
     client: TestClient, dataset: Path
 ) -> None:
     """A stamp failure never rejects the human's confirmation, and a sweep failure never rejects the
-    expert's schema change: it comes back as a warning naming what is left unstamped."""
+    expert's schema change: it comes back as a warning naming what is left unstamped.
+
+    Bound to the file backend: the failure is simulated by occupying the digest store's own file
+    path with a directory, which is a file-backend write obstruction, not a backend-general one.
+    """
+    ts.bind(FileBackend())
     _save_via_route(client, dataset, CATKIN_TWO_STATES)
     _confirm_negative_unstamped(dataset, "img_alpha.jpg", "catkin")
     _block_the_digest_store(dataset)
@@ -228,7 +233,12 @@ def test_the_save_route_writes_the_registry_and_reports_a_sweep_it_could_not_com
 def test_the_class_map_tool_writes_the_registry_and_reports_a_sweep_it_could_not_complete(
     dataset: Path
 ) -> None:
-    """The tool warns and proceeds on the same terms as the route, through the same sweep."""
+    """The tool warns and proceeds on the same terms as the route, through the same sweep.
+
+    Bound to the file backend: the failure is simulated by occupying the digest store's own file
+    path with a directory, which is a file-backend write obstruction, not a backend-general one.
+    """
+    ts.bind(FileBackend())
     _save_via_tool(dataset, CATKIN_TWO_STATES)
     _confirm_negative_unstamped(dataset, "img_alpha.jpg", "catkin")
     _block_the_digest_store(dataset)

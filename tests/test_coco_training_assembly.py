@@ -12,7 +12,9 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tcip_mcp.dataset_layout import status_records  # noqa: E402
+from tcip_mcp.dataset_layout import (
+    record_image_statuses, stamp_image_status_digests, status_bucket,
+)  # noqa: E402
 from tcip_mcp.class_registry import (  # noqa: E402
     Attribute, ClassRegistry, Subject, assign_class_ids,
 )
@@ -99,8 +101,6 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
 
 
 def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
-    import json as _json
-
     from tcip_mcp.pipelines.data.datasets import assemble_coco
     images = tmp_path / "images"
     labels = tmp_path / "annotations"
@@ -108,10 +108,8 @@ def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):
     _make_images(images, ["img0", "img1"])
     json_io.write_annotations(labels / "img0.json", [], 100, 100, keep_empty=True)  # confirmed below
     json_io.write_annotations(labels / "img1.json", [], 100, 100, keep_empty=True)  # emptied mid-work
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(_json.dumps({"catkin": status_records(
-        {"img0.jpg": "negative", "img1.jpg": "partial"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket(CATKIN, None),
+                          {"img0.jpg": "negative", "img1.jpg": "partial"}, recorded_by="user:breeder")
     _reg, id_map = _reg_id_map()
     coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}  # human-confirmed only
@@ -313,10 +311,8 @@ def _rail_fixture(tmp_path):
     json_io.write_annotations(labels / "ann.json", [_box(4, 4, 12, 12)], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "empty.json", [], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "neg.json", [], 100, 100, keep_empty=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps(
-        {"catkin": status_records({"neg.jpg": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {"neg.jpg": "negative"},
+                          recorded_by="user:breeder")
     return images, labels
 
 
@@ -433,10 +429,8 @@ def test_confirmed_negative_survives_an_uppercase_extension(tmp_path, ext):
     json_io.write_annotations(labels / "IMG_0001.json", [_box(4, 4, 12, 12)], 100, 100,
                               keep_empty=True)
     json_io.write_annotations(labels / "IMG_0002.json", [], 100, 100, keep_empty=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps(
-        {"catkin": status_records({f"IMG_0002{ext}": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {f"IMG_0002{ext}": "negative"},
+                          recorded_by="user:breeder")
 
     _reg, id_map = _reg_id_map()
     # The assembled COCO carries the real names, so to_coco_dataset can match the store.
@@ -509,11 +503,9 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
                               [_box(4, 4, 12, 12, subject="catkin"),
                                _box(4, 4, 12, 12, subject="bush")], 100, 100, keep_empty=True)
     json_io.write_annotations(labels / "shared.json", [], 100, 100, keep_empty=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
     # Confirmed negative for catkin only; the breeder never judged it for bush.
-    (state / "image_status.json").write_text(json.dumps(
-        {"catkin": status_records({"shared.jpg": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket("catkin", None), {"shared.jpg": "negative"},
+                          recorded_by="user:breeder")
 
     assert confirmed_negative_names(labels, subject="catkin", date=None) == {"shared.jpg"}
     assert confirmed_negative_names(labels, subject="bush", date=None) == set()
@@ -534,10 +526,8 @@ def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
 
     labels = tmp_path / "labels"
     labels.mkdir(parents=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps(
-        {"catkin": status_records({"a.jpg": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket("catkin", None), {"a.jpg": "negative"},
+                          recorded_by="user:breeder")
 
     with pytest.raises(ValueError, match="needs an explicit subject"):
         confirmed_negative_names(labels, subject=None, date=None)
@@ -554,10 +544,8 @@ def test_a_derived_tree_without_negatives_does_not_refuse(tmp_path):
 
     labels = tmp_path / "labels"
     labels.mkdir(parents=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps(
-        {"catkin": status_records({"a.jpg": "complete"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket("catkin", None), {"a.jpg": "complete"},
+                          recorded_by="user:breeder")
 
     assert confirmed_negative_names(labels, subject=None, date=None) == set()
 
@@ -576,10 +564,9 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
         stem = f"i{n:02d}"
         boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
         json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps({"catkin": status_records(
-        {f"i{n:02d}.jpg": "negative" for n in range(1, 10, 2)}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket("catkin", None),
+                          {f"i{n:02d}.jpg": "negative" for n in range(1, 10, 2)},
+                          recorded_by="user:breeder")
 
     out = tmp_path / "splits"
     make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin")
@@ -598,7 +585,7 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     import tcip_store as ts
     from tcip_mcp import class_registry
     from tcip_mcp.class_registry import write_registry
-    from tcip_mcp.dataset_layout import image_status_digest_key, status_bucket
+    from tcip_mcp.dataset_layout import image_status_digest_key
     from tcip_mcp.tools.data_tools import make_splits
 
     images = tmp_path / "images"
@@ -617,13 +604,10 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
         stem = f"i{n:02d}"
         boxes = [] if n % 2 else [_box(4, 4, 12, 12)]
         json_io.write_annotations(labels / f"{stem}.json", boxes, 100, 100, keep_empty=True)
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
     neg_names = {f"i{n:02d}.jpg" for n in range(1, 10, 2)}
-    (state / "image_status.json").write_text(json.dumps({"catkin": status_records(
-        dict.fromkeys(neg_names, "negative"), recorded_by="user:breeder")}))
-    (state / "image_status_digest.json").write_text(json.dumps(
-        {"catkin": {n: expected_digest for n in neg_names}}))
+    record_image_statuses(tmp_path, status_bucket("catkin", None),
+                          dict.fromkeys(neg_names, "negative"), recorded_by="user:breeder")
+    stamp_image_status_digests(tmp_path, status_bucket("catkin", None), neg_names, expected_digest)
 
     out = tmp_path / "splits"
     make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin")
@@ -668,14 +652,11 @@ def test_quarantined_negative_reads_the_same_reason_on_both_label_paths(tmp_path
     _make_images(images, ["a"])
     json_io.write_annotations(labels / "a.json", [], 100, 100, keep_empty=True)
 
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps(
-        {CATKIN: status_records({"a.jpg": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {"a.jpg": "negative"},
+                          recorded_by="user:breeder")
     # Stamped with a digest that does not match the current schema -> quarantined, not trusted.
     assert current_digest != "stale-digest"
-    (state / "image_status_digest.json").write_text(
-        json.dumps({CATKIN: {"a.jpg": "stale-digest"}}))
+    stamp_image_status_digests(tmp_path, status_bucket(CATKIN, None), ["a.jpg"], "stale-digest")
 
     _, id_map = _reg_id_map()
     _, counts_json = trainable_stems(str(labels), str(images), subject=CATKIN, date=None)

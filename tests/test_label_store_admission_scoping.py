@@ -7,8 +7,6 @@ is the token for a finished image that has content, the opposite of "negative", 
 form of it.
 """
 
-import json
-
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -17,7 +15,7 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-from tcip_mcp.dataset_layout import status_records  # noqa: E402
+from tcip_mcp.dataset_layout import record_image_statuses, status_bucket  # noqa: E402
 
 CATKIN = "catkin"
 BUSH = "bush"
@@ -102,13 +100,11 @@ def test_the_only_status_that_confirms_a_negative_is_the_negative_one(tmp_path):
     _write(labels, "worked", [_box(12, 8, 60, 30), _box(70, 20, 96, 84)])
     _write(labels, "emptied", [])
     _write(labels, "confirmed_empty", [])
-    state = tmp_path / ".tcip" / "state"
-    state.mkdir(parents=True)
-    (state / "image_status.json").write_text(json.dumps({CATKIN: status_records({
+    record_image_statuses(tmp_path, status_bucket(CATKIN, None), {
         "worked.jpg": "complete",
         "emptied.jpg": "complete",
         "confirmed_empty.jpg": "negative",
-    }, recorded_by="user:breeder")}))
+    }, recorded_by="user:breeder")
 
     assert confirmed_negative_names(labels, subject=CATKIN, date=None) == {"confirmed_empty.jpg"}
 

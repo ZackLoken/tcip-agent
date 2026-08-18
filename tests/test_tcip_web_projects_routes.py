@@ -155,7 +155,11 @@ def test_set_active_rejects_unknown_project(client, workspace_dir):
 
 
 def test_wrong_encoding_marker_does_not_break_the_front_door(client, workspace_dir):
-    # A marker written in UTF-16 (e.g. PowerShell Set-Content) must not 500 the list.
+    # Bound to the file backend: the claim is about raw bytes on disk no text codec decodes.
+    import tcip_store
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     _make_project(workspace_dir, "hazelnut_catkin_valley-farm", dates=["2026-02-11"])
     (workspace_dir / ".active").write_bytes("hazelnut_catkin_valley-farm".encode("utf-16"))
 

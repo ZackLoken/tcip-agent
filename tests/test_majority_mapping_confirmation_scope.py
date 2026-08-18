@@ -11,11 +11,12 @@ unvalidated delivery of a trait whose reading is settled, are both real cases.
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 
 import pytest
 
+import tcip_store as ts
+from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_mcp.tools.phenology_tools import compute_phenology
 
 CATKIN_SPEC = {
@@ -95,9 +96,9 @@ def _predictions(root: Path, positive_class: str, id_map: dict, *, trait: str) -
                             producing_experiment_id="exp-1", trait=trait)
         dirs[date] = str(d)
     mapping_path = root / "plant_mapping.json"
-    mapping_path.write_text(json.dumps({
+    ts.replace(plant_mapping_key(mapping_path), {
         date: [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}] for date in dirs
-    }), encoding="utf-8")
+    })
     return mapping_path, dirs
 
 

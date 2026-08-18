@@ -19,7 +19,7 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp import class_registry
 from tcip_mcp.class_registry import ClassRegistry, Subject
-from tcip_mcp.dataset_layout import status_records
+from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 
 
 def _write_image(images_dir: Path, stem: str, size=(640, 480)) -> None:
@@ -107,17 +107,13 @@ def test_num_classes_agree_on_one_assign_class_ids_map(tmp_path):
 
 # (d) confirmed_negative_names recovers negatives and refuses (not silent-empty) with no subject.
 def test_confirmed_negatives_thread_subject_and_refuse_when_unthreaded(tmp_path):
-    import json
-
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
 
     labels_dir = tmp_path / "annotations" / "2-11-26"
     labels_dir.mkdir(parents=True)
-    status = tmp_path / ".tcip" / "state" / "image_status.json"
-    status.parent.mkdir(parents=True)
     # A human confirmed img_009 an empty negative for catkin on this date.
-    status.write_text(json.dumps({"catkin/2-11-26": status_records(
-        {"img_009.jpg": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(tmp_path, status_bucket("catkin", "2-11-26"),
+                          {"img_009.jpg": "negative"}, recorded_by="user:breeder")
 
     got = confirmed_negative_names(labels_dir, subject="catkin", date="2-11-26")
     assert got == {"img_009.jpg"}
