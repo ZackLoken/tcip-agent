@@ -216,8 +216,7 @@ def check_region_completeness(root: Path, findings: list) -> None:
 def check_trait_specs(root: Path, findings: list) -> None:
     from tcip_mcp.traits import load_trait_specs_with_errors
 
-    # Diagnosing a project must leave it as it was found, so a stray spelling is named, not renamed.
-    _specs, errors = load_trait_specs_with_errors(project_root=root, adopt_canonical_suffix=False)
+    _specs, errors = load_trait_specs_with_errors(project_root=root)
     for e in errors:
         findings.append(("error", f"trait spec {e['file']} failed to load: {e['reason']}"))
 

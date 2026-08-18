@@ -118,25 +118,25 @@ def _pin_platform_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def seed_catkin_trait_spec(tmp_path: Path, _pin_platform_root):
-    """Seed a real catkin.yml into this test's pinned project root.
+    """Seed a real catkin trait-spec record into this test's pinned project root.
 
-    There are no built-in traits anymore: ``get_trait("catkin")`` only resolves where a config
-    file actually exists (``traits.py``). Writing the same values ``tests/_trait_fixtures.CATKIN``
+    There are no built-in traits anymore: ``get_trait("catkin")`` only resolves where a spec
+    record actually exists (``traits.py``). Writing the same values ``tests/_trait_fixtures.CATKIN``
     holds keeps a test that calls ``get_trait("catkin")``/``registered_traits()`` without authoring
-    its own config working, the same as when a builtin was unconditionally present. Not autouse:
+    its own spec working, the same as when a builtin was unconditionally present. Not autouse:
     an unrelated test's project root should stay empty by default; request this explicitly in a
     test that actually needs catkin registered.
     """
     import dataclasses
 
-    import yaml
+    import tcip_store as ts
 
+    from tcip_mcp import traits
     from tests._trait_fixtures import CATKIN
 
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
     data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(CATKIN).items()}
-    (specs_dir / "catkin.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    ts.replace(traits.trait_spec_key(specs_dir, "catkin"), data, expect=ts.Version.ABSENT)
 
 
 @pytest.fixture

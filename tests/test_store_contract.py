@@ -1257,12 +1257,6 @@ BAND_GROUP_MANIFEST_BYTES = (
     '  }\n'
     '}\n'
 ).encode("utf-8")
-TRAIT_SPEC_BYTES = (
-    "delivers:\n"
-    "- measure_one\n"
-    f"name: {TRAIT_UNDER_TEST}\n"
-    'notes: "\\xFC"\n'
-).encode("utf-8")
 SNAPSHOT_BYTES = "def build():\n    return 'ü'\n".encode("utf-8")
 IMAGE_BYTES = b"\xff\xd8\xff\xe0not a real frame, only bytes handed to the store\x00"
 LABEL_BYTES = '{"annotations": [{"subject": "catkin", "bbox": [1.0, 2.0, 3.5, 4.5]}]}'.encode("utf-8")
@@ -1507,8 +1501,8 @@ REGISTERED = {
         lambda root: resolution.sidecar_key(_stamp_bucket(root), "resolve_scale"),
         "predictions/live/2026-03-04/resolve_scale.json", root_of=_stamp_bucket),
     "trait_specs": Registered(
-        TRAIT_SPEC_BYTES,
-        _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.yml",
+        {"name": TRAIT_UNDER_TEST, "delivers": ["measure_one"], "notes": "ü"},
+        _trait_spec_key, f".tcip/state/trait_specs/{TRAIT_UNDER_TEST}.json",
         root_of=_trait_specs_root),
     "annotation_records": Registered(
         LABEL_BYTES, lambda root: json_io.annotation_record_key(_generic_label_dir(root), "a_1"),

@@ -17,10 +17,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from tcip_store import Version
+from tcip_store import Version, read_versioned, replace
 
 from tcip_mcp import operationalization as op
-from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec
+from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec, trait_spec_key, trait_specs_dir
 
 CROSSING_TRAIT = "bloom"
 COUNT_TRAIT = "stem"
@@ -86,16 +86,18 @@ DELIVERY_TRAIT_BY_PHENOTYPE = {
 
 
 def write_spec(project_root: Path, spec: TraitSpec) -> None:
-    """Author a spec file into a project's own registry, the way a breeder hand-authors one."""
-    import yaml
+    """Author a spec record into a project's own registry, the way an authoring tool would.
 
-    specs_dir = Path(project_root) / ".tcip" / "state" / "trait_specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
+    Compare-and-set against whatever is on file, so a test re-registering the same trait to
+    simulate a spec that moved since it was read overwrites it rather than being refused.
+    """
     data = {
         key: (list(value) if isinstance(value, tuple) else value)
         for key, value in dataclasses.asdict(spec).items()
     }
-    (specs_dir / f"{spec.name}.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    key = trait_spec_key(trait_specs_dir(str(project_root)), spec.name)
+    current = read_versioned(key, default=None)
+    replace(key, data, expect=current.version)
 
 
 def seed_project(project_root: Path) -> Path:
