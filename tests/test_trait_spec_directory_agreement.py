@@ -93,13 +93,15 @@ def _load_doctor():
 def test_the_traits_route_follows_the_registry_when_the_registry_moves(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """The route resolves the spec directory through the registry rather than spelling it out, so
-    a surface cannot keep reading a placement the registry no longer uses and report the empty
-    answer that a project with nothing authored gives."""
-    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", Path(".tcip") / "state" / "specs_moved")
-    specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
+    """The route resolves the spec directory through ``trait_specs_dir()`` rather than a path
+    spelled out beside it. Renaming the store's own final directory segment is no longer
+    supported (the locator's ``trait_specs`` prefix is fixed, matching every sibling STATE-rooted
+    store); this proves centralization instead by redirecting ``trait_specs_dir()`` itself to a
+    different, still canonically-named directory and checking the route follows it there."""
+    redirected = tmp_path / "elsewhere" / ".tcip" / "state" / "trait_specs"
+    monkeypatch.setattr(traits, "trait_specs_dir", lambda project_root=None: redirected)
     ts.replace(
-        traits.trait_spec_key(specs_dir, "leaf"), {"name": "leaf", "delivers": ["leaf_length"]},
+        traits.trait_spec_key(redirected, "leaf"), {"name": "leaf", "delivers": ["leaf_length"]},
         expect=ts.Version.ABSENT)
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
@@ -109,12 +111,12 @@ def test_the_traits_route_follows_the_registry_when_the_registry_moves(
 def test_the_doctor_follows_the_registry_when_the_registry_moves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """Same demand on the session-start ritual: it reports on the directory the registry resolves,
-    so a moved placement cannot turn every broken spec into a silent clean bill."""
-    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", Path(".tcip") / "state" / "specs_moved")
-    specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
+    """Same demand on the session-start ritual: it reports on the directory ``trait_specs_dir()``
+    resolves, so a redirected registry cannot turn every broken spec into a silent clean bill."""
+    redirected = tmp_path / "elsewhere" / ".tcip" / "state" / "trait_specs"
+    monkeypatch.setattr(traits, "trait_specs_dir", lambda project_root=None: redirected)
     ts.replace(
-        traits.trait_spec_key(specs_dir, "unicorn"),
+        traits.trait_spec_key(redirected, "unicorn"),
         {"name": "unicorn", "delivers": ["unicorn_horn_length"]}, expect=ts.Version.ABSENT)
 
     findings: list[tuple[str, str]] = []
