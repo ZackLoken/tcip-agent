@@ -311,6 +311,9 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
         STATE,
         ((Constant("trait_operationalizations"), Patterned(ANY), Patterned(ANY, tail=".json")),),
     ),
+    "delivery_events": Claim(
+        STATE, ((Constant("delivery_events"), Patterned(ANY, tail=".json")),)
+    ),
     "experiment_config": Claim(
         EXPERIMENTS, ((Patterned(ANY), Patterned(literal("config"), tail=".json")),)
     ),

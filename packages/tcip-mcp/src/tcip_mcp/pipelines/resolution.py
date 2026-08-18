@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,6 +39,8 @@ from tcip_store import (
     register_store,
 )
 from tcip_store.file_backend import RootedFileLocator
+
+logger = logging.getLogger(__name__)
 
 # --- vocabularies ---------------------------------------------------------
 SOURCES = ("explicit", "derived", "default")
@@ -1611,11 +1614,60 @@ def delivered_provenance(
     return {c: values.get(c) for c in columns}
 
 
+DELIVERY_EVENTS_STORE = "delivery_events"
+_DELIVERY_EVENTS_LOCATOR = RootedFileLocator(prefix=("delivery_events",), suffix=".json")
+register_store(
+    StoreDescriptor(
+        name=DELIVERY_EVENTS_STORE,
+        kind="record",
+        key_fields=("event_id",),
+        codec=RECORD_JSON,
+        concurrency="last_writer_wins",
+        enumerable=True,
+        locator=_DELIVERY_EVENTS_LOCATOR,
+    )
+)
+"""One record per completed delivery, enumerable, keyed by a content-derived id so two deliveries
+never collide and neither ever needs to read the other before writing (``last_writer_wins``: each
+key is written exactly once, so there is nothing to compare-and-set against)."""
+
+
+def delivery_events_scope(project_root: str | Path | None = None) -> Path:
+    """Where a project's delivery-event records live: ``<root>/.tcip/state``.
+
+    Scoped under the project root the same way ``operationalizations_scope`` is
+    (``operationalization.py``'s own pattern): this store is the project's enumerable document of
+    what shipped, a different concern from the dataset-scoped audit-log line
+    ``record_delivery_binding_event`` already writes below, over a scope of its own.
+    """
+    if project_root is not None:
+        return Path(project_root) / ".tcip" / "state"
+    from tcip_mcp.project_paths import resolve_state
+
+    return resolve_state(Path(".tcip") / "state")
+
+
+def delivery_event_key(scope: str | Path, event_id: str) -> Key:
+    """One delivery event's record, addressed by its own content-derived id."""
+    return Key(DELIVERY_EVENTS_STORE, str(scope), (event_id,))
+
+
+def _delivery_event_id(door: str, output_path: str | None, now: str) -> str:
+    """A stable, Windows-safe id for one delivery event: a hex digest carries no colon and no
+    timestamp-collision risk a caller-supplied nonce would otherwise need, and is computed here
+    rather than accepted from a caller so no door can name its own event twice."""
+    return hashlib.sha256(f"{door}|{output_path}|{now}".encode()).hexdigest()
+
+
 def record_delivery_binding_event(
     door: str,
-    output_path: str,
+    output_path: str | None,
     pred_dirs: Sequence[str] | None,
     bindings: Mapping[str, StampBinding],
+    *,
+    trait: str | None = None,
+    delivery_kind: str | None = None,
+    project_root: str | Path | None = None,
 ) -> None:
     """Record what verification found for each bucket a delivery read, in that dataset's own log.
 
@@ -1625,6 +1677,21 @@ def record_delivery_binding_event(
     decorator's inputs, so a door emits it alongside. The event files against the dataset root the
     buckets share, since it describes records that travel with the data; a delivery whose buckets
     share no dataset root files against the platform log instead.
+
+    Beside that dataset-scoped audit line, a project-scoped ``delivery_events`` record is also
+    written, carrying the real per-bucket ``StampBinding`` evidence this call already computed
+    rather than a coarse gate stamp, so a delivery can be found again by the same ``trait``/
+    ``delivery_kind`` vocabulary an operationalization or a trait-spec statement is found by. This
+    second write is best-effort, matching this function's own existing, already-shipped behavior:
+    a delivery event is a fact recorded after the artifact it describes already shipped, not a
+    confirmation, so a lost line here is a provenance gap surfaced by a warning, never a reason to
+    make an already-completed delivery look retryable.
+
+    ``project_root`` names the project this event belongs to, for a caller (a web route) whose
+    process can serve more than one project: an MCP tool leaves it unset and gets the process-pinned
+    root, correct since that process serves exactly one project, but a web route already holding its
+    own guarded, resolved root passes it explicitly, the same divergence D11 already closes for the
+    operationalization record.
     """
     from tcip_mcp.audit import record_event
 
@@ -1643,6 +1710,31 @@ def record_delivery_binding_event(
         record_digests=sorted({b.record_digest for b in bindings.values()
                                if b.ok and b.claimed and b.record_digest}),
     )
+
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        event_id = _delivery_event_id(door, output_path, now)
+        record = {
+            "event_id": event_id,
+            "trait": trait,
+            "delivery_kind": delivery_kind,
+            "door": door,
+            "output_path": output_path,
+            "documents": {
+                bucket: {
+                    "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
+                    "producing_experiment_id": b.producing_experiment_id,
+                    "checkpoint_sha256": b.checkpoint_sha256, "record_digest": b.record_digest,
+                    "note": b.note,
+                }
+                for bucket, b in bindings.items()
+            },
+            "produced_at": now,
+        }
+        key = delivery_event_key(delivery_events_scope(project_root), event_id)
+        tcip_store.replace(key, record)
+    except Exception:
+        logger.warning("Failed to write delivery_events record for door %r", door, exc_info=True)
 
 
 def _validity_rank(state: str | None) -> int:

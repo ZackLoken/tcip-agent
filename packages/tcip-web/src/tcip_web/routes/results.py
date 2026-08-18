@@ -389,6 +389,13 @@ def per_plant_curves(payload: PhenologyPayload) -> dict:
     if not measurement.gate.ok:
         raise HTTPException(400, _refusal(measurement))
     _still_stated(measurement, payload.trait)
+    from tcip_mcp.operationalization import STATE_CROSSING_DATES
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+
+    record_delivery_binding_event("results.per_plant_curves", None,
+                                  measurement.pred_dirs, measurement.bindings,
+                                  trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
+                                  project_root=measurement.project_root)
     return {
         "rows": measurement.curve_rows(),
         "n_plants": len(measurement.plants["rows"]),
@@ -412,6 +419,13 @@ def onset_dates(payload: PhenologyPayload) -> dict:
     if not measurement.gate.ok:
         raise HTTPException(400, _refusal(measurement))
     _still_stated(measurement, payload.trait)
+    from tcip_mcp.operationalization import STATE_CROSSING_DATES
+    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
+
+    record_delivery_binding_event("results.onset_dates", None,
+                                  measurement.pred_dirs, measurement.bindings,
+                                  trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
+                                  project_root=measurement.project_root)
     return {"rows": measurement.milestone_rows(), **_disclosure(measurement)}
 
 
@@ -458,6 +472,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     # column a schema declares but nothing fills is a phantom that must not reach the delivered CSV.
     # Both payloads are the same measurement, so both carry the same chain. Uses phenology_tools'
     # own resolver rather than re-reading the sidecars here.
+    from tcip_mcp.operationalization import STATE_CROSSING_DATES
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
     from tcip_mcp.tools.phenology_tools import _resolve_producer_identity
 
@@ -504,7 +519,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         "rows": len(rows),
     })
     record_delivery_binding_event("results.export_csv", str(saved_path),
-                                  measurement.pred_dirs, measurement.bindings)
+                                  measurement.pred_dirs, measurement.bindings,
+                                  trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
+                                  project_root=measurement.project_root)
     headers["X-TCIP-Saved-To"] = str(saved_path)
     return Response(content=body, media_type="text/csv", headers=headers)
 

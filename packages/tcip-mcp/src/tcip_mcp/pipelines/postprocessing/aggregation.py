@@ -434,5 +434,6 @@ def export_aggregated_csv(
             })
 
     record_delivery_binding_event("export_aggregated_csv", output_path, pred_dirs,
-                                  measurement_recon["bindings"])
+                                  measurement_recon["bindings"],
+                                  trait=trait, delivery_kind=delivery_kind)
     return output_path
