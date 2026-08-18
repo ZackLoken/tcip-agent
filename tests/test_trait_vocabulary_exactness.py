@@ -54,8 +54,9 @@ def test_get_trait_refuses_a_name_differing_only_by_case(
     """A name that is not exactly a registered one is unknown, however close it looks. Resolving
     it to a same-spelled-different-cased spec would silently swap in another trait's measurement
     semantics, which is worse than the honest refusal."""
-    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    _two_traits_with_different_semantics(tmp_path)
+    specs_dir = tmp_path / "trait_specs"
+    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
+    _two_traits_with_different_semantics(specs_dir)
     assert registered_traits() == ["catkin", "leaf"]
 
     with pytest.raises(TraitUnknownError, match=f"Unknown trait '{near_miss}'"):
@@ -65,8 +66,9 @@ def test_get_trait_refuses_a_name_differing_only_by_case(
 def test_get_trait_resolves_the_exact_registered_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The refusal above must not cost the legitimate call: each exact name still returns its own
     spec, and the two specs stay distinct."""
-    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    _two_traits_with_different_semantics(tmp_path)
+    specs_dir = tmp_path / "trait_specs"
+    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
+    _two_traits_with_different_semantics(specs_dir)
 
     assert get_trait("catkin").count_bias_tolerance_frac == 0.02
     assert get_trait("catkin").positive_class_name == "elongated"
@@ -77,8 +79,9 @@ def test_get_trait_resolves_the_exact_registered_name(tmp_path: Path, monkeypatc
 def test_unknown_trait_refusal_lists_what_is_registered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The refusal names the registry it searched, so a caller can tell a misspelling from an
     unauthored trait without guessing."""
-    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
-    _two_traits_with_different_semantics(tmp_path)
+    specs_dir = tmp_path / "trait_specs"
+    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
+    _two_traits_with_different_semantics(specs_dir)
 
     with pytest.raises(TraitUnknownError, match=r"Registered traits: \['catkin', 'leaf'\]"):
         get_trait("Catkin")
@@ -94,8 +97,9 @@ def test_delivers_must_be_a_vocabulary_member_not_a_prefix_of_one(tmp_path: Path
     assert truncated not in vocab
     assert any(v.startswith(truncated) for v in vocab), truncated
 
-    _write_spec(tmp_path, "truncated", {"delivers": [truncated]})
-    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "truncated", {"delivers": [truncated]})
+    specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
     assert specs == []
     assert [e["file"] for e in errors] == ["truncated.json"]
     assert truncated in errors[0]["reason"]
@@ -104,10 +108,11 @@ def test_delivers_must_be_a_vocabulary_member_not_a_prefix_of_one(tmp_path: Path
 def test_a_truncated_delivers_entry_does_not_smuggle_a_whole_spec_in(tmp_path: Path):
     """One prefix entry alongside real vocabulary still fails the whole spec: the anchor is every
     delivered phenotype, not merely one of them."""
-    _write_spec(tmp_path, "mixed", {"delivers": ["leaf_length", "leaf_wid"]})
-    _write_spec(tmp_path, "honest", {"delivers": ["leaf_length", "leaf_width"]})
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "mixed", {"delivers": ["leaf_length", "leaf_wid"]})
+    _write_spec(specs_dir, "honest", {"delivers": ["leaf_length", "leaf_width"]})
 
-    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
+    specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
     assert [s.name for s in specs] == ["honest"]
     assert [e["file"] for e in errors] == ["mixed.json"]
     assert "leaf_wid" in errors[0]["reason"]
@@ -116,22 +121,24 @@ def test_a_truncated_delivers_entry_does_not_smuggle_a_whole_spec_in(tmp_path: P
 def test_write_trait_spec_fields_refuses_to_truncate_an_existing_delivers(tmp_path: Path):
     """The update path re-runs the same vocabulary check, so a field update cannot walk a
     registered spec off the controlled vocabulary a prefix at a time."""
-    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
 
     with pytest.raises(ValueError, match="invalid spec"):
-        traits.write_trait_spec_fields("leaf", {"delivers": ["leaf_len"]}, [], specs_dir=tmp_path)
+        traits.write_trait_spec_fields("leaf", {"delivers": ["leaf_len"]}, [], specs_dir=specs_dir)
 
-    assert load_trait_specs(specs_dir=tmp_path)[0].delivers == ("leaf_length",)
+    assert load_trait_specs(specs_dir=specs_dir)[0].delivers == ("leaf_length",)
 
 
 def test_write_trait_spec_fields_still_accepts_a_real_vocabulary_addition(tmp_path: Path):
     """The refusal above admits the legitimate edit: adding a second phenotype that is genuinely in
     crops.yml is written and reloads."""
-    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
 
     updated = traits.write_trait_spec_fields(
         "leaf", {"delivers": ["leaf_length", "leaf_width"]},
-        ["delivers: vocabulary_derived"], specs_dir=tmp_path,
+        ["delivers: vocabulary_derived"], specs_dir=specs_dir,
     )
     assert updated.delivers == ("leaf_length", "leaf_width")
-    assert load_trait_specs(specs_dir=tmp_path)[0].delivers == ("leaf_length", "leaf_width")
+    assert load_trait_specs(specs_dir=specs_dir)[0].delivers == ("leaf_length", "leaf_width")
