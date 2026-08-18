@@ -8,7 +8,6 @@ push as the canvas the human is looking at now.
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
@@ -46,19 +45,21 @@ def _canvas_image(tmp_path: Path) -> str:
 def _push_state(tmp_path: Path, image: str, *, received_at: float,
                 shapes: list[dict] | None = None) -> None:
     """Write the two documents the GUI pushes: the meta heartbeat and the geometry blob."""
-    state_dir = tmp_path / ".tcip" / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "canvas_live.json").write_text(json.dumps({
-        "received_at": received_at, "project_root": str(tmp_path), "tab": "annotate",
+    import tcip_store
+    from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
+
+    root = str(tmp_path)
+    tcip_store.replace(canvas_geometry_key(root), {
+        "image_path": image, "tab": "annotate", "received_at": received_at,
+        "shapes": SHAPES if shapes is None else shapes,
+    })
+    tcip_store.replace(canvas_meta_key(root), {
+        "received_at": received_at, "project_root": root, "tab": "annotate",
         "image": Path(image).name, "image_path": image,
         "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
         "user": "breeder", "mode": "polygon",
         "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
-    }))
-    (state_dir / "canvas_shapes.json").write_text(json.dumps({
-        "image_path": image, "tab": "annotate", "received_at": received_at,
-        "shapes": SHAPES if shapes is None else shapes,
-    }))
+    })
 
 
 def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:

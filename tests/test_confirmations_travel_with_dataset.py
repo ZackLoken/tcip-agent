@@ -10,7 +10,6 @@ unstamped confirmation is admitted, never punished for predating the mechanism.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from PIL import Image
@@ -18,7 +17,7 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_mcp import class_registry
 from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject
-from tcip_mcp.dataset_layout import image_status_digest_path, status_bucket
+from tcip_mcp.dataset_layout import stamp_image_status_digests, status_bucket
 
 
 def _write_image(images_dir: Path, stem: str, size=(64, 64)) -> None:
@@ -42,10 +41,7 @@ def _confirm_negative(root: Path, subject: str, image_name: str, *, date=None,
     record_image_statuses(root, bucket, {image_name: CONFIRMED_NEGATIVE},
                           recorded_by="user:breeder")
     if digest is not None:
-        digest_path = image_status_digest_path(root)
-        stamps = json.loads(digest_path.read_text()) if digest_path.is_file() else {}
-        stamps.setdefault(bucket, {})[image_name] = digest
-        digest_path.write_text(json.dumps(stamps))
+        stamp_image_status_digests(root, bucket, [image_name], digest)
 
 
 def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="catkin"),)):

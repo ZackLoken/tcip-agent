@@ -20,7 +20,6 @@ Rails pinned here (one section each):
 from __future__ import annotations
 
 import inspect
-import json
 from pathlib import Path
 
 import pytest
@@ -31,6 +30,7 @@ import tcip_store as ts  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
+from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     coco_detection_metrics,
     gt_class_avg_size,
@@ -608,11 +608,10 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
         # "no operating_point.json" case, tested separately.
         pass
     mapping_path = tmp_path / "state" / "plant_mapping.json"
-    mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    mapping_path.write_text(json.dumps({
+    ts.replace(plant_mapping_key(mapping_path), {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
-    }), encoding="utf-8")
+    })
     return mapping_path, d1, d2
 
 

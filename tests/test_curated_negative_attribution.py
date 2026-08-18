@@ -16,11 +16,12 @@ import json
 
 from PIL import Image
 
+import tcip_store as ts
 from tcip_mcp import class_registry
 from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, attribute_schema_digest
-from tcip_mcp.dataset_layout import image_status_digest_path, image_status_path, status_bucket
+from tcip_mcp.dataset_layout import image_status_digest_key, image_status_key, status_bucket
 from tcip_mcp.pipelines.data.datasets import confirmed_negative_names
-from tcip_mcp.pipelines.feedback.materialize import materialize_dataset
+from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key, materialize_dataset
 
 
 def _image(images_dir, name: str, size) -> None:
@@ -68,9 +69,9 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
     r = materialize_dataset(state, str(src), str(out))
     assert r["hard_negative"] == 3
 
-    store_file = image_status_path(out)
-    assert store_file.is_file()
-    store = json.loads(store_file.read_text())
+    store_key = image_status_key(out)
+    assert ts.exists(store_key)
+    store = ts.read(store_key)
     assert list(store) == [status_bucket("catkin", None)]
     bucket = store[status_bucket("catkin", None)]
     assert sorted(bucket) == ["neg_a.png", "neg_b.png", "neg_c.png"]
@@ -82,7 +83,7 @@ def test_every_confirmed_negative_reaches_the_status_store(tmp_path):
 
     # No source registry to stamp against, so nothing is stamped, and an unstamped confirmation is
     # admitted rather than quarantined.
-    assert not image_status_digest_path(out).exists()
+    assert not ts.exists(image_status_digest_key(out))
 
 
 def test_explicit_subject_outranks_the_derived_one(tmp_path):
@@ -99,7 +100,7 @@ def test_explicit_subject_outranks_the_derived_one(tmp_path):
     r = materialize_dataset(state, str(src), str(out), subject="bush")
     assert r["subject"] == "bush"
     assert r["subjects"] == ["catkin"]
-    assert json.loads((out / "curated_manifest.json").read_text())["subject"] == "bush"
+    assert ts.read(curated_manifest_key(out))["subject"] == "bush"
 
     assert confirmed_negative_names(out / "annotations", subject="bush", date=None) == {"neg.png"}
     assert confirmed_negative_names(out / "annotations", subject="catkin", date=None) == set()
@@ -128,7 +129,7 @@ def test_multi_subject_review_leaves_negatives_unattributed(tmp_path):
     assert [e["image"] for e in r["unconfirmed_negatives"]] == ["neg.png"]
     assert "no single subject" in r["unconfirmed_negatives"][0]["reason"]
 
-    assert not image_status_path(out).exists()
+    assert not ts.exists(image_status_key(out))
     for subject in ("catkin", "leaf"):
         assert confirmed_negative_names(out / "annotations", subject=subject, date=None) == set()
 
@@ -159,7 +160,7 @@ def test_negative_stamps_match_the_source_registry_schema(tmp_path):
     leaf_digest = attribute_schema_digest(registry, "leaf")
     assert catkin_digest and leaf_digest and catkin_digest != leaf_digest
 
-    stamps = json.loads(image_status_digest_path(out).read_text())
+    stamps = ts.read(image_status_digest_key(out))
     assert stamps[status_bucket("catkin", None)] == {
         "neg_a.png": catkin_digest, "neg_b.png": catkin_digest}
 
@@ -255,7 +256,7 @@ def test_a_harvested_negative_records_who_confirmed_it_and_when(tmp_path):
 
     materialize_dataset(state, str(src), str(out))
 
-    record = json.loads(image_status_path(out).read_text())[status_bucket("catkin", None)]["neg.png"]
+    record = ts.read(image_status_key(out))[status_bucket("catkin", None)]["neg.png"]
     assert isinstance(record, dict), "a stored status is a record, not a bare token"
     assert record["status"] == "negative"
     assert record["recorded_by"] == "user:rowan"
@@ -278,7 +279,7 @@ def test_a_negative_no_one_reviewer_answers_for_names_the_harvest(tmp_path):
 
     materialize_dataset(state, str(src), str(out))
 
-    record = json.loads(image_status_path(out).read_text())[status_bucket("catkin", None)]["neg.png"]
+    record = ts.read(image_status_key(out))[status_bucket("catkin", None)]["neg.png"]
     assert isinstance(record, dict), "a stored status is a record, not a bare token"
     assert not record["recorded_by"].startswith("user:"), (
         "a tool producer stays bare, so a reader can tell it from a person's own Complete")

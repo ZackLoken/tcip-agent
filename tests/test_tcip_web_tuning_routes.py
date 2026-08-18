@@ -28,24 +28,29 @@ def hpo_root(tmp_path, monkeypatch) -> Path:
 
 
 def _write_sweep(root: Path, study: str, **manifest_fields) -> Path:
+    import tcip_store
+    from tcip_mcp.tools.training_tools import sweep_manifest_key
+
     sweep = root / study
     sweep.mkdir(parents=True, exist_ok=True)
     manifest = {"study_name": study, "status": "running", "n_trials": 2, **manifest_fields}
-    (sweep / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    tcip_store.replace(sweep_manifest_key(study), manifest)
     return sweep
 
 
 def _write_trial(sweep: Path, trial_id: str, *, metrics: list[dict] | None = None,
                  params: dict | None = None) -> Path:
+    import tcip_store
+    from tcip_mcp.tools.training_tools import trial_config_key, trial_metrics_key
+
     trial = sweep / f"trial_{trial_id}"
     trial.mkdir(parents=True, exist_ok=True)
     if params is not None:
-        (trial / "resolved_config.json").write_text(
-            json.dumps({"training": {}, "trial_params": params, "unconsumed_params": []}),
-            encoding="utf-8")
+        tcip_store.replace(trial_config_key(sweep, trial.name),
+                           {"training": {}, "trial_params": params, "unconsumed_params": []})
     if metrics is not None:
-        (trial / "metrics.jsonl").write_text(
-            "".join(json.dumps(row) + "\n" for row in metrics), encoding="utf-8")
+        for row in metrics:
+            tcip_store.append(trial_metrics_key(sweep, trial.name), row)
     return trial
 
 

@@ -12,7 +12,6 @@ keeps resolving by default the way it did when a builtin was unconditionally pre
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -392,11 +391,14 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
             d / "P1.json",
             [Annotation(subject=subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
         _op_sidecar(d, id_map, dataset_root=root)
+    import tcip_store
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+
     mapping_path = tmp_path / "plant_mapping.json"
-    mapping_path.write_text(json.dumps({
+    tcip_store.replace(plant_mapping_key(mapping_path), {
         "2026-02-11": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
-    }), encoding="utf-8")
+    })
     return mapping_path, d1, d2
 
 

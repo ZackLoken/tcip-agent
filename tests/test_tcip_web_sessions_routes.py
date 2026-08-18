@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -10,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import tcip_store
-from tcip_mcp.dataset_layout import status_records
+from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
 from tcip_web.app import app
 from tcip_web.routes.sessions import annotation_stats_key
 
@@ -128,10 +127,8 @@ def test_load_splits_time_into_new_annotation_review_and_negative_confirmation(
     to total_time_seconds."""
     project_root = tmp_path / "proj"
     dataset_root = tmp_path / "data"
-    (dataset_root / ".tcip" / "state").mkdir(parents=True)
-    status_path = dataset_root / ".tcip" / "state" / "image_status.json"
-    status_path.write_text(json.dumps({"catkin/2026-02-11": status_records(
-        {"IMG_NEG": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(dataset_root, status_bucket("catkin", "2026-02-11"),
+                          {"IMG_NEG": "negative"}, recorded_by="user:breeder")
 
     pr = str(project_root)
     common = {"project_root": pr, "dataset_root": str(dataset_root), "subject": "catkin",
@@ -171,7 +168,13 @@ def test_a_status_store_that_will_not_decode_reports_its_time_as_review(
 
     The route only displays these numbers, so it keeps answering, but it names the store in the
     log and counts the time as review: the reading that claims the least.
+
+    Bound to the file backend: the claim needs bytes on disk no codec decodes, which only the
+    file backend ever holds raw.
     """
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     project_root = tmp_path / "proj"
     dataset_root = tmp_path / "data"
     (dataset_root / ".tcip" / "state").mkdir(parents=True)
@@ -213,9 +216,8 @@ def test_load_reflects_a_negative_confirmed_after_the_session_that_spent_time_en
     assert before["review_seconds"] == 9.0
     assert before["negative_confirmation_seconds"] == 0.0
 
-    status_path = dataset_root / ".tcip" / "state" / "image_status.json"
-    status_path.write_text(json.dumps({"catkin/2026-02-11": status_records(
-        {"IMG_LATE": "negative"}, recorded_by="user:breeder")}))
+    record_image_statuses(dataset_root, status_bucket("catkin", "2026-02-11"),
+                          {"IMG_LATE": "negative"}, recorded_by="user:breeder")
 
     after = client.get("/api/sessions/load", params={"project_root": pr}).json()["sessions"][0]
     assert after["review_seconds"] == 0.0

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import tcip_store
 from tcip_mcp import workspace
 from tcip_mcp.tools.project_tools import set_active_project
 
@@ -41,7 +42,13 @@ def test_a_marker_that_does_not_decode_reads_as_no_active_project():
     """The marker is the front door's first read, so bytes no encoding of it can turn into a
     name are treated as unset rather than raised at every caller that asks which project is
     open. An ordinary marker still names its project, in the tests above.
+
+    Bound to the file backend on purpose: the claim is about surviving bytes on disk that no
+    text codec decodes, which only the file backend ever holds raw.
     """
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     marker = workspace.active_marker_path()
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_bytes("hazelnut_catkin_valley-farm\n".encode("utf-16"))

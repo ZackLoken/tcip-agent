@@ -195,7 +195,7 @@ def test_the_gui_route_records_the_person_whose_confirmation_it_is(
             "user": "rowan"}
     assert client.post("/api/classes/image_status", json=body).status_code == 200
 
-    stored = json.loads(image_status_path(tmp_path).read_text(encoding="utf-8"))
+    stored = tcip_store.read(image_status_key(tmp_path))
     record = stored["catkin"]["IMG_0009.JPG"]
     assert record["status"] == "negative"
     assert record["recorded_by"] == "user:rowan"

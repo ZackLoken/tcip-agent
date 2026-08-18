@@ -173,25 +173,22 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
 
 
 def test_list_runs_reconstructs_from_experiments(tmp_path, monkeypatch) -> None:
-    # No live runs (post-restart): the list is rebuilt from .tcip/experiments/. A genuine
-    # training experiment left 'running' by a crash resurfaces as 'interrupted'; a
-    # review-feedback experiment (no model_source) is not a training run and is excluded.
+    """No live runs (post-restart): rebuilt from .tcip/experiments/. A genuine training
+    experiment left 'running' by a crash resurfaces as 'interrupted'; a review-feedback
+    experiment (no model_source) is not a training run and is excluded.
+    """
     monkeypatch.chdir(tmp_path)
-    import json as _json
-
+    import tcip_store
+    from tcip_mcp.experiments import create_experiment, status_key, update_status
     from tcip_web.routes import training
 
-    exp = tmp_path / ".tcip" / "experiments" / "run_1"
-    exp.mkdir(parents=True)
-    (exp / "config.json").write_text(
-        _json.dumps({"model_source": {"builder": "torchvision:fasterrcnn_resnet50_fpn"}})
-    )
-    (exp / "status.json").write_text(_json.dumps({"state": "running"}))
+    create_experiment("run_1", {"model_source": {"builder": "torchvision:fasterrcnn_resnet50_fpn"}})
+    # No heartbeat stamped, unlike update_status: this is the crash this test simulates.
+    with tcip_store.transaction(status_key("run_1")) as txn:
+        txn.write(status_key("run_1"), {"state": "running", "started": None, "ended": None})
 
-    fb = tmp_path / ".tcip" / "experiments" / "fb_1"
-    fb.mkdir(parents=True)
-    (fb / "config.json").write_text(_json.dumps({"source": "review_feedback"}))
-    (fb / "status.json").write_text(_json.dumps({"state": "completed"}))
+    create_experiment("fb_1", {"source": "review_feedback"})
+    update_status("fb_1", "completed")
 
     monkeypatch.setattr(
         "tcip_mcp.tools.training_tools.list_training_runs", lambda: {"runs": []}

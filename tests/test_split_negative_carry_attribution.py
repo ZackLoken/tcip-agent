@@ -9,15 +9,15 @@ image that has content on it".
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
 from tcip_mcp.dataset_layout import (
-    image_status_digest_path,
-    image_status_path,
+    image_status_digest_key,
+    image_status_key,
     status_bucket,
 )
 from tcip_mcp.tools.data_tools import make_splits
@@ -89,7 +89,7 @@ def test_confirmation_is_carried_only_into_the_split_that_holds_its_image(tmp_pa
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
     with_store = [name for name in ("train", "val", "test")
-                  if image_status_path(out / name).is_file()]
+                  if ts.exists(image_status_key(out / name))]
 
     assert with_store == [holder]
 
@@ -100,7 +100,7 @@ def test_carried_confirmation_is_stored_under_the_dateless_bucket_as_a_negative(
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
-    stored = json.loads(image_status_path(out / holder).read_text(encoding="utf-8"))
+    stored = ts.read(image_status_key(out / holder))
 
     assert list(stored) == [status_bucket(SUBJECT, None)]
     assert list(stored[status_bucket(SUBJECT, None)]) == [f"{NEGATIVE_STEM}.jpg"]
@@ -113,9 +113,9 @@ def test_the_carried_confirmation_still_names_who_made_it(tmp_path: Path):
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
-    stored = json.loads(image_status_path(out / holder).read_text(encoding="utf-8"))
+    stored = ts.read(image_status_key(out / holder))
     carried = stored[status_bucket(SUBJECT, None)][f"{NEGATIVE_STEM}.jpg"]
-    source = json.loads(image_status_path(tmp_path / "ds").read_text(encoding="utf-8"))
+    source = ts.read(image_status_key(tmp_path / "ds"))
 
     assert carried["recorded_by"] == CONFIRMED_BY
     assert carried == source[status_bucket(SUBJECT, DATE)][f"{NEGATIVE_STEM}.jpg"]
@@ -147,7 +147,7 @@ def test_carried_schema_stamp_is_recorded_per_image_not_per_bucket(tmp_path: Pat
     assert (split_root / "classes.json").is_file()
     expected = attribute_schema_digest(read_registry(split_root / "classes.json"), SUBJECT)
     assert expected is not None
-    stamps = json.loads(image_status_digest_path(split_root).read_text(encoding="utf-8"))
+    stamps = ts.read(image_status_digest_key(split_root))
 
     assert stamps == {status_bucket(SUBJECT, None): {f"{NEGATIVE_STEM}.jpg": expected}}
 
@@ -159,7 +159,7 @@ def test_no_subject_threaded_carries_no_confirmation(tmp_path: Path):
     out, _ = _materialize(tmp_path, subject=None)
 
     assert [name for name in ("train", "val", "test")
-            if image_status_path(out / name).is_file()] == []
+            if ts.exists(image_status_key(out / name))] == []
 
 
 def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Path):
@@ -223,7 +223,7 @@ def _carried_negative(tmp_path: Path, *, labels_date: str | None,
     )
     assert "error" not in result
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
-    stored = json.loads(image_status_path(out / holder).read_text(encoding="utf-8"))
+    stored = ts.read(image_status_key(out / holder))
     return stored.get(status_bucket(SUBJECT, None), {})
 
 

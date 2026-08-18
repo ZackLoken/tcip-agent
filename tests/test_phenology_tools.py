@@ -12,7 +12,6 @@ positive-class axis.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -92,8 +91,7 @@ def test_build_plant_mapping_missing_csv(tmp_path: Path) -> None:
 
 
 def _write_mapping(path: Path, mapping: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(mapping), encoding="utf-8")
+    ts.replace(plant_mapping_key(path), mapping)
 
 
 def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:

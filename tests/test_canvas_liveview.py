@@ -8,7 +8,6 @@ only when its (image_path, tab) identity matches the meta), the display-resolved
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -289,19 +288,18 @@ def test_render_tolerates_malformed_shapes(tmp_path):
 def _write_state(tmp_path: Path, img: str, shapes=SHAPES, *, shapes_image: str | None = None,
                  tab: str = "annotate", shapes_tab: str | None = None) -> None:
     import time
-    sd = tmp_path / ".tcip" / "state"
-    sd.mkdir(parents=True, exist_ok=True)
-    (sd / "canvas_live.json").write_text(json.dumps({
-        "received_at": time.time(), "project_root": str(tmp_path), "tab": tab,
+    root = str(tmp_path)
+    if shapes is not None:
+        tcip_store.replace(canvas_geometry_key(root), {
+            "image_path": shapes_image or img, "tab": shapes_tab or tab,
+            "shapes": shapes, "received_at": time.time(),
+        })
+    tcip_store.replace(canvas_meta_key(root), {
+        "received_at": time.time(), "project_root": root, "tab": tab,
         "image": Path(img).name, "image_path": img,
         "viewport": {"x": 0, "y": 0, "w": 200, "h": 100}, "user": "breeder", "mode": "polygon",
         "classes": [{"id": 0, "name": "catkin", "color": "#FF0000"}],
-    }))
-    if shapes is not None:
-        (sd / "canvas_shapes.json").write_text(json.dumps({
-            "image_path": shapes_image or img, "tab": shapes_tab or tab,
-            "shapes": shapes, "received_at": time.time(),
-        }))
+    })
 
 
 def test_capture_live_canvas_missing_state(tmp_path, monkeypatch):
@@ -334,10 +332,9 @@ def test_capture_live_canvas_renders_exactly_the_viewport_region(tmp_path, monke
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     img = _make_image(tmp_path)
     _write_state(tmp_path, img)
-    sd = tmp_path / ".tcip" / "state"
-    live = json.loads((sd / "canvas_live.json").read_text())
+    live = tcip_store.read(canvas_meta_key(str(tmp_path)))
     live["viewport"] = {"x": 50, "y": 0, "w": 100, "h": 100}
-    (sd / "canvas_live.json").write_text(json.dumps(live))
+    tcip_store.replace(canvas_meta_key(str(tmp_path)), live)
 
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     res = capture_live_canvas(refresh=False)
