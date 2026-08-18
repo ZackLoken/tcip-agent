@@ -221,12 +221,15 @@ export type OperationalizationRecord = {
   record_seen: string;
 };
 
-/** The four fields the confirmation writer owns, every one of them null after a withdrawal. */
+/** The four fields the confirmation writer owns, every one of them null after a withdrawal, plus
+ *  the audit-append warning (A8): a confirmation that lands but whose audit line does not is still
+ *  a 200, never a refusal, the same shape the trait-spec confirmation route now also carries. */
 export interface OperationalizationConfirmation {
   confirmed_by: string | null;
   confirmed_at: string | null;
   identity_from_request: boolean | null;
   confirmed_fields: Record<string, unknown> | null;
+  audit_warning: string | null;
 }
 
 export interface ConfirmOperationalizationBody {
