@@ -33,10 +33,9 @@ pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 # ── R1: config-driven authoring, crops.yml-cross-checked ──────────────────
 
 def _write_spec(directory: Path, name: str, spec: dict) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    import yaml
+    import tcip_store as ts
 
-    (directory / f"{name}.yml").write_text(yaml.safe_dump({"name": name, **spec}), encoding="utf-8")
+    ts.replace(traits.trait_spec_key(directory, name), {"name": name, **spec}, expect=ts.Version.ABSENT)
 
 
 def test_load_trait_specs_reads_vocab_checked_config(tmp_path: Path):
@@ -66,7 +65,7 @@ def test_load_trait_specs_with_errors_names_the_broken_file_and_why(tmp_path: Pa
     specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
     assert specs == []
     assert len(errors) == 1
-    assert errors[0]["file"] == "unicorn.yml"
+    assert errors[0]["file"] == "unicorn.json"
     assert "unicorn_horn_length" in errors[0]["reason"]
 
 
@@ -77,14 +76,21 @@ def test_load_trait_specs_with_errors_leaves_valid_specs_out_of_the_error_list(t
     _write_spec(tmp_path, "unicorn", {"delivers": ["unicorn_horn_length"]})
     specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
     assert [s.name for s in specs] == ["leaf"]
-    assert [e["file"] for e in errors] == ["unicorn.yml"]
+    assert [e["file"] for e in errors] == ["unicorn.json"]
 
 
-def test_load_trait_specs_with_errors_reports_malformed_yaml(tmp_path: Path):
-    (tmp_path / "broken.yml").write_text("not: valid: yaml: [", encoding="utf-8")
+def test_load_trait_specs_with_errors_reports_malformed_json(tmp_path: Path):
+    # A malformed record's bytes exist only as a loose file, which the file backend serves
+    # directly; the database backend refuses to read a root holding files it did not write.
+    from tcip_store.file_backend import FileBackend
+
+    import tcip_store as ts
+
+    ts.bind(FileBackend())
+    (tmp_path / "broken.json").write_text("not valid json {", encoding="utf-8")
     specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
     assert specs == []
-    assert errors[0]["file"] == "broken.yml"
+    assert errors[0]["file"] == "broken.json"
 
 
 def test_config_spec_unknown_field_is_rejected(tmp_path: Path):
@@ -295,15 +301,37 @@ def test_a_spec_write_that_lost_the_race_is_refused_rather_than_silently_winning
 
     _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
     key = traits.trait_spec_key(tmp_path, "leaf")
-    stale = ts.read_blob_versioned(key).version
+    stale = ts.read_versioned(key).version
     traits.write_trait_spec_fields(
         "leaf", {"count_bias_tolerance_frac": 1.0}, ["count_bias_tolerance_frac: agent_proposed_unvalidated"],
         specs_dir=tmp_path)
 
     with pytest.raises(ts.VersionConflict):
-        ts.put_blob(key, b"name: leaf\ndelivers:\n- leaf_length\n", expect=stale)
+        ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]}, expect=stale)
 
     assert load_trait_specs(specs_dir=tmp_path)[0].count_bias_tolerance_frac == 1.0
+
+
+def test_get_trait_load_trait_specs_and_registered_traits_agree_on_a_record_conformed_by_hand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A project whose spec was conformed straight into the record store (the shape a one-off
+    conform script produces, written here by hand rather than by running one) resolves the
+    identical ``TraitSpec`` through every read path the platform has: the re-kind changes only
+    the bytes on disk, never what a reader sees.
+    """
+    import dataclasses
+
+    import tcip_store as ts
+
+    data = {k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(CATKIN).items()}
+    ts.replace(traits.trait_spec_key(tmp_path, "catkin"), data, expect=ts.Version.ABSENT)
+    monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
+
+    assert get_trait("catkin") == CATKIN
+    assert load_trait_specs() == [CATKIN]
+    assert load_trait_specs(specs_dir=tmp_path) == [CATKIN]
+    assert registered_traits() == ["catkin"]
 
 
 def test_catkin_config_semantics_match_reference_fixture():
