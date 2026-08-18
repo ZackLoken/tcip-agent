@@ -18,8 +18,14 @@ BACKEND_ENV = "TCIP_STORE_BACKEND"
 
 FILE_BACKEND = "file"
 SQLITE_BACKEND = "sqlite"
-DEFAULT_BACKEND = FILE_BACKEND
-"""What an unset environment binds."""
+DEFAULT_BACKEND = SQLITE_BACKEND
+"""What an unset environment binds: one database per root, at ``<root>/.tcip/store.db``.
+
+A root whose records and logs are still loose files is refused rather than read as empty, so a
+layout that predates its database is conformed with ``scripts/adopt_store.py`` before a process
+on this default touches it. ``scripts/export_store.py`` writes the files back out, which is what
+``TCIP_STORE_BACKEND=file`` then reads.
+"""
 
 
 def bind_default(*, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> FileBackend | SqliteBackend:

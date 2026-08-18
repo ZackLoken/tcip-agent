@@ -64,9 +64,10 @@ doesn't repeat them:
 - `packages/tcip-annotation/`: headless annotation/review engine. Depends on `tcip-store`
   and on neither of the other two. See `packages/tcip-annotation/CLAUDE.md`.
 - `packages/tcip-store/`: the storage seam. One keyed, locked, atomic interface for the
-  platform's records, append-only logs and blobs, plus the file backend that serves today's
-  on-disk layout byte for byte. Bottom of the stack: standard library plus `filelock`, no
-  dependency on the other three, and every other package depends on it.
+  platform's records, append-only logs and blobs, over two backends that must mean the same
+  thing: the database backend (the default, one `store.db` per root) and the file backend that
+  serves the on-disk layout byte for byte. Bottom of the stack: standard library plus
+  `filelock`, no dependency on the other three, and every other package depends on it.
 - `packages/tcip-web/`: FastAPI backend + Vite/React/TS/Tailwind/Konva frontend. The
   human's UI. See `packages/tcip-web/CLAUDE.md`.
 - `scripts/`: one-off scripts you write (prefer this over a new MCP tool, see Conventions).
@@ -212,10 +213,13 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
 - Never train or evaluate on an unconfirmed format. If `read_annotations`
   cannot determine the format it refuses rather than guessing: an undetected
   mismatch makes real annotations read as empty negatives.
-- State changes go through `@audited` MCP tools. `.tcip/audit.jsonl` is the
-  append-only record; don't route mutations around it.
-- Experiments are immutable. Each run is `.tcip/experiments/<id>/`
-  (config/metrics/artifacts/lineage). New run; don't overwrite history.
+- State changes go through `@audited` MCP tools. The append-only audit log, under the root each
+  event's scope names, is the record; don't route mutations around it. An entry the decorator
+  cannot append is a refusal, not a warning: the append runs after the tool body, so it raises
+  `MutationCommittedWithoutAuditLine` rather than let a caller blind-retry a mutation that
+  already committed.
+- Experiments are immutable. Each run is one record (config/metrics/artifacts/lineage) plus the
+  run's own files under `.tcip/experiments/<id>/`. New run; don't overwrite history.
 - Confirm before destructive/outward actions (deleting labels, overwriting
   weights, exporting deliverables). Approval for one doesn't extend to the next.
 - No backward compatibility. The platform is pre-release and has no users. Every migration path,
@@ -289,7 +293,18 @@ python scripts/list_tools.py       # current MCP tool list/count (don't hardcode
 # the full frontend gate, in CI order (.github/workflows/ci.yml): a partial run misses format:check/lint
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build   # build → ../static/
 python -m tcip_web                 # backend + built UI → http://127.0.0.1:8765
+python scripts/export_store.py <root>   # write a root's database-held records and logs back out as files
+python scripts/adopt_store.py <root>    # move a root's loose record/log files into its database
 ```
+
+Every process binds one storage backend at its entry point, and an unset environment binds the
+database: a root's records and append-only logs live in `<root>/.tcip/store.db`, blobs stay
+files. `TCIP_STORE_BACKEND=file` binds the file backend instead, over the loose-file layout
+`export_store.py` produces; any other value refuses rather than picking one. The two must
+behave identically: `tests/test_store_contract.py` runs each of its cases against both backends
+in one run, while the rest of the suite runs on whichever backend the environment binds, so run
+`pytest tests/` both ways when you touch the seam. A root whose records are still loose files is
+refused by the database backend rather than read as empty, and `adopt_store.py` conforms it.
 
 The MCP server auto-launches when an MCP client connects (`.mcp.json`). If the
 `mcp__tcip__*` tools aren't available, the repo's `.mcp.json` didn't launch it: you're
@@ -298,7 +313,7 @@ for a name you expected, or a tool you know was renamed still appears under its 
 the client is holding a stale tool index cached from an earlier server build. Restart
 the MCP client (or reconnect) so it re-reads the running server's tools; confirm against
 `python scripts/list_tools.py`, which reflects the source, not the cache. Durable platform
-state (`.tcip/audit.jsonl`, `.tcip/experiments/`) resolves via `$TCIP_PROJECT_ROOT` (the
+state (the audit log, the experiment records) resolves via `$TCIP_PROJECT_ROOT` (the
 server/backend pin it to the repo root at startup), so a process started from a subdir no
 longer fragments `.tcip/`.
 

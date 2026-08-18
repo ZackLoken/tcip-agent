@@ -68,12 +68,20 @@ _register_rail_stores()
 
 @contextmanager
 def bound(backend):
-    """Bind one backend for a block, since these cases are about handing a root between two."""
+    """Bind one backend for a block, since these cases are about handing a root between two.
+
+    The suite's own backend is put back on the way out rather than dropped: a call after the
+    block still has to reach a store, and a process with nothing bound is the state the seam
+    refuses outright.
+    """
+    from tcip_store.store import _backend
+
+    previous = _backend()
     ts.bind(backend)
     try:
         yield backend
     finally:
-        ts.unbind()
+        ts.bind(previous)
         backend.close()
 
 
@@ -174,10 +182,15 @@ def test_a_file_written_after_this_backend_last_looked_still_refuses(tmp_path):
     assert not (tmp_path / ".tcip" / "store.db").exists()
 
 
-def test_a_restored_archive_is_refused_rather_than_read_as_an_empty_project(tmp_path):
+def test_a_restored_archive_is_refused_rather_than_read_as_an_empty_project(tmp_path, monkeypatch):
     """An import extracts a project's files into a fresh directory, so its confirmed negatives
     are files and nothing else. A database created beside them answers every one of them with
-    absence, which is an annotated image training as empty."""
+    absence, which is an annotated image training as empty.
+
+    The two phases take separate platform roots. The archive and the import are audited calls
+    that record under the root their process is pinned to, so one platform root written through
+    both backends would trip these same rails on the setup rather than on the case.
+    """
     from tcip_mcp import dataset_layout
     from tcip_mcp.tools.project_tools import archive_project, import_project
 
@@ -186,10 +199,17 @@ def test_a_restored_archive_is_refused_rather_than_read_as_an_empty_project(tmp_
     (source / "images" / "2026-03-04" / "a_1.jpg").write_bytes(b"\xff\xd8\xff")
     negative = {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user:ü"}}}
     restored = tmp_path / "restored"
+    platform_files = tmp_path / "platform_files"
+    platform_database = tmp_path / "platform_database"
+    platform_files.mkdir()
+    platform_database.mkdir()
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_files))
     with bound(FileBackend()):
         ts.replace(dataset_layout.image_status_key(source), negative, expect=ts.Version.ABSENT)
         assert "error" not in archive_project(str(source), str(tmp_path / "bundle.zip"))
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         # The order a long-lived process reaches a destination in: it answers about the root,
         # then the bundle lands in it, then something writes.

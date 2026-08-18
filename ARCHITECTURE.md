@@ -47,7 +47,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 |---|---|---|---|
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools. | 2 | 16 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 2 | 16 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 1 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 2 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 4 | 10 |
@@ -157,7 +157,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 |---|---|---|---|
 | packages/tcip-store/src/tcip_store/__init__.py | The storage seam's public surface: keys, errors, store declarations, and the module-level operations. | 5 | 0 |
 | packages/tcip-store/src/tcip_store/adoption.py | Moving a root's existing record and log files into a database, exclusively and atomically, or refusing before it writes, including the stores a database beside them has never held. | 5 | 0 |
-| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point, and the environment variable that decides. | 3 | 0 |
+| packages/tcip-store/src/tcip_store/binding.py | Which backend a process binds at its entry point: the database unless `TCIP_STORE_BACKEND` names the file backend, and a refusal for any other name. | 3 | 0 |
 | packages/tcip-store/src/tcip_store/errors.py | Every typed refusal the seam raises, absence and corruption included. | 1 | 6 |
 | packages/tcip-store/src/tcip_store/export.py | Writing a root's database-held records and logs back out as the file layout, and the per-store counters that say when those files are behind. | 4 | 0 |
 | packages/tcip-store/src/tcip_store/file_backend.py | The filesystem backend: identity to path, atomic replace, file locks, append-only logs, blobs, and the conform rail's refusal of record writes, and of a colliding blob write, to a root a database holds. | 3 | 6 |
@@ -1159,17 +1159,23 @@ bug confined to the route's own HTTP layer would not be caught by the calibratio
 
 Path: `.tcip/audit.jsonl` under the root the entry's scope names: the pinned platform state
 root, via `resolve_state`, for a platform event, and the dataset root for an event that changed
-a record travelling with the data.
+a record travelling with the data. That path is what the file backend places the log at and what
+`scripts/export_store.py` writes back out; on the default database backend the rows live in that
+root's `.tcip/store.db` until they are exported.
 
-Writers: the `@audited` decorator, `packages/tcip-mcp/src/tcip_mcp/audit.py:139`, which records
+Writers: the `@audited` decorator, `packages/tcip-mcp/src/tcip_mcp/audit.py:174`, which records
 a call in the platform log unless the tool declares `@audited(scope_arg=...)` naming the
 argument that carries the dataset it mutates a record of, resolved by `dataset_scope_of`, line
-112 (through the same canonicalizer the tool body uses, when the declaration passes one as
-`scope_via`); `record_event`, same file, line 86, which is what code that is not an `@audited`
+147 (through the same canonicalizer the tool body uses, when the declaration passes one as
+`scope_via`); `record_event`, same file, line 121, which is what code that is not an `@audited`
 MCP tool emits through (the training envelope's open/close events, and each GUI route's own
-`_audit` helper). Both funnel through `_write_entry`, same file, line 77, which appends through
-the storage seam under the key `audit_log_key`, line 58. Dataset-scoped entries carry a `scope`
-field naming their root; platform entries keep the original shape.
+`_audit` helper). Both address the log through `audit_log_key`, same file, line 84, and append
+through the storage seam. What a failed append means is where the two part: `record_event` warns
+and returns, through `_write_entry`, same file, line 103, because its callers bracket work rather
+than follow a mutation; the decorator raises `MutationCommittedWithoutAuditLine`, line 57,
+because its append runs after the tool body and a warning there invites a blind retry of a
+mutation already on disk. Dataset-scoped entries carry a `scope` field naming their root;
+platform entries keep the original shape.
 
 Reader: no production code parses the log's entries. The only production consumer is
 `archive_project` (`tools/project_tools.py`), which copies the file into the archive by suffix
@@ -1527,7 +1533,7 @@ Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-nam
 ## S06. Append-only audit log .tcip/audit.jsonl
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:139` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 86, the one emitter for code that is not an `@audited` tool; both append through `_write_entry`, line 77.
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:174` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is not an `@audited` tool; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
 Side B: `packages/tcip-web/src/tcip_web/routes/review.py:78` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 

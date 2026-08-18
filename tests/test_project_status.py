@@ -14,7 +14,7 @@ from tcip_mcp.project_status import (
     record_report,
     record_retrospective,
 )
-from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
+from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND, SQLITE_BACKEND
 
 
 def _damage_project_status(root: Path, data: bytes) -> None:
@@ -27,7 +27,7 @@ def _damage_project_status(root: Path, data: bytes) -> None:
     from tcip_store.store import _backend
 
     key = project_status_key(root)
-    name = os.environ.get(BACKEND_ENV) or FILE_BACKEND
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
     if name == FILE_BACKEND:
         backend = _backend()
         backend.path_for(key).write_bytes(data)

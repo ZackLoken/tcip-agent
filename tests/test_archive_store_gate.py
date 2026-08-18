@@ -26,12 +26,20 @@ _NEGATIVE = {"catkin/2026-03-04": {"a_1.jpg": {"status": "negative", "by": "user
 
 @contextmanager
 def bound(backend):
-    """Bind one backend for a block, since these cases write as rows and archive as files."""
+    """Bind one backend for a block, since these cases write as rows and archive as files.
+
+    The suite's own backend is put back on the way out rather than dropped: an audited call
+    after the block still has to reach the audit log, and a process with nothing bound is the
+    state the seam refuses outright.
+    """
+    from tcip_store.store import _backend
+
+    previous = _backend()
     ts.bind(backend)
     try:
         yield backend
     finally:
-        ts.unbind()
+        ts.bind(previous)
         backend.close()
 
 
@@ -152,21 +160,33 @@ def test_no_database_file_travels_in_the_bundle(tmp_path):
 
 
 def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_negatives(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     """The whole round trip the gate exists for: rows out to files, files into a bundle, bundle
     into a fresh directory, and that directory adopted back into a database with the human's
-    negative still saying negative."""
+    negative still saying negative.
+
+    The archive and the import take separate platform roots. An audited call records under the
+    root its process is pinned to, so one platform root written through both backends would be
+    the mixed binding the ownership rails refuse, which is not the subject here.
+    """
     from tcip_store.adoption import adopt_root
     from tcip_store.layout_claims import ROOT
 
     root = _project(tmp_path)
+    platform_database = tmp_path / "platform_database"
+    platform_files = tmp_path / "platform_files"
+    platform_database.mkdir()
+    platform_files.mkdir()
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
         export_files(root)
     archive_project(str(root), str(tmp_path / "bundle.zip"))
 
     restored = tmp_path / "restored"
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_files))
     with bound(FileBackend()):
         assert "error" not in import_project(str(tmp_path / "bundle.zip"), str(restored))
         assert ts.read(dataset_layout.image_status_key(restored)) == _NEGATIVE
