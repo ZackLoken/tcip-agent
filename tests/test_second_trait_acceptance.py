@@ -17,10 +17,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 from fastapi.testclient import TestClient
 
 import tcip_store as ts
+from tcip_mcp import traits
 from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_web.app import app
 
@@ -34,7 +34,6 @@ def client() -> TestClient:
 
 def _seed_currant_bloom_trait(tmp_path: Path) -> None:
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
     spec = {
         "name": "currant_bloom",
         "count_objective": "count_unbiased",
@@ -70,7 +69,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
             "bloom_05per_date/bloom_50per_date/bloom_95per_date entries for currant.",
         ],
     }
-    (specs_dir / "currant_bloom.yml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+    ts.replace(traits.trait_spec_key(specs_dir, "currant_bloom"), spec, expect=ts.Version.ABSENT)
     # A second trait needs its own confirmed meaning too: nothing about the record is catkin-shaped.
     from tests._operationalization_fixtures import seed_confirmed_crossing
 

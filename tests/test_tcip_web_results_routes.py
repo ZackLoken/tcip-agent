@@ -46,15 +46,18 @@ def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
 ) -> None:
     """catkin is seeded valid by the fixture; a second, broken spec must still be visible by
     name and reason, not silently absent the way a dropped spec looks identical to none at all."""
+    from tcip_mcp import traits
+
     specs_dir = tmp_path / ".tcip" / "state" / "trait_specs"
-    (specs_dir / "unicorn.yml").write_text(
-        "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
+    tcip_store.replace(traits.trait_spec_key(specs_dir, "unicorn"),
+                       {"name": "unicorn", "delivers": ["unicorn_horn_length"]},
+                       expect=tcip_store.Version.ABSENT)
 
     resp = client.get("/api/results/traits", params={"project_root": str(tmp_path)})
     body = resp.json()
     assert body["traits"] == ["catkin"]
     assert len(body["invalid_specs"]) == 1
-    assert body["invalid_specs"][0]["file"] == "unicorn.yml"
+    assert body["invalid_specs"][0]["file"] == "unicorn.json"
     assert "unicorn_horn_length" in body["invalid_specs"][0]["reason"]
 
 
