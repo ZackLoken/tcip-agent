@@ -607,9 +607,11 @@ def _registry_term(dataset_root: Path) -> str:
 def _confirmations_term(dataset_root: Path) -> str:
     """Digest over the dataset-native confirmed-negative store's raw content (all buckets, sorted).
 
-    Reads ``dataset_layout.image_status_path`` only, never a foreign store, since
-    confirmations are dataset-native, the same way ``_registry_term`` reads only
-    ``classes_path``. Hashes raw on-disk negative membership, not the quarantine-filtered view
+    Reads the dataset's own confirmed-negative store through
+    ``dataset_layout.read_image_status_store``, the one read every other consumer of that store
+    goes through, and never a foreign store, since confirmations are dataset-native the same way
+    ``_registry_term`` reads only ``classes_path``. Hashes stored negative membership, not the
+    quarantine-filtered view
     ``confirmed_negative_names`` returns: fingerprint is content identity (should two datasets be
     considered the same content), quarantine is a training-time trust decision, and conflating them
     would make the fingerprint *less* sensitive to a real on-disk difference than it should be, the
@@ -618,17 +620,10 @@ def _confirmations_term(dataset_root: Path) -> str:
     still gets a valid non-None fingerprint.
     """
     from tcip_mcp.dataset_layout import (
-        image_status_path, is_confirmed_negative, normalize_status_store,
+        is_confirmed_negative, normalize_status_store, read_image_status_store,
     )
 
-    p = image_status_path(dataset_root)
-    if not p.is_file():
-        return ""
-    try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ""
-    statuses = normalize_status_store(raw)
+    statuses = normalize_status_store(read_image_status_store(dataset_root))
     h = hashlib.sha256()
     any_negatives = False
     for bucket in sorted(statuses):
@@ -1544,7 +1539,7 @@ def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
     by ``register_model_from_experiment``, so the second answers when the registry index sits under a
     root this process is not reading.
     """
-    from tcip_mcp.experiments import _read_member, lineage_key
+    from tcip_mcp.experiments import lineage_key, read_member
     from tcip_mcp.model_registry import checkpoint_sha256, read_registry_index
     from tcip_mcp.project_paths import project_root
 
@@ -1552,7 +1547,7 @@ def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
     for entry in read_registry_index(project_root()):
         if tag in (entry.get("tags") or []) and entry.get("sha256"):
             return str(entry["sha256"])
-    weights = (_read_member(lineage_key(experiment_id), {}) or {}).get("model_weights")
+    weights = (read_member(lineage_key(experiment_id), {}) or {}).get("model_weights")
     return checkpoint_sha256(weights) if weights else None
 
 

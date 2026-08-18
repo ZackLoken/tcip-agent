@@ -11,7 +11,6 @@ early stopping, mixed precision, gradient accumulation, checkpoints.
 from __future__ import annotations
 
 import functools
-import json
 import logging
 import random
 import threading
@@ -322,9 +321,10 @@ def cancel_run(run_id: str) -> bool:
     sentinel file at ``<output_dir>/.cancel_requested`` instead, which ``TrainRun.should_cancel()``
     polls in the child. When this process has no local record of the run at all (it was launched by
     a *different* process, e.g. the web backend cancelling a run the agent's MCP server's
-    subprocess is running), falls back to resolving the run's real output directory on disk rather
-    than guessing one; an unresolvable run is refused (``False``), never a silent write to a path
-    nobody polls.
+    subprocess is running), falls back to the run's own status record for the real output directory
+    rather than guessing one; an unresolvable run is refused (``False``), never a silent write to a
+    path nobody polls. The record is read through the store the launching process wrote it to, so a
+    live run is still cancellable when that store is a database rather than a file beside the run.
     """
     with _RUNS_LOCK:
         run = _RUNS.get(run_id)
@@ -336,19 +336,13 @@ def cancel_run(run_id: str) -> bool:
             (Path(run.output_dir) / ".cancel_requested").touch()
         return True
 
-    from tcip_mcp.experiments import resolve_experiment_dir_for_run
+    from tcip_mcp.experiments import read_member, resolve_experiment_for_run, status_key
 
-    exp_dir = resolve_experiment_dir_for_run(run_id)
-    if exp_dir is None:
+    experiment_id = resolve_experiment_for_run(run_id)
+    if experiment_id is None:
         return False
-    status_path = exp_dir / "status.json"
-    if not status_path.is_file():
-        return False
-    try:
-        status = json.loads(status_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return False
-    output_dir = status.get("output_dir")
+    status = read_member(status_key(experiment_id), {})
+    output_dir = status.get("output_dir") if isinstance(status, dict) else None
     if not output_dir:
         return False
     Path(output_dir).mkdir(parents=True, exist_ok=True)

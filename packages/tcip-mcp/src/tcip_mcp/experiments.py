@@ -295,11 +295,13 @@ _TERMINAL_STATES = {"completed", "failed"}
 _RECORDED_AS_DONE = {"completed", "failed", "cancelled"}
 
 
-def _read_member(key: Key, default: Any = None) -> Any:
+def read_member(key: Key, default: Any = None) -> Any:
     """One member document, with an unreadable record folded onto ``default``.
 
-    Every caller here already treated a corrupt member the way it treats an absent one, so the
-    fold is stated once rather than repeated at each read.
+    Every caller of an experiment member already treats a corrupt one the way it treats an absent
+    one, so the fold is stated once rather than repeated at each read. The read every consumer of
+    a member document goes through, in this module and outside it, so none of them reaches past
+    the seam for the bytes.
     """
     try:
         return store.read(key, default=default)
@@ -314,7 +316,7 @@ def experiment_exists(experiment_id: str) -> bool:
 
 
 def _current_state(experiment_id: str) -> str | None:
-    status = _read_member(status_key(experiment_id), {})
+    status = read_member(status_key(experiment_id), {})
     return status.get("state") if isinstance(status, dict) else None
 
 
@@ -513,23 +515,26 @@ def resolve_experiment_for_run(run_id: str, *, root: Path | str | None = None) -
             return run_id
     except BadKey:
         return None
-    candidates = _experiment_ids_with_status(root)
+    candidates = experiment_ids_with_status(root)
     matches = [name for name in candidates if name.endswith(f"_{run_id}")]
     if len(matches) == 1:
         return matches[0]
 
     for name in candidates:
-        status = _read_member(status_key(name, root=root), {})
+        status = read_member(status_key(name, root=root), {})
         if isinstance(status, dict) and status.get("run_id") == run_id:
             return name
     return None
 
 
-def _experiment_ids_with_status(root: Path | str | None) -> list[str]:
+def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
     """Every experiment id the store holds a status record for, sorted.
 
-    The member stores share one file layout, so enumerating any of them answers with every
-    member document under the scope; the document part is what says which member a key names.
+    Every experiment gets a status record at creation, so this is the whole set, and it is the
+    enumeration for any caller that wants the experiments themselves: what names an experiment is a
+    record the store holds, so directories a backend happens to keep beside them are not candidate
+    ids and a backend that keeps none at all still answers. Enumerating one member store answers
+    with every member key under the scope, and the document part says which member a key names.
     """
     found = store.keys(EXPERIMENT_STATUS_STORE, experiments_scope(root))
     return sorted(key.parts[0] for key in found if key.parts[1] == STATUS_DOCUMENT)
@@ -551,7 +556,7 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
     experiment_id = resolve_experiment_for_run(run_id)
     if experiment_id is None:
         return None
-    status = _read_member(status_key(experiment_id))
+    status = read_member(status_key(experiment_id))
     if not isinstance(status, dict):
         return None
 
@@ -895,7 +900,7 @@ def register_model_from_experiment(
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    config = _read_member(config_key(experiment_id), {})
+    config = read_member(config_key(experiment_id), {})
 
     # Prefer metrics stored IN the checkpoint (they describe the epoch it was saved at, so a
     # best-checkpoint isn't mislabelled with a later, worse epoch's numbers). Fall back to the
@@ -957,7 +962,7 @@ def get_experiment(
     members = {"config": config_key, "status": status_key,
                "artifacts": artifacts_key, "lineage": lineage_key}
     for name, key_of in members.items():
-        document = _read_member(key_of(experiment_id))
+        document = read_member(key_of(experiment_id))
         if document is not None:
             result[name] = document
 
@@ -978,8 +983,8 @@ def list_experiments() -> list[dict[str, Any]]:
     resolves against, so a record the resolver finds is a record this lists.
     """
     experiments = []
-    for experiment_id in _experiment_ids_with_status(None):
-        status = _read_member(status_key(experiment_id))
+    for experiment_id in experiment_ids_with_status(None):
+        status = read_member(status_key(experiment_id))
         if isinstance(status, dict):
             experiments.append({
                 "experiment_id": experiment_id,
@@ -1039,11 +1044,11 @@ def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    lineage = _read_member(lineage_key(experiment_id))
+    lineage = read_member(lineage_key(experiment_id))
     if lineage is None:
         return {"error": "No lineage file found"}
 
-    config = _read_member(config_key(experiment_id))
+    config = read_member(config_key(experiment_id))
     if isinstance(config, dict):
         data_cfg = config.get("data", {})
         lineage["data_config"] = {
@@ -1062,5 +1067,5 @@ def read_split_manifest(experiment_id: str) -> dict[str, Any]:
     a calibration path asks are answered from one parse, so a consumer never re-derives the
     record's location or its key names.
     """
-    manifest = _read_member(split_key(experiment_id), {})
+    manifest = read_member(split_key(experiment_id), {})
     return manifest if isinstance(manifest, dict) else {}
