@@ -123,17 +123,17 @@ def _author_catkin_trait_spec(root: Path) -> None:
     """
     import dataclasses
 
-    import yaml
+    import tcip_store as ts
 
+    from tcip_mcp import traits
     from tests._operationalization_fixtures import seed_confirmed_crossing
     from tests._trait_fixtures import CATKIN
 
-    specs_dir = root / ".tcip" / "state" / "trait_specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
     data = {k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dataclasses.asdict(CATKIN).items()}
-    (specs_dir / "catkin.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
-    seed_confirmed_crossing(root, CATKIN.name)
+    key = traits.trait_spec_key(traits.trait_specs_dir(root), data["name"])
+    ts.replace(key, data, expect=ts.Version.ABSENT)
+    seed_confirmed_crossing(root, data["name"])
 
 
 def main() -> int:
