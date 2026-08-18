@@ -23,10 +23,9 @@ from tcip_mcp.traits import (
 
 
 def _write_spec(directory: Path, name: str, spec: dict) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    import yaml
+    import tcip_store as ts
 
-    (directory / f"{name}.yml").write_text(yaml.safe_dump({"name": name, **spec}), encoding="utf-8")
+    ts.replace(traits.trait_spec_key(directory, name), {"name": name, **spec}, expect=ts.Version.ABSENT)
 
 
 def _two_traits_with_different_semantics(directory: Path) -> None:
@@ -98,7 +97,7 @@ def test_delivers_must_be_a_vocabulary_member_not_a_prefix_of_one(tmp_path: Path
     _write_spec(tmp_path, "truncated", {"delivers": [truncated]})
     specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
     assert specs == []
-    assert [e["file"] for e in errors] == ["truncated.yml"]
+    assert [e["file"] for e in errors] == ["truncated.json"]
     assert truncated in errors[0]["reason"]
 
 
@@ -110,7 +109,7 @@ def test_a_truncated_delivers_entry_does_not_smuggle_a_whole_spec_in(tmp_path: P
 
     specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
     assert [s.name for s in specs] == ["honest"]
-    assert [e["file"] for e in errors] == ["mixed.yml"]
+    assert [e["file"] for e in errors] == ["mixed.json"]
     assert "leaf_wid" in errors[0]["reason"]
 
 

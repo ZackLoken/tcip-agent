@@ -9,11 +9,13 @@ own resolution rather than against a path spelled out beside them.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import tcip_store as ts
 from fastapi.testclient import TestClient
 from tcip_web.app import app
 
@@ -32,15 +34,18 @@ def _seed_registry(project_root: Path) -> Path:
     """Two valid specs with different vocabularies plus one that cannot load, all written into the
     directory the registry itself resolves, never a path spelled out here."""
     specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    (specs_dir / "leaf.yml").write_text(
-        "name: leaf\ndelivers: [leaf_length, leaf_width]\nmilestone_fractions: [0.5]\n",
-        encoding="utf-8")
-    (specs_dir / "bloom.yml").write_text(
-        "name: bloom\ndelivers: [bloom_50per_date]\nmilestone_fractions: [0.05, 0.5, 0.95]\n",
-        encoding="utf-8")
-    (specs_dir / "unicorn.yml").write_text(
-        "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "leaf"),
+        {"name": "leaf", "delivers": ["leaf_length", "leaf_width"], "milestone_fractions": [0.5]},
+        expect=ts.Version.ABSENT)
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "bloom"),
+        {"name": "bloom", "delivers": ["bloom_50per_date"], "milestone_fractions": [0.05, 0.5, 0.95]},
+        expect=ts.Version.ABSENT)
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "unicorn"),
+        {"name": "unicorn", "delivers": ["unicorn_horn_length"]},
+        expect=ts.Version.ABSENT)
     return specs_dir
 
 
@@ -52,7 +57,7 @@ def test_the_traits_route_serves_what_the_registry_resolves(client: TestClient, 
     _specs, errors = load_trait_specs_with_errors(
         specs_dir=tmp_path / traits._TRAIT_SPECS_RELPATH)
     assert registered == ["bloom", "leaf"]
-    assert [e["file"] for e in errors] == ["unicorn.yml"]
+    assert [e["file"] for e in errors] == ["unicorn.json"]
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
     assert body["traits"] == registered
@@ -93,8 +98,9 @@ def test_the_traits_route_follows_the_registry_when_the_registry_moves(
     answer that a project with nothing authored gives."""
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", Path(".tcip") / "state" / "specs_moved")
     specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
-    specs_dir.mkdir(parents=True)
-    (specs_dir / "leaf.yml").write_text("name: leaf\ndelivers: [leaf_length]\n", encoding="utf-8")
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "leaf"), {"name": "leaf", "delivers": ["leaf_length"]},
+        expect=ts.Version.ABSENT)
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
     assert body["traits"] == registered_traits_for(tmp_path) == ["leaf"]
@@ -107,40 +113,43 @@ def test_the_doctor_follows_the_registry_when_the_registry_moves(
     so a moved placement cannot turn every broken spec into a silent clean bill."""
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", Path(".tcip") / "state" / "specs_moved")
     specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
-    specs_dir.mkdir(parents=True)
-    (specs_dir / "unicorn.yml").write_text(
-        "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "unicorn"),
+        {"name": "unicorn", "delivers": ["unicorn_horn_length"]}, expect=ts.Version.ABSENT)
 
     findings: list[tuple[str, str]] = []
     _load_doctor().check_trait_specs(tmp_path, findings)
 
-    assert [f for f in findings if "unicorn.yml" in f[1]]
+    assert [f for f in findings if "unicorn.json" in f[1]]
 
 
-def test_the_doctor_names_a_spec_the_registry_cannot_read_without_touching_it(tmp_path: Path):
-    """The ritual diagnoses, it never edits. A spec file the registry does not read is reported by
-    name, with the spelling it should carry, and is still on disk exactly as it was afterwards."""
+def test_the_doctor_names_a_broken_spec_without_touching_it(tmp_path: Path):
+    """The ritual diagnoses, it never edits. A spec record the registry cannot decode is reported
+    by name and reason, and its bytes are still on disk exactly as they were afterwards."""
     specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
     specs_dir.mkdir(parents=True)
-    stray = specs_dir / "leaf.yaml"
-    stray.write_text("name: leaf\ndelivers: [leaf_length]\n", encoding="utf-8")
-    before = stray.read_bytes()
+    broken = specs_dir / "broken.json"
+    broken.write_text("not valid json {", encoding="utf-8")
+    before = broken.read_bytes()
 
-    res = subprocess.run([sys.executable, DOCTOR, str(tmp_path)], capture_output=True, text=True)
+    # A malformed record's bytes exist only as a loose file, which the file backend serves
+    # directly; the database backend refuses to read a root holding files it did not write.
+    env = {**os.environ, "TCIP_STORE_BACKEND": "file"}
+    res = subprocess.run(
+        [sys.executable, DOCTOR, str(tmp_path)], capture_output=True, text=True, env=env)
 
-    assert res.returncode == 2, f"the doctor did not report the stray spelling: {res.stdout}"
-    assert "leaf.yaml" in res.stdout
-    assert "leaf.yml" in res.stdout
-    assert stray.read_bytes() == before
-    assert sorted(p.name for p in specs_dir.iterdir()) == ["leaf.yaml"]
+    assert res.returncode == 2, f"the doctor did not report the broken spec: {res.stdout}"
+    assert "broken.json" in res.stdout
+    assert broken.read_bytes() == before
 
 
 def test_a_registry_with_nothing_broken_reports_nothing_broken(client: TestClient, tmp_path: Path):
     """The agreement above must not turn every project into a complaint: a registry whose specs all
     load serves its traits with an empty invalid list and no doctor finding."""
     specs_dir = tmp_path / traits._TRAIT_SPECS_RELPATH
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    (specs_dir / "leaf.yml").write_text("name: leaf\ndelivers: [leaf_length]\n", encoding="utf-8")
+    ts.replace(
+        traits.trait_spec_key(specs_dir, "leaf"), {"name": "leaf", "delivers": ["leaf_length"]},
+        expect=ts.Version.ABSENT)
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
     assert body["traits"] == ["leaf"]
