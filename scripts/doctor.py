@@ -221,6 +221,31 @@ def check_trait_specs(root: Path, findings: list) -> None:
         findings.append(("error", f"trait spec {e['file']} failed to load: {e['reason']}"))
 
 
+def check_trait_spec_statements(root: Path, findings: list) -> None:
+    """A registered trait spec with no authoring statement behind it: the recoverable gap
+    author_trait_spec's own second write can leave when it fails partway. The breeder's new
+    confirmation panel would show no row for a trait that plainly exists, so this is worth
+    surfacing rather than leaving to be found only when the breeder asks why."""
+    import tcip_store as ts
+
+    from tcip_mcp.traits import (
+        TRAIT_SPEC_STATEMENTS_STORE,
+        load_trait_specs,
+        trait_spec_statements_scope,
+    )
+
+    specs = load_trait_specs(project_root=root)
+    if not specs:
+        return
+    scope = trait_spec_statements_scope(root)
+    stated = {key.parts[0] for key in ts.keys(TRAIT_SPEC_STATEMENTS_STORE, str(scope))}
+    for spec in specs:
+        if spec.name not in stated:
+            findings.append(("warn", f"trait spec {spec.name!r} has no authoring statement on "
+                            "record; author it with author_trait_spec so the breeder has "
+                            "something to confirm"))
+
+
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
     """Which database-held store each file-reading check depends on, and under which root.
 
@@ -290,7 +315,7 @@ def main() -> int:
     findings: list[tuple[str, str]] = []
     invalid = staleness_findings(root)
     for check in (check_negatives, check_registry, check_provenance, check_state,
-                 check_region_completeness, check_trait_specs):
+                 check_region_completeness, check_trait_specs, check_trait_spec_statements):
         reason = invalid.get(check.__name__)
         if reason:
             findings.append(("error", f"{check.__name__} reads state as files and those files "
