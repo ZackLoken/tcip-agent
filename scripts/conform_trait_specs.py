@@ -25,6 +25,15 @@ breeder still has to click confirm.
 
 Exit codes: 0 conformed (or nothing to conform), 2 refused (a spec failed to parse or validate;
 nothing written for that trait).
+
+A second, unrelated one-off mode lives here too: ``--migrate-reroot`` copies one trait's record
+out of the old, self-rooted ``trait_specs`` database (the shape the store used before it was
+re-rooted onto the shared ``.tcip/state`` database every sibling project-state store already
+shares) into the new, state-rooted location the store's key now resolves against. It never
+touches the trait-spec-statement record: that was already written to the shared state root when
+the spec was first authored, so re-migrating it would re-author a statement that already exists.
+
+    python scripts/conform_trait_specs.py --migrate-reroot <trait> <project_root>
 """
 
 from __future__ import annotations
@@ -42,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" 
 import tcip_store as ts  # noqa: E402
 from tcip_mcp import traits  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
+from tcip_store.sqlite_backend import SqliteBackend, database_path  # noqa: E402
 
 STATEMENT_SURFACE = "scripts/conform_trait_specs.py"
 """The producing surface stamped into a conformed statement's ``stated_by``: this ran outside
@@ -116,13 +126,80 @@ def conform_one(root: Path, yaml_path: Path, *, plan: bool) -> tuple[str, str]:
     return trait, "conformed"
 
 
+class RerootConflict(RuntimeError):
+    """The new, state-rooted location already holds a value that disagrees with the old one."""
+
+
+def migrate_reroot_one(root: Path, trait: str, backend: object) -> str:
+    """Copy one trait's record from the old, self-rooted ``trait_specs`` database to the shared
+    state root the store's key now resolves against. Touches no statement record: the statement
+    a project's spec was authored with already lives at the shared state root, so re-running this
+    must not re-author it.
+
+    Requires the SQLite backend and the old database to already exist, refusing cleanly
+    otherwise: an explicit per-trait operator step for a project caught mid-migration, not a
+    sweep that treats "nothing there" as a quiet success. Idempotent when the new location
+    already holds an equal value; refuses on a real conflict rather than picking a winner.
+    """
+    if not isinstance(backend, SqliteBackend):
+        raise RuntimeError(
+            "the re-root migration only makes sense against the SQLite backend: the old, "
+            "self-rooted trait_specs database this migrates from is a SQLite-only artifact"
+        )
+
+    old_specs_root = root / ".tcip" / "state" / "trait_specs"
+    old_db = database_path(str(old_specs_root))
+    if not old_db.is_file():
+        raise RuntimeError(
+            f"{old_db} does not exist: nothing to migrate for {trait!r} at {root}, but this "
+            "command names a trait expected to have old, self-rooted data"
+        )
+
+    old_key = ts.Key(traits.TRAIT_SPECS_STORE, str(old_specs_root), (trait,))
+    old = ts.read_versioned(old_key, default=None)
+    if old.value is None:
+        raise RuntimeError(f"the old database at {old_db} holds no record for {trait!r}")
+
+    new_key = traits.trait_spec_key(traits.trait_specs_dir(root), trait)
+    new = ts.read_versioned(new_key, default=None)
+    if new.value is not None:
+        if new.value == old.value:
+            return f"no-op: {trait!r} already on record at the new location with the same value"
+        raise RerootConflict(
+            f"{trait!r} is already on record at the new location with a value that disagrees "
+            "with the old database's row: a real conflict, resolved by a human, never by this "
+            "migration step picking a winner"
+        )
+
+    ts.replace(new_key, old.value, expect=ts.Version.ABSENT)
+    return f"migrated: {trait!r} copied from the old, self-rooted database to the shared state root"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("roots", nargs="+", type=Path)
     ap.add_argument("--plan", action="store_true", help="show what would conform, write nothing")
+    ap.add_argument(
+        "--migrate-reroot", metavar="TRAIT",
+        help="copy one trait's record out of the old, self-rooted trait_specs database into the "
+             "shared state root; roots must then name exactly one project root",
+    )
     args = ap.parse_args()
 
-    bind_default()
+    backend = bind_default()
+
+    if args.migrate_reroot:
+        if len(args.roots) != 1:
+            ap.error("--migrate-reroot takes exactly one project root")
+        root = args.roots[0].resolve()
+        try:
+            outcome = migrate_reroot_one(root, args.migrate_reroot, backend)
+        except RuntimeError as e:
+            print(f"{root}: {args.migrate_reroot}: refused: {e}")
+            return 2
+        print(f"{root}: {args.migrate_reroot}: {outcome}")
+        return 0
+
     refused = False
     for root in args.roots:
         root = root.resolve()
