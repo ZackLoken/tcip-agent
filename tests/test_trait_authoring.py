@@ -243,9 +243,8 @@ def test_registry_reads_every_config_file(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def test_config_authored_catkin_is_the_real_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    # There is no built-in trait definition that could outrank a config file authoring the same
-    # trait name, so an authored catkin.yml is simply what get_trait("catkin") returns, proven here
-    # by a value a real builtin would never have carried.
+    # No built-in trait definition could outrank a config-authored spec record carrying the same
+    # trait name, proven here by a value a real builtin would never have carried.
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", tmp_path)
     _write_spec(tmp_path, "catkin", {"delivers": ["catkin_05per_date"], "count_bias_tolerance_frac": 99.0})
     assert get_trait("catkin").count_bias_tolerance_frac == 99.0
@@ -256,42 +255,7 @@ def test_unknown_trait_still_hard_fails():
         get_trait("banana")
 
 
-# ── one spelling of a spec file, and one writer that cannot lose an edit ─────────
-
-def test_a_spec_authored_with_the_other_yaml_spelling_is_adopted_under_the_canonical_one(
-    tmp_path: Path,
-):
-    """Spec files are hand-authored, so both suffixes get written by hand. The registry addresses
-    one of them, so a scan renames the other rather than leaving an authored trait unreachable."""
-    import yaml
-
-    (tmp_path / "leaf.yaml").write_text(
-        yaml.safe_dump({"name": "leaf", "delivers": ["leaf_length"]}), encoding="utf-8")
-
-    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
-
-    assert [s.name for s in specs] == ["leaf"]
-    assert errors == []
-    assert sorted(p.name for p in tmp_path.glob("*.y*ml")) == ["leaf.yml"]
-
-
-def test_a_second_spelling_beside_the_canonical_file_is_reported_rather_than_overwriting_it(
-    tmp_path: Path,
-):
-    """Adopting the canonical name must never consume the file already under it: the registry keeps
-    serving what it holds and names the other file, so a breeder can merge the two by hand."""
-    _write_spec(tmp_path, "leaf", {"delivers": ["leaf_length"]})
-    import yaml
-
-    (tmp_path / "leaf.yaml").write_text(
-        yaml.safe_dump({"name": "leaf", "delivers": ["leaf_width"]}), encoding="utf-8")
-
-    specs, errors = load_trait_specs_with_errors(specs_dir=tmp_path)
-
-    assert [s.delivers for s in specs] == [("leaf_length",)]
-    assert [e["file"] for e in errors] == ["leaf.yaml"]
-    assert (tmp_path / "leaf.yaml").is_file()
-
+# ── one writer that cannot lose an edit ─────────
 
 def test_a_spec_write_that_lost_the_race_is_refused_rather_than_silently_winning(tmp_path: Path):
     """A spec is read, merged into and written back from more than one process, so the store takes
@@ -335,10 +299,8 @@ def test_get_trait_load_trait_specs_and_registered_traits_agree_on_a_record_conf
 
 
 def test_catkin_config_semantics_match_reference_fixture():
-    # This module's pytestmark seeds a real catkin.yml matching tests/_trait_fixtures.CATKIN,
-    # proving the config path round-trips every field faithfully, not just the ones this test
-    # happens to check by name below. Config-loaded specs are rebuilt fresh per call (traits.py),
-    # never module-load singletons, so this is value equality, not identity.
+    # This module's pytestmark seeds a real catkin spec record matching tests/_trait_fixtures.CATKIN.
+    # Config-loaded specs are rebuilt fresh per call (traits.py), never module-load singletons.
     t = get_trait("catkin")
     assert t == CATKIN
     assert t.positive_class_name == "elongated"
