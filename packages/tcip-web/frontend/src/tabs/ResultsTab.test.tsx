@@ -3,7 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
-import { resultsApi, type OperationalizationRecord } from "@/api/inference";
+import {
+  resultsApi,
+  type DeliveryEventRecord,
+  type OperationalizationRecord,
+  type TraitSpecStatementRecord,
+} from "@/api/inference";
 import { useStore } from "@/store";
 import { ResultsTab } from "@/tabs/ResultsTab";
 
@@ -42,11 +47,18 @@ beforeEach(() => {
     milestone_fractions_by_trait: { subject_a: [0.5, 0.95] },
     invalid_specs: [],
   });
-  // The operationalization panel loads with the tab; a test about anything else has no records.
+  // The operationalization, trait-spec, and delivery-events panels all load with the tab; a test
+  // about anything else has no records.
   vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
     records: [],
     statement_fields: [],
   });
+  vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
+    records: [],
+    unresolved: [],
+    statement_fields: [],
+  });
+  vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
 });
 
 afterEach(() => {
@@ -485,6 +497,7 @@ describe("ResultsTab operationalization records", () => {
       confirmed_at: "2026-02-02T09:00:00+00:00",
       identity_from_request: true,
       confirmed_fields: { count_objective: "every visible object" },
+      audit_warning: null,
     });
     vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
       ...COUNT_RECORD,
@@ -555,6 +568,7 @@ describe("ResultsTab operationalization records", () => {
       confirmed_at: null,
       identity_from_request: null,
       confirmed_fields: null,
+      audit_warning: null,
     });
     vi.spyOn(resultsApi, "operationalization").mockResolvedValue(COUNT_RECORD);
 
@@ -708,5 +722,363 @@ describe("ResultsTab operationalization records", () => {
       screen.queryByRole("button", { name: /ask the agent to calibrate this/i }),
     ).not.toBeInTheDocument();
     vi.unstubAllGlobals();
+  });
+});
+
+describe("ResultsTab trait-spec authoring statements", () => {
+  // Every authored value below is distinct once rendered, so a `getByText` match inside the row
+  // is unambiguous: two authored fields that both rendered "none" would collide.
+  const TRAIT_SPEC_RECORD: TraitSpecStatementRecord = {
+    trait: "subject_a",
+    statement_fields: {
+      delivers: ["subject_a_50per_date"],
+      positive_class_name: "subject_a_open",
+      milestone_fractions: [0.5, 0.95],
+      milestone_on: "positive_fraction",
+      majority_milestone: "95per",
+      majority_provisional: true,
+      phenology_prefix: "subj_a_col",
+      majority_label: "most subject_a open",
+      count_objective: "count_unbiased",
+      count_bias_tolerance_frac: 0.1,
+      count_error_tolerance: 2.5,
+      classifier_agreement_floor: 0.41,
+      ordinal_agreement_floor: 0.4,
+      regression_skill_floor: 0.6,
+      notes: "Authored from the packing-shed conversation.",
+    },
+    rationale: "Breeder said the 50% and 95% open crossing dates matter most for harvest timing.",
+    stated_by: "author_trait_spec",
+    stated_at: "2026-02-01T10:00:00+00:00",
+    relayed_note: "Answered during the site visit.",
+    confirmed_by: null,
+    confirmed_at: null,
+    identity_from_request: null,
+    confirmed_current: false,
+    record_seen: "hash-of-the-displayed-trait-spec",
+  };
+
+  const LISTED_TRAIT_SPEC = {
+    records: [TRAIT_SPEC_RECORD],
+    unresolved: [],
+    statement_fields: ["statement_fields", "rationale", "stated_by", "stated_at", "relayed_note"],
+  };
+
+  function rowFor(record: TraitSpecStatementRecord) {
+    return screen.findByTestId(`trait-spec-statement-${record.trait}`);
+  }
+
+  it("shows the rationale and every authored field the served statement carries", async () => {
+    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue(LISTED_TRAIT_SPEC);
+
+    render(<ResultsTab />);
+    const row = await rowFor(TRAIT_SPEC_RECORD);
+
+    expect(within(row).getByText(TRAIT_SPEC_RECORD.rationale!)).toBeInTheDocument();
+    expect(within(row).getByText(TRAIT_SPEC_RECORD.stated_by!)).toBeInTheDocument();
+    expect(within(row).getByText(TRAIT_SPEC_RECORD.relayed_note!)).toBeInTheDocument();
+    const authored: Record<string, unknown> = TRAIT_SPEC_RECORD.statement_fields!;
+    for (const value of Object.values(authored)) {
+      const text = Array.isArray(value) ? value.join(", ") : value === true ? "yes" : String(value);
+      expect(within(row).getByText(text)).toBeInTheDocument();
+    }
+  });
+
+  it("shows only what the served list names, so a field the server drops leaves the row", async () => {
+    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
+      records: [TRAIT_SPEC_RECORD],
+      unresolved: [],
+      statement_fields: ["rationale"],
+    });
+
+    render(<ResultsTab />);
+    const row = await rowFor(TRAIT_SPEC_RECORD);
+
+    expect(within(row).getByText(TRAIT_SPEC_RECORD.rationale!)).toBeInTheDocument();
+    expect(within(row).queryByText(TRAIT_SPEC_RECORD.stated_by!)).not.toBeInTheDocument();
+    expect(within(row).queryByText("subject_a_open")).not.toBeInTheDocument();
+  });
+
+  it("confirms with the record_seen hash of what was displayed and posts record_seen", async () => {
+    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue(LISTED_TRAIT_SPEC);
+    const confirmSpy = vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockResolvedValue({
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      record_seen: "hash-of-the-displayed-trait-spec",
+      audit_warning: null,
+    });
+    vi.spyOn(resultsApi, "traitSpecStatement").mockResolvedValue({
+      ...TRAIT_SPEC_RECORD,
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_current: true,
+    });
+
+    useStore.setState({ user: "breeder" });
+    render(<ResultsTab />);
+    const row = await rowFor(TRAIT_SPEC_RECORD);
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(confirmSpy.mock.calls[0][0]).toEqual({
+      project_root: "C:/proj",
+      trait: "subject_a",
+      record_seen: "hash-of-the-displayed-trait-spec",
+      confirmed: true,
+      user: "breeder",
+    });
+    expect(await within(row).findByText(/confirmed by user:breeder/i)).toBeInTheDocument();
+  });
+
+  it("re-renders what is on file when the statement moved since it was displayed", async () => {
+    const MOVED: TraitSpecStatementRecord = {
+      ...TRAIT_SPEC_RECORD,
+      rationale: "Revised: only the 95% crossing date matters now.",
+      record_seen: "hash-of-the-statement-on-file",
+    };
+    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue(LISTED_TRAIT_SPEC);
+    vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockRejectedValue(
+      new StructuredRefusalError(
+        {
+          kind: "trait_spec_authoring",
+          message: "the trait-spec statement moved since it was read",
+          record: MOVED,
+        },
+        409,
+        "the trait-spec statement moved since it was read",
+      ),
+    );
+
+    render(<ResultsTab />);
+    const row = await rowFor(TRAIT_SPEC_RECORD);
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    expect(await within(row).findByText(MOVED.rationale!)).toBeInTheDocument();
+    expect(within(row).queryByText(TRAIT_SPEC_RECORD.rationale!)).not.toBeInTheDocument();
+    expect(within(row).getByText(/changed since it was shown/i)).toBeInTheDocument();
+  });
+});
+
+describe("ResultsTab audit_warning banner (A8)", () => {
+  const COUNT_RECORD: OperationalizationRecord = {
+    trait: "subject_b_total",
+    delivery_kind: "per_plant_count_aggregate",
+    statement: "Every isolated object of the subject on a plant, summed over that plant's images.",
+    mechanism: "The detector's objects at the operating point the calibration holdout fixed.",
+    measured_subject: "subject_b",
+    delivered_phenotypes: ["subject_b_count"],
+    delivered_value_keys: ["n_objects"],
+    stated_by: "state_trait_operationalization",
+    stated_at: "2026-02-01T10:00:00+00:00",
+    relayed_note: "",
+    confirmed_by: null,
+    confirmed_at: null,
+    identity_from_request: null,
+    confirmed_current: false,
+    superseded: [],
+    delivers: [],
+    record_seen: "hash-of-the-displayed-record",
+  };
+
+  it("renders a warning banner when the operationalization confirmation lands but its audit line does not", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+      records: [COUNT_RECORD],
+      statement_fields: ["statement"],
+    });
+    vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_fields: {},
+      audit_warning: "committed and unrecorded, do not blind-retry",
+    });
+    vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
+      ...COUNT_RECORD,
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_current: true,
+    });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId(
+      `operationalization-${COUNT_RECORD.trait}::${COUNT_RECORD.delivery_kind}`,
+    );
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    expect(
+      await within(row).findByText(/committed and unrecorded, do not blind-retry/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no warning banner when the operationalization confirmation's audit line lands cleanly", async () => {
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+      records: [COUNT_RECORD],
+      statement_fields: ["statement"],
+    });
+    vi.spyOn(resultsApi, "confirmOperationalization").mockResolvedValue({
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_fields: {},
+      audit_warning: null,
+    });
+    vi.spyOn(resultsApi, "operationalization").mockResolvedValue({
+      ...COUNT_RECORD,
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_current: true,
+    });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId(
+      `operationalization-${COUNT_RECORD.trait}::${COUNT_RECORD.delivery_kind}`,
+    );
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    await waitFor(() =>
+      expect(within(row).getByText(/confirmed by user:breeder/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Warning:/i)).not.toBeInTheDocument();
+  });
+
+  const TRAIT_SPEC_RECORD: TraitSpecStatementRecord = {
+    trait: "subject_a",
+    statement_fields: { count_objective: "count_unbiased" },
+    rationale: "Breeder said count-unbiased is right for this trait.",
+    stated_by: "author_trait_spec",
+    stated_at: "2026-02-01T10:00:00+00:00",
+    relayed_note: "",
+    confirmed_by: null,
+    confirmed_at: null,
+    identity_from_request: null,
+    confirmed_current: false,
+    record_seen: "hash-of-the-displayed-trait-spec",
+  };
+
+  it("renders a warning banner when the trait-spec confirmation lands but its audit line does not", async () => {
+    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
+      records: [TRAIT_SPEC_RECORD],
+      unresolved: [],
+      statement_fields: ["rationale"],
+    });
+    vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockResolvedValue({
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      record_seen: "hash-of-the-displayed-trait-spec",
+      audit_warning: "committed and unrecorded, do not blind-retry",
+    });
+    vi.spyOn(resultsApi, "traitSpecStatement").mockResolvedValue({
+      ...TRAIT_SPEC_RECORD,
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_current: true,
+    });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId(`trait-spec-statement-${TRAIT_SPEC_RECORD.trait}`);
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    expect(
+      await within(row).findByText(/committed and unrecorded, do not blind-retry/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no warning banner when the trait-spec confirmation's audit line lands cleanly", async () => {
+    vi.spyOn(resultsApi, "traitSpecStatements").mockResolvedValue({
+      records: [TRAIT_SPEC_RECORD],
+      unresolved: [],
+      statement_fields: ["rationale"],
+    });
+    vi.spyOn(resultsApi, "confirmTraitSpecStatement").mockResolvedValue({
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      record_seen: "hash-of-the-displayed-trait-spec",
+      audit_warning: null,
+    });
+    vi.spyOn(resultsApi, "traitSpecStatement").mockResolvedValue({
+      ...TRAIT_SPEC_RECORD,
+      confirmed_by: "user:breeder",
+      confirmed_at: "2026-02-02T09:00:00+00:00",
+      identity_from_request: true,
+      confirmed_current: true,
+    });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId(`trait-spec-statement-${TRAIT_SPEC_RECORD.trait}`);
+    fireEvent.click(within(row).getByRole("button", { name: /confirm this record/i }));
+
+    await waitFor(() =>
+      expect(within(row).getByText(/confirmed by user:breeder/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Warning:/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("ResultsTab delivery events (read-only)", () => {
+  const DELIVERY_EVENT: DeliveryEventRecord = {
+    event_id: "abc123",
+    trait: "subject_a",
+    delivery_kind: "state_crossing_dates",
+    door: "results.per_plant_curves",
+    output_path: null,
+    documents: {
+      "C:/data/predictions/baseline/2026-01-01": {
+        ok: true,
+        claimed: true,
+        experiment_id: "exp-1",
+        producing_experiment_id: "exp-1",
+        checkpoint_sha256: "abc",
+        record_digest: "digest-1",
+        note: null,
+      },
+      "C:/data/predictions/baseline/2026-01-08": {
+        ok: false,
+        claimed: false,
+        experiment_id: null,
+        producing_experiment_id: null,
+        checkpoint_sha256: null,
+        record_digest: null,
+        note: "no stamp on this bucket",
+      },
+    },
+    produced_at: "2026-02-03T12:00:00+00:00",
+  };
+
+  it("lists what shipped, with real per-bucket verification evidence and no confirm/withdraw controls", async () => {
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [DELIVERY_EVENT] });
+
+    render(<ResultsTab />);
+    const row = await screen.findByTestId("delivery-abc123");
+
+    expect(within(row).getByText("subject_a")).toBeInTheDocument();
+    expect(within(row).getByText("state_crossing_dates")).toBeInTheDocument();
+    expect(within(row).getByText("results.per_plant_curves")).toBeInTheDocument();
+    expect(within(row).getByText(/2026-02-03T12:00:00\+00:00/)).toBeInTheDocument();
+    expect(within(row).getByText(/no file written/i)).toBeInTheDocument();
+    expect(
+      within(row).getByText("C:/data/predictions/baseline/2026-01-01: verified"),
+    ).toBeInTheDocument();
+    expect(
+      within(row).getByText("C:/data/predictions/baseline/2026-01-08: no claim"),
+    ).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /withdraw/i })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /correction/i })).not.toBeInTheDocument();
+  });
+
+  it("renders nothing extra when this project has no deliveries yet", async () => {
+    vi.spyOn(resultsApi, "deliveryEvents").mockResolvedValue({ records: [] });
+
+    render(<ResultsTab />);
+    await waitFor(() => expect(resultsApi.deliveryEvents).toHaveBeenCalled());
+
+    expect(screen.getByText(/nothing has shipped from this project yet/i)).toBeInTheDocument();
   });
 });

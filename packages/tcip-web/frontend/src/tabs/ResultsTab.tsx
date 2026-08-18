@@ -15,16 +15,20 @@ import { StructuredRefusalError } from "@/api/http";
 import {
   operationalizationRefusalOf,
   resultsApi,
+  traitSpecAuthoringRefusalOf,
+  type DeliveryEventRecord,
   type OperationalizationRecord,
   type OperationalizationRefusal,
   type PhenologyRequest,
   type OnsetRow,
   type PerPlantRow,
   type PlantMappingSummary,
+  type TraitSpecStatementRecord,
 } from "@/api/inference";
-import { DisclosureChevron } from "@/components/CollapsibleSection";
-import { useEditableAgentRequest } from "@/hooks/useEditableAgentRequest";
+import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
+import { flatStatementFields, StatementPanel } from "@/components/StatementPanel";
 import { useStore } from "@/store";
+import { fieldValueText, STATEMENT_FIELD_LABELS } from "@/lib/statementFields";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {
@@ -32,30 +36,59 @@ interface DateRow {
   [plantId: string]: number | string | null;
 }
 
-/** Breeder-facing wording only; the served `statement_fields` decides what a row shows, and a
- *  field without an entry here renders under its own name rather than disappearing. */
-const STATEMENT_FIELD_LABELS: Record<string, string> = {
-  statement: "What the number means",
-  mechanism: "How the platform decides it",
-  measured_subject: "Measured subject",
-  delivered_phenotypes: "Delivered phenotypes",
-  delivered_value_keys: "Delivered value keys",
-  stated_by: "Recorded through",
-  stated_at: "Recorded at",
-  relayed_note: "Relayed note",
-};
-
-/** One record, addressed by the pair its store is keyed on. */
+/** One operationalization record, addressed by the pair its store is keyed on. */
 function recordKey(record: { trait: string; delivery_kind: string }): string {
   return `${record.trait}::${record.delivery_kind}`;
 }
 
-function statementFieldText(record: OperationalizationRecord, field: string): string {
-  const values: Record<string, unknown> = record;
-  const value = values[field];
-  if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "none";
-  if (typeof value !== "string" || value.trim() === "") return "none";
-  return value;
+/**
+ * A trait-spec authoring statement's field body: `statement_fields` is not a flat field itself,
+ * it is a nested snapshot of the authored `TraitSpec` values the statement covers, so it expands
+ * into its own labeled rows rather than rendering as one opaque blob. The nested keys are read off
+ * whatever the server actually sent, in the order it sent them, rather than a frontend-held list of
+ * authored field names that could drift from `traits._AUTHORED_SPEC_FIELDS`.
+ */
+function traitSpecFieldsBody(record: TraitSpecStatementRecord, statementFields: string[]) {
+  return (
+    <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[11px]">
+      {statementFields.flatMap((field) => {
+        if (field === "statement_fields") {
+          const authored = record.statement_fields ?? {};
+          return Object.entries(authored).map(([authoredField, value]) => (
+            <Fragment key={authoredField}>
+              <dt className="text-tcip-muted">
+                {STATEMENT_FIELD_LABELS[authoredField] ?? authoredField}
+              </dt>
+              <dd>{fieldValueText(value)}</dd>
+            </Fragment>
+          ));
+        }
+        const values: Record<string, unknown> = record;
+        return [
+          <Fragment key={field}>
+            <dt className="text-tcip-muted">{STATEMENT_FIELD_LABELS[field] ?? field}</dt>
+            <dd>{fieldValueText(values[field])}</dd>
+          </Fragment>,
+        ];
+      })}
+    </dl>
+  );
+}
+
+// The agent states, the breeder confirms; a correction is a message that proposes no meaning.
+function traitSpecCorrectionRequest(record: TraitSpecStatementRecord): string {
+  const authored = record.statement_fields ?? {};
+  const fields =
+    Object.entries(authored)
+      .map(
+        ([field, value]) => `${STATEMENT_FIELD_LABELS[field] ?? field}: ${fieldValueText(value)}`,
+      )
+      .join("; ") || "nothing authored yet";
+  return (
+    `The trait-spec authoring statement on record for the "${record.trait}" trait is not what I ` +
+    `mean. Why the agent chose this: ${record.rationale ?? "no rationale recorded"} Authored ` +
+    `fields: ${fields}. What should change: `
+  );
 }
 
 function supersededValueText(value: unknown): string {
@@ -78,136 +111,20 @@ function movedRecordFrom(e: unknown): OperationalizationRecord | null {
     : null;
 }
 
+/** The trait-spec statement a 409 carries, or null when the failure is anything else. Reads the
+ *  structured `trait_spec_authoring` refusal directly rather than re-parsing `e.detail` by hand,
+ *  since the decoder already exists and its own shape is the record, not a nested guess at one. */
+function movedTraitSpecStatementFrom(e: unknown): TraitSpecStatementRecord | null {
+  const refusal = traitSpecAuthoringRefusalOf(e);
+  return refusal ? refusal.record : null;
+}
+
 // The agent states, the breeder confirms; a correction is a message that proposes no meaning.
 function correctionRequest(record: OperationalizationRecord): string {
   return (
     `The operationalization on record for the "${record.trait}" trait's ${record.delivery_kind} ` +
     `delivery is not what I mean. On record: ${record.statement} Decided by: ${record.mechanism} ` +
     `Measured subject: ${record.measured_subject}. What should change: `
-  );
-}
-
-function OperationalizationRow({
-  record,
-  statementFields,
-  refused,
-  confirming,
-  withdrawing,
-  note,
-  onConfirm,
-  onWithdraw,
-}: {
-  record: OperationalizationRecord;
-  statementFields: string[];
-  refused: boolean;
-  confirming: boolean;
-  withdrawing: boolean;
-  note: string | null;
-  onConfirm: (record: OperationalizationRecord) => void;
-  onWithdraw: (record: OperationalizationRecord) => void;
-}) {
-  const { request, setRequest } = useEditableAgentRequest(correctionRequest(record));
-  const [correcting, setCorrecting] = useState(false);
-
-  const delivers =
-    record.delivers.map((d) => `${d.name}: ${d.definition}`).join("; ") ||
-    "nothing this project's crop vocabulary defines";
-
-  return (
-    <li
-      className={`rounded border p-3 ${refused ? "border-tcip-fp" : "border-tcip-border"}`}
-      data-testid={`operationalization-${recordKey(record)}`}
-    >
-      <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[12px]">{record.trait}</span>
-        <span className="text-[11px] text-tcip-muted">{record.delivery_kind}</span>
-        <span
-          className={`ml-auto text-[11px] ${record.confirmed_current ? "text-tcip-muted" : "text-tcip-fp"}`}
-        >
-          {record.confirmed_by && record.confirmed_current
-            ? `Confirmed by ${record.confirmed_by} on ${record.confirmed_at}`
-            : record.confirmed_by
-              ? `Confirmed by ${record.confirmed_by} on ${record.confirmed_at}, no longer current`
-              : "Not confirmed"}
-        </span>
-      </div>
-      {record.confirmed_by && (
-        <div className="text-[11px] text-tcip-muted">
-          {record.identity_from_request
-            ? "That name came with the confirming request."
-            : "That name came from the backend's own environment, not from the confirming request."}
-        </div>
-      )}
-      <p className="mt-1 text-[11px] text-tcip-muted">Delivers {delivers}</p>
-      <dl className="mt-2 grid grid-cols-[170px_1fr] gap-x-3 gap-y-1 text-[11px]">
-        {statementFields.map((field) => (
-          <Fragment key={field}>
-            <dt className="text-tcip-muted">{STATEMENT_FIELD_LABELS[field] ?? field}</dt>
-            <dd>{statementFieldText(record, field)}</dd>
-          </Fragment>
-        ))}
-      </dl>
-      {record.superseded.length > 0 && (
-        <div className="mt-2 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
-          <div>Changed since this was confirmed:</div>
-          <ul className="mt-1 list-disc pl-4">
-            {record.superseded.map((s) => (
-              <li key={s.field}>
-                {s.field}: confirmed as {supersededValueText(s.confirmed_value)}, now{" "}
-                {supersededValueText(s.current_value)}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {note && <div className="mt-2 text-[11px] text-tcip-fp">{note}</div>}
-      <div className="mt-2 flex items-center gap-2">
-        {!record.confirmed_current && (
-          <button
-            className="tcip-btn-primary text-[11px]"
-            onClick={() => onConfirm(record)}
-            disabled={confirming || withdrawing}
-          >
-            {confirming ? "Confirming…" : "Confirm this record"}
-          </button>
-        )}
-        {record.confirmed_by && (
-          <button
-            className="tcip-btn text-[11px]"
-            onClick={() => onWithdraw(record)}
-            disabled={confirming || withdrawing}
-          >
-            {withdrawing ? "Withdrawing…" : "Withdraw this confirmation"}
-          </button>
-        )}
-        <button
-          className="tcip-btn text-[11px]"
-          aria-expanded={correcting}
-          onClick={() => setCorrecting((open) => !open)}
-        >
-          <DisclosureChevron open={correcting} />
-          Send a correction to the agent
-        </button>
-      </div>
-      {correcting && (
-        <div className="mt-2 flex flex-col gap-1">
-          <textarea
-            className="tcip-input h-20 w-full resize-none text-[11px] leading-4"
-            value={request}
-            onChange={(e) => setRequest(e.target.value)}
-            spellCheck={true}
-            aria-label={`Correction for ${record.trait}, ${record.delivery_kind}`}
-          />
-          <button
-            className="tcip-btn self-start text-[11px]"
-            onClick={() => useStore.getState().sendToAgentTerminal(request)}
-            disabled={!request.trim()}
-          >
-            Send to the agent
-          </button>
-        </div>
-      )}
-    </li>
   );
 }
 
@@ -219,6 +136,7 @@ function OperationalizationPanel({
   confirmingKey,
   withdrawingKey,
   notes,
+  auditWarnings,
   onConfirm,
   onWithdraw,
 }: {
@@ -229,55 +147,126 @@ function OperationalizationPanel({
   confirmingKey: string | null;
   withdrawingKey: string | null;
   notes: Record<string, string>;
+  auditWarnings: Record<string, string | null>;
   onConfirm: (record: OperationalizationRecord) => void;
   onWithdraw: (record: OperationalizationRecord) => void;
 }) {
   return (
-    <div className="tcip-panel p-4">
-      <div className="tcip-heading mb-1">What the delivered numbers mean</div>
-      <p className="mb-3 text-[11px] text-tcip-muted">
-        The agent records what each delivered number means and how the platform decides it. A
-        delivery waits until you confirm the record it would ship under. Read what is on file, then
-        confirm it or send the agent a correction. A confirmation you gave stands until you withdraw
-        it.
-      </p>
-      {refusal && (
-        <div className="mb-3 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
-          <div>
-            A delivery for the {refusal.trait} trait's {refusal.delivery_kind} number is waiting on
-            a confirmed record of what that number means.
+    <StatementPanel
+      heading="What the delivered numbers mean"
+      description={
+        <>
+          The agent records what each delivered number means and how the platform decides it. A
+          delivery waits until you confirm the record it would ship under. Read what is on file,
+          then confirm it or send the agent a correction. A confirmation you gave stands until you
+          withdraw it.
+        </>
+      }
+      records={records}
+      loadError={loadError}
+      emptyText="Nothing is recorded for this project yet. The agent records one before a delivery can ship under it."
+      refusalBanner={
+        refusal && (
+          <div className="mb-3 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
+            <div>
+              A delivery for the {refusal.trait} trait's {refusal.delivery_kind} number is waiting
+              on a confirmed record of what that number means.
+            </div>
+            <div className="mt-1 text-tcip-muted">{refusal.message}</div>
           </div>
-          <div className="mt-1 text-tcip-muted">{refusal.message}</div>
-        </div>
+        )
+      }
+      recordKey={recordKey}
+      kindLabelOf={(record) => record.delivery_kind}
+      testIdOf={(record) => `operationalization-${recordKey(record)}`}
+      refusedOf={(record) =>
+        refusal !== null &&
+        refusal.trait === record.trait &&
+        refusal.delivery_kind === record.delivery_kind
+      }
+      headerExtraOf={(record) => (
+        <p className="mt-1 text-[11px] text-tcip-muted">
+          Delivers{" "}
+          {record.delivers.map((d) => `${d.name}: ${d.definition}`).join("; ") ||
+            "nothing this project's crop vocabulary defines"}
+        </p>
       )}
-      {loadError && <div className="mb-3 text-[11px] text-tcip-fp">{loadError}</div>}
-      {records.length === 0 ? (
-        <div className="text-[11px] text-tcip-muted">
-          Nothing is recorded for this project yet. The agent records one before a delivery can ship
-          under it.
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {records.map((record) => (
-            <OperationalizationRow
-              key={recordKey(record)}
-              record={record}
-              statementFields={statementFields}
-              refused={
-                refusal !== null &&
-                refusal.trait === record.trait &&
-                refusal.delivery_kind === record.delivery_kind
-              }
-              confirming={confirmingKey === recordKey(record)}
-              withdrawing={withdrawingKey === recordKey(record)}
-              note={notes[recordKey(record)] || null}
-              onConfirm={onConfirm}
-              onWithdraw={onWithdraw}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+      fieldsBodyOf={(record) => flatStatementFields(record, statementFields)}
+      supersededBlockOf={(record) =>
+        record.superseded.length > 0 && (
+          <div className="mt-2 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
+            <div>Changed since this was confirmed:</div>
+            <ul className="mt-1 list-disc pl-4">
+              {record.superseded.map((s) => (
+                <li key={s.field}>
+                  {s.field}: confirmed as {supersededValueText(s.confirmed_value)}, now{" "}
+                  {supersededValueText(s.current_value)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      }
+      correctionSeedOf={correctionRequest}
+      correctionAriaLabelOf={(record) => `Correction for ${record.trait}, ${record.delivery_kind}`}
+      confirmingKey={confirmingKey}
+      withdrawingKey={withdrawingKey}
+      notes={notes}
+      auditWarnings={auditWarnings}
+      onConfirm={onConfirm}
+      onWithdraw={onWithdraw}
+    />
+  );
+}
+
+function TraitSpecStatementPanel({
+  records,
+  statementFields,
+  loadError,
+  confirmingKey,
+  withdrawingKey,
+  notes,
+  auditWarnings,
+  onConfirm,
+  onWithdraw,
+}: {
+  records: TraitSpecStatementRecord[];
+  statementFields: string[];
+  loadError: string | null;
+  confirmingKey: string | null;
+  withdrawingKey: string | null;
+  notes: Record<string, string>;
+  auditWarnings: Record<string, string | null>;
+  onConfirm: (record: TraitSpecStatementRecord) => void;
+  onWithdraw: (record: TraitSpecStatementRecord) => void;
+}) {
+  return (
+    <StatementPanel
+      heading="What a trait's own semantics were authored to mean"
+      description={
+        <>
+          The agent authors each trait's measurement semantics and its own account of why. An
+          operationalization can build on a trait whether or not its spec is confirmed here, but the
+          spec itself still waits on your read. Read what is on file, then confirm it or send the
+          agent a correction. A confirmation you gave stands until you withdraw it.
+        </>
+      }
+      records={records}
+      loadError={loadError}
+      emptyText="No trait has been authored for this project yet."
+      recordKey={(record) => record.trait}
+      kindLabelOf={() => ""}
+      testIdOf={(record) => `trait-spec-statement-${record.trait}`}
+      fieldsBodyOf={(record) => traitSpecFieldsBody(record, statementFields)}
+      correctionSeedOf={traitSpecCorrectionRequest}
+      correctionAriaLabelOf={(record) => `Correction for ${record.trait}`}
+      confirmingKey={confirmingKey}
+      withdrawingKey={withdrawingKey}
+      notes={notes}
+      auditWarnings={auditWarnings}
+      onConfirm={onConfirm}
+      onWithdraw={onWithdraw}
+    />
   );
 }
 
@@ -346,6 +335,27 @@ export function ResultsTab() {
   const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const [withdrawingKey, setWithdrawingKey] = useState<string | null>(null);
   const [confirmNotes, setConfirmNotes] = useState<Record<string, string>>({});
+  // A confirmation that landed but whose audit line did not (A8): not a failure, so it is kept
+  // apart from the error-styled notes above.
+  const [confirmAuditWarnings, setConfirmAuditWarnings] = useState<Record<string, string | null>>(
+    {},
+  );
+
+  // A trait's own authoring statement: sibling state to the operationalization state above, the
+  // same list/confirm/withdraw/moved-record shape.
+  const [traitSpecStatements, setTraitSpecStatements] = useState<TraitSpecStatementRecord[]>([]);
+  const [traitSpecStatementFields, setTraitSpecStatementFields] = useState<string[]>([]);
+  const [traitSpecStatementsError, setTraitSpecStatementsError] = useState<string | null>(null);
+  const [traitSpecConfirmingKey, setTraitSpecConfirmingKey] = useState<string | null>(null);
+  const [traitSpecWithdrawingKey, setTraitSpecWithdrawingKey] = useState<string | null>(null);
+  const [traitSpecNotes, setTraitSpecNotes] = useState<Record<string, string>>({});
+  const [traitSpecAuditWarnings, setTraitSpecAuditWarnings] = useState<
+    Record<string, string | null>
+  >({});
+
+  // What has shipped from this project: read-only, no confirm/withdraw state to carry.
+  const [deliveryEvents, setDeliveryEvents] = useState<DeliveryEventRecord[]>([]);
+  const [deliveryEventsError, setDeliveryEventsError] = useState<string | null>(null);
 
   // The trait a delivery is computed for, resolved from this project's own registered traits
   // (never assumed): auto-selected when there is exactly one, left blank (with an explicit
@@ -406,6 +416,40 @@ export function ResultsTab() {
       });
   }, [projectRoot]);
 
+  useEffect(() => {
+    if (!projectRoot) return;
+    void resultsApi
+      .traitSpecStatements(projectRoot)
+      .then((res) => {
+        setTraitSpecStatements(res.records);
+        setTraitSpecStatementFields(res.statement_fields);
+        setTraitSpecStatementsError(null);
+      })
+      .catch((e) => {
+        setTraitSpecStatements([]);
+        setTraitSpecStatementFields([]);
+        setTraitSpecStatementsError(
+          `Could not load what this project's traits were authored to mean: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [projectRoot]);
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    void resultsApi
+      .deliveryEvents(projectRoot)
+      .then((res) => {
+        setDeliveryEvents(res.records);
+        setDeliveryEventsError(null);
+      })
+      .catch((e) => {
+        setDeliveryEvents([]);
+        setDeliveryEventsError(
+          `Could not load what this project has shipped: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [projectRoot]);
+
   const replaceOperationalization = useCallback((record: OperationalizationRecord) => {
     setOperationalizations((prev) =>
       prev.map((r) => (recordKey(r) === recordKey(record) ? record : r)),
@@ -420,8 +464,9 @@ export function ResultsTab() {
       const setPending = confirmed ? setConfirmingKey : setWithdrawingKey;
       setPending(key);
       setConfirmNotes((prev) => ({ ...prev, [key]: "" }));
+      setConfirmAuditWarnings((prev) => ({ ...prev, [key]: null }));
       try {
-        await resultsApi.confirmOperationalization({
+        const res = await resultsApi.confirmOperationalization({
           project_root: projectRoot,
           trait: record.trait,
           delivery_kind: record.delivery_kind,
@@ -429,6 +474,7 @@ export function ResultsTab() {
           confirmed,
           user: useStore.getState().user || undefined,
         });
+        setConfirmAuditWarnings((prev) => ({ ...prev, [key]: res.audit_warning }));
         replaceOperationalization(
           await resultsApi.operationalization(projectRoot, record.trait, record.delivery_kind),
         );
@@ -455,6 +501,54 @@ export function ResultsTab() {
       }
     },
     [projectRoot, replaceOperationalization],
+  );
+
+  const replaceTraitSpecStatement = useCallback((record: TraitSpecStatementRecord) => {
+    setTraitSpecStatements((prev) => prev.map((r) => (r.trait === record.trait ? record : r)));
+  }, []);
+
+  // Withdrawal is the same door with confirmed false, mirroring writeConfirmation above.
+  const writeTraitSpecConfirmation = useCallback(
+    async (record: TraitSpecStatementRecord, confirmed: boolean) => {
+      if (!projectRoot) return;
+      const key = record.trait;
+      const setPending = confirmed ? setTraitSpecConfirmingKey : setTraitSpecWithdrawingKey;
+      setPending(key);
+      setTraitSpecNotes((prev) => ({ ...prev, [key]: "" }));
+      setTraitSpecAuditWarnings((prev) => ({ ...prev, [key]: null }));
+      try {
+        const res = await resultsApi.confirmTraitSpecStatement({
+          project_root: projectRoot,
+          trait: record.trait,
+          record_seen: record.record_seen,
+          confirmed,
+          user: useStore.getState().user || undefined,
+        });
+        setTraitSpecAuditWarnings((prev) => ({ ...prev, [key]: res.audit_warning }));
+        replaceTraitSpecStatement(await resultsApi.traitSpecStatement(projectRoot, record.trait));
+      } catch (e) {
+        const moved = movedTraitSpecStatementFrom(e);
+        if (moved) {
+          replaceTraitSpecStatement(moved);
+          setTraitSpecNotes((prev) => ({
+            ...prev,
+            [key]: confirmed
+              ? "This statement changed since it was shown. Read what is on file above, then confirm that."
+              : "This statement changed since it was shown. Read what is on file above, then withdraw that.",
+          }));
+        } else {
+          setTraitSpecNotes((prev) => ({
+            ...prev,
+            [key]: `${confirmed ? "Could not confirm" : "Could not withdraw"}: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          }));
+        }
+      } finally {
+        setPending(null);
+      }
+    },
+    [projectRoot, replaceTraitSpecStatement],
   );
 
   const refreshDatasetTree = useCallback(() => {
@@ -797,6 +891,18 @@ export function ResultsTab() {
         )}
       </div>
 
+      <TraitSpecStatementPanel
+        records={traitSpecStatements}
+        statementFields={traitSpecStatementFields}
+        loadError={traitSpecStatementsError}
+        confirmingKey={traitSpecConfirmingKey}
+        withdrawingKey={traitSpecWithdrawingKey}
+        notes={traitSpecNotes}
+        auditWarnings={traitSpecAuditWarnings}
+        onConfirm={(record) => void writeTraitSpecConfirmation(record, true)}
+        onWithdraw={(record) => void writeTraitSpecConfirmation(record, false)}
+      />
+
       <OperationalizationPanel
         records={operationalizations}
         statementFields={statementFields}
@@ -805,9 +911,12 @@ export function ResultsTab() {
         confirmingKey={confirmingKey}
         withdrawingKey={withdrawingKey}
         notes={confirmNotes}
+        auditWarnings={confirmAuditWarnings}
         onConfirm={(record) => void writeConfirmation(record, true)}
         onWithdraw={(record) => void writeConfirmation(record, false)}
       />
+
+      <DeliveryEventsPanel records={deliveryEvents} loadError={deliveryEventsError} />
 
       {trait && !hasMilestones && (
         <div className="tcip-panel p-4 flex flex-col gap-2">
