@@ -236,6 +236,11 @@ def get_sweep(sweep_id: str) -> dict:
     }
 
 
+def _log_holds_anything(page) -> bool:
+    """Whether a metrics log holds anything at all: rows, a torn tail, or undecodable bytes."""
+    return bool(page.records or page.torn_tail or page.corrupt)
+
+
 @router.get("/sweeps/{sweep_id}/trials")
 def list_trials(sweep_id: str) -> dict:
     """The trial directories a sweep has produced so far.
@@ -243,9 +248,9 @@ def list_trials(sweep_id: str) -> dict:
     Ray names its own per-trial directories after the trainable, so only the
     ``trial_<id>`` dirs the platform writes are listed here.
     """
-    from tcip_store import DecodeError, store
+    from tcip_store import DecodeError, read_log, store
 
-    from tcip_mcp.tools.training_tools import trial_config_key
+    from tcip_mcp.tools.training_tools import trial_config_key, trial_metrics_key
 
     root = _sweep_root(sweep_id)
     trials: list[dict] = []
@@ -262,7 +267,7 @@ def list_trials(sweep_id: str) -> dict:
             resolved = {}
         trials.append({
             "trial_id": d.name[len(_TRIAL_DIR_PREFIX):],
-            "has_metrics": (d / "metrics.jsonl").is_file(),
+            "has_metrics": _log_holds_anything(read_log(trial_metrics_key(root, d.name))),
             "params": resolved.get("trial_params") or {},
             "unconsumed_params": resolved.get("unconsumed_params") or [],
         })
@@ -290,7 +295,7 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
         logger.warning("trial %s has %d metrics rows that do not decode",
                        trial_id, len(page.corrupt))
     rows = [dict(row) for row in page.records]
-    return metrics_response(rows, exists=bool(rows or page.torn_tail or page.corrupt))
+    return metrics_response(rows, exists=_log_holds_anything(page))
 
 
 @router.get("/ray-dashboard")
