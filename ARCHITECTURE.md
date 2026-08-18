@@ -830,12 +830,12 @@ registered at HEAD.
 | POST | `/launch` | `launch_hpo` | `routes/tuning.py:179` |
 | GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:203` |
 | GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:216` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:240` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:273` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:297` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:375` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:391` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:405` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:245` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:278` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:302` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:380` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:396` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:410` |
 
 ### 11 routes with no located frontend caller
 

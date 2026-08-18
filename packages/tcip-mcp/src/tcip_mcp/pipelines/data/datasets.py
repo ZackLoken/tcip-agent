@@ -487,9 +487,11 @@ def confirmed_negative_records(
     loop harvested. With no locatable dataset root, no store, or no confirmations for this subject,
     it returns nothing.
     """
+    import tcip_store
+
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        classes_path, dataset_root_of, image_status_digest_path,
+        classes_path, dataset_root_of, image_status_digest_key,
         is_confirmed_negative, status_confirmations, status_bucket, status_of,
     )
 
@@ -519,16 +521,14 @@ def confirmed_negative_records(
         return negatives
 
     stamped_by_image: dict = {}
-    digest_file = image_status_digest_path(root)
-    if digest_file.is_file():
-        try:
-            stamps = json.loads(digest_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            stamps = {}
-        if isinstance(stamps, dict):
-            bucket_stamps = stamps.get(bucket_key)
-            if isinstance(bucket_stamps, dict):
-                stamped_by_image = bucket_stamps
+    try:
+        stamps = tcip_store.read(image_status_digest_key(root), default={})
+    except tcip_store.DecodeError:
+        stamps = {}
+    if isinstance(stamps, dict):
+        bucket_stamps = stamps.get(bucket_key)
+        if isinstance(bucket_stamps, dict):
+            stamped_by_image = bucket_stamps
     if not stamped_by_image:
         return negatives  # nothing stamped in this bucket -> no signal -> admit (a rail admits valid work)
 
