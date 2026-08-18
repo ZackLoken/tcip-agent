@@ -150,6 +150,15 @@ def test_a_registry_with_nothing_broken_reports_nothing_broken(client: TestClien
     ts.replace(
         traits.trait_spec_key(specs_dir, "leaf"), {"name": "leaf", "delivers": ["leaf_length"]},
         expect=ts.Version.ABSENT)
+    # A statement makes this registry genuinely nothing-broken under check_trait_spec_statements too.
+    ts.replace(
+        traits.trait_spec_statement_key(traits.trait_spec_statements_scope(tmp_path), "leaf"),
+        {"trait": "leaf", "statement_fields": {"delivers": ["leaf_length"]},
+         "rationale": "test fixture", "stated_by": "test", "stated_at": "2026-03-04T00:00:00+00:00",
+         "relayed_note": "", "confirmed_by": None, "confirmed_at": None,
+         "identity_from_request": None, "record_seen": None},
+        expect=ts.Version.ABSENT,
+    )
 
     body = client.get("/api/results/traits", params={"project_root": str(tmp_path)}).json()
     assert body["traits"] == ["leaf"]
