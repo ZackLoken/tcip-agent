@@ -60,9 +60,6 @@ RUN = "run"
 PREDICTION_BUCKET = "prediction_bucket"
 """One prediction bucket directory, where a run's operating-point stamps sit beside its output."""
 
-TRAIT_SPECS = "trait_specs"
-"""A root's ``.tcip/state/trait_specs`` directory, one document per registered trait."""
-
 LAYOUTS = (
     ROOT,
     STATE,
@@ -74,7 +71,6 @@ LAYOUTS = (
     CURATED,
     RUN,
     PREDICTION_BUCKET,
-    TRAIT_SPECS,
 )
 """Every kind of directory a root can be, for an operator naming one on a command line."""
 
@@ -311,7 +307,9 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
             (Constant("review"), Patterned(ANY, tail=".json")),
         ),
     ),
-    "trait_specs": Claim(TRAIT_SPECS, ((Patterned(ANY, tail=".json"),),)),
+    "trait_specs": Claim(
+        STATE, ((Constant("trait_specs"), Patterned(ANY, tail=".json")),)
+    ),
     "trait_operationalizations": Claim(
         STATE,
         ((Constant("trait_operationalizations"), Patterned(ANY), Patterned(ANY, tail=".json")),),
