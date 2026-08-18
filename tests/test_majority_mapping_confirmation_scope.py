@@ -52,16 +52,13 @@ def _write_specs(project_root: Path) -> None:
     the delivery door requires before it will produce one. The two are independent: what a record
     covers is the crossing measurement, never the majority alias the marker qualifies.
     """
-    import yaml
-
     from tcip_mcp import traits
 
     from tests._operationalization_fixtures import seed_confirmed_crossing
 
     specs_dir = project_root / traits._TRAIT_SPECS_RELPATH
-    specs_dir.mkdir(parents=True, exist_ok=True)
     for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
-        (specs_dir / f"{spec['name']}.yml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+        ts.replace(traits.trait_spec_key(specs_dir, spec["name"]), spec, expect=ts.Version.ABSENT)
     for spec in (CATKIN_SPEC, PISTILLATE_SPEC):
         seed_confirmed_crossing(project_root, spec["name"])
 

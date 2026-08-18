@@ -84,15 +84,20 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
 def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     """A dropped trait spec reads identically to no trait at all from the registry alone;
     doctor.py is where the agent catches the difference at session start."""
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
     root = _project(tmp_path)
     specs_dir = root / ".tcip" / "state" / "trait_specs"
-    specs_dir.mkdir(parents=True)
-    (specs_dir / "unicorn.yml").write_text(
-        "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
+    # This test's doctor subprocess runs with file_layout=True, so the fixture's own record has
+    # to land as the same loose file the file backend reads, not the process-default backend.
+    ts.bind(FileBackend())
+    ts.replace(traits.trait_spec_key(specs_dir, "unicorn"),
+              {"name": "unicorn", "delivers": ["unicorn_horn_length"]}, expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
-    assert "unicorn.yml" in res.stdout
+    assert "unicorn.json" in res.stdout
     assert "unicorn_horn_length" in res.stdout
 
 
@@ -313,21 +318,23 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
 def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     """The specs the doctor loads are the ones the trait registry resolves, and only the
     unloadable spec is reported: a valid spec sitting beside it stays silent."""
+    import tcip_store as ts
+
     root = _layout_project(tmp_path, "2026-03-04")
     specs_dir = root / traits._TRAIT_SPECS_RELPATH
-    specs_dir.mkdir(parents=True)
-    (specs_dir / "bloom_length.yml").write_text(
-        "name: bloom_length\ndelivers: [bloom_length]\n", encoding="utf-8")
-    (specs_dir / "burr_size.yml").write_text(
-        "name: burr_size\ndelivers: [burr_size]\nmeasured_with: calipers\n", encoding="utf-8")
+    ts.replace(traits.trait_spec_key(specs_dir, "bloom_length"),
+              {"name": "bloom_length", "delivers": ["bloom_length"]}, expect=ts.Version.ABSENT)
+    ts.replace(traits.trait_spec_key(specs_dir, "burr_size"),
+              {"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers"},
+              expect=ts.Version.ABSENT)
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
     spec_lines = _lines(res.stdout, "trait spec")
     assert len(spec_lines) == 1, res.stdout
-    assert "burr_size.yml" in spec_lines[0]
+    assert "burr_size.json" in spec_lines[0]
     assert "measured_with" in spec_lines[0]
-    assert "bloom_length.yml" not in res.stdout
+    assert "bloom_length.json" not in res.stdout
 
 
 def test_review_baselines_are_not_counted_as_label_records(tmp_path):
