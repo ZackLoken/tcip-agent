@@ -396,24 +396,17 @@ def _label_record_state(stem: str, labels_dir, subject: str | None) -> tuple[boo
 
 
 def _raw_status_store(labels_dir) -> object:
-    """The dataset's stored image statuses as written, or ``{}`` when there is nothing to read.
+    """The dataset's stored image statuses, for a caller that has a labels directory rather than
+    a dataset root, or ``{}`` when the directory belongs to no dataset.
 
-    The one read of ``image_status_path`` behind every function here, so the enumeration of a
-    subject's buckets and the records taken from them come from the same document and the same
-    answer to a store that is absent or will not parse.
+    The store read itself is :func:`~tcip_mcp.dataset_layout.read_image_status_store`, shared with
+    every other confirmed-negative reader, so the enumeration of a subject's buckets and the records
+    taken from them come from the same document.
     """
-    from tcip_mcp.dataset_layout import dataset_root_of, image_status_path
+    from tcip_mcp.dataset_layout import dataset_root_of, read_image_status_store
 
     root = dataset_root_of(labels_dir)
-    if root is None:
-        return {}
-    status_file = image_status_path(root)
-    if not status_file.is_file():
-        return {}
-    try:
-        return json.loads(status_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    return {} if root is None else read_image_status_store(root)
 
 
 def confirmed_negative_records_every_date(
@@ -460,9 +453,10 @@ def confirmed_negative_records(
     copying these confirmations into another dataset carries who confirmed them rather than
     re-attributing them to itself.
 
-    Reads the dataset-native ``image_status_path``, a sibling of ``classes.json``, so confirmations
-    travel with the dataset rather than living in whichever project's private ``.tcip/`` happened to
-    be an ancestor, and returns only the ``status_bucket(subject, date)`` bucket. A confirmation is
+    Reads the dataset-native store ``image_status_key`` names, keyed by the dataset root the way
+    ``classes.json`` is, so confirmations travel with the dataset rather than living in whichever
+    project's private ``.tcip/`` happened to be an ancestor, and returns only the
+    ``status_bucket(subject, date)`` bucket. A confirmation is
     a human's statement about one subject on one image; a store keyed by image name alone re-applies
     it to subjects they never looked at, so an image full of bushes trains as "contains no bushes".
 

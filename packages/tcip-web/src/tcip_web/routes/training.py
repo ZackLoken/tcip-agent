@@ -55,49 +55,48 @@ def _historical_training_runs() -> list[dict]:
     HPO trials never create experiments so they can't appear here. A non-terminal state
     on a run that isn't live means the process died -> surfaced as ``interrupted``.
 
+    The experiments come from ``tcip_mcp.experiments.experiment_ids_with_status``, the store's own
+    enumeration: what names an experiment is a record, so this lists the same set whichever backend
+    holds it rather than only the ones a backend happens to keep a directory for.
+
     Delegates the actual state/current_epoch reconstruction to
     ``tcip_mcp.experiments.reconstruct_run_status``, the single implementation of
-    experiment-directory-to-``run_id`` resolution. A fresh-id relaunch's experiment directory
-    name does not necessarily equal the real ``run_id``; a directory whose ``status.json`` never
-    stamped ``run_id`` still resolves correctly through the shared resolver's exact-match
-    strategy: defaulting to ``d.name`` here means the lookup is for the directory's own name,
-    which trivially matches itself, and ``current_epoch`` is populated from the run's metrics
-    log via that same resolver. The inline fallback below is reached only when
-    ``reconstruct_run_status`` itself returns ``None`` or resolves to a *different* directory than
-    the one being iterated (a malformed/unreadable ``status.json``, or a genuine identity
-    anomaly), a narrower, degenerate case, not the common case of a directory whose ``status.json``
-    never stamped ``run_id``.
+    experiment-id-to-``run_id`` resolution. A fresh-id relaunch's experiment id does not
+    necessarily equal the real ``run_id``; an experiment whose status record never stamped
+    ``run_id`` still resolves correctly through the shared resolver's exact-match strategy:
+    defaulting to the experiment id here means the lookup is for that id, which trivially matches
+    itself, and ``current_epoch`` is populated from the run's metrics log via that same resolver.
+    The inline fallback below is reached only when ``reconstruct_run_status`` itself returns
+    ``None`` or resolves to a *different* experiment than the one being iterated (a
+    malformed/unreadable status record, or a genuine identity anomaly), a narrower, degenerate
+    case, not the common case of a status record that never stamped ``run_id``.
     """
     from tcip_store import DecodeError, store
 
     from tcip_mcp.experiments import (
         config_key,
-        experiments_dir,
+        experiment_ids_with_status,
         reconstruct_run_status,
         status_key,
     )
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
-    exp_root = experiments_dir()
-    if not exp_root.exists():
-        return []
     runs: list[dict] = []
-    for d in sorted(exp_root.iterdir()):
-        if not d.is_dir():
-            continue
+    for experiment_id in experiment_ids_with_status():
         try:
-            config = store.read(config_key(d.name), default={})
-            status = store.read(status_key(d.name), default={})
+            config = store.read(config_key(experiment_id), default={})
+            status = store.read(status_key(experiment_id), default={})
         except DecodeError:
             # One unreadable record must not cost the breeder the whole run listing.
-            logger.warning("experiment %s has a member that does not decode", d.name, exc_info=True)
+            logger.warning("experiment %s has a member that does not decode", experiment_id,
+                           exc_info=True)
             continue
         if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
             continue  # not a training experiment (e.g. review-feedback lineage)
-        run_id = status.get("run_id", d.name)  # the real run_id when stamped, else the
-                                                # experiment_id itself as the fallback
+        run_id = status.get("run_id", experiment_id)  # the real run_id when stamped, else the
+                                                       # experiment_id itself as the fallback
         reconstructed = reconstruct_run_status(run_id, stale_seconds=_HEARTBEAT_STALE_SECONDS)
-        if reconstructed is not None and reconstructed["experiment_id"] == d.name:
+        if reconstructed is not None and reconstructed["experiment_id"] == experiment_id:
             runs.append({
                 "run_id": run_id,
                 "status": reconstructed["status"],
@@ -106,10 +105,7 @@ def _historical_training_runs() -> list[dict]:
                 "external": True,  # reconstructed → not managed by this web process
             })
             continue
-        # Fallback: reconstruct_run_status found nothing (or something else) for this directory's
-        # own run_id: a malformed/unreadable status.json, not the common case of a status.json
-        # that never stamped run_id (that one resolves correctly above via the exact-match
-        # strategy on the defaulted d.name).
+        # Reached only when the shared resolver answers with nothing, or with another experiment.
         state = status.get("state", "unknown")
         if state not in _TERMINAL_STATES:
             state = "running" if _heartbeat_fresh(status.get("heartbeat")) else "interrupted"

@@ -14,7 +14,6 @@ per-plant fraction → crossings).
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -833,15 +832,17 @@ def compute_phenology(
         return {"error": stated.message, "n_plants": 0}
     pos = spec.positive_class_name
 
-    mp = Path(mapping_path)
-    if not mp.is_file():
-        return {"error": f"mapping not found: {mapping_path}"}
+    from tcip_store import StoreError
+
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
     try:
-        mapping = json.loads(mp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
+        mapping = plant_mapping.load_mapping_rows(Path(mapping_path))
+    except StoreError as e:
         return {"error": f"could not read mapping {mapping_path}: {e}"}
-    if not isinstance(mapping, dict) or not mapping:
-        return {"error": f"mapping at {mapping_path} is empty or malformed"}
+    if not mapping:
+        return {"error": f"mapping not found: {mapping_path}; build one with "
+                         f"build_plant_mapping before computing phenology"}
 
     positive_class_id, msg = _resolve_positive_class_id(trait, predictions_by_date)
     if positive_class_id is None:

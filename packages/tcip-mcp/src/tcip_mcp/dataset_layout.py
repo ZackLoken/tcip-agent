@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 import tcip_store
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
+from tcip_store import RECORD_JSON, DecodeError, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
 # Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
@@ -321,6 +321,27 @@ def image_status_key(dataset_root: str | Path) -> Key:
     writers, so an unconditional write drops confirmations nobody re-reviewed.
     """
     return Key(IMAGE_STATUS_STORE, str(dataset_root), _IMAGE_STATUS_PARTS)
+
+
+def read_image_status_store(dataset_root: str | Path) -> dict:
+    """The dataset's stored image statuses as written, or ``{}`` when there is nothing to read.
+
+    The one read behind every confirmed-negative reader, so an enumeration of a subject's buckets,
+    the records taken from them, and a fingerprint over them all come from the same document and
+    give the same answer to a store that is absent or will not decode. Reading the bytes off
+    :func:`image_status_path` instead answers "no confirmations" whenever the backend holds them
+    somewhere other than that file, which trains a human's confirmed negatives as unlabelled and
+    silently drops them from a dataset's content identity.
+
+    The shape guards (:func:`status_confirmations`, :func:`normalize_status_store`) stay the
+    caller's, so a reader that needs the records whole and one that needs only the tokens still
+    project the same raw document rather than a pre-narrowed view.
+    """
+    try:
+        raw = tcip_store.read(image_status_key(dataset_root), default={})
+    except DecodeError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
 
 
 def view_coverage_path(dataset_root: str | Path) -> Path:

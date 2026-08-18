@@ -272,10 +272,9 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         raise HTTPException(400, stated.as_detail())
 
     _guard(payload.mapping_path, *payload.predictions_by_date.values())
-    mapping = plant_mapping.load_mapping(Path(payload.mapping_path))
-    if not mapping:
+    mapping_raw = plant_mapping.load_mapping_rows(Path(payload.mapping_path))
+    if not mapping_raw:
         raise HTTPException(404, f"no mapping at {payload.mapping_path}")
-    mapping_raw = {date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()}
 
     pred_dirs = list(payload.predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs)

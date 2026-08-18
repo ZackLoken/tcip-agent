@@ -103,15 +103,22 @@ def check_negatives(root: Path, findings: list) -> None:
 
 
 def check_registry(root: Path, findings: list) -> None:
-    from tcip_store import DecodeError
+    """Flag registered models whose checkpoint is missing or points into a test/temp tree.
+
+    Every way the registry index can refuse to be read comes out as a finding, not as a
+    traceback: the doctor's contract is an exit code and a list, and a check that dies takes the
+    whole run's findings and exit code with it. A store that will not decode and a database file
+    that will not open are both "this could not be checked", which is not the same answer as clean.
+    """
+    from tcip_store import StoreError
 
     from tcip_mcp.model_registry import read_registry_index
 
     try:
         entries = read_registry_index(root)
-    except DecodeError as exc:
-        findings.append(("error", "the model registry index will not decode, so this project's "
-                        f"registered models cannot be read at all: {exc}"))
+    except StoreError as exc:
+        findings.append(("error", "the model registry index will not decode or read, so this "
+                        f"project's registered models could not be checked at all: {exc}"))
         return
     for m in entries if isinstance(entries, list) else []:
         ckpt = m.get("checkpoint_path", "")

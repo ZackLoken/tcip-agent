@@ -522,7 +522,23 @@ def persist_mapping(mapping: dict[str, list[Assignment]], out_path: Path) -> Non
     tcip_store.replace(plant_mapping_key(out_path), serialisable)
 
 
+def load_mapping_rows(path: Path) -> dict[str, list[dict]]:
+    """The persisted mapping as plain per-date rows, for a consumer that works in dicts.
+
+    Reads through :func:`load_mapping`, so a caller handing the rows to the phenology pipeline
+    gets the fields that reader fills in and the types it coerces, rather than whatever a
+    particular writer happened to leave out. ``{}`` when no mapping is stored under ``path``.
+    """
+    return {date: [a.__dict__ for a in assignments]
+            for date, assignments in load_mapping(path).items()}
+
+
 def load_mapping(path: Path) -> dict[str, list[Assignment]]:
+    """One build's persisted per-date plant assignments, or ``{}`` when nothing is stored there.
+
+    Read through the store the mapping was written to, so a build persisted under one backend is
+    found by the delivery that consumes it rather than reported missing.
+    """
     raw = tcip_store.read(plant_mapping_key(path), default=None)
     if raw is None:
         return {}
