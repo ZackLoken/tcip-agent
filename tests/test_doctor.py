@@ -327,6 +327,15 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     ts.replace(traits.trait_spec_key(specs_dir, "burr_size"),
               {"name": "burr_size", "delivers": ["burr_size"], "measured_with": "calipers"},
               expect=ts.Version.ABSENT)
+    # A statement isolates bloom_length from check_trait_spec_statements's own separate finding.
+    ts.replace(
+        traits.trait_spec_statement_key(traits.trait_spec_statements_scope(root), "bloom_length"),
+        {"trait": "bloom_length", "statement_fields": {"delivers": ["bloom_length"]},
+         "rationale": "test fixture", "stated_by": "test", "stated_at": "2026-03-04T00:00:00+00:00",
+         "relayed_note": "", "confirmed_by": None, "confirmed_at": None,
+         "identity_from_request": None, "record_seen": None},
+        expect=ts.Version.ABSENT,
+    )
 
     res = _run(root)
     assert res.returncode == 2, res.stdout
