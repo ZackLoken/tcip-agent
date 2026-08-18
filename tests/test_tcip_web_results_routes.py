@@ -10,6 +10,10 @@ from fastapi.testclient import TestClient
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, BBox
 
+import tcip_store
+from tcip_mcp.audit import audit_log_key
+from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_sidecar
 from tcip_web.app import app
 
 from tests._binding_fixtures import PRODUCER_CHECKPOINT_SHA256
@@ -155,11 +159,11 @@ def _phenology_fixture(
                                 dataset_root=root, experiment_id=f"exp-cls-{date_str}",
                                 producing_experiment_id=producing_experiment_id, trait="catkin")
         else:
-            (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
+            write_sidecar(bucket, sidecar, "operating_point")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"
-    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    tcip_store.replace(plant_mapping_key(mapping_path), mapping)
     return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
             "predictions_by_date": preds, "trait": "catkin"}
 
@@ -172,7 +176,7 @@ def _expected_validation_record(body: dict) -> str:
     """
     pointers = set()
     for pred_dir in body["predictions_by_date"].values():
-        stamp = json.loads((Path(pred_dir) / "operating_point.json").read_text(encoding="utf-8"))
+        stamp = read_operating_point_sidecar(pred_dir)
         by = stamp["validated_by"]
         pointers.add(f"{by['experiment_id']}:{by['record_digest']}")
     return "; ".join(sorted(pointers))
@@ -236,9 +240,10 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
     # not crash interpolation or leak '0000-00-00' into a delivered date.
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
     mapping_path = Path(body["mapping_path"])
-    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    key = plant_mapping_key(mapping_path)
+    mapping = tcip_store.read(key)
     mapping["undated"] = mapping["2026-02-11"]
-    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    tcip_store.replace(key, mapping)
     body["predictions_by_date"]["undated"] = body["predictions_by_date"]["2026-02-11"]
     rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
     for row in rows:
@@ -331,14 +336,12 @@ def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
     the record is re-earned here, over the mutated stamp, the same way a real producer would.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
-    from tcip_mcp.pipelines.resolution import write_sidecar
 
     from tests._binding_fixtures import file_validation_record
 
     for bucket_str in body["predictions_by_date"].values():
         bucket = Path(bucket_str)
-        path = bucket / "operating_point.json"
-        sidecar = json.loads(path.read_text(encoding="utf-8"))
+        sidecar = read_operating_point_sidecar(bucket)
         op = sidecar.setdefault("operating_point", {})
         if tile_size_prov is None:
             op.pop("tile_size", None)
@@ -350,9 +353,7 @@ def _set_tile_provenance(body: dict, tile_size_prov: dict | None) -> dict:
                 sidecar, dataset_root=root, pred_dirs=[bucket],
                 experiment_id=f"exp-tile-{bucket.name}", producing_experiment_id="exp-1",
                 trait=sidecar.get("trait"))
-            write_sidecar(bucket, sidecar, "operating_point")
-        else:
-            path.write_text(json.dumps(sidecar), encoding="utf-8")
+        write_sidecar(bucket, sidecar, "operating_point")
     return body
 
 
@@ -471,10 +472,10 @@ def test_a_genuinely_unvalidated_classifier_refuses_even_when_the_count_is_valid
     # which one to fix.
     body = _phenology_fixture(tmp_path, validated=True)
     for bucket in body["predictions_by_date"].values():
-        (Path(bucket) / "classifier_operating_point.json").write_text(json.dumps({
+        write_sidecar(Path(bucket), {
             "validated": False, "trait": "catkin",
             "operating_point": {"classifier": {"value": "elongated", "validated_against": "false"}},
-        }), encoding="utf-8")
+        }, "classifier_operating_point")
     resp = client.post("/api/results/onset_dates", json=body)
     assert resp.status_code == 400
     assert "['classifier']" in resp.json()["detail"]
@@ -621,9 +622,8 @@ def test_the_web_export_records_what_verification_found_in_the_datasets_own_log(
                        json={**body, "payload": "milestones", "filename": "x.csv"})
     assert resp.status_code == 200, resp.text[:300]
 
-    log = tmp_path / "ds" / ".tcip" / "audit.jsonl"
-    assert log.is_file(), "the delivery wrote nothing to the log of the dataset its buckets sit in"
-    emitted = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln]
+    emitted = tcip_store.read_log(audit_log_key(tmp_path / "ds")).records
+    assert emitted, "the delivery wrote nothing to the log of the dataset its buckets sit in"
     events = [e for e in emitted if e["tool"] == "results.export_csv" and "verified_buckets" in e]
     assert len(events) == 1, emitted
     verified = events[0]["verified_buckets"]
@@ -644,9 +644,9 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
     saved = tmp_path / "results_export" / "catkin_delivery.csv"
     assert resp.headers["X-TCIP-Saved-To"] == str(saved)
     assert saved.read_bytes() == resp.content
-    audit = (tmp_path / ".tcip" / "audit.jsonl").read_text(encoding="utf-8")
-    assert "results.export_csv" in audit
-    assert "catkin_delivery.csv" in audit
+    audit = tcip_store.read_log(audit_log_key(tmp_path)).records
+    assert any(e.get("tool") == "results.export_csv" for e in audit)
+    assert any("catkin_delivery.csv" in json.dumps(e) for e in audit)
 
 
 def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(

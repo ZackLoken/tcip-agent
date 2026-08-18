@@ -178,8 +178,8 @@ def test_a_restored_project_conformed_to_a_database_still_holds_its_confirmed_ne
 
 
 def test_the_tcip_bundle_carries_a_retrospective(tmp_path):
-    """A retrospective is prose a human wrote and every reader of it reads it as a file, so a
-    bundle that drops it drops the project's own account of itself."""
+    """A retrospective is prose the platform writes and every reader of it reads it as a file,
+    so a bundle that drops it drops the project's own account of itself."""
     root = _project(tmp_path)
     (root / ".tcip" / "retrospectives").mkdir(parents=True)
     (root / ".tcip" / "retrospectives" / "session.md").write_text("what happened", encoding="utf-8")

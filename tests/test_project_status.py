@@ -2,16 +2,50 @@
 
 from __future__ import annotations
 
-import json
+import os
 from pathlib import Path
 
+import tcip_store
 from tcip_mcp.project_status import (
+    project_status_key,
     project_status_path,
     read_project_status,
     record_distillation,
     record_report,
     record_retrospective,
 )
+from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
+
+
+def _damage_project_status(root: Path, data: bytes) -> None:
+    """Put ``data`` behind the project status record, wherever the bound backend keeps it.
+
+    A record must already exist at the key (``record_report`` seeds one); this corrupts the bytes
+    behind it in place, on the same path the bound backend actually reads, so the case is genuine
+    on both backends rather than reporting absence on one and corruption on the other.
+    """
+    from tcip_store.store import _backend
+
+    key = project_status_key(root)
+    name = os.environ.get(BACKEND_ENV) or FILE_BACKEND
+    if name == FILE_BACKEND:
+        backend = _backend()
+        backend.path_for(key).write_bytes(data)
+        return
+    if name != SQLITE_BACKEND:
+        raise ValueError(f"no bytes-corruption path for backend {name!r}")
+    import sqlite3
+
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
+    try:
+        conn.execute(
+            "update records set value = ? where store = ? and parts = ?",
+            (data, key.store, encode_parts(key.parts)),
+        )
+    finally:
+        conn.close()
 
 
 def test_project_status_path(tmp_path: Path):
@@ -23,17 +57,14 @@ def test_read_project_status_absent_returns_empty(tmp_path: Path):
 
 
 def test_read_project_status_corrupt_json_is_flagged(tmp_path: Path):
-    path = project_status_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_text("{not valid json", encoding="utf-8")
+    record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
+    _damage_project_status(tmp_path, b"{not valid json")
     assert read_project_status(tmp_path) == {"_corrupt": True}
 
 
 def test_read_project_status_non_dict_shape_is_flagged(tmp_path: Path):
     # Valid JSON, but not a dict: same shape guard as dataset_layout.normalize_status_store.
-    path = project_status_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    tcip_store.replace(project_status_key(tmp_path), [1, 2, 3], expect=tcip_store.Version.ABSENT)
     assert read_project_status(tmp_path) == {"_corrupt": True}
 
 
@@ -91,11 +122,10 @@ def test_record_distillation_resets_both_distillation_counters_only(tmp_path: Pa
 
 
 def test_record_functions_are_best_effort_on_a_corrupt_file(tmp_path: Path):
-    # A pre-existing corrupt status file must not crash a record_* call: it's best-effort and
+    # A pre-existing corrupt status record must not crash a record_* call: it's best-effort and
     # attached to a write (claude_reports/project_retrospective) that must not fail because of it.
-    path = project_status_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_text("{not valid json", encoding="utf-8")
+    record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
+    _damage_project_status(tmp_path, b"{not valid json")
 
     record_report(tmp_path)  # must not raise
     status = read_project_status(tmp_path)
@@ -106,9 +136,8 @@ def test_record_functions_are_best_effort_on_a_corrupt_file(tmp_path: Path):
 def test_read_project_status_non_utf8_bytes_are_flagged_not_raised(tmp_path: Path):
     # UnicodeDecodeError is not a subclass of json.JSONDecodeError: a narrower except clause than
     # (OSError, ValueError) would let this raise straight through read_project_status.
-    path = project_status_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"\xff\xfe\x00\x01not valid utf-8")
+    record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
+    _damage_project_status(tmp_path, b"\xff\xfe\x00\x01not valid utf-8")
 
     assert read_project_status(tmp_path) == {"_corrupt": True}
     record_report(tmp_path)  # must not raise past this either, same best-effort invariant

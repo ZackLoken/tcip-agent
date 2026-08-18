@@ -8,7 +8,9 @@ exactly one dataset identity, so no other identity can inherit it.
 
 from __future__ import annotations
 
+import tcip_store as ts
 from tcip_mcp.pipelines.data.splits import (
+    cal_holdout_lock_key,
     cal_holdout_lock_path,
     group_balanced_split,
     resolve_locked_cal_holdout_split,
@@ -126,8 +128,8 @@ def test_a_prefix_sharing_identity_never_inherits_another_datasets_lock(tmp_path
         "the second dataset was handed a lock drawn over a different stem universe"
     )
     assert set(second["calibration"]) | set(second["holdout"]) == set(second_stems)
-    assert cal_holdout_lock_path(first_hash, scope_root=tmp_path).is_file()
-    assert cal_holdout_lock_path(second_hash, scope_root=tmp_path).is_file()
+    assert ts.exists(cal_holdout_lock_key(first_hash, scope_root=tmp_path))
+    assert ts.exists(cal_holdout_lock_key(second_hash, scope_root=tmp_path))
 
     reread = resolve_locked_cal_holdout_split(
         first_stems, identity_hash=first_hash, scope_root=tmp_path, seed=1)

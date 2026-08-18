@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
@@ -11,6 +12,8 @@ from tcip_mcp.tools.data_tools import (
     scan_dataset,
     validate_data_quality,
     make_splits,
+    split_manifest_key,
+    split_stem_list_key,
 )
 
 
@@ -46,7 +49,7 @@ def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     assert sum(result["splits"].values()) == 3
     assert result["output_dir"] == str(out)
     for split in ("train", "val", "test"):
-        assert (out / f"{split}.json").is_file()
+        assert ts.exists(split_stem_list_key(out, split))
         assert (out / split / "images").is_dir()
         assert (out / split / "labels").is_dir()
     # Every image landed under exactly one split's images/ dir.
@@ -63,7 +66,7 @@ def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     assert sum(result["splits"].values()) == 3
     assert result["stratified"] is True
     for split in ("train", "val", "test"):
-        assert (out / f"{split}.json").is_file()
+        assert ts.exists(split_stem_list_key(out, split))
 
 
 def test_make_splits_bad_ratios(data_dir: Path):
@@ -90,8 +93,6 @@ def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"),
 
 
 def test_make_splits_groups_tiles_together(tmp_path: Path):
-    import json
-
     from tcip_mcp.pipelines.data.splits import default_group_key
 
     root = _multi_source_dataset(tmp_path / "ds")
@@ -102,7 +103,7 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
     # No source prefix may appear in more than one split.
     seen: dict[str, str] = {}
     for split in ("train", "val", "test"):
-        for stem in json.loads((out / f"{split}.json").read_text()):
+        for stem in ts.read(split_stem_list_key(out, split)):
             g = default_group_key(stem)
             assert seen.get(g, split) == split, f"group {g} spans splits"
             seen[g] = split
@@ -111,8 +112,6 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
     """An agent-derived group_key_map (3 stems, 2 groups) is honored: the two same-group stems
     never land in different splits."""
-    import json
-
     root = _multi_source_dataset(tmp_path / "ds", prefixes=("x", "y", "z"), tiles=1)
     out = tmp_path / "m"
     group_key_map = {"x_0_0": "gA", "y_0_0": "gA", "z_0_0": "gB"}
@@ -124,10 +123,10 @@ def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
 
     membership: dict[str, str] = {}
     for split in ("train", "val", "test"):
-        for stem in json.loads((out / f"{split}.json").read_text()):
+        for stem in ts.read(split_stem_list_key(out, split)):
             membership[stem] = split
     assert membership["x_0_0"] == membership["y_0_0"]  # gA never straddles
-    manifest = json.loads((out / "split_manifest.json").read_text())
+    manifest = ts.read(split_manifest_key(out))
     assert manifest["group_by"] == "explicit_map"
 
 
@@ -175,8 +174,6 @@ def test_make_splits_spatial_refuses_materialize(tmp_path: Path):
 
 
 def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):
-    import json
-
     root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
     out = tmp_path / "m"
     result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
@@ -186,20 +183,18 @@ def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):
     assert result["group_by"] == "spatial_strip"
     assert result["splits"]["train"] > 0 and result["splits"]["val"] > 0
 
-    train_ids = json.loads((out / "train.json").read_text())
-    val_ids = json.loads((out / "val.json").read_text())
+    train_ids = ts.read(split_stem_list_key(out, "train"))
+    val_ids = ts.read(split_stem_list_key(out, "val"))
     assert train_ids and val_ids
     assert set(train_ids).isdisjoint(set(val_ids))
     assert all(i.startswith("mosaic::strip_") for i in train_ids + val_ids)
 
-    manifest = json.loads((out / "split_manifest.json").read_text())
+    manifest = ts.read(split_manifest_key(out))
     assert manifest["group_by"] == "spatial_strip"
     assert manifest["spatial"]["train_identities"] == train_ids
 
 
 def test_make_splits_spatial_three_way(tmp_path: Path):
-    import json
-
     root = _single_source_dataset(tmp_path / "ds", 4000, 3000)
     out = tmp_path / "m3"
     result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
@@ -208,11 +203,11 @@ def test_make_splits_spatial_three_way(tmp_path: Path):
     assert "error" not in result
     assert all(result["splits"][name] > 0 for name in ("train", "val", "test"))
     for name in ("train", "val", "test"):
-        assert (out / f"{name}.json").is_file()
+        assert ts.exists(split_stem_list_key(out, name))
 
-    train_ids = set(json.loads((out / "train.json").read_text()))
-    val_ids = set(json.loads((out / "val.json").read_text()))
-    test_ids = set(json.loads((out / "test.json").read_text()))
+    train_ids = set(ts.read(split_stem_list_key(out, "train")))
+    val_ids = set(ts.read(split_stem_list_key(out, "val")))
+    test_ids = set(ts.read(split_stem_list_key(out, "test")))
     assert train_ids.isdisjoint(val_ids)
     assert train_ids.isdisjoint(test_ids)
     assert val_ids.isdisjoint(test_ids)

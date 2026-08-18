@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -50,8 +51,17 @@ def _project(tmp_path: Path) -> Path:
     return root
 
 
-def _run(root: Path):
-    return subprocess.run([PY_EXE, DOCTOR, str(root)], capture_output=True, text=True)
+def _run(root: Path, *, file_layout: bool = False):
+    """Run the doctor against ``root``.
+
+    ``file_layout=True`` bound to the file backend on purpose: that caller's fixture wrote
+    ``image_status.json``/``region_completeness.json``/``registry.json`` straight to disk, and
+    the check under test reads that same file layout directly, the exact case
+    ``staleness_findings`` reports as invalid once a database also holds the root, so the
+    subprocess is pinned to file regardless of whatever backend the outer test run selects.
+    """
+    env = {**os.environ, "TCIP_STORE_BACKEND": "file"} if file_layout else None
+    return subprocess.run([PY_EXE, DOCTOR, str(root)], capture_output=True, text=True, env=env)
 
 
 def test_doctor_flags_the_field_session_bug_family(tmp_path):
@@ -62,7 +72,7 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
     (reg / "registry.json").write_text(json.dumps(
         [{"name": "junk", "checkpoint_path": "C:\Temp\pytest-of-x\model.pt"}]))
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
     out = res.stdout
     assert "IMG_B" in out and "not a confirmed negative" in out   # unconfirmed empty -> warn
@@ -80,7 +90,7 @@ def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     (specs_dir / "unicorn.yml").write_text(
         "name: unicorn\ndelivers: [unicorn_horn_length]\n", encoding="utf-8")
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2  # errors present
     assert "unicorn.yml" in res.stdout
     assert "unicorn_horn_length" in res.stdout
@@ -122,7 +132,7 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     json_io.write_annotations(
         ann_path, [Annotation(subject="catkin", geometry=BBox(1, 1, 20, 20))], 32, 32)
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2
     assert "region completeness" in res.stdout
     assert "catkin" in res.stdout and "A1" in res.stdout
@@ -198,7 +208,7 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
         {status_bucket("catkin", date): status_records(
             {"IMG_R.JPG": "negative"}, recorded_by="user:breeder")}))
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
     contradictions = _lines(res.stdout, "contradictory")
     assert len(contradictions) == 1, res.stdout
@@ -220,7 +230,7 @@ def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
         status_bucket("leaf", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
     }))
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
     contradictions = _lines(res.stdout, "contradictory")
     assert len(contradictions) == 1, res.stdout
@@ -244,7 +254,7 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
         {status_bucket("catkin", None): status_records(
             {"IMG_F.JPG": "negative"}, recorded_by="user:breeder")}))
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
     contradictions = _lines(res.stdout, "contradictory")
     assert len(contradictions) == 1, res.stdout
@@ -290,7 +300,7 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
         {"name": "scratch_detector", "checkpoint_path": scratch},
     ]))
 
-    res = _run(root)
+    res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
     entry_lines = _lines(res.stdout, "registry entry")
     assert len(entry_lines) == 2, res.stdout

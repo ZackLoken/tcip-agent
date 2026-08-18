@@ -27,6 +27,7 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
+import tcip_store as ts  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
@@ -218,8 +219,9 @@ def _write_preds(d: Path, stem: str, subjects: list[str]) -> None:
 
 
 def _write_id_map_sidecar(d: Path, id_map: dict) -> None:
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "operating_point.json").write_text(json.dumps({"id_map": id_map}), encoding="utf-8")
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    write_sidecar(d, {"id_map": id_map}, "operating_point")
 
 
 def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
@@ -532,6 +534,16 @@ def test_golden_coco_matching_is_iou_threshold_sensitive():
 # 6. compute_phenology gate behavior
 # ══════════════════════════════════════════════════════════════════════════
 
+def _write_stamp_bypassing_claim_rail(d: Path, stamp: dict, document: str) -> None:
+    """Write a bucket's stamp through the storage seam, skipping the writer-side claim check."""
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    d.mkdir(parents=True, exist_ok=True)
+    key = sidecar_key(d, document)
+    with ts.transaction(key) as txn:
+        txn.write(key, stamp)
+
+
 def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None,
                       checkpoint_sha256: str | None = None,
@@ -560,7 +572,7 @@ def _write_op_sidecar(d: Path, *, dataset_root: Path, validated: bool, conf: flo
                             experiment_id=f"exp-record-{d.name}",
                             producing_experiment_id=experiment_id)
     else:
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        _write_stamp_bypassing_claim_rail(d, stamp, "operating_point")
 
 
 def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
@@ -577,7 +589,7 @@ def _write_classifier_sidecar(d: Path, *, dataset_root: Path, validated: bool,
                             dataset_root=dataset_root, experiment_id=f"exp-classifier-{d.name}",
                             producing_experiment_id="exp-golden", trait=trait)
     else:
-        (d / "classifier_operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        _write_stamp_bypassing_claim_rail(d, stamp, "classifier_operating_point")
 
 
 def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None = None):

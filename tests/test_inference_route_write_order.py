@@ -99,7 +99,9 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
         assert json.loads((out_dir / f"{stem}.json").read_text())["annotations"][0]["score"] \
             == pytest.approx(0.9)
 
-    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    import tcip_store as ts
+    from tcip_mcp.pipelines.resolution import sidecar_key
+    sidecar = ts.read(sidecar_key(out_dir))
     assert sidecar["operating_point"]["conf"]["value"] == pytest.approx(0.25)
     assert sidecar["checkpoint"] == "m"
     assert sidecar["checkpoint_sha256"] and sidecar["produced_at"]

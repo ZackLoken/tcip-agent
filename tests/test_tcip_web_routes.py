@@ -10,8 +10,10 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import tcip_store
 from tcip_annotation.json_io import read_annotations, write_annotations
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.audit import audit_log_key
 from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
 from tcip_web.app import app
 from tcip_web.paths import safe_join
@@ -37,6 +39,13 @@ def _write_pred(path, preds, *, w: int = 100, h: int = 80, subject: str = "catki
     anns = [Annotation(subject=subject, geometry=BBox(p[0], p[1], p[2], p[3]), score=p[4])
             for p in preds]
     write_annotations(str(path), anns, w, h)
+
+
+def _write_operating_point_sidecar(pred_dir, fields: dict) -> None:
+    """Author a bucket's ``operating_point.json`` stamp through the seam, not a bare file write."""
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), fields, expect=tcip_store.Version.ABSENT)
 
 
 # ── paths.safe_join ──────────────────────────────────────────────────────
@@ -517,20 +526,25 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     resp = _save_box(client, img_path, label_path, project_root=str(proj))
     assert resp.status_code == 200
 
-    audit = tmp_path / ".tcip" / "audit.jsonl"
-    assert audit.exists()
-    assert "gui_save_labels" in audit.read_text()
-    assert not (proj / ".tcip" / "audit.jsonl").exists()
+    assert any(e.get("tool") == "gui_save_labels" for e in _audit_entries(tmp_path))
+    assert _audit_entries(proj) == []
 
 
 # ── /api/review ─────────────────────────────────────────────────────────
 
 
-def _shard(state_dir: Path, shard_name: str) -> Path:
-    """The one review shard written for ``shard_name``, wherever its bucket directory put it."""
-    found = sorted((state_dir / "review").rglob(shard_name))
+def _shard_state(state_dir: Path, img_name: str) -> dict:
+    """The one review verdict recorded for ``img_name``, wherever its bucket key put it."""
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    found = [k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(state_dir)) if k.parts[1] == img_name]
     assert len(found) == 1, found
-    return found[0]
+    return tcip_store.read(found[0])["state"]
+
+
+def _audit_entries(root: Path) -> list[dict]:
+    """Every audit entry recorded in the log ``root`` names, through the seam."""
+    return list(tcip_store.read_log(audit_log_key(root)).records)
 
 
 def test_review_matches_end_to_end(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
@@ -612,11 +626,9 @@ def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path
         },
     )
     assert resp.status_code == 200
-    # the image's review shard should now exist (per-image file, not one whole-state file)
-    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
-    assert shard_path.exists()
-    data = json.loads(shard_path.read_text(encoding="utf-8"))
-    assert data["state"]["detections"][0]["action"] == "accepted"  # payload wraps {img_name, state}
+    # the image's review verdict should now exist (a shard keyed by image, not one whole-state record)
+    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+    assert state["detections"][0]["action"] == "accepted"
 
 
 def test_review_action_resolves_class_id_from_bucket_id_map(
@@ -632,19 +644,17 @@ def test_review_action_resolves_class_id_from_bucket_id_map(
     pred_dir.mkdir(parents=True)
     pred = pred_dir / "pred.json"
     _write_pred(pred, [(40, 32, 60, 48, 0.9)])
-    (pred_dir / "operating_point.json").write_text(
-        json.dumps({"checkpoint_sha256": "sha", "experiment_id": None,
-                    "id_map": {"dormant": 0, "elongated": 1}}),
-        encoding="utf-8")
+    _write_operating_point_sidecar(
+        pred_dir, {"checkpoint_sha256": "sha", "experiment_id": None,
+                   "id_map": {"dormant": 0, "elongated": 1}})
 
     resp = _review_action(
         client, img_path, gt, dataset_root,
         pred_path=str(pred), det_type="tp", class_name="elongated", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
-    data = json.loads(shard_path.read_text(encoding="utf-8"))
-    assert data["state"]["detections"][0]["class_id"] == 1  # resolved via the bucket's id_map
+    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+    assert state["detections"][0]["class_id"] == 1  # resolved via the bucket's id_map
 
 
 def test_review_action_records_unresolvable_class_id_as_none(
@@ -671,9 +681,8 @@ def test_review_action_records_unresolvable_class_id_as_none(
         pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
-    data = json.loads(shard_path.read_text(encoding="utf-8"))
-    assert data["state"]["detections"][0]["class_id"] is None
+    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+    assert state["detections"][0]["class_id"] is None
 
 
 def test_review_action_no_sidecar_records_unresolvable_class_id(
@@ -692,9 +701,8 @@ def test_review_action_no_sidecar_records_unresolvable_class_id(
         pred_path=str(pred), det_type="tp", class_name="catkin", action="accepted",
     )
     assert resp.status_code == 200
-    shard_path = _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json")
-    data = json.loads(shard_path.read_text(encoding="utf-8"))
-    assert data["state"]["detections"][0]["class_id"] is None
+    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+    assert state["detections"][0]["class_id"] is None
 
 
 def _review_action(client, img_path, gt, dataset_root, **over):
@@ -851,7 +859,7 @@ def test_review_action_auto_completes_and_audits(
     )
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
-    assert "gui_review_action" in (dataset_root / ".tcip" / "audit.jsonl").read_text()
+    assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
@@ -869,7 +877,7 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
         params={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
     )
     assert status.json()["status"] == "completed"
-    assert "gui_review_mark_complete" in (dataset_root / ".tcip" / "audit.jsonl").read_text()
+    assert any(e.get("tool") == "gui_review_mark_complete" for e in _audit_entries(dataset_root))
 
 
 def test_review_gt_edit_audits_into_the_log_of_the_dataset_it_wrote(
@@ -891,9 +899,8 @@ def test_review_gt_edit_audits_into_the_log_of_the_dataset_it_wrote(
     })
     assert resp.status_code == 200
 
-    assert "gui_review_save_gt" in (
-        dataset_root / ".tcip" / "audit.jsonl").read_text(encoding="utf-8")
-    assert not (project_root / ".tcip" / "audit.jsonl").exists()
+    assert any(e.get("tool") == "gui_review_save_gt" for e in _audit_entries(dataset_root))
+    assert _audit_entries(project_root) == []
 
 
 def test_review_action_records_subject_name_and_reviewer(
@@ -923,7 +930,7 @@ def test_review_action_records_subject_name_and_reviewer(
         },
     )
     assert resp.status_code == 200
-    entry = json.loads(_shard(state, "IMG_0000.JPG.json").read_text())["state"]["detections"][0]
+    entry = _shard_state(state, "IMG_0000.JPG")["detections"][0]
     assert entry["class_name"] == "catkin"  # real name, straight from the annotation's subject
     assert entry["reviewed_by"]  # non-empty reviewer
 
@@ -1259,9 +1266,8 @@ def test_review_subject_names_flow_from_annotations(
             },
         )
         assert resp.status_code == 200
-        shard = json.loads(
-            _shard(dataset_root / ".tcip" / "state", "IMG_0000.JPG.json").read_text())
-        return shard["state"]["detections"][0]["class_name"]
+        state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+        return state["detections"][0]["class_name"]
 
     assert _class_name_for("catkin") == "catkin"
     assert _class_name_for("efb") == "efb"  # different subject, its own name, no bleed

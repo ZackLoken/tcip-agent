@@ -1,29 +1,26 @@
 """An audited tool's entry lands in the one log its scope names.
 
-A tool that mutates a record travelling with the dataset records in that dataset's own
-``.tcip/audit.jsonl``, so the provenance moves with the data; every other call stays a platform
-event. Exactly one log receives each entry, and a platform entry keeps the shape it always had.
+A tool that mutates a record travelling with the dataset records in that dataset's own audit
+log, so the provenance moves with the data; every other call stays a platform event. Exactly
+one log receives each entry, and a platform entry keeps the shape it always had.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
 import tcip_mcp.audit as audit_module
+import tcip_store as ts
 
 CAPTURE_DATE = "2024-05-01"
 
 
 def _entries(root: Path) -> list[dict]:
-    """Every audit row under ``root``, or none when that root has no log at all."""
-    log = root / ".tcip" / "audit.jsonl"
-    if not log.is_file():
-        return []
-    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
+    """Every audit row scoped to ``root``, or none when that scope's log holds nothing yet."""
+    return list(ts.read_log(audit_module.audit_log_key(root)).records)
 
 
 def _rows_for(root: Path, tool: str) -> list[dict]:

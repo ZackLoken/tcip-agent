@@ -188,14 +188,14 @@ def build_worksheet(project_root: Path) -> str:
     disagreements = [r for r in reports if r.get("user_disagreement")]
     if disagreements:
         lines.append(f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed")
-        for r in disagreements[-15:]:
+        for r in disagreements[:15]:
             cat = r.get("category", "?")
             detail = str(r.get("detail", "")).replace("\n", " ")[:200]
             lines.append(f"- [{cat}] {detail}")
 
     if reports:
         lines.append(f"\n## Friction reports ({len(reports)}): machine-local, won't reach the repo alone")
-        for r in reports[-15:]:
+        for r in reports[:15]:
             cat = r.get("category", "?")
             detail = str(r.get("detail", "")).replace("\n", " ")[:160]
             lines.append(f"- [{cat}] {detail}")

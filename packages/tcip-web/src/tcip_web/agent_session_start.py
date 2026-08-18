@@ -1,12 +1,23 @@
-"""SessionStart ritual hook: inject the session-start ritual directive with live open-loop counts.
+"""SessionStart ritual hook: inject the session-start ritual directive naming the active project.
 
 Fast and stdlib-only by design (Anthropic guidance: SessionStart hooks must be quick, they are for
 context loading, never slow work). It spawns no subprocess and imports nothing heavy: it reads the
-active-project marker, counts open reports/retrospectives, and injects an ``additionalContext``
-directive telling the agent to run the ritual (``load_project_memory``/
-``inspect_project``/``doctor.py``) as its first actions. A shell hook has no MCP client, so it
-cannot run those calls itself, it makes them salient and dynamic, which prose in a large always-on
-file does not. ``additionalContext`` lands as a fresh session-start reminder at the top of context.
+active-project marker and injects an ``additionalContext`` directive telling the agent to run the
+ritual (``load_project_memory``/``inspect_project``/``doctor.py``) as its first actions. A shell
+hook has no MCP client, so it cannot run those calls itself, it makes them salient and dynamic,
+which prose in a large always-on file does not. ``additionalContext`` lands as a fresh
+session-start reminder at the top of context.
+
+It once also counted open reports/retrospectives by globbing the project's own directories, which
+undercounts to zero once a project's state moves to a database backend. Re-pointing that count
+through the storage seam was tried and rejected: the seam's own enumeration of those two record
+kinds lives in ``tcip_mcp.tools.meta_tools``, and importing it pulls in the MCP server's full tool
+registration (measured at several seconds, not the milliseconds a SessionStart hook gets), the
+same regression this module's own stdlib-only import test stands guard against. Calling
+``tcip_store.keys`` directly needs a store descriptor only that same module registers, so doing it
+here without that import would mean re-declaring the report/retrospective file layout a second
+time, the drift this platform's own seam discipline forbids. So the count is dropped rather than
+served wrong or duplicated: this hook now only names the active project.
 
 Best-effort: every path swallows its error and exits 0. A session-start hook must never break the
 session, and (the reason the earlier subprocess version was reverted) must never slow its spawn.
@@ -36,21 +47,11 @@ def _active_project() -> str:
         return ""
 
 
-def _count(proj: str, subdir: str, pattern: str) -> int:
-    try:
-        d = Path(proj) / ".tcip" / subdir
-        return len(list(d.glob(pattern))) if d.is_dir() else 0
-    except Exception:
-        return 0
-
-
 def _active_context(proj: str) -> str:
-    nrep = _count(proj, "reports", "*.json")
-    nret = _count(proj, "retrospectives", "*.md")
     name = Path(proj).name or proj
     return (
         "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
-        f"Active project: {name} ({proj}), {nrep} friction report(s), {nret} retrospective(s) open.\n\n"
+        f"Active project: {name} ({proj}).\n\n"
         "If this session continues work on that project, run the ritual first: load_project_memory "
         "(kind='reports' and kind='retrospectives'), inspect_project, then python scripts/doctor.py <project_root>.\n"
         "If the user's task is to create or switch to a different project, do that first (init_project "

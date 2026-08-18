@@ -12,7 +12,6 @@ covers model_registry.resolve_model_identity's checkpoint deserialization.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -78,13 +77,13 @@ class _CalStub:
 def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeypatch):
     """group_by="external" (the explicit-val_images_dir route) falls back to the exact-stem check
     and validates when genuinely disjoint, rather than mapping to unresolvable=True forever."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_ext"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["train_a", "train_b"], "group_by": "external"}), encoding="utf-8")
+    tcip_store.replace(split_key("exp_ext"), {"train": ["train_a", "train_b"], "group_by": "external"})
 
     cal, hold = _good_dense_op_records()
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
@@ -100,14 +99,14 @@ def test_external_marker_not_permanently_blocked_when_disjoint(tmp_path, monkeyp
 
 def test_external_marker_still_catches_a_real_leak(tmp_path, monkeypatch):
     """The exact-stem fallback must still refuse a genuine leak, not just always pass."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_ext2"
-    exp_dir.mkdir(parents=True)
     # Training trained on "c_a", the same stem the calibration reference uses below.
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["c_a", "other_stem"], "group_by": "external"}), encoding="utf-8")
+    tcip_store.replace(split_key("exp_ext2"), {"train": ["c_a", "other_stem"], "group_by": "external"})
 
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=_op_records("c"),
@@ -125,7 +124,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
     """group_key_map, exercised through _auto_train_val -> _persist_split_manifest ->
     _train_disjointness, must not permanently block the model, and the persisted map must
     actually be used for a real group-level leak check, not just declared unresolvable."""
-    from tcip_mcp.experiments import create_experiment, experiments_dir
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
@@ -146,7 +145,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
 
     create_experiment("e1", {})
     _persist_split_manifest("e1", train_ds, val_ds, data_cfg)
-    split = json.loads((experiments_dir() / "e1" / "split.json").read_text())
+    split = read_split_manifest("e1")
     assert split["group_by"] == "explicit_map"
     assert split["group_key_map"] == group_key_map  # the map itself, not just the policy name
 
@@ -172,15 +171,14 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
 def test_train_disjointness_named_group_by_output_unchanged(tmp_path, monkeypatch):
     """Byte-identical to the pre-spatial-split behavior: a tile_prefix split.json is untouched
     by the spatial_strip branch in _train_disjointness."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_named"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["srcA_0_0", "srcA_0_1", "srcB_0_0"], "group_by": "tile_prefix"}),
-        encoding="utf-8",
-    )
+    tcip_store.replace(split_key("exp_named"),
+                       {"train": ["srcA_0_0", "srcA_0_1", "srcB_0_0"], "group_by": "tile_prefix"})
     result = _train_disjointness("exp_named", {"srcB_0_0"}, set())
     # leaked_stems stays empty here: a named group_by resolves every train and reference stem,
     # so nothing falls through to the exact-stem fallback; leaked_groups is the real signal.
@@ -191,15 +189,16 @@ def test_train_disjointness_named_group_by_output_unchanged(tmp_path, monkeypatc
 
 
 def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, monkeypatch):
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_spatial"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(json.dumps({
+    tcip_store.replace(split_key("exp_spatial"), {
         "train": ["mosaic::strip_x_1"],
         "val": ["mosaic::strip_x_0"], "group_by": "spatial_strip",
-    }), encoding="utf-8")
+    })
 
     # A reference drawn from the same source is a real leak: region-scoping aside, the trained
     # pixels and the reference still share one source image.
@@ -215,14 +214,14 @@ def test_train_disjointness_spatial_strip_detects_same_source_leak(tmp_path, mon
 def test_train_disjointness_rects_kwargs_default_none_is_byte_identical(tmp_path, monkeypatch):
     """cal_rects/hold_rects default to None: passing them explicitly as None must produce
     byte-identical output to every existing caller, which omits them entirely."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_noop"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(json.dumps({
-        "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
-    }), encoding="utf-8")
+    tcip_store.replace(split_key("exp_noop"),
+                       {"train": ["mosaic::strip_x_1"], "group_by": "spatial_strip"})
 
     omitted = _train_disjointness("exp_noop", {"mosaic"}, set())
     explicit_none = _train_disjointness(
@@ -239,19 +238,20 @@ def test_train_disjointness_spatial_strip_geometric_containment(tmp_path, monkey
     every persisted train region) instead of the lexical same-source check, and catches a leak
     the lexical check alone would miss: a rect that spills into train from a source stem that
     isn't literally the training source's own name."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_geo"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(json.dumps({
+    tcip_store.replace(split_key("exp_geo"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
         "spatial": {
             "train_region": [[0, 0, 500, 1000]],
             "val_region": [[500, 0, 750, 1000]],
             "test_region": [[750, 0, 1000, 1000]],
         },
-    }), encoding="utf-8")
+    })
 
     clean = _train_disjointness(
         "exp_geo", {"mosaic"}, set(), cal_rects={"mosaic": (550, 100, 700, 300)})
@@ -276,12 +276,13 @@ def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tm
     calibration side, distinct from val/test) must clear the geometric check exactly like a
     val/test rect does -- calibration_region was omitted from the non-train set once and every
     block calibration failed as a result; this pins it against regression."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import _train_disjointness
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_geo4"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(json.dumps({
+    tcip_store.replace(split_key("exp_geo4"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
         "spatial": {
             "train_region": [[0, 0, 500, 1000]],
@@ -289,7 +290,7 @@ def test_train_disjointness_spatial_strip_geometric_admits_calibration_region(tm
             "calibration_region": [[650, 0, 800, 1000]],
             "test_region": [[800, 0, 1000, 1000]],
         },
-    }), encoding="utf-8")
+    })
 
     clean = _train_disjointness(
         "exp_geo4", {"mosaic"}, {"mosaic"},
@@ -307,7 +308,7 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
     val_region (this phase's own addition), and _train_disjointness's geometric check reads
     them back correctly -- a calibration rect drawn from inside the persisted val region reads
     clean, and one drawn from inside the persisted train region is caught."""
-    from tcip_mcp.experiments import create_experiment, experiments_dir
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
@@ -322,7 +323,7 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
 
     create_experiment("exp_geo_e2e", {})
     _persist_split_manifest("exp_geo_e2e", train_ds, val_ds, data_cfg)
-    split = json.loads((experiments_dir() / "exp_geo_e2e" / "split.json").read_text())
+    split = read_split_manifest("exp_geo_e2e")
     train_region = split["spatial"]["train_region"]
     val_region = split["spatial"]["val_region"]
     assert train_region and val_region
@@ -361,7 +362,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
     mapping an identity back to its stem, per the other test in this section) - but the bare
     stem must still never appear as a member on its own, and a different-source reference
     must still read clean end to end through the real training-launch path."""
-    from tcip_mcp.experiments import create_experiment, experiments_dir
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.pipelines.operating_point import _train_disjointness
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
@@ -376,7 +377,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
 
     create_experiment("exp_spatial_e2e", {})
     _persist_split_manifest("exp_spatial_e2e", train_ds, val_ds, data_cfg)
-    split = json.loads((experiments_dir() / "exp_spatial_e2e" / "split.json").read_text())
+    split = read_split_manifest("exp_spatial_e2e")
     assert split["group_by"] == "spatial_strip"
     assert stem not in split["train"]  # the bare stem itself is never a member
     assert all("::strip_" in s for s in split["train"])
@@ -406,14 +407,15 @@ def test_review_to_records_stems_the_image_id():
 def test_review_confirmed_leak_now_detected(tmp_path, monkeypatch):
     """Extensioned review ids in the same tile group as training stems must be caught, not
     silently reported clean."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.feedback.review_calibration import resolve_operating_point_from_review
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_review"
-    exp_dir.mkdir(parents=True)
     # Trained on two tiles of source "srcA".
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["srcA_0_0", "srcA_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
+    tcip_store.replace(split_key("exp_review"),
+                       {"train": ["srcA_0_0", "srcA_0_1"], "group_by": "tile_prefix"})
 
     def _entry(gt, pred, conf):
         return {"action": "accepted", "class_id": 0, "gt_bbox_norm": gt, "pred_bbox_norm": pred,
@@ -541,8 +543,16 @@ def test_stale_locked_stem_refuses_cleanly(tmp_path):
 
 
 def test_corrupt_lock_file_refuses_instead_of_silent_redraw(tmp_path):
+    """Bound to the file backend: undecodable bytes behind a record have no seam expression (a
+    write always encodes a valid value), so this reaches the file the seam's own locator places
+    them at. What is under test, catching DecodeError, is the store's own concern, not the file
+    backend's, so this exercises it identically to a corruption reached any other way."""
+    import tcip_store
+    from tcip_store.file_backend import FileBackend
+
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_path, resolve_locked_cal_holdout_split
 
+    tcip_store.bind(FileBackend())
     lock_path = cal_holdout_lock_path("corrupt-test", scope_root=tmp_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("{not valid json", encoding="utf-8")

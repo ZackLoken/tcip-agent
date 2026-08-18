@@ -33,6 +33,9 @@ def test_adoption_repins_platform_root(tmp_path, monkeypatch):
 
 
 def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monkeypatch):
+    import tcip_store as ts
+    from tcip_mcp.model_registry import registry_index_key
+
     proj = _adopt(tmp_path, monkeypatch)
     clean_cwd = tmp_path / "cwd"
     clean_cwd.mkdir()
@@ -40,16 +43,18 @@ def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monke
     from tcip_mcp import experiments
 
     experiments.create_experiment("exp_unify", {"model_source": {"builder": "x:y"}}, data_source="imgs")
-    assert (proj / ".tcip" / "experiments" / "exp_unify").is_dir()
+    # config_key resolves against the pinned platform root with no root override, so its
+    # existence proves the record landed under the adopted project, not wherever cwd is.
+    assert ts.exists(experiments.config_key("exp_unify"))
 
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"fake checkpoint")
     # Auto-register path uses the experiments-module default (empty project_path) → platform root.
     result = experiments.register_model_from_experiment("exp_unify", str(ckpt))
     assert "error" not in result
-    assert (proj / ".tcip" / "models" / "registry.json").is_file()
+    assert ts.exists(registry_index_key(proj))
     # A different project's registry is untouched: nothing leaked to the repo root / cwd.
-    assert not (Path.cwd() / ".tcip" / "models" / "registry.json").is_file()
+    assert not ts.exists(registry_index_key(Path.cwd()))
 
 
 def test_no_adoption_keeps_cwd_default(tmp_path, monkeypatch):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import tcip_store
+from tcip_mcp.web_client import gui_snapshot_key
 from tcip_web.state import DatasetSelection, GuiState, StateStore
 
 
@@ -31,8 +33,8 @@ def test_flush_targets_current_project_not_stale(tmp_path: Path) -> None:
     store._state = GuiState(dataset=DatasetSelection(project_root=str(proj_b)))
     store._flush_sync()
 
-    assert (proj_b / ".tcip" / "state" / "gui.json").exists()
-    assert not (proj_a / ".tcip" / "state" / "gui.json").exists()
+    assert tcip_store.exists(gui_snapshot_key(str(proj_b)))
+    assert not tcip_store.exists(gui_snapshot_key(str(proj_a)))
 
 
 def test_load_from_disk_roundtrip(tmp_path: Path) -> None:

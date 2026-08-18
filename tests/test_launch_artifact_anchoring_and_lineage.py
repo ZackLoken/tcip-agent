@@ -8,11 +8,12 @@ assert only what the parent resolves, writes and hands to it.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
 import pytest
+
+import tcip_store as ts
 
 
 @pytest.fixture
@@ -91,16 +92,19 @@ def test_a_relative_output_dir_anchors_to_the_project_root_not_the_process_cwd(
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools_launch(_detection_config(images_dir, labels_dir), "runs/nightly")
 
+    from tcip_mcp.tools.training_tools import launch_config_key
+
     run_dir = Path(res["output_dir"])
     assert run_dir == project / "runs" / "nightly" / res["run_id"]
-    assert (run_dir / "launch_config.json").is_file()
+    assert ts.exists(launch_config_key(run_dir))
     assert not (server_cwd / "runs").exists()
 
     argv = recorded_children[0].argv
     assert argv[argv.index("--output-dir") + 1] == str(run_dir)
 
-    status = json.loads(
-        (project / ".tcip" / "experiments" / res["experiment_id"] / "status.json").read_text())
+    from tcip_mcp.experiments import status_key
+
+    status = ts.read(status_key(res["experiment_id"]))
     assert status["output_dir"] == str(run_dir)
 
 
@@ -118,10 +122,14 @@ def test_an_absolute_output_dir_stays_the_callers_own_choice(
     images_dir, labels_dir = _canonical_dataset(project / "ds")
     res = training_tools_launch(_detection_config(images_dir, labels_dir), str(scratch))
 
+    from tcip_mcp.tools.training_tools import launch_config_key
+
     assert Path(res["output_dir"]) == scratch / res["run_id"]
-    assert (scratch / res["run_id"] / "launch_config.json").is_file()
+    assert ts.exists(launch_config_key(scratch / res["run_id"]))
     # The experiment record itself still belongs to the project, wherever the weights go.
-    assert (project / ".tcip" / "experiments" / res["experiment_id"]).is_dir()
+    from tcip_mcp.experiments import status_key
+
+    assert ts.exists(status_key(res["experiment_id"], root=project))
 
 
 def test_launched_run_records_the_datasets_identity_in_its_lineage(
@@ -139,8 +147,9 @@ def test_launched_run_records_the_datasets_identity_in_its_lineage(
 
     res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
 
-    lineage = json.loads(
-        (tmp_path / ".tcip" / "experiments" / res["experiment_id"] / "lineage.json").read_text())
+    from tcip_mcp.experiments import lineage_key
+
+    lineage = ts.read(lineage_key(res["experiment_id"]))
     assert lineage["dataset_id"] == registered["id"]
     assert lineage["dataset_fingerprint"] == registered["fingerprint"]
 

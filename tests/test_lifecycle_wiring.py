@@ -1,13 +1,14 @@
 """Training↔experiment↔registry lifecycle wiring (registration from an
 experiment links final metrics + a back-reference + lineage)."""
 
-import json
+import tcip_store as ts
 
 
 def test_register_model_from_experiment_links_metrics_and_lineage(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
     from tcip_mcp.experiments import (
         create_experiment,
+        lineage_key,
         log_metrics,
         register_model_from_experiment,
     )
@@ -31,7 +32,7 @@ def test_register_model_from_experiment_links_metrics_and_lineage(tmp_path, monk
     assert m["metrics"]["map50"] == 0.81
 
     # The experiment's lineage records the model weights.
-    lineage = json.loads((tmp_path / ".tcip" / "experiments" / "exp1" / "lineage.json").read_text())
+    lineage = ts.read(lineage_key("exp1"))
     assert lineage["model_weights"] == str(ckpt)
 
 

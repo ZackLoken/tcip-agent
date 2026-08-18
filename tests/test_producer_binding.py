@@ -63,11 +63,17 @@ def _bucket(root: Path, *, name: str = "live", date: str = "2026-03-04", stems=(
 
 
 def _write_raw(pred_dir: Path, stamp: dict, document: str = "operating_point") -> Path:
-    """A stamp written straight to disk, the way an actor with filesystem access writes one."""
+    """A stamp written straight through the seam, bypassing write_sidecar's own claim check: the
+    way a forged, hand-authored or edited-after-the-fact stamp reaches the store."""
+    import tcip_store
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
     pred_dir.mkdir(parents=True, exist_ok=True)
-    path = pred_dir / f"{document}.json"
-    path.write_text(json.dumps(stamp), encoding="utf-8")
-    return path
+    key = sidecar_key(pred_dir, document)
+    with tcip_store.transaction(key) as txn:
+        txn.write(key, stamp)
+    return pred_dir / f"{document}.json"
 
 
 def _count_validity(pred_dir: Path) -> dict:
@@ -456,7 +462,17 @@ def test_an_untouched_validated_bucket_reconciles_across_repeated_deliveries(tmp
 
 
 def test_a_dataset_moved_to_a_new_absolute_path_still_verifies(tmp_path):
-    """Covered buckets are keyed inside the dataset, so moving the dataset whole changes nothing."""
+    """Covered buckets are keyed inside the dataset, so moving the dataset whole changes nothing.
+
+    Bound to the file backend: the sqlite backend keeps a connection to the pre-move root open
+    for the test process's life, and Windows refuses to rename a directory holding an open
+    database handle, a mechanical property of that backend rather than of the claim under test,
+    which every other case in this module already exercises against both backends.
+    """
+    import tcip_store
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
     original = tmp_path / "ds"
     pred_dir = _bucket(original)
     write_bound_sidecar(pred_dir, _count_stamp(), dataset_root=original)

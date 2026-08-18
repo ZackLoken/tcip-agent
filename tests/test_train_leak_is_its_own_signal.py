@@ -9,13 +9,12 @@ whichever of its two mechanisms (group-level or exact-stem) actually found it.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 pytest.importorskip("torch")
 
+import tcip_store  # noqa: E402
+from tcip_mcp.experiments import split_key  # noqa: E402
 from tcip_mcp.pipelines.operating_point import resolve_operating_point  # noqa: E402
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT  # noqa: E402
 
@@ -43,11 +42,8 @@ def _records(stems: list[str], offset: float) -> list[dict]:
     return recs
 
 
-def _write_split(tmp_path: Path, experiment_id: str, train_stems: list[str]) -> None:
-    exp_dir = tmp_path / ".tcip" / "experiments" / experiment_id
-    exp_dir.mkdir(parents=True, exist_ok=True)
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": train_stems, "group_by": "stem"}), encoding="utf-8")
+def _write_split(experiment_id: str, train_stems: list[str]) -> None:
+    tcip_store.replace(split_key(experiment_id), {"train": train_stems, "group_by": "stem"})
 
 
 def _resolve(experiment_id: str):
@@ -58,13 +54,13 @@ def _resolve(experiment_id: str):
         holdout_records=_records(HOLD_STEMS, 100000.0))
 
 
-def test_a_reference_drawn_entirely_from_the_training_split_is_refused(tmp_path):
+def test_a_reference_drawn_entirely_from_the_training_split_is_refused():
     """Calibration and holdout share no image with each other, so the cal-versus-holdout signal
     reads clean, yet every one of their images was trained on. The refusal comes from the
     train-disjointness result alone, which here reports its leak at group level with nothing in the
     exact-stem list beside it.
     """
-    _write_split(tmp_path, "exp_leaky", CAL_STEMS + HOLD_STEMS)
+    _write_split("exp_leaky", CAL_STEMS + HOLD_STEMS)
 
     b = _resolve("exp_leaky")
     sweep = b.params["conf"].sweep
@@ -78,11 +74,11 @@ def test_a_reference_drawn_entirely_from_the_training_split_is_refused(tmp_path)
     assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
-def test_the_same_reference_validates_against_a_training_split_it_never_touched(tmp_path):
+def test_the_same_reference_validates_against_a_training_split_it_never_touched():
     """The companion obligation: the identical records, against a run trained on other images
     entirely, must earn the held-out stamp.
     """
-    _write_split(tmp_path, "exp_clean", [f"other_{i}" for i in range(6)])
+    _write_split("exp_clean", [f"other_{i}" for i in range(6)])
 
     b = _resolve("exp_clean")
     sweep = b.params["conf"].sweep

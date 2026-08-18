@@ -271,8 +271,9 @@ def test_materialize_dataset_copies_every_sibling_and_the_manifest(tmp_path):
     assert (out / "images" / "cap_R.tif").is_file()
     assert (out / "annotations" / "cap.json").is_file()
 
-    import json
-    manifest = json.loads((out / "curated_manifest.json").read_text())
+    import tcip_store as ts
+    from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
+    manifest = ts.read(curated_manifest_key(out))
     assert manifest["images"][0]["image"] == "cap.bandgroup"
 
     # The output's own manifest is independently readable (band filenames resolve alongside it).

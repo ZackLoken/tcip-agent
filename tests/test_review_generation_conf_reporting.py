@@ -8,7 +8,6 @@ own recorded value, and reports its absence as absent rather than as a floor of 
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -28,7 +27,11 @@ def _bucket(tmp_path: Path, name: str, sidecar: dict | None) -> Path:
     d = tmp_path / "predictions" / name
     d.mkdir(parents=True)
     if sidecar is not None:
-        (d / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
+        import tcip_store
+        from tcip_mcp.pipelines.resolution import sidecar_key
+
+        tcip_store.replace(sidecar_key(d, "operating_point"), sidecar,
+                           expect=tcip_store.Version.ABSENT)
     return d
 
 

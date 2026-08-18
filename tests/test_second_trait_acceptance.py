@@ -14,13 +14,14 @@ constructed to prove the structural invariant.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+import tcip_store as ts
+from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_web.app import app
 
 _ID_MAP = {"closed": 0, "open": 1}
@@ -133,11 +134,13 @@ def _currant_bloom_fixture(
                                 dataset_root=root, experiment_id=f"exp-cls-{date_str}",
                                 producing_experiment_id="exp-1", trait="currant_bloom")
         else:
-            (bucket / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
+            from tcip_mcp.pipelines.resolution import write_sidecar
+
+            write_sidecar(bucket, sidecar, "operating_point")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"
-    mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+    ts.replace(plant_mapping_key(mapping_path), mapping)
     return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
             "predictions_by_date": preds, "trait": "currant_bloom"}
 

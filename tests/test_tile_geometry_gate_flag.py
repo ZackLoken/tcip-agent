@@ -9,8 +9,9 @@ persisted training geometry.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+import tcip_store as ts
 
 from tcip_mcp.pipelines.resolution import (
     VALIDATED_EXPLICIT_GEOMETRY,
@@ -18,6 +19,7 @@ from tcip_mcp.pipelines.resolution import (
     VALIDATED_PERSISTED_GEOMETRY,
     raw_operating_point,
     reconcile_tile_size_validity,
+    sidecar_key,
     tile_size_gate_flag,
 )
 
@@ -30,10 +32,16 @@ def _provenance(*, tile_size: int | None, tile_size_source: str) -> dict:
 
 
 def _bucket(path: Path, provenance: dict) -> str:
-    """A written prediction bucket carrying that run's own operating-point provenance."""
+    """A written prediction bucket carrying that run's own operating-point provenance.
+
+    Written through the seam, bypassing the writer-side claim rail: this stamp claims
+    ``validated`` with no ``validated_by`` pointer on purpose, since the dimension under test
+    here is the tile-geometry gate flag, not the validation-record binding.
+    """
     path.mkdir(parents=True, exist_ok=True)
-    (path / "operating_point.json").write_text(
-        json.dumps({"validated": True, "operating_point": provenance}), encoding="utf-8")
+    key = sidecar_key(path, "operating_point")
+    with ts.transaction(key) as txn:
+        txn.write(key, {"validated": True, "operating_point": provenance})
     return str(path)
 
 

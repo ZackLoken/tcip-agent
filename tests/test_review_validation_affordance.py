@@ -176,8 +176,11 @@ def _write_shard(review_dir: Path, bucket_dir: Path, name: str, detections: list
     Each verdict records the identity of the prediction document the reviewer saw, exactly as the
     route does, so the promotion has the recorded digest it compares against the file on disk. The
     bucket's prediction file for ``name`` must therefore already be written when this is called.
+    Written through the seam the engine itself writes through, so the record lands wherever the
+    selected backend actually keeps it.
     """
-    from tcip_annotation.review_engine import bucket_dirname
+    import tcip_store
+    from tcip_annotation.review_engine import review_verdict_key
     from tcip_mcp.prediction_buckets import bucket_key_of
 
     digest = _pred_digest(bucket_dir, name)
@@ -185,14 +188,14 @@ def _write_shard(review_dir: Path, bucket_dir: Path, name: str, detections: list
                if isinstance(d.get("producer_identity"), dict) else d
                for d in detections]
     bucket = bucket_key_of(bucket_dir)
-    shard_dir = review_dir / bucket_dirname(bucket)
-    shard_dir.mkdir(parents=True, exist_ok=True)
-    (shard_dir / f"{name}.json").write_text(
-        json.dumps({"bucket": bucket, "img_name": name,
-                    "state": {"img_status": "completed",
-                              "gt_preexisting": gt_preexisting,
-                              "detections": entries}}),
-        encoding="utf-8")
+    state_dir = Path(review_dir).parent  # review_verdict_key wants the state dir, review_dir's parent
+    tcip_store.replace(
+        review_verdict_key(state_dir, bucket, name),
+        {"bucket": bucket, "img_name": name,
+         "state": {"img_status": "completed",
+                   "gt_preexisting": gt_preexisting,
+                   "detections": entries}},
+        expect=tcip_store.Version.ABSENT)
 
 
 def _pred_digest(bucket_dir: Path, image_name: str) -> str | None:
@@ -220,7 +223,11 @@ def _write_sidecar(pred_dir: Path, identity: dict, *, generation_conf: float | N
         "validated": False,
         "operating_point": op,
     }
-    (pred_dir / "operating_point.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar,
+                       expect=tcip_store.Version.ABSENT)
 
 
 def _make_project(tmp_path: Path, *, floored: bool, producer_identity: dict = _IDENTITY,
@@ -303,7 +310,10 @@ def client():
 
 
 def _read_sidecar(pred_dir: str) -> dict:
-    return json.loads((Path(pred_dir) / "operating_point.json").read_text(encoding="utf-8"))
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    return tcip_store.read(sidecar_key(pred_dir, "operating_point"))
 
 
 def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
@@ -342,12 +352,16 @@ def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp
     absence against the absence still on disk rather than skipping the comparison, so a review
     holding one still earns its record."""
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
     negative = client.post("/api/review/mark_complete", json={
         "dataset_root": proj, "image_name": "Z.jpg", "pred_dir": pred_dir})
     assert negative.status_code == 200, negative.text
-    shard = json.loads(
-        next(iter(sorted((Path(proj) / ".tcip" / "state" / "review").rglob("Z.jpg.json"))))
-        .read_text(encoding="utf-8"))
+    (shard_key,) = [k for k in tcip_store.keys(REVIEW_VERDICTS_STORE,
+                                                str(Path(proj) / ".tcip" / "state"))
+                    if k.parts[1] == "Z.jpg"]
+    shard = tcip_store.read(shard_key)
     assert shard["state"]["producer_identity"]["prediction_digest"] is None
     assert shard["state"]["adjudication_covered"] is True
 
@@ -439,13 +453,18 @@ def test_route_honestly_refuses_when_class_id_unresolvable(client, tmp_path: Pat
     # id_map never recognized its class_name) must make the route refuse loudly (400, naming the
     # real cause) rather than silently stamp VALIDATED_REVIEW_CONFIRMED on a reference the dead
     # `class_id` field would otherwise default to category_id 1 for every entry.
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
-    review_dir = Path(proj) / ".tcip" / "state" / "review"
-    shard_path = next(iter(sorted(review_dir.rglob("A.jpg.json"))))
-    shard = json.loads(shard_path.read_text(encoding="utf-8"))
+    state_dir = Path(proj) / ".tcip" / "state"
+    (shard_key,) = [k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, str(state_dir))
+                    if k.parts[1] == "A.jpg"]
+    stored = tcip_store.read_versioned(shard_key)
+    shard = stored.value
     for entry in shard["state"]["detections"]:
         entry["class_id"] = None
-    shard_path.write_text(json.dumps(shard), encoding="utf-8")
+    tcip_store.replace(shard_key, shard, expect=stored.version)
 
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
@@ -481,12 +500,16 @@ def test_route_promotes_over_a_validated_stamp_no_record_answers_for(client, tmp
     a validation. Reading the raw flag would let a forged or orphaned claim both survive and deny
     the breeder the real validation their review earned, so the route verifies before it decides and
     promotes over it."""
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
     proj, pred_dir = _make_dense_reviewed_project(tmp_path)
-    asserted = _read_sidecar(pred_dir)
+    stored = tcip_store.read_versioned(sidecar_key(pred_dir, "operating_point"))
+    asserted = stored.value
     asserted["validated"] = True
     asserted["validated_reference"] = "held_out_annotations"
     asserted["operating_point"]["conf"] = {"validated_against": "held_out_annotations", "value": 0.31}
-    Path(pred_dir, "operating_point.json").write_text(json.dumps(asserted), encoding="utf-8")
+    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), asserted, expect=stored.version)
 
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})

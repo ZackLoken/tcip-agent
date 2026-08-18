@@ -556,7 +556,9 @@ def test_export_predictions_ships_when_tile_size_has_a_real_basis(
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
-    sidecar = json.loads((out / "operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(out)
     assert sidecar["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert sidecar["validated"] is True
 
@@ -592,7 +594,9 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
     assert "error" not in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert r["validated"] is False  # floored despite conf's own clean reference
-    sidecar = json.loads((out / "operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(out)
     assert sidecar["validated"] is False
     assert (out / "a.json").exists()  # the honestly-flagged provisional bucket still wrote
 
@@ -689,7 +693,9 @@ def _run_gui_inference_worker(tmp_path, monkeypatch, *, tile, train_tile_size=No
 
 
 def _sidecar_tile_reference(out_dir):
-    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    op = read_operating_point_sidecar(out_dir)["operating_point"]
     return op["tile_size"]["validated_against"]
 
 
@@ -753,7 +759,9 @@ def test_gui_launch_with_no_tile_field_derives_from_the_checkpoint_not_a_default
         tmp_path, monkeypatch, tile=None, tile_source="default", train_tile_size=224)
     assert job.status == "completed"
     assert (out_dir / "img.json").exists()
-    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    op = read_operating_point_sidecar(out_dir)["operating_point"]
     assert op["tiled"]["value"] is True
     assert _sidecar_tile_reference(out_dir) == VALIDATED_PERSISTED_GEOMETRY
 
@@ -767,7 +775,9 @@ def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
         tmp_path, monkeypatch, tile=None, tile_source="default")
     assert job.status == "completed"
     assert (out_dir / "img.json").exists()
-    op = json.loads((out_dir / "operating_point.json").read_text())["operating_point"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    op = read_operating_point_sidecar(out_dir)["operating_point"]
     assert op["tiled"]["value"] is False
     assert _sidecar_tile_reference(out_dir) is None  # never entered the gate at all
 
@@ -788,7 +798,9 @@ def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=No
     if is_validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        from tcip_mcp.pipelines.resolution import write_sidecar
+
+        write_sidecar(d, stamp)
     return str(d)
 
 
@@ -1100,7 +1112,9 @@ def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
     export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
                           provenance={"produced_at": "2026-03-04T12:00:00+00:00"})
 
-    pointer = json.loads((Path(d) / "operating_point.json").read_text())["validated_by"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    pointer = read_operating_point_sidecar(d)["validated_by"]
     row = _delivered_row(out)
     assert row["measurement_validated"] == VALIDATED_HELD_OUT
     assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
@@ -1120,7 +1134,9 @@ def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_pa
                                      "experiment_id": "exp_that_never_ran",
                                      "operating_point_conf": 0.4})
 
-    pointer = json.loads((Path(d) / "operating_point.json").read_text())["validated_by"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    pointer = read_operating_point_sidecar(d)["validated_by"]
     row = _delivered_row(out)
     assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
     # The record's own producing run wins over the asserted one, so the forged name never ships.
@@ -1131,11 +1147,12 @@ def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_pa
 
 
 def _audit_rows(root, tool):
-    log = Path(root) / ".tcip" / "audit.jsonl"
-    if not log.is_file():
-        return []
-    return [r for r in (json.loads(ln) for ln in log.read_text().splitlines() if ln)
-            if r["tool"] == tool]
+    import tcip_store
+
+    from tcip_mcp.audit import audit_log_key
+
+    page = tcip_store.read_log(audit_log_key(root))
+    return [r for r in page.records if r["tool"] == tool]
 
 
 def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
@@ -1147,7 +1164,9 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
     export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), trait_name="stem_count",
                           pred_dirs=[d])
 
-    pointer = json.loads((Path(d) / "operating_point.json").read_text())["validated_by"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    pointer = read_operating_point_sidecar(d)["validated_by"]
     rows = _audit_rows(tmp_path / "ds", "export_aggregated_csv")
     assert len(rows) == 1, rows
     assert rows[0]["record_digests"] == [pointer["record_digest"]]
@@ -1160,12 +1179,18 @@ def test_the_delivery_records_what_it_verified_in_the_dataset_own_log(tmp_path):
 def test_an_unbound_bucket_records_why_it_was_not_verified(tmp_path):
     """The same event on the failing side: a reader of the log sees which bucket floored the
     delivery and the reason, not only that a CSV was written."""
+    import tcip_store
+
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import sidecar_key
 
     d = _write_bucket(tmp_path, "unbound", conf_ref=VALIDATED_HELD_OUT, validated=False)
-    stamp = json.loads((Path(d) / "operating_point.json").read_text())
-    (Path(d) / "operating_point.json").write_text(json.dumps({**stamp, "validated": True}),
-                                                  encoding="utf-8")
+    # Forges a stamp claiming validated=True with no real validated_by, exactly the shape
+    # write_sidecar's own claim check refuses, so this writes under it, through the seam.
+    key = sidecar_key(d)
+    with tcip_store.transaction(key) as txn:
+        stamp = txn.read(key)
+        txn.write(key, {**stamp, "validated": True})
 
     export_aggregated_csv(_COUNT_RESULTS, str(tmp_path / "o.csv"), trait_name="stem_count",
                           pred_dirs=[d], acknowledge_unvalidated=True)

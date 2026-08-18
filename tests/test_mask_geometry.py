@@ -15,6 +15,7 @@ import math
 import numpy as np
 import pytest
 
+import tcip_store as ts
 from tcip_mcp.pipelines.measurement import instance_geometries, mask_geometry
 
 
@@ -260,18 +261,14 @@ def test_an_annotations_reference_can_never_validate_a_physical_scale():
     assert thr.is_shippable is False
 
 
-# --------------------------------------------------------------------------
-# resolve_scale.json: the on-disk sidecar a delivery door reconciles a
-# physical scale from (no production writer yet, so the fixture is written
-# directly, the same style test_delivery_gate.py's _write_bucket uses for
-# operating_point.json).
-# --------------------------------------------------------------------------
+# resolve_scale.json: the sidecar a delivery door reconciles a physical scale from.
 
 def _write_scale_sidecar(path, *, validated_against, value=0.05, unit="mm", capture_id=None):
-    import json
+    """Plant a resolve_scale.json stamp through the seam, bypassing the writer-side claim rail."""
+    from tcip_mcp.pipelines.resolution import sidecar_key
 
     path.mkdir(parents=True, exist_ok=True)
-    (path / "resolve_scale.json").write_text(json.dumps({
+    stamp = {
         "validated": validated_against == "physical_measurement",
         "operating_point": {
             "scale": {
@@ -280,18 +277,18 @@ def _write_scale_sidecar(path, *, validated_against, value=0.05, unit="mm", capt
                 "validated_against": validated_against,
             },
         },
-    }), encoding="utf-8")
+    }
+    key = sidecar_key(path, "resolve_scale")
+    with ts.transaction(key) as txn:
+        txn.write(key, stamp)
     return str(path)
 
 
 def _write_bound_scale_sidecar(path, dataset_root, *, value=0.05, unit="mm", capture_id=None,
                                experiment_id="exp-scale"):
-    """A ``resolve_scale.json`` sidecar genuinely answered for by a validation record, for the tests
-    whose subject is a scale claim that did clear rather than one merely stamped as such."""
-    import json
-
+    """A resolve_scale.json sidecar genuinely answered for by a validation record."""
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
-    from tests._binding_fixtures import file_validation_record
+    from tests._binding_fixtures import write_bound_sidecar
 
     stamp = {
         "validated": True, "trait": "catkin",
@@ -303,10 +300,9 @@ def _write_bound_scale_sidecar(path, dataset_root, *, value=0.05, unit="mm", cap
             },
         },
     }
-    bound = file_validation_record(stamp, document="resolve_scale", dataset_root=dataset_root,
-                                   experiment_id=experiment_id)
     path.mkdir(parents=True, exist_ok=True)
-    (path / "resolve_scale.json").write_text(json.dumps(bound), encoding="utf-8")
+    write_bound_sidecar(path, stamp, document="resolve_scale", dataset_root=dataset_root,
+                        experiment_id=experiment_id)
     return str(path)
 
 

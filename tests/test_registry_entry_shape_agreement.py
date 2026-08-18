@@ -131,7 +131,14 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     Absence and corruption are different states: a project that registered nothing has no models,
     while a project whose index will not parse has models nobody can see. Folding the second into
     the first hands a breeder a clean bill of health for a registry that is unreadable.
+
+    Bound to the file backend on purpose: corruption is injected by truncating the index's own
+    raw bytes on disk, which only means something for a document a file actually holds.
     """
+    from tcip_store import bind
+    from tcip_store.file_backend import FileBackend
+
+    bind(FileBackend())
     root = tmp_path / "proj"
     root.mkdir()
     reg = ModelRegistry(str(root))

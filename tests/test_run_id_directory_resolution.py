@@ -20,7 +20,8 @@ def _experiment(experiment_id: str, run_id: str, output_dir: str) -> None:
 
 
 def test_ambiguous_relaunch_suffix_resolves_through_the_stamped_run_id(tmp_path):
-    from tcip_mcp.experiments import experiments_dir, resolve_experiment_dir_for_run
+    from tcip_mcp import experiments as exp
+    from tcip_mcp.experiments import resolve_experiment_dir_for_run
 
     run_id = "run_20260114_7f3c"
     decoy = f"alpha_{run_id}"
@@ -28,8 +29,10 @@ def test_ambiguous_relaunch_suffix_resolves_through_the_stamped_run_id(tmp_path)
     _experiment(decoy, "run_20251203_11ab", str(tmp_path / "runs" / "alpha"))
     _experiment(stamped, run_id, str(tmp_path / "runs" / "zeta"))
 
-    root = experiments_dir()
-    assert sorted(p.name for p in root.glob(f"*_{run_id}")) == [decoy, stamped]
+    # The candidates the ambiguous suffix match actually walks, from the store the resolver
+    # itself reads, not a directory listing the store's own backend need not keep.
+    candidates = exp.experiment_ids_with_status(None)
+    assert sorted(name for name in candidates if name.endswith(f"_{run_id}")) == [decoy, stamped]
 
     resolved = resolve_experiment_dir_for_run(run_id)
     assert resolved is not None

@@ -10,14 +10,15 @@ to this run's experiment without overriding one the caller named.
 
 from __future__ import annotations
 
-import json
-
 import pytest
+
+import tcip_store as ts
 
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
+from tcip_mcp.tools.training_tools import trial_metrics_key_for_dir  # noqa: E402
 
 CONFIG = {"model_source": {"builder": "x:y", "task": "detection", "in_chans": 5}, "device": "cpu"}
 
@@ -56,8 +57,7 @@ def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
     ctx.log_metrics(3, {"val_loss": 0.75, "map50": 0.10})
     ctx.log_metrics(7, {"val_loss": 0.25, "map50": 0.60})
 
-    lines = (tmp_path / "out" / "metrics.jsonl").read_text().splitlines()
-    rows = [json.loads(x) for x in lines if x.strip()]
+    rows = ts.read_log(trial_metrics_key_for_dir(tmp_path / "out")).records
     assert len(rows) == 2
     assert [r["epoch"] for r in rows] == [3, 7]
     assert [r["val_loss"] for r in rows] == [0.75, 0.25]
@@ -72,8 +72,7 @@ def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(tmp_
 
     ctx.log_metrics(2, {"val_loss": float("nan"), "map50": 0.0})
 
-    rows = [json.loads(x) for x in
-            (tmp_path / "out" / "metrics.jsonl").read_text().splitlines() if x.strip()]
+    rows = ts.read_log(trial_metrics_key_for_dir(tmp_path / "out")).records
     assert rows == [{"epoch": 2, "val_loss": None, "val_loss_state": "nan", "map50": 0.0}]
 
 

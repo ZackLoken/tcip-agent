@@ -12,7 +12,6 @@ The per-image prediction file is addressed by the image's stem, so ``IMG_0007.JP
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -41,10 +40,17 @@ def _bucket(tmp_path: Path) -> Path:
         IMG_W, IMG_H,
     )
     write_annotations(str(d / "IMG_0031.json"), [], IMG_W, IMG_H, keep_empty=True)
-    (d / "operating_point.json").write_text(
-        json.dumps({"checkpoint_sha256": CHECKPOINT_SHA, "experiment_id": "exp-17"}),
-        encoding="utf-8")
+    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "experiment_id": "exp-17"})
     return d
+
+
+def _seed_sidecar(pred_dir: Path, sidecar: dict) -> None:
+    """The bucket's ``operating_point.json`` stamp, through the seam the route reads it from."""
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    tcip_store.replace(sidecar_key(pred_dir, "operating_point"), sidecar,
+                       expect=tcip_store.Version.ABSENT)
 
 
 def _dataset_root(tmp_path: Path) -> Path:
@@ -54,10 +60,14 @@ def _dataset_root(tmp_path: Path) -> Path:
 
 
 def _shard(dataset_root: Path, image_name: str) -> dict:
-    """The one shard written for ``image_name``, wherever its bucket directory put it."""
-    found = sorted((dataset_root / ".tcip" / "state" / "review").rglob(f"{image_name}.json"))
+    """The one shard written for ``image_name``, through the seam wherever its bucket put it."""
+    import tcip_store
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
+    state_dir = str(dataset_root / ".tcip" / "state")
+    found = [k for k in tcip_store.keys(REVIEW_VERDICTS_STORE, state_dir) if k.parts[1] == image_name]
     assert len(found) == 1, found
-    return json.loads(found[0].read_text(encoding="utf-8"))["state"]
+    return tcip_store.read(found[0])["state"]
 
 
 def test_bulk_complete_on_a_predicted_image_is_not_adjudication_covered(

@@ -8,7 +8,6 @@ can deliver that count named in the refusal.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -58,7 +57,10 @@ def test_the_whole_mosaic_pass_runs_at_the_cap_its_sidecar_records(tmp_path, mon
     # The band passes block calibration runs come first; the last one is the mosaic pass itself.
     assert len(passes) > 1
     mosaic_pass = passes[-1]
-    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    sidecar = read_operating_point_sidecar(out_dir)
     stamped_cap = sidecar["operating_point"]["max_dets"]["value"]
     assert mosaic_pass["max_dets"] == stamped_cap
     assert stamped_cap is None

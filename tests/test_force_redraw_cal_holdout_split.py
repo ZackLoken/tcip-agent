@@ -5,15 +5,16 @@ membership diff, never silently, never automatically.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 
 def _audit_events(root: Path, tool: str) -> list[dict]:
-    path = root / ".tcip" / "audit.jsonl"
-    if not path.is_file():
-        return []
-    return [json.loads(x) for x in path.read_text().splitlines() if json.loads(x).get("tool") == tool]
+    import tcip_store
+
+    from tcip_mcp.audit import audit_log_key
+
+    page = tcip_store.read_log(audit_log_key(root))
+    return [entry for entry in page.records if entry.get("tool") == tool]
 
 
 def test_force_redraw_requires_nonempty_reason(tmp_path: Path):

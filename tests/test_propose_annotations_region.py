@@ -382,10 +382,8 @@ class TestWholeFrameDefaultIsUnaffected:
     def test_state_envelope_has_no_region_key_without_grid_cells(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import json
-
+        import tcip_store as ts
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.project_paths import resolve_state
         from tcip_mcp.tools import vision_tools
 
         class OneBoxProposer:
@@ -403,8 +401,7 @@ class TestWholeFrameDefaultIsUnaffected:
         result = vision_tools.propose_annotations(image_path=str(img_path))
         assert "error" not in result, result
 
-        state_file = resolve_state(Path(".tcip") / "state" / "proposals_no_region.json")
-        envelope = json.loads(state_file.read_text(encoding="utf-8"))
+        envelope = ts.read(vision_tools.proposal_staging_key("no_region"))
         assert set(envelope) == {"engine", "candidates"}
 
     def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
@@ -444,10 +441,8 @@ class TestWholeFrameDefaultIsUnaffected:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The refusal above must not cost a working engine its staged proposals."""
-        import json as json_mod
-
+        import tcip_store as ts
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.project_paths import resolve_state
         from tcip_mcp.tools import vision_tools
 
         class OneBoxProposer:
@@ -466,6 +461,5 @@ class TestWholeFrameDefaultIsUnaffected:
         result = vision_tools.propose_annotations(image_path=str(img_path))
 
         assert "error" not in result, result
-        state_file = resolve_state(Path(".tcip") / "state" / "proposals_storable.json")
-        envelope = json_mod.loads(state_file.read_text(encoding="utf-8"))
+        envelope = ts.read(vision_tools.proposal_staging_key("storable"))
         assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]

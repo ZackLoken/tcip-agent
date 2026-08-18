@@ -14,7 +14,6 @@ within it.
 
 from __future__ import annotations
 
-import json
 import sys
 from dataclasses import replace
 
@@ -36,8 +35,9 @@ from tests._trait_fixtures import CATKIN  # noqa: E402
 def _sidecar(dir_path: Path, id_map: dict | None) -> None:
     """Write a bucket's operating_point.json exactly the way export_predictions does: the only
     fact count_by_class reads to decide whether/how a bucket was classified."""
-    dir_path.mkdir(parents=True, exist_ok=True)
-    (dir_path / "operating_point.json").write_text(json.dumps({"id_map": id_map}), encoding="utf-8")
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    write_sidecar(dir_path, {"id_map": id_map})
 
 
 def _preds(dir_path: Path, stem: str, subjects: list[str]) -> None:

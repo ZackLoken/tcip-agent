@@ -8,7 +8,6 @@ the geometric disjointness check that consumes it.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -45,14 +44,14 @@ def _data_cfg(images_dir: Path, labels_dir: Path, **split) -> dict:
 
 
 def _persisted_split(experiment_id: str, data_cfg: dict) -> dict:
-    from tcip_mcp.experiments import create_experiment, experiments_dir
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
     train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None, "the fixture must produce a real validation side"
     create_experiment(experiment_id, {})
     _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
-    return json.loads((experiments_dir() / experiment_id / "split.json").read_text())
+    return read_split_manifest(experiment_id)
 
 
 def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) -> None:

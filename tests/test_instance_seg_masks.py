@@ -295,6 +295,7 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
     task), so the tiled (patch + offset) mask shape reaches export too."""
     import json
 
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.inference_tools import export_predictions
 
     images_dir = tmp_path / "images"
@@ -303,7 +304,7 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
     r = export_predictions(instance_seg_ckpt, str(images_dir), str(out), device="cpu",
                            tile_size=TILE, conf_threshold=0.0)  # force at least one (masked) detection
     assert "error" not in r
-    op = json.loads((Path(r["output_dir"]) / "operating_point.json").read_text())
+    op = read_operating_point_sidecar(r["output_dir"])
     assert op["mask_binarize"]["name"] == "mask_binarize_threshold"
     assert op["mask_binarize"]["requires_validation"] is True
 
@@ -329,9 +330,13 @@ def test_export_predictions_instance_seg_explicit_tile_true_writes_tiled(instanc
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_ckpt, tmp_path):
     """The delivery-gating eval never consumed masks: it reads boxes/scores/labels only, so a
     tile-trained Mask R-CNN must still evaluate here instead of crashing on the mask refusal."""
+    import tcip_store as ts
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.evaluation import (
+        evaluation_results_key,
+        run_full_frame_evaluation,
+    )
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     _image(images_dir, "a.png")
@@ -345,7 +350,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     assert r["eval_regime"] == "full-frame-tiled-inference"
     assert r["scored_images"] == 1
     assert r["n_gt"] == 1
-    assert Path(r["results_path"]).is_file()
+    assert ts.exists(evaluation_results_key(tmp_path / "out"))
     # task records the checkpoint's actual producer task, not a hardcoded "detection". iou_type
     # stays "bbox" regardless of task: this gate always scores boxes only, by design (see the
     # docstring).

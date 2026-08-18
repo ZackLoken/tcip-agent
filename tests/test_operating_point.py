@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
@@ -264,13 +262,13 @@ def test_resolve_operating_point_content_clone_holdout_is_false():
 
 
 def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch):
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp1"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["a_0_0", "a_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
+    tcip_store.replace(split_key("exp1"), {"train": ["a_0_0", "a_0_1"], "group_by": "tile_prefix"})
 
     # Calibration/holdout share tile group "a" (stem "a_0_2") with the training split above.
     cal = [{"width": 400, "height": 400, "image_id": "a_0_2", "gt": [_ann(100, 100)],
@@ -303,13 +301,13 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
 
 
 def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_validates(tmp_path, monkeypatch):
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp2"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(
-        json.dumps({"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"}), encoding="utf-8")
+    tcip_store.replace(split_key("exp2"), {"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"})
 
     # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
     cal, hold = _good_cal_holdout()
@@ -329,14 +327,15 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
 def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monkeypatch):
     """cal_rects/hold_rects default to None: an existing caller who never passes them (every
     caller before this phase) gets exactly today's lexical spatial_strip check, unchanged."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_rects_noop"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(json.dumps({
+    tcip_store.replace(split_key("exp_rects_noop"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
-    }), encoding="utf-8")
+    })
     cal, hold = _good_cal_holdout()
 
     omitted = resolve_operating_point("catkin", tiled=False, dataset_hash="h1",
@@ -357,19 +356,20 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
     them into the geometric containment check instead of the lexical same-source one, catching a
     leak the lexical check alone would miss (a rect whose own source name isn't a training stem
     at all, but whose geometry spills into the persisted train region)."""
+    import tcip_store
+
+    from tcip_mcp.experiments import split_key
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    exp_dir = tmp_path / ".tcip" / "experiments" / "exp_rects_geo"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "split.json").write_text(json.dumps({
+    tcip_store.replace(split_key("exp_rects_geo"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
         "spatial": {
             "train_region": [[0, 0, 500, 1000]],
             "val_region": [[500, 0, 750, 1000]],
             "test_region": [[750, 0, 1000, 1000]],
         },
-    }), encoding="utf-8")
+    })
     cal, hold = _good_cal_holdout()
     cal_id = cal[0]["image_id"]
 

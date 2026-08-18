@@ -24,10 +24,13 @@ from tcip_mcp.pipelines.inference.predictor import (  # noqa: E402
 )
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
+    snapshot_manifest_key,
     snapshot_model_source,
     stamp_model_ref,
 )
 from tests import bespoke_models  # noqa: E402
+
+import tcip_store as ts  # noqa: E402
 
 
 def _model_source() -> dict:
@@ -47,7 +50,7 @@ def test_snapshot_model_source_copies_files_and_records_provenance(tmp_path):
     manifest = snapshot_model_source({"model_source": _model_source(), "seed": 123}, exp_dir)
 
     assert manifest is not None
-    assert (exp_dir / "model_src" / "manifest.json").is_file()
+    assert ts.exists(snapshot_manifest_key(exp_dir))
     expected_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     entry = next(e for e in manifest["files"] if e["sha256"] == expected_sha)
     assert (exp_dir / "model_src" / entry["file"]).is_file()  # content-addressed destination

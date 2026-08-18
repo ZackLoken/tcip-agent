@@ -9,11 +9,12 @@ a run after it ended.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+import tcip_store as ts
 
 REFERENCE_IDENTITY = {
     "calibration_dataset_hash": "9f2c1b0a4d6e8f31",
@@ -44,8 +45,9 @@ def _row(**overrides: Any) -> dict[str, Any]:
 
 
 def _rows_on_disk(root: Path, experiment_id: str) -> list[dict[str, Any]]:
-    path = root / ".tcip" / "experiments" / experiment_id / "validations.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    from tcip_mcp.experiments import validations_key
+
+    return list(ts.read_log(validations_key(experiment_id, root=root)).records)
 
 
 def test_a_second_validation_of_one_claim_appends_rather_than_replacing(tmp_path):
@@ -145,7 +147,9 @@ def test_a_row_is_found_by_its_recomputed_identity_and_an_unknown_one_finds_noth
 
 
 def test_the_same_calibration_content_resolves_to_one_experiment(tmp_path):
-    from tcip_mcp.experiments import _append_validation, ensure_calibration_experiment
+    from tcip_mcp.experiments import (
+        _append_validation, config_key, ensure_calibration_experiment, list_experiments,
+    )
 
     first = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
@@ -159,10 +163,9 @@ def test_the_same_calibration_content_resolves_to_one_experiment(tmp_path):
     )
 
     assert again == first
-    experiments_dir = tmp_path / ".tcip" / "experiments"
-    assert [d.name for d in experiments_dir.iterdir()] == [first]
+    assert [e["experiment_id"] for e in list_experiments()] == [first]
 
-    config = json.loads((experiments_dir / first / "config.json").read_text())
+    config = ts.read(config_key(first))
     assert config["reference_identity"] == REFERENCE_IDENTITY
     assert config["trait"] == "catkin_50per_date"
     assert config["notes"] == "calibrated on the March holdout"
@@ -170,7 +173,7 @@ def test_the_same_calibration_content_resolves_to_one_experiment(tmp_path):
 
 
 def test_a_calibration_against_a_different_reference_is_a_different_experiment(tmp_path):
-    from tcip_mcp.experiments import ensure_calibration_experiment
+    from tcip_mcp.experiments import ensure_calibration_experiment, list_experiments
 
     on_march = ensure_calibration_experiment(
         document="classifier_operating_point", checkpoint_sha256=None,
@@ -184,14 +187,13 @@ def test_a_calibration_against_a_different_reference_is_a_different_experiment(t
     )
 
     assert on_april != on_march
-    experiments_dir = tmp_path / ".tcip" / "experiments"
-    assert sorted(d.name for d in experiments_dir.iterdir()) == sorted([on_march, on_april])
+    assert sorted(e["experiment_id"] for e in list_experiments()) == sorted([on_march, on_april])
 
 
 def test_a_calibration_config_restating_an_identity_field_is_refused(tmp_path):
     """The identity fields are written from the content the id came from, so a caller's own
     spelling of one could disagree with the id itself."""
-    from tcip_mcp.experiments import ensure_calibration_experiment
+    from tcip_mcp.experiments import config_key, ensure_calibration_experiment, list_experiments
 
     with pytest.raises(ValueError) as refused:
         ensure_calibration_experiment(
@@ -200,24 +202,21 @@ def test_a_calibration_config_restating_an_identity_field_is_refused(tmp_path):
             config={"trait": "something_else", "notes": "free text"},
         )
     assert "trait" in str(refused.value)
-    assert not any((tmp_path / ".tcip" / "experiments").glob("*"))
+    assert list_experiments() == []
 
     experiment_id = ensure_calibration_experiment(
         document="ordinal_operating_point", checkpoint_sha256="0" * 64,
         reference_identity=REFERENCE_IDENTITY, trait="catkin_50per_date",
         config={"notes": "free text", "operator_note": "run from the ordinal door"},
     )
-    config = json.loads(
-        (tmp_path / ".tcip" / "experiments" / experiment_id / "config.json").read_text()
-    )
+    config = ts.read(config_key(experiment_id))
     assert config["trait"] == "catkin_50per_date"
     assert config["operator_note"] == "run from the ordinal door"
 
 def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_row(tmp_path):
     """The record both mutate is a platform-scoped experiment member, so the rows land in the
     platform log where a reviewer enumerating validations looks first."""
-    import json as _json
-
+    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.experiments import (
         _append_validation, create_experiment, ensure_calibration_experiment,
     )
@@ -237,8 +236,7 @@ def test_the_append_and_the_calibration_creation_each_leave_one_platform_audit_r
         config={"notes": "repeat resolves, creates nothing"},
     )
 
-    rows = [_json.loads(line) for line in
-            (tmp_path / ".tcip" / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = ts.read_log(audit_log_key(tmp_path)).records
     appended = [r for r in rows if r.get("tool") == "experiment_validation_recorded"]
     assert [r["arguments"]["record_digest"] for r in appended] == [digest]
     created = [r for r in rows if r.get("tool") == "calibration_experiment_created"]

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from tcip_mcp.tools.feedback_tools import materialize_review_dataset, prioritize_review_queue
@@ -109,6 +108,7 @@ def test_materialize_refuses_an_empty_stated_store_rather_than_the_dataset_s_own
 
 
 def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
+    import tcip_store as ts
     import tcip_mcp.experiments as experiments
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
     experiments.create_experiment("exp1", {"x": 1})
@@ -118,16 +118,17 @@ def test_materialize_review_dataset_records_lineage(tmp_path, monkeypatch):
     r = materialize_review_dataset(str(dataset_root), str(src), str(out), experiment_id="exp1")
     assert r["experiment_id"] == "exp1"
 
-    lineage = json.loads((tmp_path / "exp" / "exp1" / "lineage.json").read_text())
+    lineage = ts.read(experiments.lineage_key("exp1"))
     assert lineage["data_source"] == str(dataset_root)
     assert lineage["review_session"]["dataset_root"] == str(dataset_root)
     assert lineage["review_session"]["review_state_dir"] == str(_own_store(dataset_root))
-    artifacts = json.loads((tmp_path / "exp" / "exp1" / "artifacts.json").read_text())
+    artifacts = ts.read(experiments.artifacts_key("exp1"))
     assert artifacts["curated_dataset"]["path"] == str(out)
 
 
 def test_lineage_records_a_stated_store_beside_the_dataset_it_curates(tmp_path, monkeypatch):
     """Both facts are recorded: which dataset the review was of, and where its shards were read."""
+    import tcip_store as ts
     import tcip_mcp.experiments as experiments
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
 
@@ -140,20 +141,21 @@ def test_lineage_records_a_stated_store_beside_the_dataset_it_curates(tmp_path, 
         str(dataset_root), str(src), str(tmp_path / "out"),
         experiment_id="ext1", review_state_dir=str(external))
 
-    lineage = json.loads((tmp_path / "exp" / "ext1" / "lineage.json").read_text())
+    lineage = ts.read(experiments.lineage_key("ext1"))
     assert lineage["data_source"] == str(dataset_root)
     assert lineage["review_session"]["dataset_root"] == str(dataset_root)
     assert lineage["review_session"]["review_state_dir"] == str(external)
 
 
 def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
+    import tcip_store as ts
     import tcip_mcp.experiments as experiments
     monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
 
     dataset_root, src = _setup(tmp_path)
     r = materialize_review_dataset(str(dataset_root), str(src), str(tmp_path / "out"), experiment_id="new1")
     assert r["experiment_id"] == "new1"
-    lineage = json.loads((tmp_path / "exp" / "new1" / "lineage.json").read_text())
+    lineage = ts.read(experiments.lineage_key("new1"))
     assert "review_session" in lineage
 
 

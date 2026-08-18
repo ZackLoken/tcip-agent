@@ -8,11 +8,11 @@ different data is not read as apples-to-apples.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
+import tcip_store as ts
 import tcip_mcp.experiments as exp
 from tcip_mcp.experiments import compare_experiments, create_experiment, update_lineage
 
@@ -42,7 +42,7 @@ def _make_dataset(root: Path) -> None:
 
 def test_create_experiment_records_identity_in_lineage(exp_dir):
     create_experiment("e1", {}, dataset_id="abc123", dataset_fingerprint="ff00")
-    lin = json.loads((exp_dir / "e1" / "lineage.json").read_text())
+    lin = ts.read(exp.lineage_key("e1"))
     assert lin["dataset_id"] == "abc123" and lin["dataset_fingerprint"] == "ff00"
 
 
@@ -55,7 +55,7 @@ def test_update_lineage_cannot_change_or_backfill_identity(exp_dir):
     # a run that recorded None identity stays None, never silently backfilled
     create_experiment("e2", {})
     update_lineage("e2", dataset_fingerprint="sneaky")
-    assert json.loads((exp_dir / "e2" / "lineage.json").read_text())["dataset_fingerprint"] is None
+    assert ts.read(exp.lineage_key("e2"))["dataset_fingerprint"] is None
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(exp_dir):
@@ -118,6 +118,6 @@ def test_persist_split_manifest_records_identity(exp_dir):
 
     _persist_split_manifest("e1", _DS(), None, {"labels_dir": ""},
                             dataset_id="x", dataset_fingerprint="yz")
-    split = json.loads((exp_dir / "e1" / "split.json").read_text())
+    split = ts.read(exp.split_key("e1"))
     assert split["dataset_id"] == "x" and split["dataset_fingerprint"] == "yz"
     assert split["train"] == ["a", "b"]  # membership still recorded beside the identity

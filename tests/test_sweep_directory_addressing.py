@@ -7,8 +7,9 @@ it, that reader lists a sweep whose trials it can never open.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+import tcip_store as ts
 
 
 def _stub_sweep(monkeypatch, observed: dict):
@@ -35,18 +36,16 @@ def test_a_sweeps_manifest_records_the_directory_that_holds_it(tmp_path: Path, m
     tt = _stub_sweep(monkeypatch, observed)
     sweeps_root = tmp_path / "sweeps"
 
-    tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1,
-               output_dir=str(sweeps_root))
+    result = tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1,
+                        output_dir=str(sweeps_root))
+    study_name = result["study_name"]
 
-    manifests = list(sweeps_root.glob("*/manifest.json"))
-    assert len(manifests) == 1  # one launch is one sweep, under one name
-    manifest = json.loads(manifests[0].read_text())
-
+    manifest = ts.read(tt.sweep_manifest_key(study_name, str(sweeps_root)))
     recorded_dir = Path(manifest["sweep_dir"])
-    assert recorded_dir == manifests[0].parent
+    assert recorded_dir == tt.sweep_dir(study_name, str(sweeps_root))
     assert recorded_dir.name == manifest["study_name"]
     assert Path(observed["trial_dir"]).parent == recorded_dir
-    assert (sweeps_root / f"{manifest['study_name']}.json").is_file()
+    assert ts.exists(tt.study_result_key(study_name, str(sweeps_root)))
 
 
 def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
@@ -58,8 +57,9 @@ def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
 
     result = tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1)
 
-    sweep_dir = tmp_path / ".tcip" / "hpo" / result["study_name"]
-    manifest = json.loads((sweep_dir / "manifest.json").read_text())
-    assert Path(manifest["sweep_dir"]) == sweep_dir
+    study_name = result["study_name"]
+    manifest = ts.read(tt.sweep_manifest_key(study_name))
+    expected_dir = tmp_path / ".tcip" / "hpo" / study_name
+    assert Path(manifest["sweep_dir"]) == expected_dir
     assert manifest["status"] == "completed"
-    assert Path(observed["trial_dir"]).parent == sweep_dir
+    assert Path(observed["trial_dir"]).parent == expected_dir

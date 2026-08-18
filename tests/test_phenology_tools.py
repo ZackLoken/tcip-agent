@@ -18,8 +18,10 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_mcp.traits import CENTER_MATCH, get_trait
 from tcip_mcp.tools.phenology_tools import (
     _classification_items,
@@ -61,8 +63,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     assert res["n_images"] == 1
     assert res["n_mapped"] + res["n_unmapped"] == 1
     assert "2026-02-11" in res["per_date"]
-    assert out.is_file()
-    persisted = json.loads(out.read_text(encoding="utf-8"))
+    persisted = ts.read(plant_mapping_key(out))
     assert list(persisted.keys()) == ["2026-02-11"]
     assert persisted["2026-02-11"][0]["stem"] == "img1"
     assert "confidence" not in persisted["2026-02-11"][0]
@@ -111,6 +112,22 @@ def _bucket(tmp_path: Path, date: str) -> Path:
     return _ds_root(tmp_path) / "predictions" / "run" / date
 
 
+def _write_stamp_bypassing_claim_rail(dir_path: Path, stamp: dict, document: str) -> None:
+    """Write one bucket's stamp through the storage seam without the writer-side claim check.
+
+    The real writer (``write_sidecar``) refuses a stamp claiming ``validated`` with no well-formed
+    ``validated_by`` pointer, so a fixture standing in for a hand-edited or foreign file (one no real
+    producer could write) goes around that check here, the same way it went straight to disk under
+    the file backend: the storage location is still the seam's, only the writer-side rail is skipped.
+    """
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    dir_path.mkdir(parents=True, exist_ok=True)
+    key = sidecar_key(dir_path, document)
+    with ts.transaction(key) as txn:
+        txn.write(key, stamp)
+
+
 def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None,
                       checkpoint_sha256: str | None = None,
@@ -140,7 +157,7 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
                             experiment_id=f"exp-record-{dir_path.name}",
                             producing_experiment_id=experiment_id)
     else:
-        (dir_path / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        _write_stamp_bypassing_claim_rail(dir_path, stamp, "operating_point")
 
 
 def _tiled(ref: str, value: int = 640) -> dict:
@@ -164,7 +181,7 @@ def _write_classifier_sidecar(dir_path: Path, *, dataset_root: Path, validated: 
                             dataset_root=dataset_root, experiment_id=f"exp-classifier-{dir_path.name}",
                             producing_experiment_id=experiment_id, trait=trait)
     else:
-        (dir_path / "classifier_operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        _write_stamp_bypassing_claim_rail(dir_path, stamp, "classifier_operating_point")
 
 
 ID_MAP = {"dormant": 0, "elongated": 1}
@@ -602,11 +619,16 @@ def test_calibrate_classifier_operating_point_passes_for_well_formed_reference(t
 
     assert res["passed"] is True, res
     assert res["failures"] == []
-    sidecar = json.loads((tmp_path / "out" / "classifier_operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_HELD_OUT,
+        read_classifier_operating_point_sidecar,
+        reconcile_classifier_validity,
+    )
+
+    sidecar = read_classifier_operating_point_sidecar(tmp_path / "out")
     assert sidecar["validated"] is True
     # The writer's field name must be the one the shared reader reads, checked by running the real
     # reader over the real output, not by re-asserting a key name in two places.
-    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, reconcile_classifier_validity
 
     assert sidecar["operating_point"]["classifier"]["validated_against"] == VALIDATED_HELD_OUT
     assert reconcile_classifier_validity([str(tmp_path / "out")])["validated"] == VALIDATED_HELD_OUT
@@ -738,7 +760,9 @@ def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_er
 
     assert res["passed"] is False
     assert "compensating_error_floor_failed" in res["failures"], res["failures"]
-    sidecar = json.loads((tmp_path / "out" / "classifier_operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
+
+    sidecar = read_classifier_operating_point_sidecar(tmp_path / "out")
     sweep_data = sidecar["sweep_data"]
     assert sweep_data["kappa"] is not None
     assert sweep_data["kappa"] <= sweep_data["kappa_floor"]
@@ -1166,7 +1190,9 @@ def test_calibrate_classifier_operating_point_unassessed_gt_never_fabricates_a_n
     )
 
     assert res["passed"] is True, res
-    sidecar = json.loads((tmp_path / "out" / "classifier_operating_point.json").read_text())
+    from tcip_mcp.pipelines.resolution import read_classifier_operating_point_sidecar
+
+    sidecar = read_classifier_operating_point_sidecar(tmp_path / "out")
     sweep_data = sidecar["sweep_data"]
     assert sweep_data["kappa"] == 1.0, sweep_data  # a perfect classifier, not degraded by phantom errors
     assert sweep_data["count_bias"] == 0.0, sweep_data
@@ -1310,9 +1336,9 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
     assert result["criterion"] == "quadratic_weighted_kappa"
     assert result["n_calibration_items"] + result["n_holdout_items"] == 10
 
-    sidecar_path = tmp_path / "calib" / "ordinal_operating_point.json"
-    assert sidecar_path.is_file()
-    sidecar = json.loads(sidecar_path.read_text())
+    from tcip_mcp.pipelines.resolution import read_ordinal_operating_point_sidecar
+
+    sidecar = read_ordinal_operating_point_sidecar(tmp_path / "calib")
     assert sidecar["trait"] == "catkin"
     assert sidecar["operating_point"]["ordinal"]["criterion"] == "quadratic_weighted_kappa"
     assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
@@ -1361,9 +1387,9 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: P
     assert result["criterion"] == "r_squared"
     assert result["n_calibration_items"] + result["n_holdout_items"] == 10
 
-    sidecar_path = tmp_path / "calib" / "regression_operating_point.json"
-    assert sidecar_path.is_file()
-    sidecar = json.loads(sidecar_path.read_text())
+    from tcip_mcp.pipelines.resolution import read_regression_operating_point_sidecar
+
+    sidecar = read_regression_operating_point_sidecar(tmp_path / "calib")
     assert sidecar["trait"] == "catkin"
     assert sidecar["operating_point"]["regression"]["criterion"] == "r_squared"
     assert sidecar["operating_point"]["regression"]["validated_against"] == result["validated_against"]
@@ -1498,9 +1524,11 @@ def _delivery_setup(tmp_path: Path, *, experiment_id: str | None,
 
 def _named_records(*pred_dirs: Path) -> str:
     """The records these buckets' stamps point at, joined the way a delivered cell joins them."""
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
     pointers = set()
     for d in pred_dirs:
-        by = json.loads((d / "operating_point.json").read_text(encoding="utf-8"))["validated_by"]
+        by = read_operating_point_sidecar(d)["validated_by"]
         pointers.add(f"{by['experiment_id']}:{by['record_digest']}")
     return "; ".join(sorted(pointers))
 
@@ -1546,13 +1574,17 @@ def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_produce
     """A stamp claiming validation no record answers for floors the count, and the acknowledged
     provisional CSV says the producer is unknown instead of repeating the names the stamp asserted
     for itself."""
+    from tcip_mcp.pipelines.resolution import update_sidecar
+
     mapping_path, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
+
+    def _forge(stamp: dict) -> dict:
+        stamp["validated_by"] = {"experiment_id": "exp_that_never_ran", "record_digest": "0" * 16}
+        return stamp
+
     for d in (d1, d2):
-        stamp = json.loads((d / "operating_point.json").read_text(encoding="utf-8"))
-        stamp["validated_by"] = {"experiment_id": "exp_that_never_ran",
-                                 "record_digest": "0" * 16}
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        update_sidecar(d, _forge, "operating_point")
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
@@ -1592,11 +1624,12 @@ def test_compute_phenology_records_what_verification_found_in_the_datasets_own_l
     )
 
     assert "error" not in res, res
-    log = _ds_root(tmp_path) / ".tcip" / "audit.jsonl"
-    assert log.is_file(), "the delivery wrote nothing to the log of the dataset its buckets sit in"
-    emitted = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines() if ln]
-    events = [e for e in emitted if e["tool"] == "compute_phenology" and "verified_buckets" in e]
-    assert len(events) == 1, emitted
+    from tcip_mcp.audit import audit_log_key
+
+    page = ts.read_log(audit_log_key(_ds_root(tmp_path)))
+    assert page.records, "the delivery wrote nothing to the log of the dataset its buckets sit in"
+    events = [e for e in page.records if e["tool"] == "compute_phenology" and "verified_buckets" in e]
+    assert len(events) == 1, page.records
     verified = events[0]["verified_buckets"]
     assert set(verified) == {str(d1), str(d2)}
     assert all(v["verified"] for v in verified.values())

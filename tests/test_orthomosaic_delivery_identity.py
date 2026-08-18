@@ -180,7 +180,9 @@ def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeyp
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, _ON_FIRST_PLANT)
 
-    recorded = json.loads((bucket / "operating_point.json").read_text())["raster_content_identity"]
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    recorded = read_operating_point_sidecar(bucket)["raster_content_identity"]
     assert recorded["width"] == 64 and recorded["pixel_checksum"]
     assert recorded["geotransform"]["tiepoint_native_x"] == TIEPOINT_NATIVE_X
 

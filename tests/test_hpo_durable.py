@@ -4,10 +4,11 @@ doesn't init Ray or train."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+
+import tcip_store as ts
 
 
 def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, monkeypatch):
@@ -30,10 +31,9 @@ def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, monkeypatch):
     assert captured["mode"] == "min"  # the composite objective is lower=better
     assert captured["metric"] == "objective"
 
-    # The result was persisted to a durable json alongside Ray's trial store.
-    result_file = tmp_path / f"{captured['study_name']}.json"
-    assert result_file.is_file()
-    assert json.loads(result_file.read_text())["best_params"] == {"lr": 0.01}
+    # The result was persisted to a durable record alongside Ray's trial store.
+    result = ts.read(tt.study_result_key(captured["study_name"], str(tmp_path)))
+    assert result["best_params"] == {"lr": 0.01}
 
 
 def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(tmp_path, monkeypatch):
@@ -61,8 +61,7 @@ def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(tmp_path, m
 
     def fake_search(**kw):
         study = kw["study_name"]
-        observed["while_running"] = json.loads(
-            (tmp_path / study / "manifest.json").read_text())
+        observed["while_running"] = ts.read(tt.sweep_manifest_key(study, str(tmp_path)))
         kw["objective_fn"]({"lr": 0.1}, lambda value: None)
         return {"best_params": {"lr": 0.1}, "best_value": 0.25, "n_trials": 1,
                 "study_name": study}
@@ -84,7 +83,7 @@ def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(tmp_path, m
     assert Path(observed["trial_dir"]).parent == tmp_path / study
     assert Path(observed["trial_dir"]).name.startswith("trial_")
 
-    finished = json.loads((tmp_path / study / "manifest.json").read_text())
+    finished = ts.read(tt.sweep_manifest_key(study, str(tmp_path)))
     assert finished["status"] == "completed"
     assert finished["finished_at"]
     assert finished["result"]["best_params"] == {"lr": 0.1}
@@ -93,7 +92,10 @@ def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(tmp_path, m
 def test_run_hpo_marks_the_manifest_failed_when_the_search_raises(tmp_path, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
+    captured: dict = {}
+
     def exploding_search(**kw):
+        captured["study_name"] = kw["study_name"]
         raise RuntimeError("no ray here")
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", exploding_search)
@@ -102,9 +104,7 @@ def test_run_hpo_marks_the_manifest_failed_when_the_search_raises(tmp_path, monk
         tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1,
                    output_dir=str(tmp_path))
 
-    manifests = list(tmp_path.glob("*/manifest.json"))
-    assert len(manifests) == 1
-    manifest = json.loads(manifests[0].read_text())
+    manifest = ts.read(tt.sweep_manifest_key(captured["study_name"], str(tmp_path)))
     assert manifest["status"] == "failed"
     assert "no ray here" in manifest["error"]
 

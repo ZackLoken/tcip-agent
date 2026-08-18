@@ -10,7 +10,6 @@ Each step asserts filesystem state to prove persistence works.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -162,19 +161,30 @@ class TestE2EPipeline:
         assert "f1" in dataset_eval
 
         # ── Step 10: Split dataset ───────────────────────────────────
+        import tcip_store as ts
+        from tcip_mcp.tools.data_tools import split_stem_list_key
+
         split_dir = tmp_path / "splits"
         split_result = make_splits(root, output_path=str(split_dir), materialize=True)
         assert split_result["total_stems"] == 5
-        assert (split_dir / "train.json").is_file()
-        assert (split_dir / "val.json").is_file()
+        assert ts.exists(split_stem_list_key(split_dir, "train"))
+        assert ts.exists(split_stem_list_key(split_dir, "val"))
         assert sum(split_result["splits"].values()) == 5
 
         # Verify split JSON content
-        train_data = json.loads((split_dir / "train.json").read_text())
+        train_data = ts.read(split_stem_list_key(split_dir, "train"))
         assert isinstance(train_data, list)
         assert len(train_data) > 0
 
         # ── Step 11: Export project as ZIP ───────────────────────────
+        from tcip_store.file_backend import database_file
+
+        if database_file(root).is_file():
+            # A database-backed project's state is not in the files a bundle carries: the
+            # platform's own export step lands it there first, same as an operator would run.
+            from tcip_store.export import export_root
+
+            export_root(root, report=lambda line: None)
         zip_path = str(tmp_path / "export.zip")
         export_result = archive_project(root, zip_path)
         assert "error" not in export_result

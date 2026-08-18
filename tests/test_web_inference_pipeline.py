@@ -177,9 +177,13 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkey
 
     assert job.status == "completed"
     import json
+
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
     assert obj["subject"] == "elongated"  # label 2 -> 0-indexed 1 -> the recorded map's "elongated"
-    sidecar = json.loads((out_dir / "operating_point.json").read_text())
+    sidecar = tcip_store.read(sidecar_key(out_dir, "operating_point"))
     assert sidecar["id_map"] == {"dormant": 0, "elongated": 1}
 
 

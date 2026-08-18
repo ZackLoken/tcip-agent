@@ -59,8 +59,7 @@ def test_review_confirmed_calibration_is_shippable():
 # --- reconcile the delivery gate against on-disk operating_point.json ---
 
 def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
-    import json
-
+    from tcip_mcp.pipelines.resolution import write_sidecar
     from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
     root = tmp_path / "ds"
@@ -74,7 +73,7 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
         d.mkdir(parents=True, exist_ok=True)
-        (d / "operating_point.json").write_text(json.dumps(stamp), encoding="utf-8")
+        write_sidecar(d, stamp)
     return str(d)
 
 

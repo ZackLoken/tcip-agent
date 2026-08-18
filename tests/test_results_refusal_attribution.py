@@ -9,7 +9,6 @@ gap stays open.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -32,22 +31,33 @@ def client() -> TestClient:
 
 def _unvalidate_count_operating_point(body: dict) -> None:
     """Strip the count operating point of its reference, leaving the classifier evidence intact."""
+    import tcip_store
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
     for bucket in body["predictions_by_date"].values():
-        path = Path(bucket) / "operating_point.json"
-        sidecar = json.loads(path.read_text(encoding="utf-8"))
-        sidecar["validated"] = False
-        sidecar["operating_point"]["conf"]["validated_against"] = VALIDATED_FALSE
-        path.write_text(json.dumps(sidecar), encoding="utf-8")
+        key = sidecar_key(bucket)
+        with tcip_store.transaction(key) as txn:
+            sidecar = txn.read(key)
+            sidecar["validated"] = False
+            sidecar["operating_point"]["conf"]["validated_against"] = VALIDATED_FALSE
+            txn.write(key, sidecar)
 
 
 def _unvalidate_classifier(body: dict) -> None:
     """Strip the positive-state classifier of its reference, leaving the count evidence intact."""
+    import tcip_store
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
     for bucket in body["predictions_by_date"].values():
-        (Path(bucket) / "classifier_operating_point.json").write_text(json.dumps({
-            "validated": False, "trait": "catkin", "experiment_id": "exp-1",
-            "operating_point": {"classifier": {"value": "elongated",
-                                               "validated_against": VALIDATED_FALSE}},
-        }), encoding="utf-8")
+        key = sidecar_key(bucket, "classifier_operating_point")
+        with tcip_store.transaction(key) as txn:
+            txn.write(key, {
+                "validated": False, "trait": "catkin", "experiment_id": "exp-1",
+                "operating_point": {"classifier": {"value": "elongated",
+                                                   "validated_against": VALIDATED_FALSE}},
+            })
 
 
 def _refusal_detail(client: TestClient, body: dict, route: str) -> str:

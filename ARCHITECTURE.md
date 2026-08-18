@@ -178,7 +178,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/agent_fence_rules.py | What the in-app agent fence protects, declared once for both shell guards. | 0 | 2 |
 | packages/tcip-web/src/tcip_web/agent_learning_capture.py | SessionEnd capture hook: the soft backstop for the self-learning loop. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 1 | 0 |
-| packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive with live open-loop counts. | 0 | 0 |
+| packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 0 | 0 |
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 9 | 2 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 3 |  <!-- queued: P5-329 unwired -->
 | packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 2 | 5 |
@@ -592,11 +592,11 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `build_plant_mapping` | `phenology_tools.py:28` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
-| `update_trait_spec_fields` | `phenology_tools.py:110` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:395` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:556` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:744` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
+| `update_trait_spec_fields` | `phenology_tools.py:109` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
+| `calibrate_classifier_operating_point` | `phenology_tools.py:394` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:555` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `compute_phenology` | `phenology_tools.py:743` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -765,14 +765,14 @@ registered at HEAD.
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:111` |
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:158` |  <!-- queued: P5-129 delete -->
-| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:382` |  <!-- queued: P5-130 merge-or-split -->
-| POST | `/onset_dates` | `onset_dates` | `routes/results.py:405` |  <!-- queued: P5-131 merge-or-split -->
-| POST | `/export_csv` | `export_csv` | `routes/results.py:428` |
-| GET | `/traits` | `list_traits` | `routes/results.py:683` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:566` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:582` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:620` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:712` |
+| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:381` |  <!-- queued: P5-130 merge-or-split -->
+| POST | `/onset_dates` | `onset_dates` | `routes/results.py:404` |  <!-- queued: P5-131 merge-or-split -->
+| POST | `/export_csv` | `export_csv` | `routes/results.py:427` |
+| GET | `/traits` | `list_traits` | `routes/results.py:682` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:565` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:581` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:619` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:711` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
 
@@ -813,15 +813,15 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/validate` | `preflight_config_route` | `routes/training.py:153` |  <!-- queued: P5-104 delete -->
-| POST | `/launch` | `launch_training_route` | `routes/training.py:167` |  <!-- queued: P5-113 delete -->
-| GET | `/runs` | `list_runs_route` | `routes/training.py:187` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:203` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:210` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:230` |
-| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:245` |  <!-- queued: P5-110 delete -->
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:268` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:322` |
+| POST | `/validate` | `preflight_config_route` | `routes/training.py:149` |  <!-- queued: P5-104 delete -->
+| POST | `/launch` | `launch_training_route` | `routes/training.py:163` |  <!-- queued: P5-113 delete -->
+| GET | `/runs` | `list_runs_route` | `routes/training.py:183` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:199` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:206` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:226` |
+| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:241` |  <!-- queued: P5-110 delete -->
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:264` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:318` |
 
 ### routes/tuning.py, prefix `/api/tuning` (9 routes)
 
@@ -982,7 +982,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:263`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:893`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:914`.
 
 Seam S17 ("Canonical per-image annotation JSON schema"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: every writer and the shared `json_io.read_annotations`
@@ -1062,7 +1062,7 @@ Writers: `set_image_status`,
 (split-materialized copy), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:499`.
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:442`; `_status_bucket_for`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:435`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:253`;
 `tcip_mcp.class_registry.stamp_unstamped_confirmations`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:223`, which enumerates every bucket of a
@@ -1070,7 +1070,7 @@ subject whose attribute schema is about to change so the confirmations under it 
 before the outgoing digest is gone.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:610`, imported by the web route module.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:631`, imported by the web route module.
 
 Seam S22 ("image_status.json confirmed-negative store"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_classes_routes.py:132,149`,
@@ -1096,7 +1096,7 @@ legitimately exist; the outgoing registry is the last moment their digest is rec
 sweep records it there and they read as predating the change instead of as made under the new
 vocabulary. Both writers reach the store through the one transactional writer
 `dataset_layout.stamp_image_status_digests`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:725`, whose `only_unstamped` argument keeps
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:746`, whose `only_unstamped` argument keeps
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`'s quarantine logic,
@@ -1118,7 +1118,7 @@ sidecar, `confirmed_negative_names` reads it) and in
 
 Path: `<dataset_root>/.tcip/state/view_coverage.json`.
 
-Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:326`.
+Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:347`.
 Writer and reader not independently re-traced beyond `dataset_layout.py`'s own docstring in the
 phase0 inventory; this session did not open the coverage route module to name a writer/reader
 symbol beyond what phase0 recorded.
@@ -1138,9 +1138,9 @@ Path: `<dataset_root>/.tcip/state/region_completeness.json` and
 `region_completeness_digest.json`, siblings of `image_status.json`.
 
 Path/shape definition: `tcip_mcp.dataset_layout.region_completeness_path`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:405`;
-`region_completeness_digest_path`, `dataset_layout.py:443`; shape guard
-`normalize_region_completeness_store`, `dataset_layout.py:483`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:426`;
+`region_completeness_digest_path`, `dataset_layout.py:464`; shape guard
+`normalize_region_completeness_store`, `dataset_layout.py:504`.
 
 Writer/reader named by phase0 but not independently opened this session:
 `pipelines/region_completeness.py` as the digest sidecar's writer.
@@ -1148,9 +1148,9 @@ Writer/reader named by phase0 but not independently opened this session:
 Seam S25 ("region_completeness.json attestation store"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_coverage_routes.py:449`,
 `tests/test_block_calibration.py:126,164,203`. The shared functions across the HTTP-route side and
-the calibration-gate side are `region_completeness_path` (`dataset_layout.py:405`),
-`normalize_region_completeness_store` (`dataset_layout.py:483`) and `status_bucket`
-(`dataset_layout.py:507`). Gap: `test_block_calibration.py`'s
+the calibration-gate side are `region_completeness_path` (`dataset_layout.py:426`),
+`normalize_region_completeness_store` (`dataset_layout.py:504`) and `status_bucket`
+(`dataset_layout.py:528`). Gap: `test_block_calibration.py`'s
 `_attest_regions_complete` helper bypasses the HTTP route, writing the store via the same shared
 functions the route calls internally rather than via a POST to `/api/coverage/completeness`, so a
 bug confined to the route's own HTTP layer would not be caught by the calibration-gate tests.
@@ -1196,21 +1196,21 @@ declared; the numbered range 10-15 carries six of them, and `env.json` and `vali
 are listed here with the rest rather than taking numbers of their own.
 
 - `config.json` (`config_key`, `experiments.py:114`): written by `create_experiment`,
-  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:387` (rewrites only
+  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:389` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:942`, and `compare_experiments`, `experiments.py:993`.
+  `experiments.py:942`, and `compare_experiments`, `experiments.py:998`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (332), `update_status`
-  (`experiments.py:413`), `stamp_run_identity` (`experiments.py:452`), `_touch_heartbeat`
+  (`experiments.py:413`), `stamp_run_identity` (`experiments.py:454`), `_touch_heartbeat`
   (`experiments.py:593`). Read by `get_experiment` (942), `reconstruct_run_status`
-  (`experiments.py:538`), `resolve_experiment_dir_for_run` (`experiments.py:476`). `state` is
+  (`experiments.py:538`), `resolve_experiment_dir_for_run` (`experiments.py:478`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (332) and
-  `update_lineage`, `experiments.py:840`. Read by `get_experiment` (942) and
-  `get_experiment_lineage`, `experiments.py:1037`.
+  `update_lineage`, `experiments.py:845`. Read by `get_experiment` (942) and
+  `get_experiment_lineage`, `experiments.py:1042`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (332) and
-  `record_artifact`, `experiments.py:813`. Read by `get_experiment` (942).
+  `record_artifact`, `experiments.py:818`. Read by `get_experiment` (942).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
-  `log_metrics`, `experiments.py:625`. Read by `read_metrics`, `experiments.py:612`, which
+  `log_metrics`, `experiments.py:630`. Read by `read_metrics`, `experiments.py:617`, which
   `get_experiment` (942, paginated) and `reconstruct_run_status` (538, last row only) go through.
 - `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
@@ -1221,10 +1221,10 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:700`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:705`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual). Read by `read_validations`, `experiments.py:735`, `find_validation`,
-  `experiments.py:750` (matching rows by recomputed `validation_digest`, `experiments.py:690`),
+  residual). Read by `read_validations`, `experiments.py:740`, `find_validation`,
+  `experiments.py:750` (matching rows by recomputed `validation_digest`, `experiments.py:695`),
   and included whole by `get_experiment` (942). The one member appendable after a terminal
   state, because a validation is a statement made about a run after it ended.
 
@@ -1308,7 +1308,7 @@ one of the stamp filenames `SIDECAR_FILENAMES` names
 (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:693`) and every bucket enumeration
 excludes (format 17).
 
-Writer: `write_sidecar`, `resolution.py:795`, the one write, under the stamp's own lock;
+Writer: `write_sidecar`, `resolution.py:790`, the one write, under the stamp's own lock;
 `update_sidecar`, line 809, is the one merge into an existing stamp, reading and writing inside
 one transaction so a promotion cannot drop what the producing run recorded. Both refuse, through
 one shared check (`_check_stamp_claim`, line 768), a stamp claiming validation with no
@@ -1325,7 +1325,7 @@ deliveries (`tools/phenology_tools.py:403,572`). The raster export also records 
 the raster the bucket was produced on, `raster_content_identity`, on every run of that regime,
 and `claim_scope_validated` when a trait triggered block calibration.
 
-Reader: `read_operating_point_sidecar`, `resolution.py:890`, which never raises: an unreadable
+Reader: `read_operating_point_sidecar`, `resolution.py:885`, which never raises: an unreadable
 stamp floors the dimension it describes to unvalidated at every reconciler rather than taking down
 a delivery gate. A stamp claiming validation is checked against the record it names by
 `verify_stamp_binding`, line 1399, called from inside every reconciler so no delivery door can
@@ -1500,7 +1500,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: every process names the same workspace directory and the same active project.
 Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:28` (`ACTIVE_MARKER = ".active"`).
-Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:31` (`raw = os.environ.get("TCIP_WORKSPACE", "").strip()`, a direct read bypassing `workspace.py`).
+Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:42` (`raw = os.environ.get("TCIP_WORKSPACE", "").strip()`, a direct read bypassing `workspace.py`).
 Phase 3 verdict: duplicated.
 
 ## S03. Backend port discovery file .tcip/state/web_port.txt
@@ -1541,7 +1541,7 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:625` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:630` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -1576,7 +1576,7 @@ Phase 3 verdict: single.
 ## S13. image_status carried in annotation_stats.json
 
 Must agree: the annotation-stats file's image_status block and the canonical image_status.json do not disagree.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:632` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:653` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. One membership restatement survives outside the resolver at `packages/tcip-web/src/tcip_web/routes/sessions.py:272` (session time classification), recorded as remaining work.
 
@@ -1590,7 +1590,7 @@ Phase 3 verdict: single.
 ## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:771` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:792` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
 Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
@@ -1639,28 +1639,28 @@ Phase 3 verdict: single.
 ## S22. image_status.json confirmed-negative store
 
 Must agree: a negative is empty labels plus an explicit human Complete, every consumer applies the same bucket keying and status vocabulary, and each stored status carries the actor who set it and when, so a person's Complete and a status a harvest wrote stay distinguishable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:619` (`def derive_status(`, with `IMAGE_STATUSES` at line 610 as the one vocabulary, `status_of` at line 542 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:640` (`def derive_status(`, with `IMAGE_STATUSES` at line 610 as the one vocabulary, `status_of` at line 542 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` and `routes/review.py` call `derive_status`; the browser imports one `ImageStatus` type from `api/classes.ts`, pinned against the Python vocabulary by a gate test.
 Phase 3 verdict: single.
 
 ## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:725` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry.stamp_unstamped_confirmations`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:746` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry.stamp_unstamped_confirmations`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
 Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:161` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
 ## S24. view_coverage.json advisory coverage record  <!-- queued: P5-279 unify -->
 
 Must agree: backend store shape and the browser's coverage payload match, keyed by status_bucket.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:326` (`def view_coverage_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:347` (`def view_coverage_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-web/src/tcip_web/routes/coverage.py:186` (`@router.post("")`, `post_coverage`).
 Phase 3 verdict: duplicated.
 
 ## S25. region_completeness.json attestation store
 
 Must agree: an attestation written by the GUI is readable, and staleness-checkable, by the calibration path that relies on it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:405` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:426` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:123` (`def stale_cells(`).
 Phase 3 verdict: restated-in-test.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:123` (`def stale_cells(`).
@@ -1669,21 +1669,21 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 
 Must agree: the stored fingerprint and the recomputed one cover the same inputs.
 Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:254` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:647` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:642` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
 ## S27. Trained-model registry .tcip/models/registry.json
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:711` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:710` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
 
 Must agree: every writer stamps, and every consumer finds, the same provenance keys next to a bucket's predictions.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:834` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; `write_sidecar`, line 794, and `update_sidecar`, line 809, are the only writers, both through `sidecar_key`, line 719, and both refusing an unearned validation claim). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, line 1163, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, line 1269, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:890` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, line 1399, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:1044` and `tools/inference_tools.py:1380` and `packages/tcip-web/src/tcip_web/routes/inference.py:289`; the review promotion merges into the stored stamp under its lock at `routes/review.py:884`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:829` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; `write_sidecar`, line 794, and `update_sidecar`, line 809, are the only writers, both through `sidecar_key`, line 719, and both refusing an unearned validation claim). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, line 1163, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, line 1269, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:885` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, line 1399, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:1044` and `tools/inference_tools.py:1380` and `packages/tcip-web/src/tcip_web/routes/inference.py:289`; the review promotion merges into the stored stamp under its lock at `routes/review.py:884`.
 Phase 3 verdict: single.
 
 ## S29. Prediction-bucket immutability
@@ -1696,7 +1696,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1058` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1063` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
@@ -1724,7 +1724,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2079` (`def check_delivery_gate(`, with `DeliveryGateResult.column_stamp`, line 1198, as the one derivation of what a deliverable's validity column carries).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2074` (`def check_delivery_gate(`, with `DeliveryGateResult.column_stamp`, line 1198, as the one derivation of what a deliverable's validity column carries).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:212`, `pipelines/postprocessing/aggregation.py:347`, `tools/inference_tools.py:1563` and `tools/phenology_tools.py:800` (each delivery door stamps the column the gate hands it rather than re-deriving one), and `packages/tcip-web/src/tcip_web/routes/results.py:268` for the GUI's own export. The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
@@ -1787,15 +1787,15 @@ Phase 3 verdict: duplicated.
 ## S43. dataset_source bespoke dataset seam  <!-- queued: P5-322 unify -->
 
 Must agree: a bespoke dataset builder returns a Dataset the trainer's loaders and the task's collation accept.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1483` (`DATASET_SOURCE_KEY = "dataset_source"`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1590` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1477` (`DATASET_SOURCE_KEY = "dataset_source"`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1584` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
 Phase 3 verdict: duplicated.
 
 ## S44. Model-contract smoke batch versus the trainer's real batch
 
 Must agree: the smoke batch has the same shape the trainer actually feeds model.forward for the task.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_contract.py:47` (`def _synth_batch(`, which synthesizes per-sample `(image, target)` items shaped like a dataset's `__getitem__` and hands them to the trainer's own collate).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py:458` (`def task_collate(task: str):`, the collate the DataLoader assembles the training batch with).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py:452` (`def task_collate(task: str):`, the collate the DataLoader assembles the training batch with).
 Phase 3 verdict: single.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function is defined at `model_contract.py:47` (`def _synth_batch(`).
 
@@ -1844,7 +1844,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:321` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:317` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 

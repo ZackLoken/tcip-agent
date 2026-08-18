@@ -76,7 +76,9 @@ def test_materialize_writes_labels_manifest_and_empty_negatives(tmp_path):
     assert label_b.is_file() and json.loads(label_b.read_text())["annotations"] == []  # empty hard-negative label
 
     assert (out / "images" / "imgA.png").is_file()
-    man = json.loads((out / "curated_manifest.json").read_text())
+    import tcip_store as ts
+    from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
+    man = ts.read(curated_manifest_key(out))
     assert man["counts"]["positive"] == 1 and man["counts"]["hard_negative"] == 1
 
 

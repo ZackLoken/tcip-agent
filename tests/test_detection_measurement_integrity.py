@@ -218,8 +218,9 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
 
 def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
+    import tcip_store as ts
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
-    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tcip_mcp.pipelines.training.evaluation import evaluation_results_key, run_full_frame_evaluation
 
     from PIL import Image
     from tcip_annotation import json_io
@@ -248,7 +249,7 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
     assert r["tp"] == 1 and r["fp"] == 0 and r["fn"] == 0
-    assert Path(r["results_path"]).is_file()
+    assert ts.exists(evaluation_results_key(tmp_path / "out"))
 
 
 def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
@@ -516,13 +517,14 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     the API still returns the right shape."""
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
-    import json
     import os
     import time
 
+    import tcip_store as ts
     from PIL import Image
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.experiments import config_key
     import tcip_mcp.pipelines.training.generic_trainer as gt
     from tcip_mcp.tools import training_tools
 
@@ -563,13 +565,13 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
     run_id = res["run_id"]
-    config_path = tmp_path / ".tcip" / "experiments" / eid / "config.json"
+    key = config_key(eid)
 
     deadline = time.monotonic() + 90
     tiling: dict = {}
     while time.monotonic() < deadline:
-        if config_path.is_file():
-            tiling = json.loads(config_path.read_text()).get("data", {}).get("tiling", {})
+        if ts.exists(key):
+            tiling = ts.read(key).get("data", {}).get("tiling", {})
             if "tile_size" in tiling:
                 break
         status = training_tools.check_training_status(run_id)
@@ -702,6 +704,7 @@ def _stand_in_calibration(monkeypatch, itools, labels_dir, **overrides):
 
 
 def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
+    import tcip_store as ts
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
 
@@ -724,14 +727,13 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     assert r["operating_point"]["conf"]["value"] == pytest.approx(0.9)
     assert stub.applied_conf == pytest.approx(0.9)                  # resolved conf governs the model
     assert r["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
-    assert Path(r["sweep_path"]).is_file()
+    assert ts.exists(itools.confidence_sweep_key(r["calibration_evidence_key"]))
 
 
 def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monkeypatch):
     """Two calibrations on the same checkpoint+labels but different predictor-path
     settings must not collide on the sweep artifact filename."""
-    import json
-
+    import tcip_store as ts
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
 
@@ -752,10 +754,10 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
                                    calibration_labels_dir=str(tmp_path))
 
     assert r_untiled["sweep_path"] != r_tiled["sweep_path"]  # distinct predictor paths, distinct files
-    assert Path(r_untiled["sweep_path"]).is_file()
-    assert Path(r_tiled["sweep_path"]).is_file()
+    assert ts.exists(itools.confidence_sweep_key(r_untiled["calibration_evidence_key"]))
+    assert ts.exists(itools.confidence_sweep_key(r_tiled["calibration_evidence_key"]))
 
-    sweep_body = json.loads(Path(r_tiled["sweep_path"]).read_text())
+    sweep_body = ts.read(itools.confidence_sweep_key(r_tiled["calibration_evidence_key"]))
     assert sweep_body["checkpoint_sha256"]  # identity threaded through, not omitted
     assert sweep_body["predictor_path"]["tile"] is True
     assert sweep_body["predictor_path"]["tile_size"] == 256
@@ -764,10 +766,12 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
 def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch):
     """The delivered operating_point.json sidecar must record the sweep artifact
     that justified the shipped conf, not omit it entirely."""
-    import json
+    from pathlib import PurePosixPath
 
+    import tcip_store as ts
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     # tiled=False here matches the real tile=False the export_predictions call below makes: an
     # operating point resolved as if the run always tiles (resolve_operating_point's own tiled
@@ -786,9 +790,12 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
         str(ckpt), images_dir=str(tmp_path), output_dir="dataset/predictions/baseline/2026-01-01",
         device="cpu", tile=False, trait="catkin", calibration_labels_dir=str(tmp_path))
     assert "error" not in out, out
-    sidecar = json.loads((Path(out["output_dir"]) / "operating_point.json").read_text())
+    sidecar = read_operating_point_sidecar(out["output_dir"])
     assert sidecar["sweep_path"]
-    assert Path(sidecar["sweep_path"]).is_file()
+    sweep_name = Path(sidecar["sweep_path"]).name
+    relative = PurePosixPath(".tcip", "artifacts", sweep_name)
+    (inputs_hash,) = itools._SweepArtifactLocator().parts_from(relative)
+    assert ts.exists(itools.confidence_sweep_key(inputs_hash))
     assert sidecar["sweep_summary"]["count_unbiased_conf"] == pytest.approx(0.9)
 
 
@@ -951,8 +958,8 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
 
 
 def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_trait_spec):
-    import json
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     from tests._binding_fixtures import calibrated_run_fields
 
@@ -972,7 +979,7 @@ def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_ca
     r = itools.export_predictions(str(ckpt), str(tmp_path), str(out_dir), trait="catkin",
                                   calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r
-    stamp = json.loads((out_dir / "operating_point.json").read_text())
+    stamp = read_operating_point_sidecar(out_dir)
     assert stamp["validated"] is True                       # not hardcoded False
     assert r["validated"] is True and r["conf_source"] == "calibration"
 

@@ -10,24 +10,26 @@ record stays writable and re-openable.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+import tcip_store as ts
+from tcip_mcp import experiments as exp
+from tcip_mcp.audit import audit_log_key
+
+_MEMBER_KEY_OF = {"status.json": exp.status_key, "artifacts.json": exp.artifacts_key,
+                  "lineage.json": exp.lineage_key, "config.json": exp.config_key}
 
 
 def _record(root: Path, experiment_id: str, name: str) -> dict:
-    return json.loads((root / ".tcip" / "experiments" / experiment_id / name).read_text())
+    return ts.read(_MEMBER_KEY_OF[name](experiment_id, root=root))
 
 
 def _metric_rows(root: Path, experiment_id: str) -> list[dict]:
-    path = root / ".tcip" / "experiments" / experiment_id / "metrics.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return list(ts.read_log(exp.metrics_key(experiment_id, root=root)).records)
 
 
 def _audit_refusals(root: Path) -> list[dict]:
-    path = root / ".tcip" / "audit.jsonl"
-    if not path.is_file():
-        return []
-    events = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    events = ts.read_log(audit_log_key(root)).records
     return [e for e in events if e.get("tool") == "experiment_mutation_refused"]
 
 

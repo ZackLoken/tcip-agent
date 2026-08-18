@@ -4,8 +4,6 @@ never survives an untiled run."""
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -100,27 +98,28 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
 
 def _write_experiment_config(tmp_path, monkeypatch, data):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    from tcip_mcp.experiments import experiments_dir
+    import tcip_store as ts
+    from tcip_mcp.experiments import config_key
 
-    exp_dir = experiments_dir() / "exp1"
-    exp_dir.mkdir(parents=True)
-    (exp_dir / "config.json").write_text(
-        json.dumps({"model_source": {"builder": "x:y"}, "data": data}), encoding="utf-8")
-    return exp_dir / "config.json"
+    key = config_key("exp1")
+    ts.replace(key, {"model_source": {"builder": "x:y"}, "data": data})
+    return key
 
 
 def test_patch_experiment_tiling_replace_drops_stale_geometry(tmp_path, monkeypatch):
     """update()-merging an untiled record would leave the stale requested tile_size in the
     durable experiment config; replace mode must not."""
+    import tcip_store as ts
+
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
 
-    path = _write_experiment_config(
+    key = _write_experiment_config(
         tmp_path, monkeypatch,
         {"images_dir": "img", "tiling": {"enabled": True, "tile_size": 640}})
     _patch_experiment_config_tiling("exp1", {"enabled": False}, replace=True,
                                     train_native_size=[64, 48])
 
-    cfg = json.loads(path.read_text(encoding="utf-8"))
+    cfg = ts.read(key)
     assert cfg["data"]["tiling"] == {"enabled": False}
     assert cfg["data"]["train_native_size"] == [64, 48]
     assert cfg["data"]["images_dir"] == "img"  # a patch of the data section, not a rewrite
@@ -128,13 +127,15 @@ def test_patch_experiment_tiling_replace_drops_stale_geometry(tmp_path, monkeypa
 
 
 def test_patch_experiment_tiling_default_still_merges(tmp_path, monkeypatch):
+    import tcip_store as ts
+
     from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
 
-    path = _write_experiment_config(
+    key = _write_experiment_config(
         tmp_path, monkeypatch, {"tiling": {"enabled": True, "sliver_frac": 0.4}})
     _patch_experiment_config_tiling("exp1", {"tile_size": 224, "overlap": 0.2})
 
-    tiling = json.loads(path.read_text(encoding="utf-8"))["data"]["tiling"]
+    tiling = ts.read(key)["data"]["tiling"]
     assert tiling == {"enabled": True, "sliver_frac": 0.4, "tile_size": 224,
                       "overlap": pytest.approx(0.2)}
 
@@ -172,8 +173,10 @@ def _base_config(tiling):
 
 def test_hpo_trial_resolved_config_replaces_unrealized_tiling(monkeypatch, tmp_path):
     """A trial that trained untiled must not leave the base config's requested tile_size in
-    resolved_config.json, the record a later reader takes for the trial's geometry."""
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    resolved_config, the record a later reader takes for the trial's geometry."""
+    import tcip_store as ts
+
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
     class _UntiledTrialDataset:
         def __len__(self):
@@ -187,12 +190,14 @@ def test_hpo_trial_resolved_config_replaces_unrealized_tiling(monkeypatch, tmp_p
     _run_hpo_trial({"lr": 3e-4}, [].append,
                    _base_config({"enabled": True, "tile_size": 999}), str(trial_dir))
 
-    resolved = json.loads((trial_dir / "resolved_config.json").read_text())
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
     assert resolved["data"]["tiling"] == {"enabled": False}
 
 
 def test_hpo_trial_resolved_config_records_effective_tile_geometry(monkeypatch, tmp_path):
-    from tcip_mcp.tools.training_tools import _run_hpo_trial
+    import tcip_store as ts
+
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
 
     class _TiledTrialDataset(_TiledStub):
         def __len__(self):
@@ -205,5 +210,5 @@ def test_hpo_trial_resolved_config_records_effective_tile_geometry(monkeypatch, 
     trial_dir = tmp_path / "trial_0"
     _run_hpo_trial({"lr": 3e-4}, [].append, _base_config({"enabled": True}), str(trial_dir))
 
-    tiling = json.loads((trial_dir / "resolved_config.json").read_text())["data"]["tiling"]
+    tiling = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))["data"]["tiling"]
     assert tiling == {"enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
