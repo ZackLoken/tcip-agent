@@ -767,6 +767,21 @@ def confirm_trait_spec(
     return updated
 
 
+def trait_spec_statement_current(spec: TraitSpec, statement: dict[str, Any] | None) -> bool:
+    """Whether ``statement``'s authored-field snapshot still matches ``spec``'s live values.
+
+    Invalidation here is read-time, not write-time: ``write_trait_spec_fields`` does not clear a
+    confirmation when it lands, so a confirmed statement whose covered fields have since moved is
+    caught here, the same way an operationalization's constituting-field drift is caught by
+    comparison rather than by a write-time rule. Unstated or unconfirmed is never current.
+    """
+    if not statement or not statement.get("confirmed_by"):
+        return False
+    recorded = statement.get("statement_fields") or {}
+    live = {field: canonical(getattr(spec, field)) for field in _AUTHORED_SPEC_FIELDS}
+    return recorded == live
+
+
 def _all_traits() -> dict[str, TraitSpec]:
     """The live registry: every config-authored spec found under this project's trait_specs dir."""
     return {spec.name: spec for spec in load_trait_specs()}
