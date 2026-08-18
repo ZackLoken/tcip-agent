@@ -383,8 +383,11 @@ def test_the_list_route_names_a_record_whose_trait_is_no_longer_registered(
     client: TestClient, project: Path
 ) -> None:
     """A record nothing can resolve is named rather than dropped, since silence reads as none."""
+    from tcip_mcp import traits
+
     fx.state_crossing(project)
-    (project / ".tcip" / "state" / "trait_specs" / f"{fx.CROSSING_TRAIT}.yml").unlink()
+    key = traits.trait_spec_key(traits.trait_specs_dir(project), fx.CROSSING_TRAIT)
+    ts.delete(key, expect=ts.read_versioned(key).version)
 
     listed = client.get(LIST_ROUTE, params={"project_root": str(project)}).json()
 
