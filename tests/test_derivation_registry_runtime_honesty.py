@@ -27,15 +27,15 @@ def _resolve(label: str):
 def _write_bare_trait(name: str, **extra) -> None:
     """A minimal trait spec in this test's pinned project root, written where the platform's own
     resolver reads specs from rather than at a location this fixture states on its own."""
-    import yaml
+    import tcip_store as ts
 
     from tcip_mcp.project_paths import resolve_state
-    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH
+    from tcip_mcp.traits import _TRAIT_SPECS_RELPATH, trait_spec_key
 
     specs_dir = resolve_state(_TRAIT_SPECS_RELPATH)
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    (specs_dir / f"{name}.yml").write_text(
-        yaml.safe_dump({"name": name, "delivers": ["leaf_length"], **extra}), encoding="utf-8"
+    ts.replace(
+        trait_spec_key(specs_dir, name), {"name": name, "delivers": ["leaf_length"], **extra},
+        expect=ts.Version.ABSENT,
     )
 
 
