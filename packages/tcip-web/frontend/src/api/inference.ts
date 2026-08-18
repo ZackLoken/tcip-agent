@@ -266,6 +266,70 @@ export function operationalizationRefusalOf(e: unknown): OperationalizationRefus
   };
 }
 
+/** One trait's authoring statement, as the browser reads it. */
+export type TraitSpecStatementRecord = {
+  trait: string;
+  statement_fields: Record<string, unknown> | null;
+  rationale: string | null;
+  stated_by: string | null;
+  stated_at: string | null;
+  relayed_note: string | null;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  identity_from_request: boolean | null;
+  confirmed_current: boolean;
+  record_seen: string;
+};
+
+/** The four fields the trait-spec confirmation writer owns, plus the audit-append warning (A8):
+ *  a confirmation that lands but whose audit line does not is still a 200, never a refusal. */
+export interface TraitSpecStatementConfirmation {
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  identity_from_request: boolean | null;
+  record_seen: string | null;
+  audit_warning: string | null;
+}
+
+export interface ConfirmTraitSpecStatementBody {
+  project_root: string;
+  trait: string;
+  record_seen: string;
+  user?: string;
+  confirmed?: boolean;
+}
+
+/** A trait-spec confirmation's refusal that the statement moved since it was displayed. */
+export interface TraitSpecAuthoringRefusal {
+  kind: "trait_spec_authoring";
+  message: string;
+  record: TraitSpecStatementRecord;
+}
+
+export function traitSpecAuthoringRefusalOf(e: unknown): TraitSpecAuthoringRefusal | null {
+  if (!(e instanceof StructuredRefusalError)) return null;
+  const detail = e.detail;
+  if (detail.kind !== "trait_spec_authoring") return null;
+  return {
+    kind: "trait_spec_authoring",
+    message: typeof detail.message === "string" ? detail.message : e.message,
+    record: detail.record as TraitSpecStatementRecord,
+  };
+}
+
+/** One completed delivery: what shipped, under which trait and kind, and the real per-bucket
+ *  verification evidence the delivering door reconciled at the time. Read-only; a delivery event
+ *  is a fact recorded after an artifact already shipped, not a statement to confirm. */
+export interface DeliveryEventRecord {
+  event_id: string;
+  trait: string | null;
+  delivery_kind: string | null;
+  door: string;
+  output_path: string | null;
+  documents: Record<string, unknown>;
+  produced_at: string;
+}
+
 export const resultsApi = {
   registeredModels: (project_path: string) =>
     getJson<{ models: RegisteredModel[] }>(
@@ -319,6 +383,31 @@ export const resultsApi = {
   // Refuses with 409 when the record moved since it was displayed, carrying what is on file now.
   confirmOperationalization: (body: ConfirmOperationalizationBody) =>
     postJson<OperationalizationConfirmation>(ROUTES.postResultsOperationalizationConfirm, body),
+
+  /** Every trait-spec authoring statement this project holds, one row per trait; siblings of
+   *  `operationalizations`/`operationalization` above, the same generalized statement shape. */
+  traitSpecStatements: (project_root: string) =>
+    getJson<{
+      records: TraitSpecStatementRecord[];
+      unresolved: unknown[];
+      statement_fields: string[];
+    }>(`${ROUTES.getResultsTraitSpecStatements}?project_root=${encodeURIComponent(project_root)}`),
+
+  traitSpecStatement: (project_root: string, trait: string) =>
+    getJson<TraitSpecStatementRecord>(
+      `${ROUTES.getResultsTraitSpecStatement}?project_root=${encodeURIComponent(project_root)}` +
+        `&trait=${encodeURIComponent(trait)}`,
+    ),
+
+  // Refuses with 409 when the statement moved since it was displayed, carrying what is on file now.
+  confirmTraitSpecStatement: (body: ConfirmTraitSpecStatementBody) =>
+    postJson<TraitSpecStatementConfirmation>(ROUTES.postResultsTraitSpecStatementConfirm, body),
+
+  /** Every delivery event this project holds: what shipped, under which trait and kind. */
+  deliveryEvents: (project_root: string) =>
+    getJson<{ records: DeliveryEventRecord[] }>(
+      `${ROUTES.getResultsDeliveryEvents}?project_root=${encodeURIComponent(project_root)}`,
+    ),
 
   // The server computes what it exports: this sends the inputs a phenology measurement is derived from
   // plus which computation to run, never a table of rows: sending rows would let the caller
