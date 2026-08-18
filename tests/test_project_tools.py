@@ -18,7 +18,7 @@ from tcip_mcp.tools.project_tools import (
     register_dataset,
     upsert_dataset,
 )
-from tcip_store.binding import BACKEND_ENV, FILE_BACKEND, SQLITE_BACKEND
+from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND, SQLITE_BACKEND
 
 
 def _damage_record(key: tcip_store.Key, data: bytes) -> None:
@@ -30,7 +30,7 @@ def _damage_record(key: tcip_store.Key, data: bytes) -> None:
     """
     from tcip_store.store import _backend
 
-    name = os.environ.get(BACKEND_ENV) or FILE_BACKEND
+    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
     if name == FILE_BACKEND:
         _backend().path_for(key).write_bytes(data)
         return

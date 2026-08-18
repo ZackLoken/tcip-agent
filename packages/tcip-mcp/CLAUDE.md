@@ -51,5 +51,8 @@ for the current tool list/count; never hardcode a count in a doc or comment, sin
 - Prefer a logged script in `scripts/` over a new tool here. This package already has tool
   bloat, not tool shortage; add a tool only for an audit seam, long-running infrastructure, or
   domain knowledge the agent lacks that a script can't carry.
-- State mutations route through `@audited` tools only; `.tcip/audit.jsonl` is the append-only
-  record other code (including scripts) must not write around.
+- State mutations route through `@audited` tools only; the append-only audit log, addressed by
+  `audit.audit_log_key` and held by whichever backend the process bound, is the record other code
+  (including scripts) must not write around. `audit.py` decides where an entry goes and what a
+  failed append means, both stated there; a caller that is not an MCP tool emits through
+  `record_event` rather than composing an entry of its own.

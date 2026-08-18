@@ -78,6 +78,12 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    strategy:
+      # Both storage backends stay gated: sqlite is the default, file is the
+      # zero-service fallback an operator can still select.
+      fail-fast: false
+      matrix:
+        store-backend: ["sqlite", "file"]
     steps:
       - uses: actions/checkout@v4
 
@@ -122,6 +128,7 @@ jobs:
         env:
           TCIP_MIN_TESTS: "400"
           OMP_NUM_THREADS: "1"
+          TCIP_STORE_BACKEND: ${{ matrix.store-backend }}
         run: pytest tests/ -n auto --timeout=300 -q
 
   typescript:

@@ -35,6 +35,8 @@ All three processes share `.tcip/` on disk (experiment state, model registry, au
 
 Supporting libraries: `packages/tcip-annotation` (headless annotation engine: label I/O, IoU matching, SAM wrapper) and `packages/tcip-store` (the storage seam: one locked, atomic interface for the platform's records, append-only logs and blobs). `tcip-store` is the bottom of the stack, depending on nothing else here; `tcip-annotation` depends on it and on neither of the other two.
 
+Records and append-only logs go into one SQLite database per root, `<root>/.tcip/store.db`; blob bytes stay files under every backend, so imagery, labels and predictions travel with the dataset as they always did. Set `TCIP_STORE_BACKEND=file` to bind the file backend instead, which reads and writes the same records as loose files. A root whose records are still loose files is refused rather than read as empty: `python scripts/adopt_store.py <root>` moves them into a database, and `python scripts/export_store.py <root>` writes them back out.
+
 ## Repository layout
 
 ```
@@ -102,8 +104,8 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 ## Conventions
 
 - Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training.
-- Experiments: tracked in `.tcip/experiments/<id>/` with config, metrics JSONL, artifacts, lineage.
-- Audit log: all MCP tool calls logged to `.tcip/audit.jsonl` via `@audited` decorator.
+- Experiments: one record per run holding config, metrics, artifacts and lineage, with the run's own files (weights, TensorBoard events, the source snapshot) under `.tcip/experiments/<id>/` beside it.
+- Audit log: all MCP tool calls logged via the `@audited` decorator, into the append-only log under the root each call's scope names, and written out at `.tcip/audit.jsonl` by the file backend and by `export_store.py`. An entry the decorator cannot append raises, since the append runs after the tool body.
 - Lazy imports: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
 - Crop traits: controlled vocabulary defined in `.github/skills/crops/`.
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence

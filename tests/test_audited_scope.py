@@ -174,9 +174,15 @@ def test_relative_output_dir_records_where_the_tool_anchors_it_not_where_the_pro
     assert not (decoy / ".tcip").exists()
 
 
-def test_a_scope_resolver_that_raises_leaves_one_platform_entry_and_the_result_intact(
+def test_a_scope_resolver_that_raises_refuses_rather_than_filing_the_event_as_platform(
     platform_root: Path,
 ) -> None:
+    """A declared dataset event whose destination cannot be worked out is not rerouted.
+
+    The platform log is where an event goes because its scope resolved to no dataset, never
+    because resolution broke: an entry filed there on a resolver failure is one nobody tracing
+    that dataset will find, and the call would report success over a trail that lost it.
+    """
     from tcip_mcp.audit import audited
 
     def _raises(value: object) -> Path:
@@ -186,12 +192,12 @@ def test_a_scope_resolver_that_raises_leaves_one_platform_entry_and_the_result_i
     def curate_something(output_dir: str) -> dict:
         return {"ok": True}
 
-    assert curate_something("anywhere") == {"ok": True}
+    with pytest.raises(RuntimeError) as caught:
+        curate_something("anywhere")
 
-    rows = _rows_for(platform_root, "curate_something")
-    assert len(rows) == 1
-    assert "scope" not in rows[0]
-    assert rows[0]["status"] == "ok"
+    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLine
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert _rows_for(platform_root, "curate_something") == []
 
 
 def test_scope_argument_naming_no_parameter_is_refused_at_decoration(platform_root: Path) -> None:
