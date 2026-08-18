@@ -18,6 +18,29 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _worker_join_bound() -> float:
+    """How long a test here waits on a sweep worker.
+
+    A worker's slowest single act is one store write, bounded by the seam's own lock wait.
+    """
+    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
+
+    return 2 * DEFAULT_LOCK_TIMEOUT_S
+
+
+@pytest.fixture(autouse=True)
+def _join_sweep_workers():
+    """Wait out any sweep a test here launched before that test returns.
+
+    A worker writes through the storage backend the fixtures close on the way out, so a test
+    that returns while its worker is still writing leaves the close racing a live statement.
+    """
+    yield
+    from tcip_web.routes import tuning
+
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+
+
 @pytest.fixture
 def hpo_root(tmp_path, monkeypatch) -> Path:
     """Point the platform state root at a tmp dir so the routes read this test's sweeps."""
@@ -85,6 +108,35 @@ def test_launch_creates_sweep_then_listed(client: TestClient) -> None:
     # assert the registry got the entry.
     listing = client.get("/api/tuning/sweeps").json()
     assert any(s["sweep_id"] == sweep_id for s in listing["sweeps"])
+
+
+def test_no_sweep_worker_outlives_the_wait_seam(client: TestClient) -> None:
+    """A launch is joinable: the module hands a caller a real wait rather than a sleep.
+
+    The sweep itself fails fast on a config that names no model, which is the point: what is
+    asserted is that nothing the launch spawned is still writing once the wait returns, and
+    that the worker persisted through the key its launch resolved, under this test's own root.
+    """
+    from tcip_web import jobstore
+    from tcip_web.routes import tuning
+
+    resp = client.post(
+        "/api/tuning/launch",
+        json={
+            "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+            "param_space": {"training.batch_size": [2, 4]},
+            "n_trials": 1,
+            "output_dir": "",
+            "search_alg": "random",
+            "scheduler": "asha",
+        },
+    )
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert not any(t.is_alive() for t in tuning._workers.values())
+    assert any(s["sweep_id"] == sweep_id for s in jobstore.load(tuning.HPO_REGISTRY))
 
 
 def test_list_sweeps_finds_a_sweep_that_only_exists_on_disk(client, hpo_root) -> None:

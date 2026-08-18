@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,32 @@ def _pin_torch_single_thread():
     torch.set_num_threads(1)
 
 
+def _drain_background_store_writers() -> None:
+    """Join any background thread still writing through the bound backend.
+
+    A database backend closes its connections, so closing one under a thread mid-statement
+    frees the connection that statement is running on, which native SQLite answers by taking
+    the whole worker process down rather than by raising. The modules that spawn such threads
+    are looked up in ``sys.modules`` rather than imported, so a test that never touched the web
+    package pays nothing for this. A worker that outlasts the wait is raised rather than closed
+    under, so the failure is legible instead of a crash.
+    """
+    tuning = sys.modules.get("tcip_web.routes.tuning")
+    if tuning is None:
+        return
+    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
+
+    # A worker's slowest single act is one store write, bounded by the seam's own lock wait.
+    bound = 2 * DEFAULT_LOCK_TIMEOUT_S
+    still_running = tuning.wait_for_workers(timeout_s=bound)
+    if still_running:
+        raise RuntimeError(
+            f"sweep workers {', '.join(still_running)} were still writing after {bound}s, so "
+            "this test's storage backend was not closed under them. The test that launched "
+            "them has to wait on tcip_web.routes.tuning.wait_for_workers before returning."
+        )
+
+
 @pytest.fixture(autouse=True)
 def _bind_storage_backend():
     """Bind the storage backend before every test, the way a process entry point does.
@@ -33,12 +60,13 @@ def _bind_storage_backend():
     test rather than per session, so a test that binds its own backend and drops it on the way
     out leaves the next one a bound process rather than an unbound one. Closed on the way out
     so a database backend leaves no open handle on the test's tmp_path, which Windows would
-    then refuse to remove.
+    then refuse to remove, and drained first so no background writer is still holding it.
     """
     from tcip_store.binding import bind_default
 
     backend = bind_default()
     yield
+    _drain_background_store_writers()
     backend.close()
 
 
