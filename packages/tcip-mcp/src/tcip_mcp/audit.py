@@ -76,6 +76,26 @@ class MutationCommittedWithoutAuditLine(RuntimeError):
         self.tool = tool
 
 
+class AuditEntryNotWritten(RuntimeError):
+    """A call outside ``@audited`` recorded a mutation that already committed, and the append for
+    it failed.
+
+    :func:`record_event_or_raise`'s sibling to :class:`MutationCommittedWithoutAuditLine`: the
+    same "committed and unrecorded, do not blind-retry" shape, for a call site with no tool body
+    of its own to have already run. A sibling rather than a subclass, since the two guard different
+    things (a decorator's own control flow around a body versus an explicit call with none), not
+    one specialization of the other.
+    """
+
+    def __init__(self, tool: str, cause: BaseException) -> None:
+        super().__init__(
+            f"{tool} completed and its audit entry could not be written: {cause}. Whatever the "
+            "call changed is committed and unrecorded, so do not retry it blind: repair the "
+            "audit log's destination, then reconcile the trail against what the call did."
+        )
+        self.tool = tool
+
+
 def platform_audit_scope() -> Path:
     """The root a platform event is recorded under, resolved at write time."""
     return resolve_state(AUDIT_ROOT)
@@ -142,6 +162,36 @@ def record_event(
     }
     entry.update(extra)
     _write_entry(entry, scope)
+
+
+def record_event_or_raise(
+    tool: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    status: str = "ok",
+    scope: str | Path | None = None,
+    **extra: Any,
+) -> None:
+    """Emit one audit line for a confirmation write that must not land silently unrecorded.
+
+    Identical shape to :func:`record_event`, for a caller recording a mutation it already made,
+    with no tool body of its own for ``@audited`` to bracket. Unlike :func:`record_event`, a
+    failed append is not swallowed: it is raised as :class:`AuditEntryNotWritten`, naming the
+    mutation that already committed and is now unrecorded, so the caller cannot blind-retry it.
+    :func:`record_event`'s own callers are unaffected; this is a new sibling, not a change to it.
+    """
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tool": tool,
+        "arguments": _redact(arguments) if arguments else {},
+        "status": status,
+    }
+    entry.update(extra)
+    try:
+        append(audit_log_key(scope), entry)
+    except Exception as exc:
+        logger.warning("Failed to write the audit entry for %s", tool, exc_info=True)
+        raise AuditEntryNotWritten(tool, exc) from exc
 
 
 def dataset_scope_of(value: Any) -> Path | None:
