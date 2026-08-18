@@ -27,11 +27,8 @@ mechanism: a suggested answer becomes the answer, and the meaning is the breeder
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -40,6 +37,7 @@ from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, Versioned, re
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.identity import user_identity
+from tcip_mcp.statements import canonical, content_hash, now_iso
 from tcip_mcp.traits import TraitSpec, crops_definitions, get_trait_for, trait_specs_dir
 
 # ── the delivery kinds ───────────────────────────────────────────────────────
@@ -178,22 +176,6 @@ def resolve_trait_for_phenotype(
     if len(delivering) > 1:
         raise ValueError(_ambiguous_deliverer_text(delivered_phenotype, delivering))
     return delivering[0]
-
-
-def canonical(value: Any) -> Any:
-    """One comparable form for a stored or live value, so JSON round-tripping is not a difference.
-
-    Sequences become lists recursively and mapping keys are sorted; scalars are left alone. A
-    ``TraitSpec`` tuple field written into a JSON record reads back as a list, so a raw comparison
-    would report a field as moved seconds after it was confirmed.
-    """
-    if isinstance(value, Mapping):
-        return {str(k): canonical(value[k]) for k in sorted(value, key=str)}
-    if isinstance(value, (str, bytes)):
-        return value
-    if isinstance(value, Sequence):
-        return [canonical(item) for item in value]
-    return value
 
 
 # ── the record store ─────────────────────────────────────────────────────────
@@ -623,13 +605,7 @@ def record_seen_hash(record: Mapping[str, Any]) -> str:
     leaving the statement text alone while changing the measured subject or the value keys would
     otherwise harvest a click for content nobody saw.
     """
-    payload = {field: canonical(record.get(field)) for field in STATEMENT_FIELDS}
-    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return content_hash(record, STATEMENT_FIELDS)
 
 
 def _require_text(value: Any, field: str) -> str:
@@ -719,7 +695,7 @@ def state_operationalization(
         "delivered_phenotypes": phenotypes,
         "delivered_value_keys": value_keys,
         "stated_by": STATEMENT_SURFACE,
-        "stated_at": _now(),
+        "stated_at": now_iso(),
         "relayed_note": str(relayed_note or ""),
         **{field: None for field in CONFIRMATION_FIELDS},
     }
@@ -789,7 +765,7 @@ def confirm_trait_operationalization(
     if confirmed:
         updated.update({
             "confirmed_by": user_identity(user),
-            "confirmed_at": _now(),
+            "confirmed_at": now_iso(),
             "identity_from_request": bool(identity_from_request),
             "confirmed_fields": _live_constituting(spec, delivery_kind),
         })
