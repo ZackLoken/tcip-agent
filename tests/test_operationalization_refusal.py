@@ -419,13 +419,17 @@ def _withdraw(project_root: Path, trait: str) -> None:
 
 
 def _hand_edit_spec(project_root: Path, trait: str, **fields) -> None:
-    """Edit the trait's own yml where it lies, the way a text editor does, around every writer."""
-    import yaml
+    """Edit the trait's own stored record directly, the way an out-of-band writer does, around
+    every writer this platform has."""
+    import tcip_store as ts
 
-    path = Path(project_root) / ".tcip" / "state" / "trait_specs" / f"{trait}.yml"
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    from tcip_mcp import traits
+
+    key = traits.trait_spec_key(traits.trait_specs_dir(project_root), trait)
+    stored = ts.read_versioned(key)
+    data = dict(stored.value)
     data.update(fields)
-    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    ts.replace(key, data, expect=stored.version)
 
 
 def _web_refusal(client: TestClient, body: dict, route: str) -> dict:
@@ -500,10 +504,10 @@ def test_all_three_web_doors_refuse_identically(client: TestClient, tmp_path: Pa
 
 
 def test_hand_edited_spec_is_caught_at_read_time(client: TestClient, tmp_path: Path):
-    """The spec is an ordinary file, so the comparison that catches an edit happens at every read.
+    """The spec is an ordinary record, so the comparison that catches an edit happens at every read.
 
-    Nothing here goes through the spec writer or its supersession signal: the yml is rewritten in
-    place, and the door still refuses, because the confirmation records the values it covered.
+    Nothing here goes through the spec writer or its supersession signal: the record is replaced
+    directly, and the door still refuses, because the confirmation records the values it covered.
     """
     body = _delivery(tmp_path, validated=True)
     _hand_edit_spec(tmp_path, "catkin", milestone_fractions=[0.5])
