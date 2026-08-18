@@ -97,3 +97,33 @@ def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_rais
     assert len(rows) == 1, rows
     assert rows[0]["status"] == "exception"
     assert rows[0]["error"] == "the body refused"
+
+
+# ── record_event_or_raise: record_event's sibling for a mutation that has already committed ──
+
+
+def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A confirmation that already committed must not be reported as silently unrecorded."""
+    monkeypatch.setattr(audit_module, "append", _refuse_append)
+
+    with pytest.raises(audit_module.AuditEntryNotWritten) as caught:
+        audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"})
+
+    assert caught.value.tool == "confirm_something"
+    assert "do not retry it blind" in str(caught.value)
+    assert isinstance(caught.value.__cause__, _AppendRefused)
+
+
+def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_returns_silently() -> None:
+    """The rail admits the work it exists beside: a healthy append behaves like record_event's."""
+    audit_module.record_event_or_raise(
+        "confirm_something", {"trait": "bloom"}, status="ok", note="confirmed"
+    )
+
+    rows = _rows_for("confirm_something")
+    assert len(rows) == 1, rows
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["arguments"] == {"trait": "bloom"}
+    assert rows[0]["note"] == "confirmed"
