@@ -59,14 +59,27 @@ TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"
 def persist(name: str, summaries: list[dict]) -> None:
     """Atomically write job summaries to ``.tcip/state/<name>.json``.
 
+    Resolves the registry key against this process's root right here, so it is the form for a
+    caller running where that root is the one it means, which is any request thread.
+    """
+    persist_to(job_registry_key(name), summaries)
+
+
+def persist_to(key: Key, summaries: list[dict]) -> None:
+    """Atomically write job summaries to a registry key the caller already resolved.
+
+    The form a background worker takes: it is handed its key when it is spawned and writes
+    through this, so the write lands under the root its launch resolved rather than under
+    whatever the environment names by the time the worker gets there.
+
     A failure here loses the GUI's history of this registry across a restart, not the jobs
     themselves, so it is logged with the registry it belongs to rather than raised into the
     route that was reporting a job's progress.
     """
     try:
-        replace(job_registry_key(name), summaries)
+        replace(key, summaries)
     except Exception:
-        logger.exception("Could not persist the %s job registry", name)
+        logger.exception("Could not persist the %s job registry", key.parts[0])
 
 
 def load(name: str) -> list[dict]:

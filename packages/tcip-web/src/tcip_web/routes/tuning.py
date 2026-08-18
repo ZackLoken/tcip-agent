@@ -12,21 +12,28 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_web.routes._metrics_common import metrics_response
 
+if TYPE_CHECKING:
+    from tcip_store import Key
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tuning", tags=["tuning"])
 
 _TRIAL_DIR_PREFIX = "trial_"
+
+HPO_REGISTRY = "hpo_sweeps"
+"""The job registry this module persists its sweeps to."""
 
 
 @dataclass
@@ -35,11 +42,32 @@ class HPOJob:
     status: str = "pending"
     error: Optional[str] = None
     result: dict[str, Any] = field(default_factory=dict)
-    thread: Optional[threading.Thread] = field(default=None, repr=False)
 
 
 _sweeps: dict[str, HPOJob] = {}
 _lock = threading.Lock()
+_workers: dict[str, threading.Thread] = {}
+"""Every sweep worker this process has spawned and not yet seen finish, by sweep id."""
+
+
+def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:
+    """Join this module's sweep workers and return the sweeps still running when time ran out.
+
+    A worker writes through the process's storage backend for as long as it runs, so a caller
+    that is about to close that backend, or otherwise must not outrace a sweep, waits here
+    instead of sleeping. ``timeout_s`` is the caller's own bound and has no default: how long a
+    shutdown or a test may block is the caller's decision, not this module's.
+    """
+    with _lock:
+        pending = list(_workers.items())
+    deadline = time.monotonic() + timeout_s
+    for _, thread in pending:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    with _lock:
+        for sweep_id, thread in pending:
+            if not thread.is_alive():
+                _workers.pop(sweep_id, None)
+    return tuple(sweep_id for sweep_id, thread in pending if thread.is_alive())
 
 
 def _summary(job: HPOJob) -> dict:
@@ -114,11 +142,16 @@ def _disk_sweeps() -> list[dict]:
     return found
 
 
-def _persist() -> None:
+def _persist(registry_key: "Key") -> None:
+    """Write the live registry to the key the caller resolved.
+
+    The key carries the root it was resolved against, so a background worker persists where its
+    launch decided rather than wherever this process's environment points by the time it writes.
+    """
     from tcip_web import jobstore
     with _lock:
         summaries = [_summary(j) for j in _sweeps.values()]
-    jobstore.persist("hpo_sweeps", summaries)
+    jobstore.persist_to(registry_key, summaries)
 
 
 def rehydrate() -> None:
@@ -132,7 +165,7 @@ def rehydrate() -> None:
     with _lock:
         if _sweeps:
             return
-        for s in jobstore.load("hpo_sweeps"):
+        for s in jobstore.load(HPO_REGISTRY):
             sid = s.get("sweep_id")
             if not sid:
                 continue
@@ -151,17 +184,24 @@ class LaunchHPOPayload(BaseModel):
     scheduler: str = "asha"
 
 
-def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
+def _worker(job: HPOJob, payload: LaunchHPOPayload, registry_key: "Key", output_dir: str) -> None:
+    """Run one sweep to completion off the request thread.
+
+    Everything this thread writes with arrives as an argument: the registry key it persists
+    through and the resolved directory the sweep runs under. Neither is re-derived here, so a
+    launch's writes land under the root that launch named rather than under whatever the
+    environment names later.
+    """
     try:
         job.status = "running"
-        _persist()
+        _persist(registry_key)
         from tcip_mcp.tools.training_tools import run_hpo
 
         res = run_hpo(
             base_config=payload.base_config,
             param_space=payload.param_space,
             n_trials=payload.n_trials,
-            output_dir=payload.output_dir,
+            output_dir=output_dir,
             search_alg=payload.search_alg,
             scheduler=payload.scheduler,
         )
@@ -172,11 +212,13 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload) -> None:
         job.status = "failed"
         job.error = str(exc)
     finally:
-        _persist()
+        _persist(registry_key)
 
 
 @router.post("/launch")
 def launch_hpo(payload: LaunchHPOPayload) -> dict:
+    from tcip_mcp.tools.training_tools import hpo_root
+
     from tcip_web import jobstore
     from tcip_web.paths import assert_path_allowed
 
@@ -188,13 +230,22 @@ def launch_hpo(payload: LaunchHPOPayload) -> dict:
         except ValueError as exc:
             raise HTTPException(403, str(exc)) from exc
 
+    # Resolved on the request thread: what the worker is handed, rather than what it looks up.
+    registry_key = jobstore.job_registry_key(HPO_REGISTRY)
+    output_dir = payload.output_dir or str(hpo_root())
+
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     with _lock:
         _sweeps[job.sweep_id] = job
         jobstore.evict_terminal(_sweeps)  # bound the registry (drop oldest terminal sweeps)
-    _persist()
-    t = threading.Thread(target=_worker, args=(job, payload), daemon=True)
-    job.thread = t
+    _persist(registry_key)
+    t = threading.Thread(
+        target=_worker, args=(job, payload, registry_key, output_dir), daemon=True
+    )
+    with _lock:
+        for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
+            _workers.pop(sweep_id, None)
+        _workers[job.sweep_id] = t
     t.start()
     return {"status": "launched", "sweep_id": job.sweep_id}
 
