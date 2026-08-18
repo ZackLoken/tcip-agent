@@ -214,6 +214,10 @@ def check_region_completeness(root: Path, findings: list) -> None:
 
 
 def check_trait_specs(root: Path, findings: list) -> None:
+    """Deliberately absent from ``gated_stores()``: this reads entirely through the storage seam
+    (``load_trait_specs_with_errors``), which resolves to whichever backend the process is bound
+    to and so can never be stale relative to itself, unlike a check that reads a raw file off
+    disk."""
     from tcip_mcp.traits import load_trait_specs_with_errors
 
     _specs, errors = load_trait_specs_with_errors(project_root=root)
@@ -225,7 +229,11 @@ def check_trait_spec_statements(root: Path, findings: list) -> None:
     """A registered trait spec with no authoring statement behind it: the recoverable gap
     author_trait_spec's own second write can leave when it fails partway. The breeder's new
     confirmation panel would show no row for a trait that plainly exists, so this is worth
-    surfacing rather than leaving to be found only when the breeder asks why."""
+    surfacing rather than leaving to be found only when the breeder asks why.
+
+    Deliberately absent from ``gated_stores()`` for the same reason as ``check_trait_specs``:
+    it reads only through the storage seam (``load_trait_specs``/``ts.keys``), never a raw file,
+    so it cannot be stale relative to the backend it is reading from."""
     import tcip_store as ts
 
     from tcip_mcp.traits import (

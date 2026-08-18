@@ -1121,6 +1121,26 @@ def test_two_spellings_of_one_root_address_one_database(store):
     ]
 
 
+def test_trait_specs_shares_the_state_database_rather_than_gaining_its_own(store):
+    """The positive proof the trait-spec re-root exists to establish: writing a ``trait_specs``
+    record alongside a sibling ``STATE``-rooted store (``trait_operationalizations``) creates
+    exactly one database under the project's shared state root, never a second, nested one under
+    ``trait_specs`` itself the way the store's self-rooted predecessor did.
+    """
+    only_on(store, SQLITE, _DATABASE_MECHANICS)
+    spec_key = traits.trait_spec_key(traits.trait_specs_dir(store.root), "catkin")
+    op_key = operationalization.operationalization_key(
+        operationalization.operationalizations_scope(store.root), "catkin", "phenology")
+
+    ts.replace(spec_key, {"name": "catkin", "delivers": ["catkin_05per_date"]},
+               expect=ts.Version.ABSENT)
+    ts.replace(op_key, {"trait": "catkin", "delivery_kind": "phenology"}, expect=ts.Version.ABSENT)
+
+    databases = sorted(store.root.rglob(DATABASE_FILENAME))
+    assert databases == [store.root / ".tcip" / "state" / ".tcip" / DATABASE_FILENAME]
+    assert not (store.root / ".tcip" / "state" / "trait_specs" / ".tcip").exists()
+
+
 def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(store):
     """The parts column's spelling, pinned here rather than left to whatever json.dumps
     defaults to on the day: two spellings of one key would address two rows."""
@@ -1305,7 +1325,10 @@ def _trait_spec_key(root: Path) -> ts.Key:
 
 
 def _trait_specs_root(root: Path) -> Path:
-    return traits.trait_specs_dir(root)
+    """The shared ``.tcip/state`` root the store's key actually hangs off, mirroring
+    ``_trait_spec_statements_root``'s own shape: the state directory, not the specs directory
+    (``trait_specs_dir``) the locator's fixed prefix places records under."""
+    return traits.trait_specs_dir(root).parent
 
 
 def _trait_spec_statement_key(root: Path) -> ts.Key:

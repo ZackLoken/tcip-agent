@@ -336,8 +336,26 @@ def _resolve_specs_dir(specs_dir: Path | None, project_root: str | Path | None) 
     return Path(specs_dir) if specs_dir is not None else trait_specs_dir(project_root)
 
 
+def _trait_specs_state_root(specs_dir: Path) -> Path:
+    """The shared ``.tcip/state`` root this store's records actually key against.
+
+    Refuses rather than silently answering from the wrong place: the locator's own
+    ``trait_specs`` prefix is fixed, so ``specs_dir.parent`` is only the right root when
+    ``specs_dir`` is genuinely named ``trait_specs``. A caller that names anything else (a typo,
+    a deliberate rename) would otherwise be read and written against the real ``trait_specs``
+    directory with no refusal anywhere in the path.
+    """
+    if specs_dir.name != "trait_specs":
+        raise ValueError(
+            f"{specs_dir} does not end in 'trait_specs', so it cannot name this store's "
+            "directory: trait specs live under a fixed 'trait_specs' segment now, never a "
+            "caller-chosen name"
+        )
+    return specs_dir.parent
+
+
 TRAIT_SPECS_STORE = "trait_specs"
-_SPEC_FILE = RootedFileLocator(suffix=SPEC_SUFFIX)
+_SPEC_FILE = RootedFileLocator(prefix=("trait_specs",), suffix=SPEC_SUFFIX)
 register_store(
     StoreDescriptor(
         name=TRAIT_SPECS_STORE,
@@ -354,11 +372,14 @@ register_store(
 def trait_spec_key(specs_dir: str | Path, trait_name: str) -> Key:
     """One trait's spec record under a spec directory.
 
+    The key's root is the shared ``.tcip/state`` directory ``specs_dir`` names (via
+    :func:`_trait_specs_state_root`), the same root every sibling project-state store hangs off;
+    the locator's own ``trait_specs`` prefix supplies the rest of the on-disk placement.
     Enumeration answers over the records themselves. :func:`write_trait_spec_fields` merges
     compare-and-set against the version it read, so a field another writer recorded is never
     dropped.
     """
-    return Key(TRAIT_SPECS_STORE, str(specs_dir), (trait_name,))
+    return Key(TRAIT_SPECS_STORE, str(_trait_specs_state_root(Path(specs_dir))), (trait_name,))
 
 
 def _spec_filename(specs_dir: Path, trait_name: str) -> str:
@@ -377,12 +398,10 @@ def load_trait_specs_with_errors(
     registry to read (``project_root``) or the directory itself; the placement is resolved here.
     """
     directory = _resolve_specs_dir(specs_dir, project_root)
-    if not directory.is_dir():
-        return [], []
     errors: list[dict] = []
     vocab = _crops_vocab()
     specs: list[TraitSpec] = []
-    for key in ts.keys(TRAIT_SPECS_STORE, str(directory)):
+    for key in ts.keys(TRAIT_SPECS_STORE, str(_trait_specs_state_root(directory))):
         filename = _spec_filename(directory, key.parts[0])
         try:
             data = ts.read_versioned(key).value
@@ -409,9 +428,10 @@ def load_trait_specs(
     specs_dir: Path | None = None, *, project_root: str | Path | None = None
 ) -> list[TraitSpec]:
     """Breeder-authored per-trait spec records (``<root>/.tcip/state/trait_specs/*.json``), each
-    cross-checked against the crops.yml controlled vocab. A missing directory yields none; an invalid
-    or fabricated spec is skipped (so ``get_trait`` later hard-fails honestly rather than serving it).
-    See :func:`load_trait_specs_with_errors` for why each skipped spec was skipped."""
+    cross-checked against the crops.yml controlled vocab. A project with no trait spec on record
+    yields none; an invalid or fabricated spec is skipped (so ``get_trait`` later hard-fails
+    honestly rather than serving it). See :func:`load_trait_specs_with_errors` for why each
+    skipped spec was skipped."""
     specs, _errors = load_trait_specs_with_errors(specs_dir, project_root=project_root)
     return specs
 
@@ -423,7 +443,7 @@ def write_trait_spec_fields(
     """Update one or more fields on an already-registered trait spec, appending provenance
     entries recording who asserted the change and how firmly.
 
-    Refuses (raises ``ValueError``) if the trait has no existing spec file, creating a new trait
+    Refuses (raises ``ValueError``) if the trait has no spec record on file, creating a new trait
     is a separate, still-manual authoring step, out of scope here. Re-validates the merged spec
     through ``_spec_from_config``, the same crops.yml cross-check and field validation every
     config-authored spec already goes through, reused rather than a second implementation, and
@@ -440,9 +460,6 @@ def write_trait_spec_fields(
     themselves; neither gets its own write implementation.
     """
     directory = _resolve_specs_dir(specs_dir, project_root)
-    if not directory.is_dir():
-        raise _no_spec_error(trait_name, directory)
-
     key = trait_spec_key(directory, trait_name)
     # A conflict means another writer committed, so the loop only repeats while the spec is
     # actually changing under it and ends when this merge is the one that lands.
@@ -479,7 +496,7 @@ def write_trait_spec_fields(
 
 def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
     return ValueError(
-        f"no existing trait spec file for {trait_name!r} under {directory}, "
+        f"no trait spec record for {trait_name!r} under {directory}, "
         "write_trait_spec_fields only updates an already-registered trait; register it first "
         "with author_trait_spec."
     )

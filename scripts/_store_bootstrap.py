@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 
 from tcip_store import registered_stores
-from tcip_store.layout_claims import EXPERIMENTS, ROOT, STATE, TRAIT_SPECS
+from tcip_store.layout_claims import EXPERIMENTS, ROOT, STATE
 
 from tcip_annotation import format_io, json_io, review_engine  # noqa: F401
 from tcip_mcp import (  # noqa: F401
@@ -63,7 +63,6 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     roots: list[tuple[str, str]] = [
         (str(root), ROOT),
         (str(root / ".tcip" / "state"), STATE),
-        (str(traits.trait_specs_dir(root)), TRAIT_SPECS),
         (str(root / ".tcip" / "experiments"), EXPERIMENTS),
     ]
     seen = {os.path.normcase(str(root))}
@@ -77,5 +76,4 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
         seen.add(os.path.normcase(str(dataset_root)))
         roots.append((str(dataset_root), ROOT))
         roots.append((str(dataset_root / ".tcip" / "state"), STATE))
-        roots.append((str(traits.trait_specs_dir(dataset_root)), TRAIT_SPECS))
     return tuple(roots)
