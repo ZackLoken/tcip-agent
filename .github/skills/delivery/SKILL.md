@@ -90,8 +90,10 @@ uncharacterized, which is a claim about a quantity that has been defined.
 Every phenotype-delivery door refuses a bare write: an unvalidated measurement number with no
 acknowledgement. The count/date/value is the phenotype, so each door runs one shared
 `check_delivery_gate`: it ships only when each measurement dimension the deliverable rests on is
-validated against a reference sized to the trait (held-out GT or a breeder-confirmed output
-sample, see the `evaluation` and `cv-research` skills), read from the predictions' own
+validated against a reference of that dimension's own kind (for the count/measurement/classifier
+dimensions, held-out GT or a breeder-confirmed output sample, see the `evaluation` and
+`cv-research` skills; a tile scale needs a geometry basis, a physical scale a physical
+measurement, and no kind stands in for another), read from the predictions' own
 `operating_point.json` sidecar, not a caller-asserted string.
 
 - `compute_phenology` gates both the elongation classifier (reconciled from

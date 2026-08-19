@@ -120,11 +120,8 @@ def tile_size_source_of(reference: str | None, *, tile_size: int | None) -> str:
     return "native_ratio" if tile_size is not None else "default"
 
 
-# The union of every real (non-"false") shippable reference, across every kind, used only by
-# dimension-agnostic logic (check_delivery_gate, _validity_rank) whose callers have already
-# resolved the right kind per-dimension upstream via accepted_references()/is_shippable. Never used
-# to decide whether a specific param's reference is the right kind for it, that decision belongs to
-# accepted_references(validation_kind), always.
+# Every real (non-"false") reference across every kind, used only where the question is "is this
+# a real reference at all": kind-correctness belongs to accepted_references/_DIMENSION_REFERENCES.
 VALIDATED_SHIPPABLE = (
     VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT,
     VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY, VALIDATED_SAME_MOSAIC_IDENTITY,
@@ -1737,14 +1734,14 @@ def record_delivery_binding_event(
         logger.warning("Failed to write delivery_events record for door %r", door, exc_info=True)
 
 
-def _validity_rank(state: str | None) -> int:
-    """Floor ordering: unvalidated (0) < any shippable reference, any kind (1). ``None`` = no
-    assertion (skip). Comparing rank between two states already scoped to the same dimension/param,
-    never used to decide whether a state is the right kind for a given param (that is
-    ``accepted_references``'s job)."""
+def _validity_rank(state: str | None, accepted: tuple[str, ...]) -> int:
+    """Floor ordering: unvalidated (0) < a reference ``accepted`` recognizes for the dimension
+    being reconciled (1). ``None`` = no assertion (never lowers). Kind-aware on purpose: a
+    wrong-kind asserted string is not a real assertion about this dimension, so it floors the
+    result rather than being silently ignored as if it outranked the on-disk state."""
     if state is None:
         return 99
-    return 1 if state in VALIDATED_SHIPPABLE else 0
+    return 1 if state in accepted else 0
 
 
 def _reconcile_validity(
@@ -1809,7 +1806,8 @@ def _reconcile_validity(
         on_disk = VALIDATED_FALSE
 
     # Floor: the asserted string may only lower the on-disk result (prefer on-disk).
-    validated = on_disk if _validity_rank(asserted) >= _validity_rank(on_disk) else VALIDATED_FALSE
+    validated = (on_disk if _validity_rank(asserted, accepted) >= _validity_rank(on_disk, accepted)
+                 else VALIDATED_FALSE)
     return {
         "validated": validated,
         "on_disk_validated": all_validated and bool(refs),
@@ -2071,7 +2069,8 @@ def reconcile_scale_validity(
         else:
             unvalidated.append(str(d))
     on_disk = VALIDATED_FALSE if unvalidated or not refs else next(iter(refs))
-    validated = on_disk if _validity_rank(asserted) >= _validity_rank(on_disk) else VALIDATED_FALSE
+    validated = (on_disk if _validity_rank(asserted, accepted) >= _validity_rank(on_disk, accepted)
+                 else VALIDATED_FALSE)
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
             "unvalidated_buckets": unvalidated, "binding_notes": binding_notes}
 
@@ -2163,6 +2162,24 @@ class DeliveryGateResult:
         return self.stamp[dimension]
 
 
+_DIMENSION_REFERENCES: dict[str, tuple[str, ...]] = {
+    "operating_point": _ACCEPTED_REFERENCES["annotations"],
+    "measurement": _ACCEPTED_REFERENCES["annotations"],
+    "classifier": _ACCEPTED_REFERENCES["annotations"],
+    "tile_size": _ACCEPTED_REFERENCES["geometry"],
+    "scale": _ACCEPTED_REFERENCES["physical"],
+    "claim_scope": CLAIM_SCOPE_REFERENCES,
+    "persisted_predictions": (),
+}
+"""Which references clear which delivery-gate dimension, every row read from the kind's own
+acceptance table so no reference-to-kind pairing is stated a second time. The count, measurement
+and classifier dimensions are annotations-kind even for dimensional and ordinal/regression
+traits: every reconciler that feeds them resolves through a ``_DOCUMENT_PARAM`` entry declared
+``"annotations"``, and a physical scale is its own ``"scale"`` dimension, never folded into
+``"measurement"``. ``"persisted_predictions"`` is floor-only (nothing clears it): it exists to
+state that an in-memory pass has no bucket behind its counts."""
+
+
 def check_delivery_gate(
     flags: dict[str, str | None], *, acknowledge_unvalidated: bool = False,
 ) -> DeliveryGateResult:
@@ -2170,9 +2187,13 @@ def check_delivery_gate(
 
     ``flags`` maps each measurement dimension the deliverable depends on (e.g. ``"operating_point"``,
     ``"classifier"``, or a single ``"measurement"`` for a continuous/ordinal trait with no conf
-    op-point) to its reconciled validity state, a shippable reference (any member of
-    ``VALIDATED_SHIPPABLE``) or anything else (treated as unvalidated). Read the on-disk state before
-    calling; the gate does not trust a caller-asserted string on its own.
+    op-point) to its reconciled validity state. A dimension clears only on a reference
+    ``_DIMENSION_REFERENCES`` accepts for that dimension; any other value (a wrong-kind reference
+    included: a raster-scope identity says nothing about a count) is treated as unvalidated. A
+    dimension name the mapping does not know raises rather than judging it against a vocabulary
+    the gate does not have; a new door's dimension gets a mapping row stating what clears it.
+    Read the on-disk state before calling; the gate does not trust a caller-asserted string on
+    its own.
 
     Every dimension validated -> the gate passes. Any not -> it refuses unless
     ``acknowledge_unvalidated=True``, the escape hatch that ships a clearly-flagged provisional
@@ -2180,16 +2201,29 @@ def check_delivery_gate(
     downstream. The refusal targets a *silent bare number*, not an honestly-acknowledged provisional
     CSV. ``stamp`` records, per dimension, the reference it cleared (or ``false``).
     """
-    stamp = {name: (st if st in VALIDATED_SHIPPABLE else VALIDATED_FALSE)
+    unknown = sorted(name for name in flags if name not in _DIMENSION_REFERENCES)
+    if unknown:
+        raise ValueError(
+            f"check_delivery_gate has no reference vocabulary for dimension(s) {unknown}: add "
+            "each to _DIMENSION_REFERENCES, stating which references clear it, before gating on "
+            f"it (known dimensions: {sorted(_DIMENSION_REFERENCES)})."
+        )
+    stamp = {name: (st if st in _DIMENSION_REFERENCES[name] else VALIDATED_FALSE)
              for name, st in flags.items()}
-    unvalidated = tuple(name for name, st in flags.items() if st not in VALIDATED_SHIPPABLE)
+    unvalidated = tuple(name for name, st in flags.items()
+                        if st not in _DIMENSION_REFERENCES[name])
     if unvalidated and not acknowledge_unvalidated:
+        clears = "; ".join(
+            f"{name} is cleared by {list(_DIMENSION_REFERENCES[name])}"
+            if _DIMENSION_REFERENCES[name]
+            else f"{name} is cleared by nothing (it states a missing prerequisite)"
+            for name in unvalidated)
         return DeliveryGateResult(
             ok=False, unvalidated=unvalidated, stamp=stamp,
             reason=(
                 f"delivery refused: unvalidated measurement dimension(s) {list(unvalidated)}. A "
-                "phenotype deliverable requires each dimension validated against a reference sized to "
-                "the trait (held-out GT or a breeder-confirmed output sample); validate it, or pass "
+                "phenotype deliverable requires each dimension validated against a reference of "
+                f"its own kind ({clears}); validate it, or pass "
                 "acknowledge_unvalidated=True to write a clearly-flagged provisional result stamped "
                 "validated=false."
             ),

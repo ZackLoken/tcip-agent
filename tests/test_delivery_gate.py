@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.pipelines import resolution as res
 from tcip_mcp.pipelines.resolution import (
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,
@@ -70,6 +71,77 @@ def test_gate_acknowledge_ships_but_stamps_false():
     assert g.ok is True
     # the acknowledged dimension still travels stamped false, never silently upgraded
     assert g.stamp == {"operating_point": VALIDATED_FALSE}
+
+
+@pytest.mark.parametrize("dimension, reference", [
+    ("measurement", res.VALIDATED_SAME_MOSAIC_IDENTITY),
+    ("operating_point", res.VALIDATED_PERSISTED_GEOMETRY),
+    ("classifier", res.VALIDATED_PHYSICAL_MEASUREMENT),
+    ("tile_size", res.VALIDATED_PHYSICAL_MEASUREMENT),
+    ("scale", VALIDATED_HELD_OUT),
+    ("claim_scope", VALIDATED_HELD_OUT),
+])
+def test_a_wrong_kind_reference_floors_the_dimension_it_cannot_clear(dimension, reference):
+    """Each dimension is cleared only by references of its own kind: a raster-scope identity says
+    nothing about a count, a training geometry nothing about an operating point, an annotation
+    reference nothing about which raster a bucket's predictions were produced on."""
+    g = check_delivery_gate({dimension: reference})
+    assert g.ok is False
+    assert g.unvalidated == (dimension,)
+    assert g.stamp == {dimension: VALIDATED_FALSE}
+
+
+@pytest.mark.parametrize("dimension, reference", [
+    ("operating_point", VALIDATED_HELD_OUT),
+    ("operating_point", VALIDATED_REVIEW_CONFIRMED),
+    ("measurement", VALIDATED_HELD_OUT),
+    ("measurement", VALIDATED_REVIEW_CONFIRMED),
+    ("classifier", VALIDATED_HELD_OUT),
+    ("classifier", VALIDATED_REVIEW_CONFIRMED),
+    ("tile_size", res.VALIDATED_PERSISTED_GEOMETRY),
+    ("tile_size", res.VALIDATED_EXPLICIT_GEOMETRY),
+    ("scale", res.VALIDATED_PHYSICAL_MEASUREMENT),
+    ("claim_scope", res.VALIDATED_SAME_MOSAIC_IDENTITY),
+])
+def test_every_dimension_still_clears_with_its_own_kind(dimension, reference):
+    """The kind-aware gate admits every legitimate pairing a real delivery door produces."""
+    g = check_delivery_gate({dimension: reference})
+    assert g.ok is True
+    assert g.stamp == {dimension: reference}
+
+
+def test_acknowledged_wrong_kind_reference_ships_stamped_false():
+    g = check_delivery_gate({"measurement": res.VALIDATED_SAME_MOSAIC_IDENTITY},
+                            acknowledge_unvalidated=True)
+    assert g.ok is True
+    assert g.stamp == {"measurement": VALIDATED_FALSE}
+
+
+def test_an_unknown_dimension_name_refuses_loudly():
+    """A dimension the gate has no reference vocabulary for is a new door under construction, not
+    a delivery to wave through under the any-shippable-reference union."""
+    with pytest.raises(ValueError, match="provenance"):
+        check_delivery_gate({"provenance": VALIDATED_HELD_OUT})
+
+
+def test_the_refusal_names_the_failed_dimensions_own_references():
+    """The refusal must point at what actually clears the failed dimension: telling a tile-size
+    failure to collect annotations sends the caller after a reference that clears nothing."""
+    g = check_delivery_gate({"tile_size": VALIDATED_FALSE})
+    assert res.VALIDATED_PERSISTED_GEOMETRY in g.reason
+    assert res.VALIDATED_EXPLICIT_GEOMETRY in g.reason
+    assert VALIDATED_HELD_OUT not in g.reason
+
+
+def test_export_detection_csv_bare_string_of_the_wrong_kind_refuses(tmp_path):
+    """The no-pred_dirs path takes the caller string as-is, but a reference of the wrong kind for
+    the measurement dimension clears nothing: a raster-scope identity is not count validity."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             trait=fx.COUNT_TRAIT,
+                             measurement_validated=res.VALIDATED_SAME_MOSAIC_IDENTITY)
 
 
 # ── export_detection_csv (writer) refuses a bare write ─────────────────────
@@ -158,6 +230,24 @@ def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT,
                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+
+
+def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
+    """The asserted string may only lower the on-disk result, and a wrong-kind assertion is not a
+    real assertion about this dimension: it floors rather than being silently ignored while the
+    on-disk reference ships as if the caller had asserted nothing."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    bucket = _detection_bucket(tmp_path, "preds", validated=True)
+    recon = res.reconcile_operating_point_validity(
+        [bucket], asserted=res.VALIDATED_SAME_MOSAIC_IDENTITY)
+    assert recon["validated"] == VALIDATED_FALSE
+
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             trait=fx.COUNT_TRAIT,
+                             measurement_validated=res.VALIDATED_SAME_MOSAIC_IDENTITY,
+                             pred_dirs=[bucket])
 
 
 def test_export_detection_csv_omitted_pred_dirs_trusts_bare_string(tmp_path):
