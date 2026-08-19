@@ -97,17 +97,19 @@ def _last_positional(tokens: "list[str]") -> "str | None":
     return positionals[-1] if positionals else None
 
 
-def _cmdlet_writes(cmd: str) -> "list[tuple[str, str]]":
-    """``(kind, target)`` for each cmdlet/alias write, kind being ``write``/``move``/``copy``.
+def _cmdlet_writes(cmd: str) -> "list[str]":
+    """The file each cmdlet/alias write names as its target.
 
-    ``copy`` is reported so the caller can exempt it from the breeder-data check, the same way the
-    Bash guard exempts ``cp``: a stateless guard cannot tell a copy's source from its destination.
+    For Copy/Move/Rename this is the destination (``-Destination`` or the last positional), so a
+    copy or move into a protected or breeder path is caught while reading a protected/breeder source
+    and writing elsewhere is not. Set/Add/Clear-Content, Out-File, New-Item and the .NET writers
+    name the file directly.
     """
-    out: list[tuple[str, str]] = []
+    out: list[str] = []
     for m in _PS_DOTNET.finditer(cmd):
-        out.append(("write", m.group("t")))
+        out.append(m.group("t"))
     for m in _PS_STREAMWRITER.finditer(cmd):
-        out.append(("write", m.group("t")))
+        out.append(m.group("t"))
     for seg in (s.strip() for s in _SEG_SPLIT.split(cmd) if s.strip()):
         tokens = seg.split()
         if not tokens:
@@ -116,15 +118,11 @@ def _cmdlet_writes(cmd: str) -> "list[tuple[str, str]]":
         named = [m.group("t") for m in _PS_NAMED.finditer(seg)]
         if _WRITE_LEAD.match(lead):
             targets = named or ([_first_positional(rest)] if _first_positional(rest) else [])
-            out.extend(("write", t) for t in targets if t)
-        elif _MOVE_LEAD.match(lead):
+            out.extend(t for t in targets if t)
+        elif _MOVE_LEAD.match(lead) or _COPY_LEAD.match(lead):
             dest = named[-1] if named else _last_positional(rest)
             if dest:
-                out.append(("move", dest))
-        elif _COPY_LEAD.match(lead):
-            dest = named[-1] if named else _last_positional(rest)
-            if dest:
-                out.append(("copy", dest))
+                out.append(dest)
     return out
 
 
@@ -154,11 +152,11 @@ def main() -> None:
         if kind == "protected":
             fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
 
-    for op, target in _cmdlet_writes(cmd):
+    for target in _cmdlet_writes(cmd):
         kind = fence_rules.classify(fence_rules.resolve_token(target, cmd, ps=True), root=root, mode=mode)
         if kind == "protected":
             fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
-        if kind == "breeder" and op != "copy":
+        if kind == "breeder":
             fence_rules.deny(fence_rules.BREEDER_DATA_WRITE_MSG)
 
     # Move/Rename relocates the tracked file whether the breeder path is its source or destination.

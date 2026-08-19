@@ -332,18 +332,30 @@ def test_guard_allows_reads_that_merely_mention_move_words(cmd):
 @pytest.mark.parametrize(
     "cmd",
     [
-        "cp /c/proj/labels/a.json /tmp/backup/a.json",
-        "cp /tmp/backup/a.json /c/proj/labels/a.json",
-        "find /c/proj/annotations -exec cp {} /tmp/backup \\;",
+        "cp /c/proj/labels/a.json /tmp/backup/a.json",  # copy a breeder file OUT: destination is free
+        "find /c/proj/annotations -exec cp {} /tmp/backup \\;",  # find-exec copy out, destination free
     ],
 )
-def test_guard_allows_copying_breeder_data(cmd):
-    # Deliberately not denied, mirroring the PowerShell guard's own Copy-Item exemption: this guard
-    # is stateless and can't tell a two-argument command's source from its destination, so denying
-    # cp here would also deny a legitimate backup/copy of a breeder file to elsewhere, not just a
-    # copy into one. The rail must admit valid work, not only reject invalid work.
+def test_guard_allows_copying_breeder_data_out(cmd):
+    # Copying a breeder file to a free destination is a legitimate backup: the destination is
+    # classified, so reading breeder data and writing elsewhere is admitted.
     r = _run_guard(cmd)
     assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "cp /tmp/x.json /c/proj/labels/a.json",  # copy INTO a breeder label overwrites it
+        "cp evil.json /c/proj/annotations/2026-01-01/a.json",
+    ],
+)
+def test_guard_denies_copying_into_breeder_data(cmd):
+    # Overwriting a breeder's label via a shell copy is the harm the fence exists to stop;
+    # destination-position parsing tells the copy-in from the admitted copy-out above.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
 
 
 def test_guard_fails_open_on_garbage_stdin():
@@ -539,11 +551,9 @@ def test_ps_guard_denies_writing_into_breeder_data_paths(cmd):
         "Get-ChildItem C:\\proj\\annotations",  # a read, not a write
         "echo 'Set-Content is a cmdlet name'",
         "Get-Content C:\\proj\\annotations\\a.json > $env:TEMP\\scratch.json",  # write target is not breeder data
-        # Copy-Item (and its aliases) can't be told source from destination by a stateless guard:
-        # deliberately exempted from the breeder-data check in both directions, mirroring the Bash
-        # guard's own exemption of cp, so a legitimate backup/duplicate of a label isn't blocked.
+        # Copy-Item OUT (breeder source, free destination) is a legitimate backup: the destination is
+        # classified, so copying a label elsewhere is admitted while copying INTO one is not.
         "Copy-Item C:\\proj\\labels\\a.json -Destination C:\\out\\backup.json",
-        "Copy-Item C:\\out\\x.json -Destination C:\\proj\\labels\\a.json",
         "cpi C:\\proj\\annotations\\a.json C:\\out\\x.json",
     ],
 )
@@ -551,6 +561,21 @@ def test_ps_guard_allows_reads_that_merely_mention_breeder_data_words(cmd):
     r = _run_ps_guard(cmd)
     assert r.returncode == 0, r.stdout
     assert r.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "Copy-Item C:\\out\\x.json -Destination C:\\proj\\labels\\a.json",
+        "cpi evil.json C:\\proj\\annotations\\2026-01-01\\a.json",
+    ],
+)
+def test_ps_guard_denies_copying_into_breeder_data(cmd):
+    # Overwriting a breeder's label via Copy-Item into a breeder destination is denied; the
+    # destination is classified, so copying a label OUT stays admitted.
+    r = _run_ps_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
 
 
 @pytest.mark.parametrize(
