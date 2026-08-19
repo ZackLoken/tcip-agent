@@ -111,8 +111,8 @@ def test_fence_settings_wires_sessionstart_only_no_stop():
     assert "Stop" not in data["hooks"]
 
 
-def test_both_guards_read_the_protected_set_from_the_fence_declaration():
-    # Both shells import one matcher built from the settings deny rules, so the paths they fence
+def test_both_guards_classify_targets_through_the_shared_fence_declaration():
+    # Both shells import one classifier built from the settings deny rules, so the paths they fence
     # are the paths declared there rather than a list either guard restates.
     from tcip_web import agent_bash_guard as bg
     from tcip_web import agent_fence_rules
@@ -120,16 +120,18 @@ def test_both_guards_read_the_protected_set_from_the_fence_declaration():
 
     assert bg.fence_rules is agent_fence_rules
     assert pg.fence_rules is agent_fence_rules
-    pattern = agent_fence_rules.protected_pattern()
+    root = agent_fence_rules.repo_root()
     deny = json.loads(FENCE.read_text(encoding="utf-8"))["permissions"]["deny"]
     declared = [r[len("Edit(") : -1] for r in deny if r.startswith("Edit(")]
     assert len(declared) >= 10, declared
     for target in declared:
         sample = target[: -len("/**")] + "/sample.txt" if target.endswith("/**") else target
-        assert pattern.search(sample), f"the declared path {target} is not fenced"
-    # A breeder's workspace path is not platform-protected: the rail admits their own data.
-    workspace = "/c/Users/breeder/tcip-projects/hazelnut/annotations/catkin/2026-02-11/detect/a.txt"
-    assert not pattern.search(workspace)
+        kind = agent_fence_rules.classify(sample, root=root, mode="dev")
+        assert kind in ("protected", "breeder"), f"the declared path {target} is not fenced"
+    # A breeder's own project file that happens to share a repo-root basename is not platform code:
+    # anchoring the single-file rules to the repo root admits it, the P6-06 over-deny fix.
+    own = "/c/Users/breeder/tcip-projects/hazelnut/README.md"
+    assert agent_fence_rules.classify(own, root=root, mode="dev") is None
 
 
 def test_a_protected_path_is_fenced_whatever_its_case():
@@ -613,3 +615,134 @@ def test_ps_guard_fails_open_on_garbage_stdin():
         [sys.executable, str(PS_GUARD)], input="not json", capture_output=True, text=True, timeout=30
     )
     assert r.returncode == 0
+
+
+# ── the Batch 4 redesign: bypasses closed, admit-valid-work preserved ────────
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # A redirect grammar that recognises every file-writing form, into breeder data and into
+        # platform code, so an allow-listed read prefix carrying one is stopped with no human loop.
+        "echo x >| /c/proj/labels/a.json",  # noclobber override
+        "ls -la >& /c/proj/labels/a.json",  # both streams to a file, riding allow-listed ls
+        "echo x >| packages/tcip-mcp/x.py",
+        "ls -la >& packages/tcip-mcp/x.py",
+        "echo x &> packages/tcip-mcp/x.py",  # &> both streams
+        "exec 3<> packages/tcip-mcp/server.py",  # read-write open, can create
+        # A protected/breeder path reached past the separator character class or through ``..``.
+        "dd of=packages/tcip-mcp/server.py",  # '=' embedded, no separator before packages
+        "dd of=/c/proj/labels/a.json",
+        "printf hacked > docs/../packages/tcip-mcp/server.py",  # .. collapses into packages/
+        # Quote insertion: the shell strips the quotes and writes the real path.
+        'echo x > /c/proj/la"bel"s/a.json',
+        "echo x > pack'ages'/tcip-mcp/x.py",
+        # Variable indirection, one hop resolved inside the command.
+        "T=/c/proj/labels/a.json; echo '{}' > $T",
+        "T=packages/tcip-mcp/x.py; echo x > $T",
+        # Multi-target tee: every destination is a write, not just the first.
+        "printf hacked | tee /tmp/a packages/tcip-mcp/server.py",
+        # In-place writers whose destination is a protected/breeder path.
+        "install -m 644 evil.py packages/tcip-mcp/server.py",
+        "touch packages/tcip-mcp/evil.py",
+        "ln -sf /dev/null packages/tcip-mcp/server.py",
+        "rsync evil.py packages/tcip-mcp/server.py",
+        "patch -p1 packages/tcip-mcp/server.py < evil.diff",
+        "install -m 644 evil.py /c/proj/labels/a.json",  # install into breeder data
+        # Inline execution with an interposed flag before -c.
+        "python -X utf8 -c \"open('packages/x','w').write('x')\"",
+    ],
+)
+def test_bash_guard_denies_the_batch4_bypasses(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_bash_guard_fails_closed_on_an_opaque_target_off_an_allow_listed_prefix():
+    # An allow-listed read prefix runs with no prompt, so a redirect into a target the guard cannot
+    # resolve (an inherited environment variable) must fail closed rather than clobber unseen.
+    assert _run_guard('cat evil.json > "$TCIP_TARGET"').returncode == 2
+    assert _run_guard("grep -r x evil > $SECRET").returncode == 2
+    # A concrete or literal-tailed target off the same prefix is seen and judged on its own path, so
+    # it is not swept up by the fail-closed rule.
+    assert _run_guard("cat evil > $HOME/scratch.txt").returncode == 0
+    # A command that leads with assignments is not an allow-listed prefix, so Claude Code prompts on
+    # it; the guard leaves that defense-in-depth path to the prompt rather than over-denying here.
+    assert _run_guard("A=/tmp/x; echo hi > $A").returncode == 0
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # Reading a protected source and writing a free destination is legitimate: the destination
+        # is what is classified, not any protected path merely named.
+        "rsync -a packages/tcip-mcp/ /tmp/backup/",
+        "install -m 644 packages/tcip-mcp/server.py /tmp/server.py",
+        "ln -s packages/tcip-mcp/server.py /tmp/server.py",
+        "cp packages/tcip-mcp/server.py /tmp/x.py",
+        "cat packages/tcip-mcp/server.py > /tmp/out.txt",  # allow-listed prefix, but a concrete free target
+        # A breeder editing their own project file that shares a repo-root basename (P6-06 fix).
+        "echo x > /c/Users/breeder/tcip-projects/hazelnut/README.md",
+        "echo x > /c/Users/breeder/tcip-projects/hazelnut/pyproject.toml",
+        # The interpreter option scan ends at -m / the script, so pytest's own -c is not inline exec.
+        "python -m pytest -c pyproject.toml",
+        # A redirect to a concrete non-protected target, even via a resolved local variable.
+        "LOG=/tmp/x.log; echo hi > $LOG",
+    ],
+)
+def test_bash_guard_admits_valid_work_after_the_redesign(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 0, r.stdout
+    assert r.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "python -X utf8 -c \"open('packages/x','w')\"",  # interposed flag, PowerShell tool
+        'Set-Content C:\\proj\\la"bel"s\\a.json "x"',  # quote insertion into breeder data
+    ],
+)
+def test_ps_guard_denies_the_batch4_bypasses(cmd):
+    r = _run_ps_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # A breeder editing their own project file that shares a repo-root basename (P6-06 fix).
+        'Set-Content C:\\Users\\breeder\\tcip-projects\\hazelnut\\README.md "x"',
+        'Set-Content C:\\Users\\breeder\\tcip-projects\\hazelnut\\pyproject.toml "x"',
+        # Copying a protected source to a free destination is a read, not a platform mutation.
+        "Copy-Item packages\\tcip-mcp\\server.py -Destination C:\\tmp\\x.py",
+    ],
+)
+def test_ps_guard_admits_valid_work_after_the_redesign(cmd):
+    r = _run_ps_guard(cmd)
+    assert r.returncode == 0, r.stdout
+    assert r.stdout.strip() == ""
+
+
+def test_guards_resolve_variable_indirection_into_in_place_writers():
+    # A destination named through a variable is resolved and classified, so the refactor keeps the
+    # coverage the old protected-anywhere check gave cp/Set-Content indirection.
+    assert _run_guard("DEST=packages/tcip-mcp/x.py; cp evil.py $DEST").returncode == 2
+    assert _run_ps_guard("$t='packages\\tcip-mcp\\x.py'; Set-Content $t 'hacked'").returncode == 2
+
+
+def test_classify_drops_repo_rules_in_production_mode_keeping_breeder_data():
+    # B2-10: in production the platform is installed with no repo tree, so the repo rules fall away
+    # (a breeder's own README is theirs to edit) while breeder data and trait-state stay protected.
+    from tcip_web import agent_fence_rules as fr
+
+    root = fr.repo_root()
+    assert fr.classify("packages/tcip-mcp/x.py", root=root, mode="prod") is None
+    assert fr.classify("README.md", root=root, mode="prod") is None
+    assert fr.classify("/c/proj/labels/a.json", root=root, mode="prod") == "breeder"
+    assert fr.classify("/c/proj/.tcip/state/trait_specs/x.json", root=root, mode="prod") == "breeder"
+    # Development mode keeps the repo rules on.
+    assert fr.classify("packages/tcip-mcp/x.py", root=root, mode="dev") == "protected"

@@ -1931,15 +1931,15 @@ Phase 3 verdict: single.
 ## S61. Bash guard and PowerShell guard protected-path sets
 
 Must agree: the two shells fence the same platform paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:115` (`protected = fence_rules.protected_pattern()`).
-Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:125` (`protected = fence_rules.protected_pattern()`).
+Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:133` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
+Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:151` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
 Phase 3 verdict: single.
 
 ## S62. Guard hooks against the fence settings deny list
 
 Must agree: what the tool-level deny list blocks and what the shell guards block cover the same paths.
 Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (`permissions.deny` lists `Edit(packages/**)` and similar).
-Side B: `packages/tcip-web/src/tcip_web/agent_fence_rules.py:128` (`def protected_pattern() -> "re.Pattern[str]":`, which builds the guards' matcher from those deny rules).
+Side B: `packages/tcip-web/src/tcip_web/agent_fence_rules.py:158` (`def _declared_targets() -> "tuple[list[str], list[str], list[str]]":`, which splits those deny rules into the sets `classify` fences).
 Phase 3 verdict: single.
 
 ## S63. Fence settings materialization for the spawned terminal  <!-- queued: P5-328 unify -->

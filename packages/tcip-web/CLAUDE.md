@@ -40,10 +40,20 @@ edit that fence file without calling it out explicitly; it's a security boundary
 config.
 
 That file's `Edit(...)` deny rules are the one declaration of the platform-protected set: both shell
-guards build their matcher from it at hook time via `agent_fence_rules.protected_pattern()`, so a
-path added there fences both shells and neither guard carries a path list to keep in step. A guard
-that cannot read the declaration denies rather than falling through, so the terminal stops visibly
-instead of silently unfencing.
+guards classify each write target through `agent_fence_rules.classify()`, which derives the protected
+directories, single files, and project-data segments from those deny rules
+(`_declared_targets()`), so a path added there fences both shells and neither guard carries a path
+list to keep in step. A guard that cannot read the declaration denies rather than falling through, so
+the terminal stops visibly instead of silently unfencing.
+
+The classifier normalizes a target (strips shell quotes, unifies separators, collapses `..`,
+handles Windows drive-relative forms) and anchors the repo rules to the repo root, so a breeder's own
+same-named project file (their `README.md`) is not caught by basename. The protected set is a
+function of deployment mode (`fence_mode()`): dev protects the repo tree plus breeder data;
+production, an installed package behind an OS sandbox, protects only breeder data. Mode defaults to
+dev unless `TCIP_FENCE_MODE=prod`. The guard is airtight only on the one no-prompt path (a redirect
+riding an allow-listed read prefix); its in-place-writer coverage is defense-in-depth behind the
+human approval prompt, and a `cd`-then-relative write is an accepted residual of a cwd-blind guard.
 
 ## Conventions specific to this package
 
