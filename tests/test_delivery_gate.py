@@ -133,17 +133,6 @@ def test_the_refusal_names_the_failed_dimensions_own_references():
     assert VALIDATED_HELD_OUT not in g.reason
 
 
-def test_export_detection_csv_bare_string_of_the_wrong_kind_refuses(tmp_path):
-    """The no-pred_dirs path takes the caller string as-is, but a reference of the wrong kind for
-    the measurement dimension clears nothing: a raster-scope identity is not count validity."""
-    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
-
-    with pytest.raises(ValueError, match="unvalidated measurement"):
-        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
-                             trait=fx.COUNT_TRAIT,
-                             measurement_validated=res.VALIDATED_SAME_MOSAIC_IDENTITY)
-
-
 # ── export_detection_csv (writer) refuses a bare write ─────────────────────
 
 def test_export_detection_csv_refuses_bare_write(tmp_path):
@@ -152,16 +141,6 @@ def test_export_detection_csv_refuses_bare_write(tmp_path):
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT)
-
-
-def test_export_detection_csv_ships_validated_and_stamps_column(tmp_path):
-    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
-
-    out = tmp_path / "o.csv"
-    export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                         trait=fx.COUNT_TRAIT, measurement_validated=VALIDATED_HELD_OUT)
-    rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_detection_csv_acknowledge_stamps_false(tmp_path):
@@ -250,16 +229,23 @@ def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
                              pred_dirs=[bucket])
 
 
-def test_export_detection_csv_omitted_pred_dirs_trusts_bare_string(tmp_path):
-    # No buckets to reconcile from: measurement_validated is taken as-is, unchanged from before
-    # pred_dirs existed (a caller that already resolved the gate against a live run's own bundle).
+def test_export_detection_csv_omitted_pred_dirs_floors_to_unvalidated(tmp_path):
+    """No buckets to reconcile from: nothing on disk backs the caller's string, so the measurement
+    dimension floors and refuses, mirroring export_aggregated_csv's no-pred_dirs path. The
+    explicit acknowledge is the only delivery route, and it stamps false."""
     from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 
     out = tmp_path / "o.csv"
+    with pytest.raises(ValueError, match="unvalidated measurement"):
+        export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
+                             trait=fx.COUNT_TRAIT, measurement_validated=VALIDATED_HELD_OUT)
+    assert not out.exists()
+
     export_detection_csv([{"image": "a.jpg", "count": 3, "scores": [0.9]}], str(out),
-                         trait=fx.COUNT_TRAIT, measurement_validated=VALIDATED_HELD_OUT)
+                         trait=fx.COUNT_TRAIT, measurement_validated=VALIDATED_HELD_OUT,
+                         acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
-    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
 
 # ── export_aggregated_csv (writer) refuses a bare write ────────────────────

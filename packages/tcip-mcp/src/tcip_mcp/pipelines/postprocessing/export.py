@@ -165,10 +165,11 @@ def export_detection_csv(
     the physical-scale dimension (see ``export_aggregated_csv``'s gate on
     ``resolve_scale.json``/``reconcile_scale_validity``) is never operative here: there is nothing in
     this CSV's own shape for a physical scale to have produced, so gating on it would manufacture a
-    refusal over a dimension that can't apply to a count. Without ``pred_dirs`` (no buckets
-    to reconcile from, e.g. a caller that already resolved the gate against a live run's own bundle),
-    ``measurement_validated`` is taken as a bare caller-asserted reference with no on-disk
-    reconciliation. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
+    refusal over a dimension that can't apply to a count. Without ``pred_dirs`` there is no on-disk
+    source for the count's validity, so the measurement dimension floors to unvalidated regardless
+    of the caller's string, mirroring ``export_aggregated_csv``: a bare caller-asserted reference is
+    never trusted on its own, and ``acknowledge_unvalidated=True`` is the only route to delivery on
+    that path. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
     CSV stamped ``validated=false``. The ``provenance`` stamp (producing checkpoint sha, experiment
     id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
     operating point + model behind it. Those cells are built by ``delivered_provenance`` from the
@@ -192,7 +193,8 @@ def export_detection_csv(
             delivery rests on. Required: a count CSV under no trait states nothing about what was
             counted.
         measurement_validated: The count operating point's reconciled validity reference. Floored
-            against each bucket's on-disk sidecar when ``pred_dirs`` is given; taken as-is otherwise.
+            against each bucket's on-disk sidecar when ``pred_dirs`` is given; floored to
+            unvalidated otherwise, since nothing on disk backs it.
         pred_dirs: Prediction buckets to reconcile the count operating point's (and, if tiled, the
             tile-geometry) validity from.
         acknowledge_unvalidated: Write an unvalidated count as a flagged provisional CSV.
@@ -207,6 +209,7 @@ def export_detection_csv(
     )
     from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
     from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
         check_delivery_gate,
         delivered_provenance,
         record_delivery_binding_event,
@@ -222,7 +225,9 @@ def export_detection_csv(
     if not stated.ok:
         raise ValueError(stated.message)
 
-    flags: dict[str, str | None] = {"measurement": measurement_validated}
+    # With no pred_dirs nothing on disk backs the count's validity, so the dimension floors to
+    # unvalidated rather than trusting the caller's bare string (mirrors export_aggregated_csv).
+    flags: dict[str, str | None] = {"measurement": VALIDATED_FALSE}
     measurement_recon: dict = {"bindings": {}}
     if pred_dirs:
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never

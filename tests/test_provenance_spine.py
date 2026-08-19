@@ -216,7 +216,7 @@ def test_export_detection_csv_carries_provenance(tmp_path):
         trait=fx.COUNT_TRAIT,
         provenance={"producer_model_sha256": sha, "experiment_id": "expE",
                     "operating_point_conf": 0.42, "produced_at": "2026-07-19T00:00:00Z"},
-        measurement_validated="held_out_annotations")
+        acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
     assert rows[0]["experiment_id"] == "expE"
