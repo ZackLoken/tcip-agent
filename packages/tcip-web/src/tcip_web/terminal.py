@@ -104,8 +104,10 @@ def _materialize_fence_settings() -> Optional[Path]:
         for group in event_groups:
             for hook in group.get("hooks", []):
                 hook["command"] = _absolutize_guard_command(hook.get("command", ""), python, guard_dir)
-    dest = Path(tempfile.gettempdir()) / "tcip_agent_fence.settings.json"
+    # A process-private directory (mkdtemp, mode 0700 on POSIX), not a fixed shared-temp name, so the
+    # live fence cannot be pre-created or race-written by another local process before the CLI reads it.
     try:
+        dest = Path(tempfile.mkdtemp(prefix="tcip_fence_")) / "tcip_agent_fence.settings.json"
         dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     except OSError:
         return None

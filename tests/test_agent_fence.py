@@ -727,6 +727,23 @@ def test_ps_guard_admits_valid_work_after_the_redesign(cmd):
     assert r.stdout.strip() == ""
 
 
+def test_materialized_fence_is_written_to_a_private_directory_not_a_fixed_shared_path():
+    # P6-11: the live permission fence must not be a fixed, pre-createable name in the shared temp
+    # root. Each spawn materializes it into its own process-private directory instead.
+    import tempfile
+
+    p1 = pty_host._materialize_fence_settings()
+    p2 = pty_host._materialize_fence_settings()
+    assert p1 is not None and p2 is not None
+    shared_root = Path(tempfile.gettempdir()).resolve()
+    assert p1.parent.resolve() != shared_root, "fence still written directly into the shared temp root"
+    assert "tcip_fence_" in p1.parent.name
+    assert p1.parent != p2.parent, "each spawn must get its own private directory"
+    assert p1.is_file()
+    cfg = json.loads(p1.read_text(encoding="utf-8"))
+    assert "Edit(packages/**)" in cfg["permissions"]["deny"]
+
+
 def test_guards_resolve_variable_indirection_into_in_place_writers():
     # A destination named through a variable is resolved and classified, so the refactor keeps the
     # coverage the old protected-anywhere check gave cp/Set-Content indirection.
