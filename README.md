@@ -210,6 +210,15 @@ Not built yet (contributions/experiments welcome):
   deploying it as a hosted, multi-user web service (including the token auth already noted there
   as a planned follow-on) is future work.
 
+## Security and data egress
+
+Local project state and imagery answer where data rests, not what leaves the machine when an agent
+drives the platform. When the agent works, the breeding data it reads is sent to your model provider,
+the same as pasting it into a chat, and the platform does not bound or redact it. Read
+[SECURITY.md](SECURITY.md) before using TCIP on commercially sensitive breeding data: it inventories
+every channel that leaves the machine, the one phone-home you can disable, and the trust boundary the
+loopback bind rests on.
+
 ## License
 
 TCIP Agent is released under the [Apache License 2.0](LICENSE) (© 2026 Zack Loken).
