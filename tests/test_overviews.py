@@ -55,6 +55,34 @@ def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_pat
     assert np.allclose(np.squeeze(region, -1), blocks, atol=1.0)
 
 
+def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(
+        tmp_path: Path) -> None:
+    """A correct decimated result alone cannot say which store served it: decoding the base and
+    averaging gives the same pixels the pyramid holds. Rewriting the base to zeros after the
+    build separates the two paths: a decimated read that still returns the original content's
+    block averages was served from the sidecar, the native read returning zeros proves the base
+    really changed, and deleting the sidecar flips the same decimated read onto the base."""
+    path, arr = _wide_raster(tmp_path)
+    build_overviews(path)
+
+    tifffile.imwrite(str(path), np.zeros_like(arr), rowsperstrip=4)
+    assert sidecar_valid(path)
+    assert has_overviews(path)
+
+    with open_raster(path, 1) as src:
+        native, _ = src.read_region(Rect(0, 0, 8192, 8))
+        reduced, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
+    assert not native.any()
+    assert (spec.scale, spec.resample) == (0.5, "average")
+    blocks = arr.reshape(4, 2, 4096, 2).mean(axis=(1, 3))
+    assert np.allclose(np.squeeze(reduced, -1), blocks, atol=1.0)
+
+    overview_sidecar(path).unlink()
+    with open_raster(path, 1) as src:
+        off_base, _ = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
+    assert not off_base.any()
+
+
 def test_build_refuses_to_rebuild_over_a_valid_sidecar(tmp_path: Path) -> None:
     path, _ = _wide_raster(tmp_path)
     build_overviews(path)
