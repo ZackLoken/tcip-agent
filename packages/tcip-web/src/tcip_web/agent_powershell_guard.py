@@ -3,19 +3,14 @@
 The sibling ``agent_bash_guard.py`` guards the Bash tool, but on Windows the fenced agent
 also has a PowerShell tool, and it was entirely ungoverned (no deny rule, no hook), so
 an agent could sidestep the whole fence with ``Set-Content packages\\...`` or ``Remove-Item``.
-A real in-app session did exactly that ("switch to PowerShell, no such hook"). This hook
-closes that bypass by mirroring the Bash guard for PowerShell.
+This hook mirrors the Bash guard for PowerShell.
 
-Honest scope (unchanged): a guardrail, not a sandbox. It closes the *direct* bypasses:
-full cmdlets and their aliases (``sc``/``ri``/…), inline/encoded execution, and writing the
-fence's own files, but a determined agent can still evade a string matcher, most notably by
-``cd``-ing into a protected directory and writing a *relative* path (the guard is stateless
-and cwd-blind), or by assembling a path from fragments. Those residuals are accepted; real
-isolation is a sandbox (the platform's stated next step). The point here is to stop
-accidental/casual mutation and every *trivial* deliberate bypass.
-
-Which paths are protected, which hold a breeder's data, and what a refusal says come from
-``agent_fence_rules``, shared with the Bash guard so the two shells fence one boundary.
+Honest scope (unchanged): a guardrail, not a sandbox. It closes the direct bypasses (full
+cmdlets and their aliases, inline/encoded execution, writing the fence's own files), classifying
+each write target through the shared ``agent_fence_rules`` so the two shells fence one boundary
+and a breeder's own same-named file (their ``README.md``) is not caught by basename. A determined
+agent can still evade a string matcher (a ``cd`` then a relative write, a path assembled from
+fragments); those residuals are accepted, and real isolation is the sandbox.
 
 Stdlib only. It only ever denies; anything it can't classify falls through to the normal
 permission flow (a bug here fails open to prompting, never to a broken terminal).
@@ -34,72 +29,103 @@ except ImportError:
 
 _STMT = fence_rules.STMT
 
-# Write / create cmdlets and .NET writers, matched anywhere (the full names are unambiguous).
-# Only bites when paired with a protected path (see main()).
-_WRITE_OP = re.compile(
-    r"\bTee-Object\b"
-    r"|\b(?:Set|Add|Clear)-Content\b"
-    r"|\bOut-File\b"
-    r"|\b(?:New|Move|Copy|Rename)-Item\b"
-    r"|\b(?:Set|New)-ItemProperty\b"
-    r"|\[(?:System\.)?IO\.(?:File|Directory)\]::(?:Write|Create|Append|Move|Copy|Replace|Open)\w*"
-    r"|\bStreamWriter\b",
-    re.IGNORECASE,
-)
-# Write / create cmdlet aliases, anchored to statement position (see _STMT).
-_WRITE_ALIAS = re.compile(
-    _STMT + r"(?:sc|ac|clc|ni|cpi|cp|copy|mi|mv|move|rni|ren|sp|spi)\b",
-    re.IGNORECASE,
-)
+# Inline / nested / encoded execution: the shared interpreters plus this shell's own evaluator.
+_INLINE_PS = re.compile(r"\bInvoke-Expression\b|\biex\b", re.IGNORECASE)
 
-# Deletes: blocked unconditionally, mirroring the Bash fence's blanket ``Bash(rm:*)`` /
-# ``Bash(rmdir:*)`` deny: the agent mutates data through audited MCP tools, not raw shell
-# deletion (of platform code OR of a breeder's labels).
+# Deletes: blocked unconditionally, mirroring the Bash fence's blanket ``rm``/``rmdir`` deny.
 _DELETE_OP = re.compile(
     r"\bRemove-Item\b|\bRemove-ItemProperty\b|\[(?:System\.)?IO\.(?:File|Directory)\]::Delete",
     re.IGNORECASE,
 )
 _DELETE_ALIAS = re.compile(_STMT + r"(?:ri|rm|rmdir|rd|del|erase)\b", re.IGNORECASE)
 
-# The shared spawned-interpreter set plus this shell's own in-process evaluator, whose payload
-# the guard can't see through. Blocked unconditionally.
-_INLINE_INTERP = re.compile(
-    r"\bInvoke-Expression\b|\biex\b|" + fence_rules.SPAWNED_INTERPRETER,
-    re.IGNORECASE,
-)
+# Dangerous git, mirroring the Bash fence deny of push/commit/reset/checkout/clean. Anchored to the
+# subcommand right after ``git`` so ``git log --grep="reset"`` is not caught.
+_GIT_DANGER = re.compile(r"\bgit\s+(?:push|commit|reset|checkout|clean)\b", re.IGNORECASE)
 
-# Dangerous git: blocked unconditionally, mirroring the Bash fence deny of
-# ``git push/commit/reset/checkout/clean``. Anchored to the subcommand right after ``git`` so
-# a benign ``git log --grep="reset"`` isn't caught (same scope as the Bash prefix deny).
-_GIT_DANGER = re.compile(
-    r"\bgit\s+(?:push|commit|reset|checkout|clean)\b",
-    re.IGNORECASE,
-)
-
-
-# A zero-byte label is not a negative without an explicit Complete, so truncating or overwriting
-# one (``Clear-Content``, ``Set-Content``, a redirect) is the same harm as deleting it.
 _BREEDER_DATA_TARGET = fence_rules.BREEDER_DATA_TARGET
-# Write ops for the breeder-data check specifically: deliberately excludes Copy-Item/cpi/cp/copy
-# and [IO.File]::Copy: this guard is stateless and can't tell a two-argument cmdlet's source from
-# its destination, so "_WRITE_OP and _BREEDER_DATA_TARGET anywhere in the command" would deny a
-# legitimate copy/backup of a breeder file to elsewhere, not just a copy into one. Move/Rename still
-# relocate the tracked file even when named as the source, so they stay included. Mirrors the Bash
-# guard's own choice to exempt cp from its breeder-data check entirely.
-_BREEDER_DATA_WRITE_OP = re.compile(
-    r"\bTee-Object\b"
-    r"|\b(?:Set|Add|Clear)-Content\b"
-    r"|\bOut-File\b"
-    r"|\b(?:New|Move|Rename)-Item\b"
-    r"|\b(?:Set|New)-ItemProperty\b"
-    r"|\[(?:System\.)?IO\.(?:File|Directory)\]::(?:Write|Create|Append|Move|Replace|Open)\w*"
-    r"|\bStreamWriter\b",
+_SEG_SPLIT = re.compile(r"[;\n]|&&|\|\||[|&]")
+
+# A named path parameter that gives a write cmdlet its target.
+_PS_NAMED = re.compile(
+    r"-(?:Path|FilePath|LiteralPath|Destination)\s+(?P<t>[^\s;|&<>()]+)", re.IGNORECASE
+)
+# .NET / StreamWriter writers name their target as the first quoted argument.
+_PS_DOTNET = re.compile(
+    r"\[(?:System\.)?IO\.(?:File|Directory)\]::\w+\s*\(\s*(['\"])(?P<t>[^'\"]+)\1", re.IGNORECASE
+)
+_PS_STREAMWRITER = re.compile(r"StreamWriter\s*\(\s*(['\"])(?P<t>[^'\"]+)\1", re.IGNORECASE)
+
+# Write cmdlets/aliases whose target the guard extracts (positionally or by named parameter).
+_WRITE_LEAD = re.compile(
+    r"^(?:Set-Content|Add-Content|Clear-Content|Out-File|New-Item|Tee-Object"
+    r"|Set-ItemProperty|New-ItemProperty|sc|ac|clc|ni|sp|spi)$",
     re.IGNORECASE,
 )
-_BREEDER_DATA_WRITE_ALIAS = re.compile(
-    _STMT + r"(?:sc|ac|clc|ni|mi|mv|move|rni|ren|sp|spi)\b",
-    re.IGNORECASE,
-)
+# Copy/Move/Rename: destination-position, so a protected source read is not caught as a write.
+_MOVE_LEAD = re.compile(r"^(?:Move-Item|Rename-Item|mi|mv|move|rni|ren)$", re.IGNORECASE)
+_COPY_LEAD = re.compile(r"^(?:Copy-Item|cpi|cp|copy)$", re.IGNORECASE)
+# A Move/Rename anywhere at statement position, for the source-or-destination breeder check.
+_MOVE_STMT = re.compile(_STMT + r"(?:Move-Item|Rename-Item|mi|mv|move|rni|ren)\b", re.IGNORECASE)
+
+
+def _first_positional(tokens: "list[str]") -> "str | None":
+    """The first bare positional token, skipping flags and the value each named flag consumes."""
+    prev_flag = False
+    for tok in tokens:
+        if tok.startswith("-"):
+            prev_flag = True
+            continue
+        if prev_flag:
+            prev_flag = False
+            continue
+        return tok
+    return None
+
+
+def _last_positional(tokens: "list[str]") -> "str | None":
+    positionals = []
+    prev_flag = False
+    for tok in tokens:
+        if tok.startswith("-"):
+            prev_flag = True
+            continue
+        if prev_flag:
+            prev_flag = False
+            continue
+        positionals.append(tok)
+    return positionals[-1] if positionals else None
+
+
+def _cmdlet_writes(cmd: str) -> "list[tuple[str, str]]":
+    """``(kind, target)`` for each cmdlet/alias write, kind being ``write``/``move``/``copy``.
+
+    ``copy`` is reported so the caller can exempt it from the breeder-data check, the same way the
+    Bash guard exempts ``cp``: a stateless guard cannot tell a copy's source from its destination.
+    """
+    out: list[tuple[str, str]] = []
+    for m in _PS_DOTNET.finditer(cmd):
+        out.append(("write", m.group("t")))
+    for m in _PS_STREAMWRITER.finditer(cmd):
+        out.append(("write", m.group("t")))
+    for seg in (s.strip() for s in _SEG_SPLIT.split(cmd) if s.strip()):
+        tokens = seg.split()
+        if not tokens:
+            continue
+        lead, rest = tokens[0], tokens[1:]
+        named = [m.group("t") for m in _PS_NAMED.finditer(seg)]
+        if _WRITE_LEAD.match(lead):
+            targets = named or ([_first_positional(rest)] if _first_positional(rest) else [])
+            out.extend(("write", t) for t in targets if t)
+        elif _MOVE_LEAD.match(lead):
+            dest = named[-1] if named else _last_positional(rest)
+            if dest:
+                out.append(("move", dest))
+        elif _COPY_LEAD.match(lead):
+            dest = named[-1] if named else _last_positional(rest)
+            if dest:
+                out.append(("copy", dest))
+    return out
 
 
 def main() -> None:
@@ -111,22 +137,36 @@ def main() -> None:
     if not isinstance(cmd, str) or not cmd.strip():
         sys.exit(0)
 
-    if _INLINE_INTERP.search(cmd):
+    root = fence_rules.repo_root()
+    mode = fence_rules.fence_mode()
+
+    if fence_rules.inline_exec(cmd) or _INLINE_PS.search(cmd):
         fence_rules.deny(fence_rules.INLINE_EXECUTION_MSG)
     if _GIT_DANGER.search(cmd):
         fence_rules.deny("Dangerous git (push/commit/reset/checkout/clean) is blocked in the agent terminal.")
     if _DELETE_OP.search(cmd) or _DELETE_ALIAS.search(cmd):
         fence_rules.deny(fence_rules.DELETE_MSG)
-    if any(_BREEDER_DATA_TARGET.search(t) for t in fence_rules.redirect_targets(cmd)):
+
+    for target in fence_rules.redirect_targets(cmd, ps=True):
+        kind = fence_rules.classify(fence_rules.resolve_token(target, cmd, ps=True), root=root, mode=mode)
+        if kind == "breeder":
+            fence_rules.deny(fence_rules.BREEDER_DATA_WRITE_MSG)
+        if kind == "protected":
+            fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
+
+    for op, target in _cmdlet_writes(cmd):
+        kind = fence_rules.classify(fence_rules.resolve_token(target, cmd, ps=True), root=root, mode=mode)
+        if kind == "protected":
+            fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
+        if kind == "breeder" and op != "copy":
+            fence_rules.deny(fence_rules.BREEDER_DATA_WRITE_MSG)
+
+    # Move/Rename relocates the tracked file whether the breeder path is its source or destination.
+    if _MOVE_STMT.search(cmd) and _BREEDER_DATA_TARGET.search(cmd):
         fence_rules.deny(fence_rules.BREEDER_DATA_WRITE_MSG)
-    if (_BREEDER_DATA_WRITE_OP.search(cmd) or _BREEDER_DATA_WRITE_ALIAS.search(cmd)) \
-            and _BREEDER_DATA_TARGET.search(cmd):
-        fence_rules.deny(fence_rules.BREEDER_DATA_WRITE_MSG)
-    protected = fence_rules.protected_pattern()
-    if any(protected.search(t) for t in fence_rules.redirect_targets(cmd)):
-        fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
-    if (_WRITE_OP.search(cmd) or _WRITE_ALIAS.search(cmd)) and protected.search(cmd):
-        fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
+
+    if fence_rules.leading_is_allow_listed(cmd, "PowerShell") and fence_rules.has_opaque_redirect_target(cmd, ps=True):
+        fence_rules.deny(fence_rules.DYNAMIC_TARGET_MSG)
 
     sys.exit(0)
 
