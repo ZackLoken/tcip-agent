@@ -81,9 +81,14 @@ def _tee_targets(cmd: str) -> "list[str]":
     return out
 
 
-def _inplace_dests(cmd: str) -> "list[tuple[str, str]]":
-    """``(verb, target)`` for each in-place writer, target being the file it would write."""
-    out: list[tuple[str, str]] = []
+def _inplace_dests(cmd: str) -> "list[str]":
+    """The file each in-place writer would write.
+
+    For cp/mv/install/rsync/ln this is the destination (the last non-flag token), so a copy or move
+    into a protected or breeder path is caught while reading a protected/breeder source and writing
+    elsewhere is not. touch/sed/patch/dd name the file directly.
+    """
+    out: list[str] = []
     for seg in _segments(cmd):
         tokens = re.split(r"[<>]", seg)[0].split()
         if not tokens:
@@ -91,15 +96,15 @@ def _inplace_dests(cmd: str) -> "list[tuple[str, str]]":
         verb, args = tokens[0], tokens[1:]
         non_flags = [t for t in args if not t.startswith("-")]
         if verb in _DEST_VERBS and non_flags:
-            out.append((verb, non_flags[-1]))
+            out.append(non_flags[-1])
         elif verb == "touch":
-            out.extend(("touch", t) for t in non_flags)
+            out.extend(non_flags)
         elif verb == "sed" and any(t.startswith("-i") for t in args) and len(non_flags) >= 2:
-            out.append(("sed", non_flags[-1]))
+            out.append(non_flags[-1])
         elif verb == "patch" and non_flags:
-            out.append(("patch", non_flags[-1]))
+            out.append(non_flags[-1])
     for m in _DD_OF.finditer(cmd):
-        out.append(("dd", m.group("target")))
+        out.append(m.group("target"))
     return out
 
 
@@ -136,11 +141,11 @@ def main() -> None:
         if kind == "protected":
             fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
 
-    for verb, target in _inplace_dests(cmd):
+    for target in _inplace_dests(cmd):
         kind = fence_rules.classify(fence_rules.resolve_token(target, cmd), root=root, mode=mode)
         if kind == "protected":
             fence_rules.deny(fence_rules.PROTECTED_WRITE_MSG)
-        if kind == "breeder" and verb != "cp":
+        if kind == "breeder":
             fence_rules.deny(fence_rules.BREEDER_DATA_WRITE_MSG)
 
     if (_MOVE_OP.search(cmd) or _FIND_MOVE.search(cmd)) and _BREEDER_DATA_TARGET.search(cmd):
