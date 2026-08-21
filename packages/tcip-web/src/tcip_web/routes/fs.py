@@ -1,11 +1,11 @@
-"""Local-filesystem directory browsing for the dataset picker's folder browser.
+"""Local-filesystem directory browsing for the frontend's folder picker.
 
-The GUI runs with its backend on the same machine as the browser, so "the server's
-filesystem" is the user's own. This lists directories only, and only where reads are
-allowed: with ``TCIP_IMAGE_ROOTS`` unset (the default local single-user GUI) browsing is
-unrestricted; set it and browsing is confined to those roots (a networked deployment).
-The wider trust-boundary hardening for exposed servers (Origin / TrustedHost / token) is a
-documented follow-up, not done here.
+The picker is how a human browses to data the platform does not know yet (images, plant
+locations, annotations to bring in), so on a connection from this machine it lists any directory
+the server's user can read: the backend runs on the breeder's own machine, and the filesystem it
+shows is theirs. A connection that arrived through a routable address is confined to the derived
+allow-set like every other route, since whole-machine enumeration must not reach the network.
+Directories only, never files.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ import stat as statmod
 import string
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from tcip_web.paths import allowed_image_roots, assert_path_allowed
+from tcip_web.paths import allowed_roots, assert_path_allowed, exposed_arrival
 
 router = APIRouter(prefix="/api/fs", tags=["fs"])
 
@@ -54,22 +54,21 @@ def _windows_drives() -> list[dict]:
     return drives
 
 
-def _roots_listing() -> dict:
-    """Top-level view (no path given): configured roots, else drives (Windows) / '/'."""
-    roots = allowed_image_roots()
-    if roots:
+def _roots_listing(confined: bool) -> dict:
+    """Top-level view (no path given): the allowed roots when confined, else drives (Windows) / '/'."""
+    if confined:
         return {
             "path": "",
             "parent": None,
             "is_dataset_root": False,
-            "entries": [_entry(r) for r in roots if r.is_dir()],
+            "entries": [_entry(r) for r in allowed_roots() if r.is_dir()],
         }
     if os.name == "nt":
         return {"path": "", "parent": None, "is_dataset_root": False, "entries": _windows_drives()}
-    return _list_dir(Path("/"))
+    return _list_dir(Path("/"), confined=False)
 
 
-def _list_dir(p: Path) -> dict:
+def _list_dir(p: Path, *, confined: bool) -> dict:
     entries: list[dict] = []
     try:
         children = sorted(p.iterdir(), key=lambda c: c.name.lower())
@@ -90,7 +89,7 @@ def _list_dir(p: Path) -> dict:
 
     # Offer a parent link, but null it when going up would escape the allowed roots.
     parent: str | None = str(p.parent) if p.parent != p else None
-    if parent is not None:
+    if parent is not None and confined:
         try:
             assert_path_allowed(parent)
         except ValueError:
@@ -107,15 +106,27 @@ def _list_dir(p: Path) -> dict:
 
 @router.get("/list")
 def list_dir(
+    request: Request,
     path: str | None = Query(None, description="Directory to list; empty = top level"),
 ) -> dict:
-    """List sub-directories of ``path`` (or the top-level drives/roots when empty)."""
+    """List sub-directories of ``path`` (or the top-level drives/roots when empty).
+
+    Confined to the allowed roots when the connection arrived through a routable address;
+    unconfined from this machine, where browsing to new data is the picker's job.
+    """
+    confined = exposed_arrival(request.scope)
     if not path:
-        return _roots_listing()
-    try:
-        resolved = assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        return _roots_listing(confined)
+    if confined:
+        try:
+            resolved = assert_path_allowed(path)
+        except ValueError as exc:
+            raise HTTPException(403, str(exc)) from exc
+    else:
+        try:
+            resolved = Path(path).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise HTTPException(400, f"cannot resolve {path}: {exc}") from exc
     if not resolved.is_dir():
         raise HTTPException(404, f"not a directory: {path}")
-    return _list_dir(resolved)
+    return _list_dir(resolved, confined=confined)
