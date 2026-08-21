@@ -89,6 +89,17 @@ no wildcard). A reverse proxy in front of the backend is an exposed deployment: 
 see the proxied client, so it is served only under the opt-in with the proxy's name advertised.
 Token authentication for an intentionally exposed GUI is a planned follow-on.
 
+What the platform records about who acted is a declaration, not a verification. The MCP server
+records which agent harness connected to it (the name and version the client declared in the MCP
+handshake, such as `claude-code 2.1.238`), a session id it minted itself, and what the declaring
+harness exported about itself to its MCP servers (Claude Code: its own session id and effective
+effort; Codex exports nothing), on every audit line and statement record that process writes and as
+headers on its pushes to the GUI; the model that ran is not recorded, since no harness forwards it; the in-app terminal
+records which executable it launched and passes its own session id down as a correlation any launcher
+could set. None of it authenticates a person: the person at the keyboard stays a name the request
+declared, the breeder's confirmation routes keep taking that name from the body, and nothing refuses
+on any of these values.
+
 The whole no-authentication argument rests on the loopback bind and a single trusted machine. None of
 the egress above is safe to treat as private-by-default once the platform moves off that machine, or
 once the roadmap's centralized or cloud-backed storage lands: the local-first claim that carries the

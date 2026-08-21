@@ -47,12 +47,13 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 |---|---|---|---|
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 2 | 16 |
+| packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 3 | 16 |
 | packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 1 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 2 | 22 |
 | packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 4 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/model_registry.py | Model registry, track trained models and their performance. | 3 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/operationalization.py | Per-project trait-operationalization records: what a delivered number means, who confirmed it, and the precondition every crossing delivery door checks. | 4 | 4 |
+| packages/tcip-mcp/src/tcip_mcp/operationalization.py | Per-project trait-operationalization records: what a delivered number means, who confirmed it, and the precondition every crossing delivery door checks. | 5 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/__init__.py | Pipeline sub-package: data, models, training, evaluation, inference, postprocessing. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/__init__.py | Active learning pipeline: scorer and selector modules. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/helpers.py | Shared active-learning helpers used by the AL MCP tools. | 2 | 1 |
@@ -112,7 +113,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 3 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 0 | 23 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 1 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 15 | 15 |
+| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 16 | 15 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools, load, save, and evaluate name-based annotations via MCP. | 15 | 1 |  <!-- queued: P5-233 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: load datasets, validate quality, split data. | 10 | 2 |
@@ -129,9 +130,9 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 9 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 25 | 6 |  <!-- queued: P5-223 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 23 | 1 |  <!-- queued: P5-231 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 2 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 3 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 1 | 4 |
+| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 2 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 2 | 9 |
 
 ## tcip-annotation
@@ -180,7 +181,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/agent_learning_capture.py | SessionEnd capture hook: the soft backstop for the self-learning loop. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 0 | 0 |
-| packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 9 | 2 |
+| packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 10 | 2 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 3 |  <!-- queued: P5-329 unwired -->
 | packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 2 | 5 |
 | packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 0 | 15 |
@@ -204,7 +205,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: launch + list + per-trial visibility. | 8 | 2 |
 | packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 1 | 3 |
 | packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 8 |
-| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 2 | 3 |
+| packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 3 | 3 |
 
 ## tcip-web-frontend
 
@@ -671,22 +672,22 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:131` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:140` |
-| WS | `/ws/state` | `state_ws` | `app.py:151` |
-| GET | `/health` | `health` | `app.py:234` |
-| GET | `/` | `index` | `app.py:242` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:265` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:303` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:312` |
+| GET | `/api/state` | `get_state` | `app.py:122` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:131` |
+| WS | `/ws/state` | `state_ws` | `app.py:142` |
+| GET | `/health` | `health` | `app.py:225` |
+| GET | `/` | `index` | `app.py:233` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:256` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:300` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:309` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/labels` | `load_labels` | `routes/annotate.py:156` |
-| POST | `/labels` | `save_labels` | `routes/annotate.py:177` |
-| POST | `/open` | `open_image` | `routes/annotate.py:234` |  <!-- queued: P5-58 delete -->
+| GET | `/labels` | `load_labels` | `routes/annotate.py:168` |
+| POST | `/labels` | `save_labels` | `routes/annotate.py:189` |
+| POST | `/open` | `open_image` | `routes/annotate.py:247` |  <!-- queued: P5-58 delete -->
 
 ### routes/canvas.py, prefix `/api/canvas` (1 route)
 
@@ -719,17 +720,17 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:118` |  <!-- queued: P5-83 unify -->
-| GET | `/images` | `list_images` | `routes/dataset.py:159` |  <!-- queued: P5-84 delete -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:180` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:259` |
-| GET | `/state` | `get_state_snapshot` | `routes/dataset.py:276` |
+| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:126` |  <!-- queued: P5-83 unify -->
+| GET | `/images` | `list_images` | `routes/dataset.py:167` |  <!-- queued: P5-84 delete -->
+| POST | `/select` | `select_dataset` | `routes/dataset.py:189` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:269` |
+| GET | `/state` | `get_state_snapshot` | `routes/dataset.py:286` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/list` | `list_dir` | `routes/fs.py:109` |
+| GET | `/list` | `list_dir` | `routes/fs.py:108` |
 
 ### routes/images.py, prefix `/api/images` (5 routes)
 
@@ -771,69 +772,69 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:111` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:158` |  <!-- queued: P5-129 delete -->
-| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:381` |  <!-- queued: P5-130 merge-or-split -->
-| POST | `/onset_dates` | `onset_dates` | `routes/results.py:411` |  <!-- queued: P5-131 merge-or-split -->
-| POST | `/export_csv` | `export_csv` | `routes/results.py:441` |
-| GET | `/traits` | `list_traits` | `routes/results.py:883` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:582` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:598` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:636` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:738` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:754` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:796` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:862` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:912` |
+| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:176` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:234` |  <!-- queued: P5-129 delete -->
+| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:465` |  <!-- queued: P5-130 merge-or-split -->
+| POST | `/onset_dates` | `onset_dates` | `routes/results.py:495` |  <!-- queued: P5-131 merge-or-split -->
+| POST | `/export_csv` | `export_csv` | `routes/results.py:525` |
+| GET | `/traits` | `list_traits` | `routes/results.py:967` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:666` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:682` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:720` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:822` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:838` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:880` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:946` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:996` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:421` |
-| POST | `/action` | `record_action` | `routes/review.py:545` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:644` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:692` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:713` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:760` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1072` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1110` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1138` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1259` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1286` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:429` |
+| POST | `/action` | `record_action` | `routes/review.py:553` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:652` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:699` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:719` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:766` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1077` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1115` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1143` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1263` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1291` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/image_event` | `image_event` | `routes/sessions.py:105` |
-| POST | `/start` | `start_session` | `routes/sessions.py:175` |
-| POST | `/end` | `end_session` | `routes/sessions.py:196` |
-| GET | `/load` | `load_sessions` | `routes/sessions.py:212` |
+| POST | `/image_event` | `image_event` | `routes/sessions.py:125` |
+| POST | `/start` | `start_session` | `routes/sessions.py:196` |
+| POST | `/end` | `end_session` | `routes/sessions.py:217` |
+| GET | `/load` | `load_sessions` | `routes/sessions.py:233` |
 
 ### routes/terminal.py, prefix `/api/terminal` (4 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/status` | `get_status` | `routes/terminal.py:232` |
-| POST | `/sessions` | `create_session` | `routes/terminal.py:246` |
-| GET | `/sessions` | `list_terminal_sessions` | `routes/terminal.py:269` |
-| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:274` |
-| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:302` |
+| GET | `/status` | `get_status` | `routes/terminal.py:252` |
+| POST | `/sessions` | `create_session` | `routes/terminal.py:266` |
+| GET | `/sessions` | `list_terminal_sessions` | `routes/terminal.py:289` |
+| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:298` |
+| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:326` |
 
 ### routes/training.py, prefix `/api/training` (8 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/validate` | `preflight_config_route` | `routes/training.py:149` |  <!-- queued: P5-104 delete -->
-| POST | `/launch` | `launch_training_route` | `routes/training.py:163` |  <!-- queued: P5-113 delete -->
-| GET | `/runs` | `list_runs_route` | `routes/training.py:183` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:199` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:206` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:226` |
-| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:241` |  <!-- queued: P5-110 delete -->
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:264` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:318` |
+| POST | `/validate` | `preflight_config_route` | `routes/training.py:150` |  <!-- queued: P5-104 delete -->
+| POST | `/launch` | `launch_training_route` | `routes/training.py:164` |  <!-- queued: P5-113 delete -->
+| GET | `/runs` | `list_runs_route` | `routes/training.py:184` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:200` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:207` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:227` |
+| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:242` |  <!-- queued: P5-110 delete -->
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:265` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:319` |
 
 ### routes/tuning.py, prefix `/api/tuning` (9 routes)
 
@@ -932,7 +933,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:64`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:68`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object the
 56 `@mcp.tool()` decorators in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` register
 against.
@@ -1075,7 +1076,7 @@ Writers: `set_image_status`,
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:435`; `_status_bucket_for`,
-`packages/tcip-web/src/tcip_web/routes/sessions.py:253`;
+`packages/tcip-web/src/tcip_web/routes/sessions.py:274`;
 `tcip_mcp.class_registry.stamp_unstamped_confirmations`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:223`, which enumerates every bucket of a
 subject whose attribute schema is about to change so the confirmations under it can be stamped
@@ -1371,12 +1372,12 @@ every declared document (183).
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
 `packages/tcip-web/src/tcip_web/state.py:18`.
 
-Writer: `StateStore._flush_sync`, `tcip_web/state.py:189`, debounced 0.5s after `mutate`/`replace`, which
+Writer: `StateStore._flush_sync`, `tcip_web/state.py:208`, debounced 0.5s after `mutate`/`replace`, which
 resolves the destination at flush time so a project switch during the debounce window cannot write
 one project's snapshot into another's. The store is declared `durable=False`: the snapshot is
 rewritten every debounce cycle and losing the last one costs a re-selection, not history.
 
-Reader: `StateStore.load_from_disk`, `tcip_web/state.py:203`.
+Reader: `StateStore.load_from_disk`, `tcip_web/state.py:221`.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
 `phase0_implementation: written twice`: `tests/test_active_context.py:33,41,54`,
@@ -1525,28 +1526,28 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP process finds the port the web backend actually bound.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:53` (`BACKEND_PORT_STORE`, declared beside the reader because the reader cannot import `tcip_web`; `backend_port_key`, line 65, is the one address, read at line 112).
-Side B: `packages/tcip-web/src/tcip_web/__main__.py:44` (`def _write_port_file(port: int) -> None:`, publishing through that same key at line 52, and logging rather than swallowing a failure, since the fallback silently misses an OS-picked port).
+Side B: `packages/tcip-web/src/tcip_web/__main__.py:43` (`def _write_port_file(port: int) -> None:`, publishing through that same key at line 52, and logging rather than swallowing a failure, since the fallback silently misses an OS-picked port).
 Phase 3 verdict: single.
 
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:154` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:32` (`from tcip_mcp.web_client import VALID_PANELS`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:30` (`from tcip_mcp.web_client import VALID_PANELS`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:702` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:282` (`if event.event_type == "review_focus":`).
-Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-name mismatch on this seam, and it still holds: the posted payload carries a key named `subject` (`annotation_tools.py:698-702`), while both readers take `active_subject` (`app.py:295-296`, `frontend/src/lib/annotateFocus.ts:21,54`), so the browser's `setActiveSubject` call this seam exists to trigger is never reached from an agent-posted `annotate_focus` event.
+Side B: `packages/tcip-web/src/tcip_web/app.py:279` (`if event.event_type == "review_focus":`).
+Phase 3 verdict: duplicated. The B01 adjudication recorded a confirmed field-name mismatch on this seam, and it still holds: the posted payload carries a key named `subject` (`annotation_tools.py:698-702`), while both readers take `active_subject` (`app.py:293`, `frontend/src/lib/annotateFocus.ts:21,54`), so the browser's `setActiveSubject` call this seam exists to trigger is never reached from an agent-posted `annotate_focus` event.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:224` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is not an `@audited` tool; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:78` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
+Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:240` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is not an `@audited` tool; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:87` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 
 ## S07. Experiment record .tcip/experiments/<id>/
@@ -1694,7 +1695,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:911` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:995` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -1756,22 +1757,22 @@ Phase 3 verdict: single. One read of the raw value survives outside the class, i
 ## S36. Count-objective vocabulary versus registered pickers
 
 Must agree: every named count objective has a registered picker function.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:73` (`COUNT_OBJECTIVES`, over the three names declared at lines 50-52).
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:74` (`COUNT_OBJECTIVES`, over the three names declared at lines 50-52).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:65` (`COUNT_OBJECTIVE_PICKERS`, with the reconciling `assert set(COUNT_OBJECTIVE_PICKERS) == COUNT_OBJECTIVES,` at line 70). A picker's provenance label, and the review-verdict variant it earns through `REVIEW_VERDICT_LABEL_SUFFIX`, line 74, are read off that registry by `pipelines/derivations.py:640`, so registering a picker registers its labels.
 Phase 3 verdict: single.
 
 ## S37. traits.py trait specs against crops.yml controlled vocabulary
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:231` (`def crops_yml_path(`, the one placement of `.github/skills/crops/crops.yml`, loaded once for every reader of it by `_crops_traits`, line 228).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:274` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:232` (`def crops_yml_path(`, the one placement of `.github/skills/crops/crops.yml`, loaded once for every reader of it by `_crops_traits`, line 228).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:275` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
 ## S38. Per-project trait spec records .tcip/state/trait_specs/*.json
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:316` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 351 and `trait_spec_key` at line 365 addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:390` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:479` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:317` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 351 and `trait_spec_key` at line 365 addressing one spec).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:391` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:479` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
@@ -1834,21 +1835,21 @@ Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
 Must agree: the snapshot the backend serializes deserializes into the store's typed shape.
-Side A: `packages/tcip-web/src/tcip_web/state.py:101` (`class GuiState(BaseModel):`).
+Side A: `packages/tcip-web/src/tcip_web/state.py:74` (`class GuiState(BaseModel):`).
 Side B: `packages/tcip-web/frontend/src/store/types.ts:2` (comment: `Types mirroring the Python backend's GuiState`, with the keep-in-sync pointer back to `state.py` on the line below).
 Phase 3 verdict: duplicated.
 
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:150` (`@app.websocket("/ws/state")`).
-Side B: `packages/tcip-web/src/tcip_web/state.py:130` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
+Side A: `packages/tcip-web/src/tcip_web/app.py:141` (`@app.websocket("/ws/state")`).
+Side B: `packages/tcip-web/src/tcip_web/state.py:149` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
-Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:301` (`@router.websocket("/ws/{session_id}")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:325` (`@router.websocket("/ws/{session_id}")`).
 Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:338` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
@@ -1862,7 +1863,7 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:317` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:318` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
@@ -1876,7 +1877,7 @@ Phase 3 verdict: duplicated.
 ## S53. Optimistic-concurrency token for label saves
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
-Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:172` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
+Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:184` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
 Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:588` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
@@ -1884,14 +1885,14 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:22` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:200` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:191` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:16` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:150` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:141` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
@@ -1905,7 +1906,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:364` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:372` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry
@@ -1918,7 +1919,7 @@ Phase 3 verdict: single.
 ## S59. Path confinement (the derived allow-set)
 
 Must agree: every route that accepts a client-supplied path confines it to the same allowed roots.
-Side A: `packages/tcip-web/src/tcip_web/paths.py:103` (`def allowed_roots() -> list[Path]:`).
+Side A: `packages/tcip-web/src/tcip_web/paths.py:46` (`def allowed_roots() -> list[Path]:`).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:77` (`p = assert_path_allowed(path)`).
 Phase 3 verdict: single.
 
@@ -1932,8 +1933,8 @@ Phase 3 verdict: single.
 ## S61. Bash guard and PowerShell guard protected-path sets
 
 Must agree: the two shells fence the same platform paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:133` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
-Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:151` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
+Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:138` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
+Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:149` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
 Phase 3 verdict: single.
 
 ## S62. Guard hooks against the fence settings deny list
@@ -1947,13 +1948,13 @@ Phase 3 verdict: single.
 
 Must agree: the hook command strings in the committed profile resolve to real guard files from whatever cwd the terminal starts in.
 Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (hook commands are repo-relative).
-Side B: `packages/tcip-web/src/tcip_web/terminal.py:77` (`def _materialize_fence_settings() -> Optional[Path]:`).
+Side B: `packages/tcip-web/src/tcip_web/terminal.py:78` (`def _materialize_fence_settings() -> Optional[Path]:`).
 Phase 3 verdict: duplicated.
 
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:47` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:51` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 
