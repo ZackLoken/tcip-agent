@@ -10,7 +10,7 @@ packages/tcip-web/
   src/tcip_web/
     app.py              # FastAPI app
     state.py            # in-memory GuiState + debounced .tcip/state/gui.json
-    paths.py            # safe_join + image-root allow-list (traversal/LFI guards)
+    paths.py            # safe_join + the always-on path guard (derived allow-set, identity containment)
     identity.py         # current-user identity for created_by/accepted_by provenance stamping
     jobstore.py         # background job tracking (training/inference/tuning)
     terminal.py         # in-app agent terminal (spawns a hardened `claude` process)
@@ -103,11 +103,14 @@ re-litigated):
   limitation and future work, not a regression.
 - Sourcemaps. The shipped `static/` bundle is built without sourcemaps (leaner
   wheel). Use `npm run dev` (HMR + sourcemaps) to debug.
-- Trust boundary. Loopback bind (default `127.0.0.1`) is frictionless with no auth;
-  cross-site WS reads are blocked (Origin check) and DNS-rebinding is blocked
-  (TrustedHost). Binding a non-loopback host is refused unless `TCIP_WEB_ALLOW_INSECURE=1`
-  (it would expose filesystem browsing + writes with no login). Token auth for an
-  intentionally-exposed GUI is a planned follow-on (needs the frontend to attach a token).
+- Trust boundary. A connection from this machine (a loopback address) is served with no auth;
+  a connection through a network address is refused, whatever the bind, until the operator sets
+  `TCIP_WEB_ALLOW_INSECURE=1`, because an exposed GUI hands a network client filesystem reads
+  and writes and the interactive agent terminal (keyboard access to Claude Code) with no login.
+  The Host header must name this backend as reached (its arrival address, its own hostname, or
+  an entry of `TCIP_WEB_ADVERTISED_HOSTS`, consulted only under the opt-in; never a wildcard),
+  and a WebSocket Origin must be the request's own origin. Token auth for an intentionally
+  exposed GUI is a planned follow-on (needs the frontend to attach a token).
 
 ### Packaging the GUI into a wheel
 

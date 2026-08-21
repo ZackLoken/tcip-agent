@@ -191,7 +191,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 4 | 2 |
 | packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 11 | 1 |
 | packages/tcip-web/src/tcip_web/routes/dataset.py | Dataset discovery + selection routes. | 4 | 1 |
-| packages/tcip-web/src/tcip_web/routes/fs.py | Local-filesystem directory browsing for the dataset picker's folder browser. | 1 | 1 |
+| packages/tcip-web/src/tcip_web/routes/fs.py | Local-filesystem directory browsing for the frontend's folder picker. | 1 | 1 |
 | packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 9 | 2 |  <!-- queued: P5-234 merge-or-split -->
 | packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 14 | 2 |
 | packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 1 | 1 |
@@ -203,6 +203,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/routes/training.py | Training routes: validate config, launch, list runs, live metrics stream. | 8 | 1 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: launch + list + per-trial visibility. | 8 | 2 |
 | packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 1 | 3 |
+| packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 8 |
 | packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 2 | 3 |
 
 ## tcip-web-frontend
@@ -728,7 +729,7 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/list` | `list_dir` | `routes/fs.py:109` |  <!-- queued: P5-76 delete -->
+| GET | `/list` | `list_dir` | `routes/fs.py:109` |
 
 ### routes/images.py, prefix `/api/images` (5 routes)
 
@@ -1914,18 +1915,18 @@ Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py:57` (`def re
 Side B: `packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py:329` (`def grid_to_rect(`, the one cell-name lookup, with `grid_to_pixel`, line 360, built on it) and `packages/tcip-web/src/tcip_web/routes/coverage.py:96` (`@router.get("/grid")`, `get_grid`, whose cell list the browser consumes verbatim).
 Phase 3 verdict: single.
 
-## S59. Image-root confinement (TCIP_IMAGE_ROOTS)
+## S59. Path confinement (the derived allow-set)
 
 Must agree: every route that accepts a client-supplied path confines it to the same allowed roots.
-Side A: `packages/tcip-web/src/tcip_web/paths.py:52` (`def allowed_image_roots() -> list[Path]:`).
+Side A: `packages/tcip-web/src/tcip_web/paths.py:103` (`def allowed_roots() -> list[Path]:`).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:77` (`p = assert_path_allowed(path)`).
 Phase 3 verdict: single.
 
 ## S60. WebSocket origin check
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
-Side A: `packages/tcip-web/src/tcip_web/paths.py:44` (`def origin_allowed(origin: str | None) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:153` (`if not origin_allowed(websocket.headers.get("origin")):`).
+Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:144` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets
