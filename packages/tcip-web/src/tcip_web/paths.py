@@ -1,59 +1,34 @@
-"""Path resolution helpers with traversal protection.
+"""Path confinement for client-supplied paths.
 
-All GUI routes that read user-supplied paths go through :func:`safe_join`
-so a malicious/broken client cannot reach files outside the configured
-project root.
+Every route that reads or writes a path a client supplied resolves it through
+:func:`assert_path_allowed` and uses the path it returns. The allow-set is derived from what the
+platform manages and is always non-empty: the workspace root, every workspace project's registered
+dataset roots, and the additive ``TCIP_IMAGE_ROOTS`` list for a legitimate root the platform does
+not know about. There is no switch that empties it. Containment is decided by filesystem identity
+(the same device and file as an allowed root, walking the candidate's resolved ancestors), never by
+comparing spellings, so a case variant, a substituted or mapped drive, a junction, or an extended
+``\\\\?\\`` prefix neither admits an outside path nor refuses an inside one. Any error while
+resolving or comparing refuses.
 """
 
 from __future__ import annotations
 
-import ipaddress
 import os
 from pathlib import Path, PurePosixPath
-from urllib.parse import urlparse
 
+from tcip_web.trust_boundary import exposed_arrival
 
-def is_loopback_host(host: str) -> bool:
-    """True if ``host`` binds only the local machine (127.0.0.0/8, ::1, localhost).
-
-    ``0.0.0.0`` / ``::`` mean "all interfaces" and are therefore not loopback: binding
-    them exposes the server to the network.
-    """
-    h = (host or "").strip().lower()
-    if h in ("localhost", "::1"):
-        return True
-    if h in ("", "0.0.0.0", "::"):
-        return False
-    try:
-        return ipaddress.ip_address(h).is_loopback
-    except ValueError:
-        return False
-
-
-# ── Browser trust boundary (shared by app.py + the WebSocket routes) ──
-# A loopback bind stays frictionless (no auth); the Origin check stops a cross-site page
-# from opening a WebSocket and reading GUI state (which includes filesystem paths). A
-# missing Origin means a non-browser client. Env-derived so a deliberately exposed bind
-# also trusts its own host.
-_BIND_HOST = os.environ.get("TCIP_WEB_HOST", "127.0.0.1")
-_ALLOWED_ORIGIN_HOSTS = {"localhost", "127.0.0.1", "::1"}
-if not is_loopback_host(_BIND_HOST):
-    _ALLOWED_ORIGIN_HOSTS.add(_BIND_HOST)
-
-
-def origin_allowed(origin: str | None) -> bool:
-    """Allow same-machine browser origins; a missing Origin means a non-browser client."""
-    if not origin:
-        return True
-    host = urlparse(origin).hostname or ""
-    return is_loopback_host(host) or host in _ALLOWED_ORIGIN_HOSTS
+__all__ = [
+    "allowed_image_roots", "allowed_roots", "assert_path_allowed", "assert_project_root_allowed",
+    "exposed_arrival", "safe_join", "within",
+]
 
 
 def allowed_image_roots() -> list[Path]:
-    """Allowed roots for absolute file reads, from ``TCIP_IMAGE_ROOTS`` (os.pathsep list).
+    """The additive ``TCIP_IMAGE_ROOTS`` entries (os.pathsep list), resolved; empty when unset.
 
-    Empty (the default) means unrestricted, appropriate for a local single-user GUI.
-    Set it to lock an exposed/networked deployment down to specific dataset directories.
+    These are added on top of the derived allow-set (:func:`allowed_roots`), the recovery path for
+    a legitimate root the platform does not manage. Setting it never narrows anything.
     """
     raw = os.environ.get("TCIP_IMAGE_ROOTS", "").strip()
     if not raw:
@@ -61,37 +36,133 @@ def allowed_image_roots() -> list[Path]:
     return [Path(r).resolve() for r in raw.split(os.pathsep) if r.strip()]
 
 
-def assert_path_allowed(path: str | Path) -> Path:
-    """Resolve ``path`` and ensure it sits under an allowed root (if any are configured).
+def _workspace_projects(workspace: Path) -> list[Path]:
+    try:
+        return sorted(p for p in workspace.iterdir() if (p / ".tcip").is_dir())
+    except OSError:
+        return []
 
-    Routes that read an absolute, client-supplied path (image serving, dimensions) call
-    this so an exposed server can be restricted via ``TCIP_IMAGE_ROOTS``. Raises
-    :class:`ValueError` if an allow-list is set and the path escapes it; with no allow-list
-    the resolved path is returned unchanged.
+
+def allowed_roots() -> list[Path]:
+    """Every root a client-supplied path may resolve under, derived at call time.
+
+    The workspace root, then each workspace project's registered dataset roots (a dataset
+    registered from outside the project tree is platform-managed data and must stay reachable
+    with no operator action), then ``TCIP_IMAGE_ROOTS``. The platform-state root
+    (``TCIP_PROJECT_ROOT``) is not a member on its own: it is the server's own state, and the
+    routes that write under it derive it server-side rather than taking it from a client.
+
+    A project whose dataset registry will not decode raises rather than contributing nothing: an
+    empty answer would strand that project's external data silently.
     """
-    resolved = Path(path).resolve()
-    roots = allowed_image_roots()
-    if not roots:
-        return resolved
-    for root in roots:
+    from tcip_mcp.tools.project_tools import read_datasets
+    from tcip_mcp.workspace import workspace_root
+    from tcip_store import DecodeError
+
+    workspace = workspace_root()
+    roots: list[Path] = [workspace]
+    for project in _workspace_projects(workspace):
+        # A project reached through a junction or symlink resolves outside the workspace and is
+        # admitted as itself, not only through the workspace it is listed from.
+        roots.append(project.resolve())
         try:
-            resolved.relative_to(root)
-            return resolved
-        except ValueError:
+            entries = read_datasets(project)
+        except DecodeError as exc:
+            raise RuntimeError(
+                f"the dataset registry of project {project} will not decode, so its registered "
+                f"roots cannot be admitted: {exc}"
+            ) from exc
+        roots.extend(Path(e["path"]) for e in entries if e.get("path"))
+    roots.extend(allowed_image_roots())
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for root in roots:
+        key = str(root)
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    return unique
+
+
+def _existing_anchor(resolved: Path) -> Path | None:
+    """The candidate itself when it exists, else its nearest existing ancestor.
+
+    Only a missing segment is climbed past; any other error while examining a candidate
+    propagates, so a path that cannot be examined is refused rather than judged by an ancestor.
+    """
+    for candidate in (resolved, *resolved.parents):
+        try:
+            candidate.stat()
+        except FileNotFoundError:
             continue
-    raise ValueError(f"path {resolved} is outside the allowed image roots")
+        except NotADirectoryError:
+            continue
+        return candidate
+    return None
+
+
+def _contained(anchor: Path, root: Path) -> bool:
+    """Whether ``anchor`` is the same directory as ``root`` or sits below it, by identity."""
+    for ancestor in (anchor, *anchor.parents):
+        if os.path.samefile(ancestor, root):
+            return True
+    return False
+
+
+def within(resolved: Path, root: Path) -> bool:
+    """Whether an already-resolved path sits at or under ``root``, by filesystem identity.
+
+    A path that does not exist yet is judged by its nearest existing ancestor. Any error while
+    examining or comparing answers False: a path or root that cannot be examined admits nothing.
+    """
+    try:
+        anchor = _existing_anchor(resolved)
+        return anchor is not None and root.exists() and _contained(anchor, root)
+    except OSError:
+        return False
+
+
+def assert_path_allowed(path: str | Path) -> Path:
+    """Resolve ``path`` and ensure it sits under an allowed root; return the resolved path.
+
+    Callers use the returned path for every later read, write and audit, never the string they
+    were given: re-resolving the raw string reopens the window between check and use. A path that
+    does not exist yet (a file about to be written) is judged by its nearest existing ancestor.
+    Raises :class:`ValueError` naming the roots checked on refusal, and on any resolution or
+    comparison error, which is a refusal rather than a guess.
+    """
+    try:
+        resolved = Path(path).resolve()
+        anchor = _existing_anchor(resolved)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"path {path!s} cannot be examined: {exc}") from exc
+    roots = allowed_roots()
+    if anchor is not None:
+        for root in roots:
+            try:
+                if root.exists() and _contained(anchor, root):
+                    return resolved
+            except OSError as exc:
+                raise ValueError(
+                    f"path {resolved} could not be compared against {root}: {exc}"
+                ) from exc
+    raise ValueError(
+        f"path {resolved} is outside the allowed roots "
+        f"({', '.join(str(r) for r in roots)}); register the dataset to a workspace project "
+        "or add its root to TCIP_IMAGE_ROOTS"
+    )
 
 
 def assert_project_root_allowed(project_root: str | Path) -> Path:
     """Confine a client-supplied ``project_root`` to the allowed roots.
 
     A route that derives a ``.tcip/state``, ``.tcip/reports``, or ``.tcip/audit.jsonl``
-    path from a request's ``project_root`` should call this before touching disk, so the
-    same ``TCIP_IMAGE_ROOTS`` lockdown that confines image reads also confines these
-    project-scoped state readers/writers. Thin wrapper over :func:`assert_path_allowed`
-    kept as its own name so call sites read as "guarding a project root" and share one
-    place to diverge the policy later if needed. Raises :class:`ValueError`; callers
-    convert to ``HTTPException(403)`` as elsewhere in this codebase.
+    path from a request's ``project_root`` calls this before touching disk, so the same
+    allow-set that confines image reads also confines these project-scoped state
+    readers/writers. Thin wrapper over :func:`assert_path_allowed` kept as its own name so
+    call sites read as "guarding a project root" and share one place to diverge the policy
+    later if needed. Raises :class:`ValueError`; callers convert to ``HTTPException(403)``
+    as elsewhere in this codebase.
     """
     return assert_path_allowed(project_root)
 

@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
-def _guard(project_root: str) -> None:
-    """Confine a client-supplied project_root (no-op unless TCIP_IMAGE_ROOTS is set)."""
+def _guard(project_root: str) -> str:
+    """Confine a client-supplied project_root and hand back the resolved spelling the reads use."""
     try:
-        assert_project_root_allowed(project_root)
+        return str(assert_project_root_allowed(project_root))
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
 
@@ -35,11 +35,11 @@ def _guard(project_root: str) -> None:
 @router.get("/reports")
 def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
     """Return recent friction reports, newest stated timestamp first."""
-    _guard(project_root)
+    root = _guard(project_root)
 
     from tcip_mcp.tools.meta_tools import report_document_name, report_documents
 
-    documents = report_documents(project_root)
+    documents = report_documents(root)
     reports: list[dict[str, Any]] = [
         {
             "file": report_document_name(document.name),
@@ -57,11 +57,11 @@ def get_reports(project_root: str, limit: int = 50) -> dict[str, Any]:
 @router.get("/retrospectives")
 def get_retrospectives(project_root: str, limit: int = 20) -> dict[str, Any]:
     """Return recent retrospectives (markdown), latest stated section first."""
-    _guard(project_root)
+    root = _guard(project_root)
 
     from tcip_mcp.tools.meta_tools import retrospective_documents
 
-    documents = retrospective_documents(project_root)
+    documents = retrospective_documents(root)
     retrospectives: list[dict[str, Any]] = [
         {
             "project_id": document.name,

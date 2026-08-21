@@ -40,7 +40,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import tcip_store
@@ -77,6 +77,26 @@ def annotation_stats_key(project_root: str) -> Key:
     return Key(ANNOTATION_STATS_STORE, project_root, _ANNOTATION_STATS_PARTS)
 
 
+def _guarded_stats_key(project_root: str) -> Key:
+    """The stats key of a client-supplied project root, confined first (403 on escape)."""
+    from tcip_web.paths import assert_project_root_allowed
+
+    try:
+        return annotation_stats_key(str(assert_project_root_allowed(project_root)))
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+def _guarded_dataset_root(dataset_root: str) -> str:
+    """A client-supplied dataset root, confined and resolved before it is persisted."""
+    from tcip_web.paths import assert_path_allowed
+
+    try:
+        return str(assert_path_allowed(dataset_root))
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
 def _normalized(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         return {"sessions": [], "image_status": {}}
@@ -107,7 +127,8 @@ def image_event(payload: ImageEventPayload) -> dict:
 
     Called by the GUI on image-leave (Prev/Next/tab-switch/save).
     """
-    key = annotation_stats_key(payload.project_root)
+    key = _guarded_stats_key(payload.project_root)
+    dataset_root = _guarded_dataset_root(payload.dataset_root) if payload.dataset_root else None
     with tcip_store.transaction(key) as txn:
         data = _normalized(txn.read(key, default=None))
         sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
@@ -129,8 +150,8 @@ def image_event(payload: ImageEventPayload) -> dict:
         if payload.loaded_annotation_count is not None and "loaded_annotation_count" not in img:
             img["loaded_annotation_count"] = int(payload.loaded_annotation_count)
 
-        if payload.dataset_root:
-            img["dataset_root"] = payload.dataset_root
+        if dataset_root:
+            img["dataset_root"] = dataset_root
             img["subject"] = payload.subject
             img["date"] = payload.date
 
@@ -175,7 +196,7 @@ class StartSessionPayload(BaseModel):
 def start_session(payload: StartSessionPayload) -> dict:
     """Insert a new session row. The GUI calls this when the user opens a
     project (or on load if no session is currently open)."""
-    key = annotation_stats_key(payload.project_root)
+    key = _guarded_stats_key(payload.project_root)
     with tcip_store.transaction(key) as txn:
         data = _normalized(txn.read(key, default=None))
         sessions: list[dict[str, Any]] = data.setdefault("sessions", [])
@@ -195,7 +216,7 @@ class EndSessionPayload(BaseModel):
 @router.post("/end")
 def end_session(payload: EndSessionPayload) -> dict:
     """Mark the latest session as ended and roll up totals."""
-    key = annotation_stats_key(payload.project_root)
+    key = _guarded_stats_key(payload.project_root)
     with tcip_store.transaction(key) as txn:
         data = _normalized(txn.read(key, default=None))
         sessions = data.setdefault("sessions", [])
@@ -210,7 +231,7 @@ def end_session(payload: EndSessionPayload) -> dict:
 
 @router.get("/load")
 def load_sessions(project_root: str) -> dict:
-    data = _normalized(tcip_store.read(annotation_stats_key(project_root), default=None))
+    data = _normalized(tcip_store.read(_guarded_stats_key(project_root), default=None))
     for s in data.get("sessions", []):
         s.update(_classify_session_seconds(s))
     return data
@@ -256,15 +277,21 @@ def _status_bucket_for(cache: dict[str, dict[str, str]], dataset_root: str,
     call to :func:`_classify_session_seconds` regardless of how many images in a session share it.
 
     A dataset with no confirmations yet has no bucket, which is an empty one. A store that will
-    not decode is named in the log and read as holding no confirmation for these images, so
-    their time is reported as review rather than silently as confirmed negatives.
+    not decode, or a persisted root the allow-set no longer admits, is named in the log and read
+    as holding no confirmation for these images, so their time is reported as review rather than
+    silently as confirmed negatives, and nothing outside the allowed roots is read.
     """
     from tcip_mcp.dataset_layout import image_status_key, normalize_status_store, status_bucket
+    from tcip_web.paths import assert_path_allowed
 
     key = f"{dataset_root}\0{subject or ''}\0{date or ''}"
     if key not in cache:
         try:
-            raw = tcip_store.read(image_status_key(dataset_root), default={})
+            raw = tcip_store.read(image_status_key(assert_path_allowed(dataset_root)), default={})
+        except ValueError:
+            logger.warning("the recorded dataset root %s is outside the allowed roots; session "
+                           "time on its images is reported as review", dataset_root)
+            raw = {}
         except tcip_store.DecodeError:
             logger.warning("the image status store under %s does not decode; session time on "
                            "its images is reported as review", dataset_root, exc_info=True)

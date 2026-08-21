@@ -57,8 +57,13 @@ human approval prompt, and a `cd`-then-relative write is an accepted residual of
 
 ## Conventions specific to this package
 
-- Path access from routes goes through `assert_path_allowed` (`TCIP_IMAGE_ROOTS` allow-list): a
-  403 on escape is the rail working, not a bug to route around.
+- Path access from routes goes through `assert_path_allowed`, which is always on: the allow-set is
+  derived from the workspace, every workspace project and its registered dataset roots, plus the
+  additive `TCIP_IMAGE_ROOTS` list, and containment is by filesystem identity. Every route uses the
+  resolved path the guard returns, never the client's string. A 403 on escape is the rail working,
+  not a bug to route around. The Results doors go further: they serve only the project the GUI has
+  open (`StateStore.project_root`, set by the guarded `/dataset/select`) and refuse evidence that
+  does not belong to it.
 - Review save formats mirror the annotation-engine's `{json, coco}` scope (see
   `packages/tcip-annotation/CLAUDE.md`); don't add a frontend format option the backend can't read.
 - The GUI follows minimalist design without dropping functionality (Zack's standing preference):

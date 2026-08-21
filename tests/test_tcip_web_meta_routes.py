@@ -13,7 +13,7 @@ from tcip_mcp.tools.meta_tools import claude_reports, project_retrospective
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_reports_empty_when_dir_missing(client: TestClient, tmp_path: Path) -> None:
@@ -65,24 +65,16 @@ def test_retrospectives_surfaces_written_retro(client: TestClient, tmp_path: Pat
 
 
 def test_reports_confines_project_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.get("/api/meta/reports", params={"project_root": str(outside)})
     assert resp.status_code == 403
 
 
 def test_retrospectives_confines_project_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.get("/api/meta/retrospectives", params={"project_root": str(outside)})
     assert resp.status_code == 403

@@ -36,10 +36,18 @@ from tcip_mcp.dataset_layout import (
     subjects_with_labels,
 )
 from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
-from tcip_web.paths import safe_join
+from tcip_web.paths import assert_path_allowed, safe_join
 from tcip_web.state import DatasetSelection, store
 
 router = APIRouter(prefix="/api/dataset", tags=["dataset"])
+
+
+def _guarded(path: str) -> Path:
+    """Confine a client-supplied root and hand back the resolved path every later read uses."""
+    try:
+        return assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 def _logical_image_names(date_dir: Path) -> list[str]:
@@ -117,7 +125,7 @@ def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
 @router.get("/tree")
 def get_dataset_tree(dataset_root: str) -> DatasetTree:
     """Return the high-level tree (dates, subjects, models) for a dataset."""
-    root = Path(dataset_root)
+    root = _guarded(dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
 
@@ -158,14 +166,15 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
 @router.get("/images")
 def list_images(dataset_root: str, date: str) -> dict:
     """List image files on a specific date."""
+    root = _guarded(dataset_root)
     try:
-        date_dir = safe_join(dataset_root, "images", date)
+        date_dir = safe_join(root, "images", date)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not date_dir.is_dir():
-        raise HTTPException(404, f"images/{date} not found under {dataset_root}")
+        raise HTTPException(404, f"images/{date} not found under {root}")
     items = _logical_image_names(date_dir)
-    return {"dataset_root": dataset_root, "date": date, "images": items, "count": len(items)}
+    return {"dataset_root": str(root), "date": date, "images": items, "count": len(items)}
 
 
 class SelectionRequest(BaseModel):
@@ -179,13 +188,14 @@ class SelectionRequest(BaseModel):
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
     """Set the active dataset for the GUI; broadcasts a state delta."""
-    root = Path(req.dataset_root)
+    project_root = _guarded(req.project_root)
+    root = _guarded(req.dataset_root)
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {req.dataset_root}")
 
     # Rehydrate any persisted GUI state for this project first (so backend state
     # survives a restart), then apply the fresh selection on top via mutate().
-    store.load_from_disk(Path(req.project_root))
+    store.open_project(project_root)
 
     image_list: list[str] = []
     if req.date:
@@ -209,7 +219,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
     prev = store.state.dataset
     same_identity = (
         _selected_this_session
-        and prev.dataset_root == req.dataset_root
+        and prev.dataset_root == str(root)
         and prev.date == req.date
         and prev.subject == req.subject
     )
@@ -218,8 +228,8 @@ async def select_dataset(req: SelectionRequest) -> dict:
     _selected_this_session = True
 
     selection = DatasetSelection(
-        project_root=req.project_root,
-        dataset_root=req.dataset_root,
+        project_root=str(project_root),
+        dataset_root=str(root),
         subject=req.subject,
         date=req.date,
         image_list=image_list,

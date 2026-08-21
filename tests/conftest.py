@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -101,6 +102,40 @@ def _restore_platform_root_env():
         os.environ.pop("TCIP_PROJECT_ROOT", None)
     else:
         os.environ["TCIP_PROJECT_ROOT"] = saved
+
+
+@pytest.fixture
+def tmp_path(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest,
+             monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Each test's ``tmp_path`` is a project directory inside its own fresh workspace.
+
+    The web layer's path guard admits only the workspace, the roots registered to its projects,
+    and ``TCIP_IMAGE_ROOTS``. Laying ``tmp_path`` out as ``<workspace>/project`` gives every test
+    the production topology (a workspace root distinct from the project under it, and the
+    platform-state pin below on the project, as ``workspace.set_active_project`` leaves it) with
+    no fixture naming the layout. A refusal case uses a directory beside the workspace
+    (``tmp_path_factory.mktemp``); a test of the additive roots sets ``TCIP_IMAGE_ROOTS`` itself.
+    """
+    name = re.sub(r"[\W]", "_", request.node.name)[:30]
+    workspace = tmp_path_factory.mktemp(name, numbered=True) / "workspace"
+    project = workspace / "project"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
+    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    return project
+
+
+@pytest.fixture(autouse=True)
+def _close_open_project():
+    """Leave the web layer's open project closed after each test.
+
+    The GUI state store is a process-wide singleton; a Results door serves only the project it
+    has open, so a test that opened one must not hand it to the next test.
+    """
+    yield
+    state = sys.modules.get("tcip_web.state")
+    if state is not None:
+        state.store.close_project()
 
 
 @pytest.fixture(autouse=True)

@@ -55,38 +55,38 @@ class CanvasStatePayload(BaseModel):
     shapes: Optional[list[dict]] = None
 
 
-def _guard_project_root(project_root: str) -> None:
-    """403 if a client-supplied project_root escapes the configured image roots.
+def _guard_project_root(project_root: str) -> str:
+    """Confine a client-supplied project_root and hand back the resolved spelling the writes use.
 
-    This route writes files under project_root, so an exposed deployment
-    (``TCIP_IMAGE_ROOTS`` set) must confine it, like review.py's ``_guard_path``.
+    This route writes files under project_root, so the confinement is the same one every other
+    path-taking route applies; 403 on escape.
     """
     try:
-        assert_path_allowed(project_root)
+        return str(assert_path_allowed(project_root))
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
-    _guard_project_root(payload.project_root)
+    project_root = _guard_project_root(payload.project_root)
     now = time.time()
 
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
         # sees an identity mismatch (stale), never a false match.
-        replace(canvas_geometry_key(payload.project_root), {
+        replace(canvas_geometry_key(project_root), {
             "image_path": payload.image_path,
             "tab": payload.tab,
             "shapes": payload.shapes,
             "received_at": now,
         })
 
-    replace(canvas_meta_key(payload.project_root), {
+    replace(canvas_meta_key(project_root), {
         "schema_version": payload.schema_version,
         "received_at": now,
         "received_at_iso": datetime.now(timezone.utc).isoformat(),
-        "project_root": payload.project_root,
+        "project_root": project_root,
         "tab": payload.tab,
         "image_path": payload.image_path,
         "image": payload.image,

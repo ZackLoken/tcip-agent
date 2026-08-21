@@ -1,8 +1,8 @@
-"""Review routes under an armed ``TCIP_IMAGE_ROOTS`` allow-list.
+"""Review routes under the web layer's path guard.
 
-An exposed deployment restricts the absolute, client-supplied paths these routes read and write.
-Every case below pins both directions: a path outside the configured roots is refused with 403,
-and the equivalent path inside them still does its work. An optional path the client simply did
+The absolute, client-supplied paths these routes read and write are confined to the allowed
+roots. Every case below pins both directions: a path outside the workspace is refused with 403,
+and the equivalent path inside it still does its work. An optional path the client simply did
 not send is not an escape and must keep being admitted.
 """
 
@@ -24,7 +24,7 @@ IMG_W, IMG_H = 160, 100
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture
@@ -38,11 +38,9 @@ def allowed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def outside(tmp_path: Path) -> Path:
-    """A directory deliberately left out of the allow-list."""
-    d = tmp_path / "elsewhere"
-    d.mkdir()
-    return d
+def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A directory beside the workspace, admitted by no allowed root."""
+    return tmp_path_factory.mktemp("outside")
 
 
 def _image(allowed: Path) -> Path:

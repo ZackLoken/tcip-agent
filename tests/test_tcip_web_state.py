@@ -19,26 +19,33 @@ def test_version_increments_on_mutate() -> None:
     assert store.version == 2
 
 
-def test_flush_targets_current_project_not_stale(tmp_path: Path) -> None:
-    # Regression: the debounced save used to capture the destination dir at schedule
-    # time, so a project switch during the debounce window wrote the new project's
-    # snapshot into the old project's gui.json. The flush must resolve the dir from
-    # the *current* state.
+def test_flush_targets_the_project_open_at_flush_time_not_at_schedule_time(tmp_path: Path) -> None:
+    """A project switch inside the debounce window must not write the new project's snapshot
+    into the old project's gui.json: the destination is the project open when the flush runs."""
     store = StateStore()
     proj_a = tmp_path / "A"
     proj_b = tmp_path / "B"
 
-    store._state = GuiState(dataset=DatasetSelection(project_root=str(proj_a)))
-    # ...project switches before the pending flush runs...
-    store._state = GuiState(dataset=DatasetSelection(project_root=str(proj_b)))
+    store.open_project(proj_a)
+    store.open_project(proj_b)
     store._flush_sync()
 
     assert tcip_store.exists(gui_snapshot_key(str(proj_b)))
     assert not tcip_store.exists(gui_snapshot_key(str(proj_a)))
 
 
+def test_nothing_persists_while_no_project_is_open(tmp_path: Path) -> None:
+    """The open project is the only persistence root; a snapshot naming a project inside its own
+    state is not one, so state edited to name a root never redirects a flush there."""
+    store = StateStore()
+    store._state = GuiState(dataset=DatasetSelection(project_root=str(tmp_path / "named")))
+    store._flush_sync()
+    assert not tcip_store.exists(gui_snapshot_key(str(tmp_path / "named")))
+
+
 def test_load_from_disk_roundtrip(tmp_path: Path) -> None:
     store = StateStore()
+    store.open_project(tmp_path)
     store._state = GuiState(
         active_tab="results",
         dataset=DatasetSelection(project_root=str(tmp_path), dataset_root=str(tmp_path / "ds")),
@@ -47,7 +54,7 @@ def test_load_from_disk_roundtrip(tmp_path: Path) -> None:
 
     # A fresh store simulates a backend restart.
     restarted = StateStore()
-    assert restarted.load_from_disk(tmp_path) is True
+    assert restarted.open_project(tmp_path) is True
     assert restarted.state.active_tab == "results"
     assert restarted.state.dataset.dataset_root == str(tmp_path / "ds")
 
