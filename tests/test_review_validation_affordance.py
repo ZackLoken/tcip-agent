@@ -306,7 +306,7 @@ def client():
     from tcip_web.app import app
 
     review_mod._engines.clear()  # a stale cached engine would read another test's shards
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _read_sidecar(pred_dir: str) -> dict:

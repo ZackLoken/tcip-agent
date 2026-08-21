@@ -16,10 +16,10 @@ This module owns the process/PTY concerns; the HTTP/WS surface is
 tests drive a scripted fake program at the process boundary, and CI (no ``claude``
 installed) cleanly reports unavailable.
 
-Trust boundary: same as every GUI surface (loopback bind + TrustedHost + WS Origin
-check). The terminal gives keyboard access to Claude Code, equivalent power to the
-terminal the operator already has on this machine; it must never be exposed beyond the
-loopback trust boundary without adding auth.
+Trust boundary: same as every GUI surface (``tcip_web.trust_boundary``: local arrivals
+served, network arrivals refused until the operator opts in, WS Origin check). The terminal
+gives keyboard access to Claude Code, equivalent power to the terminal the operator already
+has on this machine; exposing it is what the opt-in's disclosure names.
 """
 
 from __future__ import annotations

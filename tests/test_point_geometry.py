@@ -385,7 +385,7 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(tmp_path: Path) -
 def client() -> TestClient:
     from tcip_web.app import app
 
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) -> None:

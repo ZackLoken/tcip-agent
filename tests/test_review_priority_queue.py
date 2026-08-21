@@ -24,7 +24,7 @@ def client():
     from tcip_web.app import app
 
     review_mod._pq_jobs.clear()  # a stale job from another test must not leak into this one
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _wait_for_terminal(client, job_id: str, timeout: float = 5.0) -> dict:

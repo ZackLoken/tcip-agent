@@ -16,7 +16,8 @@ from tcip_store.errors import BadKey
 if TYPE_CHECKING:
     from tcip_store import Key
 
-from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, origin_allowed
+from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
+from tcip_web.trust_boundary import origin_allowed
 from tcip_web.routes._metrics_common import metrics_response
 
 logger = logging.getLogger(__name__)
@@ -317,7 +318,7 @@ async def _stream_metrics(
 @router.websocket("/runs/{run_id}/stream")
 async def training_stream_ws(websocket: WebSocket, run_id: str, project_root: str) -> None:
     """Tail ``run_id``'s metrics log and push new rows to the browser."""
-    if not origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     try:

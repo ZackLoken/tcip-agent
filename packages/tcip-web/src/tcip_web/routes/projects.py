@@ -7,7 +7,7 @@ active-project marker are resolved through :mod:`tcip_mcp.workspace`: the single
 of truth shared with the ``ingest_images`` tool and the ``set_active_project`` tool, so a
 project the agent creates is exactly the project this route lists.
 
-Trust boundary: same as every other REST route (loopback bind + TrustedHost). Listing is
+Trust boundary: same as every other REST route (``tcip_web.trust_boundary``). Listing is
 inherently confined to the workspace directory, and the active-project name is validated
 as a single path segment, so neither can be coaxed into reaching outside the workspace.
 """

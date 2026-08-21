@@ -51,7 +51,7 @@ def _subjects(catkin_attributes: dict, bush_attributes: dict | None = None) -> d
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture

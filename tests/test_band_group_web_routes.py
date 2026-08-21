@@ -19,7 +19,7 @@ from tcip_web.app import app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:

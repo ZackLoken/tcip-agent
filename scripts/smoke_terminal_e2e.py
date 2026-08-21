@@ -32,7 +32,7 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[>=
 
 
 def main() -> int:
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     status = client.get("/api/terminal/status").json()
     print(f"[1] status: {status}")

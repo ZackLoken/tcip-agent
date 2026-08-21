@@ -26,7 +26,7 @@ from tcip_web.app import app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _single(client: TestClient, root: Path, image_name: str, status: str, subject: str,

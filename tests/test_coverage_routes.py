@@ -16,7 +16,7 @@ from tcip_web.routes import coverage as coverage_route
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture(autouse=True)
@@ -298,8 +298,8 @@ class TestCoverageRecord:
         img_dir.mkdir(parents=True)
         path = img_dir / "frame.tif"
         Image.fromarray(np.zeros((80, 100, 3), dtype=np.uint8)).save(path)
-        grid = _grid(TestClient(app), str(path), tile_size=64)
-        resp = TestClient(app).post("/api/coverage",
+        grid = _grid(TestClient(app, base_url="http://127.0.0.1"), str(path), tile_size=64)
+        resp = TestClient(app, base_url="http://127.0.0.1").post("/api/coverage",
                                     json=_post_body(str(path), ["A1"], grid, date=None))
         assert resp.status_code == 200, resp.text
         store = ts.read(view_coverage_key(tmp_path / "flat"))

@@ -26,7 +26,7 @@ if pty_host.os.name == "nt":
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture(autouse=True)
@@ -77,13 +77,13 @@ def test_status_unavailable_without_cli(client, monkeypatch):
 
 def test_create_session_spawns_and_streams_banner(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
 
 
 def test_input_round_trip(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "hello agent\r"})
         _read_until(ws, "echo:hello agent")
@@ -98,19 +98,19 @@ def test_attach_semantics_second_create_returns_live_session(client):
 
 def test_scrollback_replays_on_reconnect(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "before reconnect\r"})
         _read_until(ws, "echo:before reconnect")
     # New socket: the banner and the echoed line replay from scrollback.
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws2:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws2:
         acc = _read_until(ws2, "echo:before reconnect")
         assert "FAKE_TERMINAL_READY" in acc
 
 
 def test_resize_does_not_crash_stream(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "resize", "rows": 40, "cols": 120})
         ws.send_json({"type": "resize", "rows": 99999, "cols": -3})  # clamped, not fatal
@@ -120,7 +120,7 @@ def test_resize_does_not_crash_stream(client):
 
 def test_process_exit_is_visible_in_stream(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "exit\r"})
         acc = _read_until(ws, "Claude Code exited")
@@ -129,14 +129,14 @@ def test_process_exit_is_visible_in_stream(client):
 
 def test_restart_gives_fresh_process(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "exit\r"})
         _read_until(ws, "Claude Code exited")
 
     resp = client.post(f"/api/terminal/sessions/{sid}/restart", json={})
     assert resp.status_code == 200
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws2:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws2:
         acc = _read_until(ws2, "FAKE_TERMINAL_READY")
         # Scrollback was cleared: the old session's exit note is gone.
         assert "exited" not in acc
@@ -144,14 +144,14 @@ def test_restart_gives_fresh_process(client):
 
 def test_ws_rejects_unknown_session(client):
     with pytest.raises(Exception):
-        with client.websocket_connect("/api/terminal/ws/nonexistent"):
+        with client.websocket_connect("ws://127.0.0.1/api/terminal/ws/nonexistent"):
             pass
 
 
 def test_ws_rejects_cross_site_origin(client):
     with pytest.raises(Exception):
         with client.websocket_connect(
-            "/api/terminal/ws/whatever", headers={"origin": "https://evil.example"}
+            "ws://127.0.0.1/api/terminal/ws/whatever", headers={"origin": "https://evil.example"}
         ):
             pass
 
@@ -199,7 +199,7 @@ def test_write_and_resize_after_process_death_do_not_raise(client):
     # resize racing process exit must degrade, never crash the WS handler.
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
     session = terminal_routes._SESSIONS[sid]
-    with client.websocket_connect(f"/api/terminal/ws/{sid}") as ws:
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
         _read_until(ws, "FAKE_TERMINAL_READY")
         ws.send_json({"type": "input", "data": "exit\r"})
         _read_until(ws, "Claude Code exited")
@@ -214,7 +214,7 @@ def test_concurrent_creates_spawn_single_session():
     from concurrent.futures import ThreadPoolExecutor
 
     def create(_):
-        return TestClient(app).post("/api/terminal/sessions", json={}).json()["session_id"]
+        return TestClient(app, base_url="http://127.0.0.1").post("/api/terminal/sessions", json={}).json()["session_id"]
 
     try:
         with ThreadPoolExecutor(max_workers=8) as ex:

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import itertools
 import logging
-import os
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -25,12 +24,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import VALID_PANELS
-from tcip_web.paths import is_loopback_host, origin_allowed
+from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in, origin_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +40,7 @@ async def _lifespan(_app: FastAPI):
     Their worker threads don't survive, so rehydrated non-terminal entries surface as
     'interrupted' (a record, not a resumable job; see ``jobstore``).
     """
+    log_exposure_opt_in()
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
@@ -86,17 +85,9 @@ app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 # via the Vite dev proxy. If we ever serve the frontend elsewhere, add
 # fastapi.middleware.cors.CORSMiddleware here.
 
-# ── Trust boundary ──
-# Keep local single-user use frictionless (loopback bind → no auth) while closing the two
-# browser-facing holes: cross-site WebSocket reads of GUI state (Origin check below) and
-# DNS-rebinding (Host allow-list). A deliberately network-exposed bind is gated further in
-# __main__ (refuses to bind non-loopback without an explicit opt-in).
-_BIND_HOST = os.environ.get("TCIP_WEB_HOST", "127.0.0.1")
-_EXPOSED = not is_loopback_host(_BIND_HOST)
-
-# ``testserver`` is Starlette's TestClient default Host; a real deployment never sees it.
-_TRUSTED_HOSTS = ["*"] if _EXPOSED else ["localhost", "127.0.0.1", "testserver"]
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=_TRUSTED_HOSTS)
+# Exposure is decided per connection from its arrival address and the Host must name this
+# backend (tcip_web.trust_boundary); the WebSocket routes apply the Origin policy before accept.
+app.add_middleware(TrustBoundaryMiddleware)
 
 # Compress JSON/text responses above ~1KB. The /api/review/matches payload scales with
 # polygon count (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
@@ -150,7 +141,7 @@ async def set_active_tab(payload: ActiveTabPayload) -> dict:
 @app.websocket("/ws/state")
 async def state_ws(websocket: WebSocket) -> None:
     """Receive live GuiState deltas. Replays the current snapshot on connect."""
-    if not origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     await websocket.accept()
@@ -311,7 +302,7 @@ def get_recent_panel_events(panel: str, limit: int = 16):
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: str):
     """Stream panel events to a browser client."""
-    if not origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     if panel not in VALID_PANELS:
