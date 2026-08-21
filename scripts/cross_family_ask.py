@@ -29,6 +29,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import tomllib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -97,7 +98,34 @@ through the `model_reasoning_effort` config key; Antigravity baked into the mode
 with only high and low available at the Pro tier. Antigravity can also serve Claude and
 GPT-OSS models, which must never be selected for a cross-family run: doing so compares
 harnesses while appearing to compare families.
+
+A codex model of None never reaches the harness: `resolve_codex_model` names it from the
+user's config so the run records the model it used (with `--ignore-user-config` the harness
+would otherwise fall back to an unrecorded built-in default).
 """
+
+CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
+
+
+def resolve_codex_model(requested: str | None) -> tuple[str, str]:
+    """Return the codex model name to pass explicitly and where it came from.
+
+    An explicit request wins. Otherwise the `model` key of ~/.codex/config.toml is read,
+    because the no-tools condition runs codex with `--ignore-user-config` and the harness's
+    own fallback is not reported anywhere. A run with no resolvable name is refused rather
+    than recorded as model None.
+    """
+    if requested:
+        return requested, "flag"
+    if CODEX_CONFIG.exists():
+        with open(CODEX_CONFIG, "rb") as fh:
+            model = tomllib.load(fh).get("model")
+        if model:
+            return str(model), str(CODEX_CONFIG)
+    raise SystemExit(
+        "codex model is unnamed: pass --model or set `model` in ~/.codex/config.toml; a run "
+        "on the harness's built-in default would not record which model answered")
+
 
 GUIDANCE_PREFIX = (
     "Before you begin, read CLAUDE.md at the repository root and the SKILL.md files "
@@ -123,7 +151,8 @@ def failed_run_meta(family: str, exc: BaseException) -> dict:
     return {
         "question_id": None, "condition": None, "condition_description": None,
         "family": family, "executable": None, "harness_version": "unknown",
-        "model_requested": None, "effort_requested": None,
+        "model_requested": None, "model_resolved": None, "model_source": None,
+        "effort_requested": None,
         "started": now(), "duration_s": 0.0, "exit_code": -3, "timed_out": False,
         "response_chars": 0, "response_source": "runner_error",
         "runner_error": f"{type(exc).__name__}: {exc}",
@@ -347,6 +376,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     prompt_file.write_text(body, encoding="utf-8")
 
     resolved_model = model or PARITY[family]["model"]
+    model_source = "flag" if model else "parity table"
+    if family == "codex":
+        resolved_model, model_source = resolve_codex_model(resolved_model)
     resolved_effort = effort or PARITY[family]["effort"]
     argv, last = BUILDERS[family](prompt_file, run_dir, cwd, condition,
                                   resolved_model, resolved_effort, timeout)
@@ -394,7 +426,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "family": family,
         "executable": str(EXECUTABLES[family]),
         "harness_version": harness_version(EXECUTABLES[family]),
-        "model_requested": resolved_model,
+        "model_requested": model,
+        "model_resolved": resolved_model,
+        "model_source": model_source,
         "effort_requested": resolved_effort,
         "cwd": str(cwd),
         "mcp": condition["mcp"],
