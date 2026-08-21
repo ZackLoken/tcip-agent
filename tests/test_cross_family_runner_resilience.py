@@ -53,7 +53,7 @@ def test_a_harness_returning_no_usable_stdout_still_records_its_run(runner, tmp_
     (tmp_path / "q.txt").write_text("question", encoding="utf-8")
 
     meta = runner.run_one("codex", "qid", "as-shipped", "question",
-                          tmp_path, tmp_path / "out", 5, None, None)
+                          tmp_path, tmp_path / "out", 5, "stub-model", None)
 
     run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
     assert (run_dir / "stdout.txt").is_file()
@@ -87,6 +87,7 @@ def test_one_familys_failure_leaves_the_others_results_intact(runner, tmp_path, 
         "cross_family_ask.py", "--question-id", "qid",
         "--prompt-file", str(tmp_path / "q.txt"),
         "--families", "codex,antigravity",
+        "--model", "stub-model",
         "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
     ])
 
@@ -128,6 +129,7 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
         "cross_family_ask.py", "--question-id", "qid",
         "--prompt-file", str(tmp_path / "q.txt"),
         "--families", "codex",
+        "--model", "stub-model",
         "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
     ])
 
@@ -177,6 +179,7 @@ def test_an_oversized_raw_stream_through_main_fails_the_run(runner, tmp_path, mo
         "cross_family_ask.py", "--question-id", "qid",
         "--prompt-file", str(tmp_path / "q.txt"),
         "--families", "codex",
+        "--model", "stub-model",
         "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
     ])
 
@@ -218,6 +221,7 @@ def test_an_empty_response_through_main_fails_the_run(runner, tmp_path, monkeypa
         "cross_family_ask.py", "--question-id", "qid",
         "--prompt-file", str(tmp_path / "q.txt"),
         "--families", "antigravity",
+        "--model", "stub-model",
         "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
     ])
 
@@ -238,6 +242,7 @@ def test_a_small_plain_text_stdout_still_returns_as_a_raw_stdout_answer_through_
         "cross_family_ask.py", "--question-id", "qid",
         "--prompt-file", str(tmp_path / "q.txt"),
         "--families", "codex",
+        "--model", "stub-model",
         "--cwd", str(tmp_path), "--out", str(tmp_path / "out"), "--timeout", "5",
     ])
 
@@ -283,10 +288,30 @@ def test_a_character_outside_the_console_codepage_survives_the_trip_to_a_stdin_c
 
     prompt = "a box-drawing rule: ───"
     meta = runner.run_one("codex", "qid", "as-shipped", prompt,
-                          tmp_path, tmp_path / "out", 30, None, None)
+                          tmp_path, tmp_path / "out", 30, "stub-model", None)
 
     run_dir = tmp_path / "out" / "qid" / "as-shipped" / "codex"
     body = (run_dir / "prompt.txt").read_text(encoding="utf-8")
     assert "─" in body
     assert (run_dir / "stdout.txt").read_text(encoding="utf-8") == body
     assert meta["exit_code"] == 0
+
+
+# ── the codex model is named on every run ───────────────────────────────────
+
+
+def test_an_unnamed_codex_model_with_no_config_is_refused_before_launch(runner, tmp_path, monkeypatch):
+    """A run on the harness's built-in default would record no model, so it is refused by name."""
+    monkeypatch.setattr(runner, "CODEX_CONFIG", tmp_path / "absent" / "config.toml")
+
+    with pytest.raises(SystemExit, match="codex model is unnamed"):
+        runner.resolve_codex_model(None)
+
+
+def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(runner, tmp_path, monkeypatch):
+    config = tmp_path / "config.toml"
+    config.write_text('model = "gpt-from-config"' + chr(10), encoding="utf-8")
+    monkeypatch.setattr(runner, "CODEX_CONFIG", config)
+
+    assert runner.resolve_codex_model(None) == ("gpt-from-config", str(config))
+    assert runner.resolve_codex_model("gpt-from-flag") == ("gpt-from-flag", "flag")
