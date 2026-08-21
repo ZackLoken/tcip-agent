@@ -180,13 +180,17 @@ def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
 async def record_connecting_client(
     ctx: ServerRequestContext[Any, Any], call_next: CallNext
 ) -> HandlerResult:
-    """Server middleware: take the client's declaration when the handshake completes.
+    """Server middleware: take the client's declaration on the first message that carries it.
 
-    ``notifications/initialized`` is the first message on which the session carries
-    ``client_params``; every tool call follows it, so the identity is in place before any record
-    is written. A client that initialized without declaring itself leaves no identity.
+    The session carries ``client_params`` from the end of ``initialize`` on. The first message
+    after that is ``notifications/initialized`` for a client that follows the protocol's ordering,
+    but the SDK serves a request that arrives before the notification (the spec says SHOULD NOT,
+    not MUST NOT), and Antigravity was observed to make its tool calls without the identity ever
+    being taken by a notification-only capture. So the capture is keyed on the declaration being
+    present and not yet taken, whatever the method, and is in place before any record is written.
+    A client that initialized without declaring itself leaves no identity.
     """
-    if ctx.method == "notifications/initialized" and ctx.session.client_params is not None:
+    if _current is None and ctx.session.client_params is not None:
         info = ctx.session.client_params.client_info
         begin(info.name, info.version)
     return await call_next(ctx)
