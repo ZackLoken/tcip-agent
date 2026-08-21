@@ -39,6 +39,15 @@ session (this one, with no `--settings` flag) stays unrestricted by it, by desig
 edit that fence file without calling it out explicitly; it's a security boundary, not incidental
 config.
 
+Each launch records what it ran: the session answers `launched` (the executable, `argv[0]`, and
+the version it declares to `--version`, probed once per process on the resolved CLI only and never
+on a `TCIP_TERMINAL_CMD` override) on the create, list and restart routes, with one
+`agent_terminal_started` platform audit line per launch. Which agent harness that program is comes
+from the harness's own MCP handshake, not from here. The child is spawned with
+`TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads it and stamps
+it on its own records as a declared correlation (`tcip_mcp.agent_identity`), beside the harness name
+and version the handshake declared. Declarations, all of them; nothing refuses on them.
+
 That file's `Edit(...)` deny rules are the one declaration of the platform-protected set: both shell
 guards classify each write target through `agent_fence_rules.classify()`, which derives the protected
 directories, single files, and project-data segments from those deny rules
