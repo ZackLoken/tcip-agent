@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -253,11 +253,16 @@ def index():
 
 
 @app.post("/api/events/{panel}")
-async def post_panel_event(panel: str, event: PanelEvent):
+async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     """Accept an event pushed from an MCP tool and broadcast to subscribers.
 
-    Payload shape: ``{panel, event_type, data}``.
+    Payload shape: ``{panel, event_type, data}``. The broadcast and replay payload, not this
+    route's response, carries every agent identity field the sender declared in its headers
+    (``agent_identity.HEADERS``, each ``None`` when not sent), so a browser and the replay can say
+    which harness steered the GUI. Declared, not verified: any sender can set the headers.
     """
+    from tcip_mcp import agent_identity
+
     if panel not in VALID_PANELS:
         return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
     payload = {
@@ -265,6 +270,7 @@ async def post_panel_event(panel: str, event: PanelEvent):
         "event_type": event.event_type,
         "data": event.data,
         "event_id": f"{datetime.now(timezone.utc).isoformat()}#{next(_event_counter)}",
+        **agent_identity.fields_from_headers(request.headers),
     }
     _recent_events[panel].append(payload)
     # Agent focus events also update the advisory GuiState slice, so gui.json (what the
