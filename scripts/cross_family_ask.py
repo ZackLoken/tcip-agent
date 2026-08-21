@@ -92,12 +92,18 @@ PARITY = {
 """Frontier tier at the highest available reasoning effort, per family.
 
 Parity here is approximate and the recorded metadata, not this table, is what a
-comparison should be read against. Each harness takes effort differently: Claude Code
-through `--effort`, which also accepts xhigh and max above the level set here; Codex
-through the `model_reasoning_effort` config key; Antigravity baked into the model id,
-with only high and low available at the Pro tier. Antigravity can also serve Claude and
-GPT-OSS models, which must never be selected for a cross-family run: doing so compares
-harnesses while appearing to compare families.
+comparison should be read against. Each harness takes effort differently, verified by
+execution against each one: Claude Code through `--effort` (low, medium, high, xhigh, max;
+an unknown value is ignored with a warning and the run proceeds on the default, so the
+runner refuses one before launching); Codex through the `model_reasoning_effort` config
+key, which the API rejects by name when unknown; Antigravity baked into the model id
+(`gemini-3.1-pro-high`, `gemini-3.1-pro-low`), and its separate `--effort` flag conflicts
+with a suffixed id and fails the run, so it is never passed with one. Antigravity can also
+serve Claude and GPT-OSS models, which must never be selected for a cross-family run:
+doing so compares harnesses while appearing to compare families. Claude Code names the
+model it used in its JSON result (`modelUsage`); Codex and Antigravity echo neither the
+model nor the effort, so for them the recorded values are what the argv passed, and a
+bogus model or effort fails the run by name rather than running on a default.
 
 A codex model of None never reaches the harness: `resolve_codex_model` names it from the
 user's config so the run records the model it used (with `--ignore-user-config` the harness
@@ -105,6 +111,25 @@ would otherwise fall back to an unrecorded built-in default).
 """
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def check_effort(family: str, model: str | None, effort: str | None) -> None:
+    """Refuse an effort the harness would silently ignore or reject after launch.
+
+    Claude Code ignores an unknown `--effort` with a warning and runs on its default, which
+    would record an effort the run did not use. Antigravity's effort lives in the model id and
+    an explicit `--effort` beside a suffixed id fails the run.
+    """
+    if family == "claude" and effort and effort not in CLAUDE_EFFORTS:
+        raise SystemExit(
+            f"claude effort {effort!r} is not one of {', '.join(CLAUDE_EFFORTS)}; the harness "
+            "would ignore it and run on its default")
+    if family == "antigravity" and effort and model and model.rsplit("-", 1)[-1] in (
+            "low", "medium", "high"):
+        raise SystemExit(
+            f"antigravity model {model!r} already carries its effort; drop --effort {effort!r} "
+            "or choose an id without one")
 
 
 def resolve_codex_model(requested: str | None) -> tuple[str, str]:
@@ -125,6 +150,30 @@ def resolve_codex_model(requested: str | None) -> tuple[str, str]:
     raise SystemExit(
         "codex model is unnamed: pass --model or set `model` in ~/.codex/config.toml; a run "
         "on the harness's built-in default would not record which model answered")
+
+
+def claude_model_used(stdout: str) -> str | None:
+    """The model Claude Code reports it ran, from the JSON result's ``modelUsage`` keys.
+
+    The harness is the one party that knows: under ``--permission-mode plan`` the ``haiku``
+    alias was observed to run on Sonnet while the full Haiku id and the ``opus``, ``sonnet``
+    and ``fable`` aliases ran as named, so the request is never trusted over this field.
+    """
+    stripped = stdout.strip()
+    start = stripped.find("{")
+    if start < 0:
+        return None
+    try:
+        used = json.loads(stripped[start:]).get("modelUsage") or {}
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return ",".join(sorted(used)) or None
+
+
+def model_matches(requested: str, used: str) -> bool:
+    """Whether the model the harness reports corresponds to the one requested: a full id must
+    appear as itself, an alias must appear inside every reported id."""
+    return all(requested == name or requested in name for name in used.split(","))
 
 
 GUIDANCE_PREFIX = (
@@ -152,7 +201,7 @@ def failed_run_meta(family: str, exc: BaseException) -> dict:
         "question_id": None, "condition": None, "condition_description": None,
         "family": family, "executable": None, "harness_version": "unknown",
         "model_requested": None, "model_resolved": None, "model_source": None,
-        "effort_requested": None,
+        "model_used": None, "model_mismatch": False, "effort_requested": None,
         "started": now(), "duration_s": 0.0, "exit_code": -3, "timed_out": False,
         "response_chars": 0, "response_source": "runner_error",
         "runner_error": f"{type(exc).__name__}: {exc}",
@@ -380,6 +429,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     if family == "codex":
         resolved_model, model_source = resolve_codex_model(resolved_model)
     resolved_effort = effort or PARITY[family]["effort"]
+    check_effort(family, resolved_model, resolved_effort)
     argv, last = BUILDERS[family](prompt_file, run_dir, cwd, condition,
                                   resolved_model, resolved_effort, timeout)
 
@@ -419,6 +469,15 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     response, response_source = extract_response(family, stdout, last)
     (run_dir / "response.md").write_text(response, encoding="utf-8")
 
+    # Claude Code names the model it ran; the others echo nothing, so for them the request is
+    # the record and a bogus value fails the run by name (see the PARITY note).
+    model_used = claude_model_used(stdout) if family == "claude" else None
+    model_mismatch = bool(
+        model_used and resolved_model and not model_matches(resolved_model, model_used))
+    if model_mismatch:
+        print(f"model mismatch: {family} ran {model_used} for a request of {resolved_model}; "
+              "pass the model's full id", file=sys.stderr)
+
     meta = {
         "question_id": question_id,
         "condition": condition_name,
@@ -429,6 +488,8 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "model_requested": model,
         "model_resolved": resolved_model,
         "model_source": model_source,
+        "model_used": model_used,
+        "model_mismatch": model_mismatch,
         "effort_requested": resolved_effort,
         "cwd": str(cwd),
         "mcp": condition["mcp"],
@@ -513,10 +574,15 @@ def main() -> int:
                     results.append(failed_run_meta(family, exc))
 
     results.sort(key=lambda r: r["family"])
-    print(f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  {'answer from':<20}version")
+    print(f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  {'answer from':<20}"
+          f"{'model (effort)':<34}version")
     for meta in results:
+        used = meta.get("model_used")
+        model = (f"{used} for {meta['model_resolved']}" if meta.get("model_mismatch")
+                 else used or meta["model_resolved"] or "?")
         print(f"{meta['family']:<14}{meta['exit_code']:>6}{meta['duration_s']:>9}"
-              f"{meta['response_chars']:>9}  {meta['response_source']:<20}{meta['harness_version']}")
+              f"{meta['response_chars']:>9}  {meta['response_source']:<20}"
+              f"{f'{model} ({meta['effort_requested']})':<34}{meta['harness_version']}")
     recovered = [m['family'] for m in results if m['response_source'] == "denied_write_draft"]
     if recovered:
         print(f"\nnote: recovered the answer from a refused write for: {', '.join(recovered)}. "
@@ -528,7 +594,8 @@ def main() -> int:
     print(f"\nwrote {summary}")
     failed_extraction = {"extraction_failed", "empty_response"}
     clean = all(
-        m["exit_code"] == 0 and m["response_source"] not in failed_extraction for m in results
+        m["exit_code"] == 0 and m["response_source"] not in failed_extraction
+        and not m.get("model_mismatch") for m in results
     )
     return 0 if clean else 1
 
