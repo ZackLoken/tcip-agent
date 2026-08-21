@@ -198,3 +198,23 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
     (row,) = rows("codex_session")
     assert row["agent_client_name"] == "codex-mcp-client"
     assert "harness_session" not in row
+
+
+def test_the_declaration_is_taken_on_the_first_message_that_carries_it_whatever_its_method() -> None:
+    """A client that sends a request before notifications/initialized (the SDK serves one) still
+    gets its declaration recorded on that first request."""
+    import types
+
+    info = types.SimpleNamespace(name="antigravity-like", version="1.1.17")
+    ctx = types.SimpleNamespace(
+        method="tools/call",
+        session=types.SimpleNamespace(client_params=types.SimpleNamespace(client_info=info)),
+    )
+
+    async def call_next(c):  # noqa: ANN001
+        return {"seen": agent_identity.current().client_name}
+
+    result = anyio.run(agent_identity.record_connecting_client, ctx, call_next)
+
+    assert result == {"seen": "antigravity-like"}
+    assert agent_identity.current().client_version == "1.1.17"
