@@ -47,7 +47,7 @@ def main() -> int:
     if TARGET.exists():
         TARGET.unlink()
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     sid = client.post("/api/terminal/sessions", json={"rows": 35, "cols": 120}).json()["session_id"]
     session = terminal_routes._SESSIONS[sid]
     ok = False

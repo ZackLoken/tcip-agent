@@ -546,9 +546,9 @@ def cancel_job(job_id: str) -> dict:
 
 @router.websocket("/jobs/{job_id}/stream")
 async def stream_job(websocket: WebSocket, job_id: str) -> None:
-    from tcip_web.paths import origin_allowed
+    from tcip_web.trust_boundary import origin_allowed
 
-    if not origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     await websocket.accept()

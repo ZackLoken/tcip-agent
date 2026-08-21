@@ -33,7 +33,7 @@ EDITED_BOX = (60.0, 8.0, 90.0, 66.0)      # 30 wide, 58 tall
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _image(tmp_path: Path) -> Path:

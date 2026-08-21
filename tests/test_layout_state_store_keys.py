@@ -53,7 +53,7 @@ def test_the_doctor_reads_a_bucket_key_through_the_published_inverse(
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture

@@ -27,7 +27,7 @@ DOCTOR = str(Path(__file__).parent.parent / "scripts" / "doctor.py")
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _seed_registry(project_root: Path) -> Path:

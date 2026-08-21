@@ -21,7 +21,7 @@ from tcip_web.app import app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _box(subject: str, x1: float, y1: float, x2: float, y2: float) -> Annotation:

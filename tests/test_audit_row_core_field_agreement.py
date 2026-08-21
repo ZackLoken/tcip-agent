@@ -20,7 +20,7 @@ from tcip_web.app import app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_gui_route_rows_and_platform_rows_agree_on_their_core_fields(

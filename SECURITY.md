@@ -78,10 +78,15 @@ TCIP retention or deletion control. Deleting a TCIP project deletes none of its 
 ## The trust boundary today, and where it stops holding
 
 The GUI binds to loopback (`127.0.0.1`) by default and is frictionless with no authentication. A
-cross-site page cannot open a WebSocket and read GUI state (an Origin check blocks it), and
-DNS-rebinding is blocked by a trusted-host list, for the default loopback bind. Binding a non-loopback
-host is refused unless `TCIP_WEB_ALLOW_INSECURE=1` is set, because an exposed bind hands an
-unauthenticated network client filesystem browsing, file writes, and an interactive agent terminal.
+connection is judged by the address it arrived on, not by the configured bind: one from this machine
+is served, one through a network address is refused until the operator sets
+`TCIP_WEB_ALLOW_INSECURE=1`, because an exposed GUI hands an unauthenticated network client
+filesystem reads and writes and an interactive agent terminal, which is keyboard access to Claude
+Code. A cross-site page cannot open a WebSocket and read GUI state (the Origin must be the request's
+own origin), and DNS rebinding is blocked because the Host header must name this backend as reached
+(its arrival address, its own hostname, or a name the operator advertised under the opt-in; there is
+no wildcard). A reverse proxy in front of the backend is an exposed deployment: the backend cannot
+see the proxied client, so it is served only under the opt-in with the proxy's name advertised.
 Token authentication for an intentionally exposed GUI is a planned follow-on.
 
 The whole no-authentication argument rests on the loopback bind and a single trusted machine. None of

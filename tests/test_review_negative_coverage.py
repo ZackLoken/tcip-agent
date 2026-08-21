@@ -27,7 +27,7 @@ CHECKPOINT_SHA = "3f9c1ab27e"
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _bucket(tmp_path: Path) -> Path:

@@ -31,7 +31,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from tcip_web import terminal as pty_host
-from tcip_web.paths import origin_allowed
+from tcip_web.trust_boundary import origin_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +301,7 @@ async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
 @router.websocket("/ws/{session_id}")
 async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
     """Raw terminal bridge. Origin-checked like every other WS route."""
-    if not origin_allowed(websocket.headers.get("origin")):
+    if not origin_allowed(websocket.headers.get("origin"), websocket.scope):
         await websocket.close(code=1008, reason="origin not allowed")
         return
     session = _SESSIONS.get(session_id)

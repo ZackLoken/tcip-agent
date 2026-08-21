@@ -1005,7 +1005,7 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
 
     from tcip_web.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     attested = _attest_regions_complete_through_the_coverage_route(
         client, str(exp["raster_path"]),
         [manifest["calibration_region"], manifest["test_region"]])

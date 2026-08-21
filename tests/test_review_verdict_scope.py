@@ -37,7 +37,7 @@ BOX = (12.0, 20.0, 52.0, 44.0)
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _stage(dataset_root: Path, model: str, date: str, stem: str = STEM) -> dict:

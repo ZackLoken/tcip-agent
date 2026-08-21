@@ -16,7 +16,6 @@ from tcip_store import replace
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import backend_port_key
-from tcip_web.paths import is_loopback_host
 
 logger = logging.getLogger(__name__)
 
@@ -57,24 +56,6 @@ def _write_port_file(port: int) -> None:
         )
 
 
-def _refuse_insecure_bind(host: str) -> None:
-    """Refuse to expose the GUI network-wide with no auth unless explicitly allowed.
-
-    A non-loopback bind makes filesystem browsing + file writes reachable by anyone on the
-    network. Require ``TCIP_WEB_ALLOW_INSECURE=1`` as an explicit, trusted-network
-    acknowledgement (token auth for exposed deployments is a planned follow-on).
-    """
-    if is_loopback_host(host):
-        return
-    if os.environ.get("TCIP_WEB_ALLOW_INSECURE") == "1":
-        return
-    raise SystemExit(
-        f"Refusing to bind {host!r} (non-loopback): this exposes the GUI, including "
-        "filesystem browsing and file writes, to the whole network with no login.\n"
-        "Set TCIP_WEB_ALLOW_INSECURE=1 to override (only on a trusted network)."
-    )
-
-
 def main() -> None:
     # Pin the platform state root before importing the app (which resolves EXPERIMENTS_DIR)
     # and before writing the port file, so this backend agrees with the MCP server on one
@@ -85,8 +66,9 @@ def main() -> None:
     # The port handoff is written here, before uvicorn imports the app that binds a backend
     # for the served process, so this entry point binds its own.
     bind_default()
+    # A non-loopback host binds, and the app's trust boundary then serves this machine's own
+    # connections and refuses network ones until the operator opts in (tcip_web.trust_boundary).
     host = os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
-    _refuse_insecure_bind(host)
     requested = int(os.environ.get("TCIP_WEB_PORT", str(DEFAULT_PORT)))
     port = _pick_port(host, requested)
     _write_port_file(port)

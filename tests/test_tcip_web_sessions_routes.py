@@ -16,7 +16,7 @@ from tcip_web.routes.sessions import annotation_stats_key
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_start_inserts_open_session(client: TestClient, tmp_path: Path) -> None:

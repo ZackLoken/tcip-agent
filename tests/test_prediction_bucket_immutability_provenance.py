@@ -31,7 +31,7 @@ IMG_W, IMG_H = 640, 480
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _write_bucket(dataset_root: Path, model: str, stems: list[str]) -> Path:

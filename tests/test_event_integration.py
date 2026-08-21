@@ -23,7 +23,7 @@ FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ── HTTP event bridge ────────────────────────────────────────────────────
