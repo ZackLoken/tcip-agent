@@ -29,7 +29,7 @@ pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _export_row(client: TestClient, body: dict) -> dict:

@@ -2,9 +2,8 @@
 
 Three separate facts travel back from a build: how many images a date holds, how many of them
 resolved to a plant, and how far the GPS matches sat from the plant they resolved to. None of them
-stands in for another, and a date's numbers are its own. The mapping a build persists into platform
-state is audited into the project that owns that state directory, resolved from the ``.tcip`` marker
-in the path rather than from a fixed depth beneath it.
+stands in for another, and a date's numbers are its own. The mapping a build persists is audited
+into the project the GUI has open, the same project the persist path itself must sit under.
 
 The mapping path a phenology door is handed is the door's own input to validate: a path naming no
 mapping is refused by name, never carried forward into a phenology computed over nothing.
@@ -19,6 +18,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_web.app import app
+from tcip_web.state import store
 
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
@@ -33,7 +33,7 @@ PLANTS = (
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _dms(deg: float) -> tuple[float, float, float]:
@@ -78,6 +78,8 @@ def _capture_fixture(root: Path) -> dict:
     _write_image(images / "2026-02-11" / "c.jpg", "2026:02:11 09:02:00", 43.30000, -90.00030)
     _write_image(images / "2026-02-11" / "e.jpg", "2026:02:11 09:03:00")
     _write_image(images / "2026-02-25" / "d.jpg", "2026:02:25 09:00:00", 43.20000, -90.00030)
+    # The mapping doors build for the project the GUI has open, the one these captures belong to.
+    store.open_project(root.resolve())
     return {"images_root": str(images), "plant_csv_paths": [str(csv_path)]}
 
 
@@ -134,22 +136,22 @@ def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_proj
     assert not (tmp_path / ".tcip" / ".tcip").exists()
 
 
-def test_a_mapping_persisted_outside_platform_state_writes_no_audit_row(
+def test_a_mapping_persisted_outside_the_open_project_is_refused(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """The audit seam belongs to platform state. A mapping the breeder parks somewhere else is
-    still built and persisted, and no project is credited with an audit row for it."""
+    """A mapping is project state, written under the project itself. A persist path outside the
+    open project's own tree is refused before anything is written, and no audit row lands."""
     import tcip_store
 
     from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
-    persist_path = tmp_path / "exports" / "plant_mapping.json"
+    persist_path = tmp_path.parent / "exports" / "plant_mapping.json"
     resp = client.post(
         "/api/results/plant_mapping/build", json={**payload, "persist_path": str(persist_path)})
-    assert resp.status_code == 200
-    assert plant_mapping.load_mapping(persist_path)
+    assert resp.status_code == 403
+    assert "is outside the open project" in resp.json()["detail"]
+    assert not persist_path.exists()
     page = tcip_store.read_log(audit_log_key(tmp_path))
     assert not any(r["tool"] == "gui_build_plant_mapping" for r in page.records)
 

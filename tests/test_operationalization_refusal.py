@@ -375,7 +375,7 @@ GOLDEN_INPUTS = {"fractions": (0.0, 1.0), "detections": 2}
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _delivery(tmp_path: Path, **kwargs) -> dict:

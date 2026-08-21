@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_HELD_OUT
 from tcip_web.app import app
+from tcip_web.state import store
 
 from tests.test_tcip_web_results_routes import _phenology_fixture
 
@@ -26,7 +27,7 @@ DOORS = ("per_plant_curves", "onset_dates")
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _unvalidate_count_operating_point(body: dict) -> None:
@@ -107,7 +108,9 @@ def test_the_two_refusals_do_not_read_alike(client: TestClient, tmp_path: Path) 
     classifier_broken = _phenology_fixture(tmp_path / "classifier", validated=True, detections=4)
     _unvalidate_classifier(classifier_broken)
 
+    store.open_project(Path(count_broken["project_root"]).resolve())
     count_detail = _refusal_detail(client, count_broken, "onset_dates")
+    store.open_project(Path(classifier_broken["project_root"]).resolve())
     classifier_detail = _refusal_detail(client, classifier_broken, "onset_dates")
     assert count_detail != classifier_detail
     assert "['classifier']" not in count_detail

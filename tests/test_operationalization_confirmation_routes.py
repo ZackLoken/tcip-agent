@@ -21,6 +21,7 @@ import tcip_store as ts
 from tcip_mcp import operationalization as op
 from tcip_mcp.audit import audit_log_key
 from tcip_web.app import app
+from tcip_web.state import store
 from tests import _operationalization_fixtures as fx
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +37,7 @@ CONFIRM_ROUTE = "/api/results/operationalization/confirm"
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 @pytest.fixture
@@ -443,14 +444,16 @@ def test_a_project_root_under_an_allowed_root_still_answers(
 
 
 def test_a_project_root_outside_the_allowed_roots_is_refused_at_every_results_door(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every door taking a project root confines it, the record routes and the delivery doors alike."""
     allowed = tmp_path / "workspace"
     allowed.mkdir()
-    outside = tmp_path / "elsewhere"
+    outside = tmp_path_factory.mktemp("outside")
     fx.seed_project(outside)
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    store.open_project(tmp_path.resolve())
 
     phenology_body = {
         "project_root": str(outside),
@@ -482,6 +485,7 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
     fx.write_spec(tmp_path, fx.CROSSING_SPEC)
     fx.seed_confirmed_crossing(tmp_path, fx.CROSSING_TRAIT)
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(tmp_path))
+    store.open_project(tmp_path.resolve())
 
     resp = client.post(
         "/api/results/onset_dates",
@@ -830,12 +834,12 @@ def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_pa
 
 
 def test_delivery_events_route_confines_project_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     allowed = tmp_path / "allowed"
     allowed.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
 
     resp = client.get(DELIVERY_EVENTS_ROUTE, params={"project_root": str(outside)})
