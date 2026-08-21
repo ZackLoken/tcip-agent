@@ -21,7 +21,7 @@ from tcip_web.paths import safe_join
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 # ── per-image JSON label fixtures (canonical on-disk format) ─────────────────
@@ -262,8 +262,8 @@ def test_images_dimensions(client: TestClient, dataset_root: Path) -> None:
     assert body["height"] == 80
 
 
-def test_images_not_found(client: TestClient) -> None:
-    resp = client.get("/api/images", params={"path": "/does/not/exist.jpg"})
+def test_images_not_found(client: TestClient, tmp_path: Path) -> None:
+    resp = client.get("/api/images", params={"path": str(tmp_path / "does_not_exist.jpg")})
     assert resp.status_code == 404
 
 
@@ -332,13 +332,12 @@ def test_annotate_save_empty_preserves_negative(
 
 
 def test_annotate_save_label_path_outside_allowed_root_403(
-    client: TestClient, dataset_root: Path, tmp_path: Path, monkeypatch
+    client: TestClient, dataset_root: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    # With an allow-list configured, a label path outside it must be rejected:
-    # write_annotations is otherwise an arbitrary file write/delete primitive.
+    # A label path outside every allowed root must be rejected: write_annotations is otherwise
+    # an arbitrary file write/delete primitive.
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(dataset_root.resolve()))
-    outside = tmp_path / "evil" / "IMG_0000.json"
+    outside = tmp_path_factory.mktemp("outside") / "evil" / "IMG_0000.json"
     resp = client.post(
         "/api/annotate/labels",
         json={"image_path": str(img_path), "label_path": str(outside), "annotations": []},
@@ -1085,18 +1084,14 @@ def test_fs_list_404_for_non_dir(client: TestClient, tmp_path: Path) -> None:
     assert client.get("/api/fs/list", params={"path": str(f)}).status_code == 404
 
 
-def test_fs_list_confined_by_image_roots(
-    client: TestClient, tmp_path: Path, monkeypatch
+def test_fs_list_is_unconfined_from_a_local_connection(
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    (allowed / "sub").mkdir(parents=True)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-
-    assert client.get("/api/fs/list", params={"path": str(allowed)}).status_code == 200
-    # Browsing outside the configured root is refused.
-    assert client.get("/api/fs/list", params={"path": str(outside)}).status_code == 403
+    # The picker route is unconfined on a connection from this machine (the default TestClient);
+    # confinement on a routable arrival is covered by test_web_path_guard_permanent_on.py.
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "sub").mkdir()
+    assert client.get("/api/fs/list", params={"path": str(outside)}).status_code == 200
 
 
 # ── native provenance (created_by / accepted_by) ─────────────────

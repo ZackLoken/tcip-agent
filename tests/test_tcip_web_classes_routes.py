@@ -16,7 +16,7 @@ from tcip_web.app import app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _catkin(x1, y1, x2, y2, *, subject: str = "catkin") -> Annotation:
@@ -300,13 +300,9 @@ def test_load_derived_registry_cache_invalidates_on_label_write(
 
 
 def test_save_classes_confines_dataset_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.post(
         "/api/classes/save",
         json={"project_root": str(outside), "dataset_root": str(outside),
@@ -316,13 +312,9 @@ def test_save_classes_confines_dataset_root_to_allowed_roots(
 
 
 def test_image_status_confines_dataset_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.post(
         "/api/classes/image_status",
         json={"project_root": str(outside), "dataset_root": str(outside),
@@ -332,13 +324,9 @@ def test_image_status_confines_dataset_root_to_allowed_roots(
 
 
 def test_image_status_bulk_confines_dataset_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.post(
         "/api/classes/image_status/bulk",
         json={"project_root": str(outside), "dataset_root": str(outside),
@@ -348,13 +336,9 @@ def test_image_status_bulk_confines_dataset_root_to_allowed_roots(
 
 
 def test_get_image_status_confines_dataset_root_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.get(
         "/api/classes/image_status",
         params={"project_root": str(outside), "dataset_root": str(outside), "subject": "catkin"},
@@ -363,13 +347,10 @@ def test_get_image_status_confines_dataset_root_to_allowed_roots(
 
 
 def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside" / "annotations"
-    outside.mkdir(parents=True)
+    outside = tmp_path_factory.mktemp("outside") / "annotations"
+    outside.mkdir()
     resp = client.post(
         "/api/classes/image_status/derive",
         json={"project_root": str(tmp_path), "annotations_dir": str(outside),
@@ -378,12 +359,11 @@ def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
     assert resp.status_code == 403
 
 
-def test_unrestricted_deployment_is_unaffected_by_the_confinement_guard(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_dataset_root_inside_the_workspace_clears_the_confinement_guard(
+    client: TestClient, tmp_path: Path
 ) -> None:
-    """TCIP_IMAGE_ROOTS unset (the default) must stay a no-op: the rail must admit valid work,
-    not only reject invalid work."""
-    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
+    """The rail must admit valid work, not only reject invalid work: with no additive
+    TCIP_IMAGE_ROOTS set, a dataset root under the workspace is still admitted."""
     resp = client.post(
         "/api/classes/image_status",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),

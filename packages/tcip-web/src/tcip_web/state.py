@@ -89,10 +89,6 @@ class GuiState(BaseModel):
     review: ReviewFilters = Field(default_factory=ReviewFilters)
     pred_reference: Optional[PredictionReference] = None
 
-    def persistence_root(self) -> Optional[str]:
-        """The project root this snapshot persists under, or None when no project is open."""
-        return self.dataset.project_root or None
-
 
 # ── Store with debounced persistence ────────────────────────────────────
 
@@ -111,6 +107,29 @@ class StateStore:
         self._save_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         self._subscribers: list = []  # list[Callable[[dict], Awaitable[None]]]
+        self._project_root: Optional[Path] = None
+
+    @property
+    def project_root(self) -> Optional[Path]:
+        """The open project's guarded, resolved root, or None when no project is open.
+
+        Persistence resolves from this, never from ``dataset.project_root`` as deserialized from
+        gui.json, so a snapshot edited on disk cannot redirect the next flush.
+        """
+        return self._project_root
+
+    def open_project(self, project_root: Path) -> bool:
+        """Make ``project_root`` the open project and load its persisted snapshot.
+
+        ``project_root`` is the path the selection route's guard returned. Returns whether a
+        snapshot was loaded (:meth:`load_from_disk`).
+        """
+        self._project_root = project_root
+        return self.load_from_disk(project_root)
+
+    def close_project(self) -> None:
+        """Forget the open project; nothing persists until another is opened."""
+        self._project_root = None
 
     def subscribe(self, callback) -> None:
         """Register a coroutine called with each mutation payload ``{state, version}``."""
@@ -167,8 +186,8 @@ class StateStore:
                 logger.exception("state subscriber failed")
 
     def _schedule_save(self) -> None:
-        if self._state.persistence_root() is None:
-            return  # No project root → nothing to persist
+        if self._project_root is None:
+            return  # No project open → nothing to persist
         if self._save_task and not self._save_task.done():
             return  # Debounce: coalesce into the pending save
         try:
@@ -187,14 +206,13 @@ class StateStore:
             logger.exception("Failed to persist GUI state")
 
     def _flush_sync(self) -> None:
-        # Resolve the destination at flush time, not schedule time: if project_root
-        # changed during the debounce window, the new project's snapshot must not be
-        # written into the previous project's gui.json.
-        root = self._state.persistence_root()
+        # Read at flush time, not schedule time: a project switch inside the debounce window must
+        # not write the new snapshot into the previous project's gui.json.
+        root = self._project_root
         if root is None:
             return
         try:
-            replace(gui_snapshot_key(root), self.snapshot())
+            replace(gui_snapshot_key(str(root)), self.snapshot())
         except (OSError, StoreError):
             # A snapshot that cannot be written must not fail the mutation that scheduled it,
             # so this is logged with the project it belongs to rather than raised.

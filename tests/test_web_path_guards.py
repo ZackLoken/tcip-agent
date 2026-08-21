@@ -14,11 +14,14 @@ import pytest
 from tcip_web.paths import (
     allowed_image_roots,
     assert_path_allowed,
-    origin_allowed,
     safe_join,
 )
+from tcip_web.trust_boundary import origin_allowed
 
 # -- Origin trust boundary ------------------------------------------------
+
+LOCAL_ARRIVAL = {"type": "websocket", "scheme": "ws", "server": ["127.0.0.1", 8765],
+                 "headers": [(b"host", b"127.0.0.1:8765")]}
 
 
 def test_origin_without_a_parseable_host_is_not_local() -> None:
@@ -28,19 +31,19 @@ def test_origin_without_a_parseable_host_is_not_local() -> None:
     hostname does not parse; treating that absence as loopback would open the state socket,
     which reports filesystem paths, to a page running anywhere.
     """
-    assert not origin_allowed("null")
-    assert not origin_allowed("file://")
-    assert not origin_allowed("http://")
-    assert not origin_allowed("http://evil.example.com")
+    assert not origin_allowed("null", LOCAL_ARRIVAL)
+    assert not origin_allowed("file://", LOCAL_ARRIVAL)
+    assert not origin_allowed("http://", LOCAL_ARRIVAL)
+    assert not origin_allowed("http://evil.example.com", LOCAL_ARRIVAL)
 
 
 def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
     """Loopback pages and clients that send no Origin at all keep working."""
-    assert origin_allowed("http://127.0.0.1:8765")
-    assert origin_allowed("http://localhost:5173")
-    assert origin_allowed("http://[::1]:8765")
-    assert origin_allowed(None)
-    assert origin_allowed("")
+    assert origin_allowed("http://127.0.0.1:8765", LOCAL_ARRIVAL)
+    assert origin_allowed("http://localhost:5173", LOCAL_ARRIVAL)
+    assert origin_allowed("http://[::1]:8765", LOCAL_ARRIVAL)
+    assert origin_allowed(None, LOCAL_ARRIVAL)
+    assert origin_allowed("", LOCAL_ARRIVAL)
 
 
 # -- TCIP_IMAGE_ROOTS containment -----------------------------------------
@@ -61,13 +64,15 @@ def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(tmp_path, monkey
     secret = sibling / "keys.pem"
     secret.write_bytes(b"x")
 
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+    monkeypatch.setenv("TCIP_WORKSPACE", str(allowed))
     assert assert_path_allowed(str(inside)) == inside.resolve()
-    with pytest.raises(ValueError, match="outside the allowed image roots"):
+    with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(secret))
 
 
-def test_every_configured_root_is_honoured_not_only_the_first(tmp_path, monkeypatch) -> None:
+def test_every_configured_root_is_honoured_not_only_the_first(
+    tmp_path, tmp_path_factory: pytest.TempPathFactory, monkeypatch
+) -> None:
     """A multi-entry ``TCIP_IMAGE_ROOTS`` admits work under each entry it names.
 
     The two roots differ in depth and in the file they hold, so honouring only the first
@@ -81,8 +86,7 @@ def test_every_configured_root_is_honoured_not_only_the_first(tmp_path, monkeypa
     second.mkdir()
     img_b = second / "scan.tif"
     img_b.write_bytes(b"x")
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
+    elsewhere = tmp_path_factory.mktemp("elsewhere")
     leak = elsewhere / "leak.jpg"
     leak.write_bytes(b"x")
 
@@ -93,15 +97,16 @@ def test_every_configured_root_is_honoured_not_only_the_first(tmp_path, monkeypa
     assert allowed_image_roots() == [root_a.resolve(), second.resolve()]
     assert assert_path_allowed(str(img_a)) == img_a.resolve()
     assert assert_path_allowed(str(img_b)) == img_b.resolve()
-    with pytest.raises(ValueError, match="outside the allowed image roots"):
+    with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(leak))
 
 
-def test_unrestricted_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch) -> None:
-    """With no allow-list the guard refuses nothing and returns a resolved absolute path.
+def test_derived_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch) -> None:
+    """A path under the derived allow-set (here, the workspace) resolves to an absolute path.
 
     Callers treat the return value as the path to open, so a dot segment or a relative
-    path must be collapsed even when no root policy is configured.
+    path must be collapsed. The additive ``TCIP_IMAGE_ROOTS`` list stays empty throughout:
+    what admits this path is the workspace, not that list.
     """
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     assert allowed_image_roots() == []

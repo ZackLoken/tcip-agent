@@ -85,17 +85,36 @@ def _image_dims(path: str) -> tuple[int, int]:
     return image_dimensions(resolve_image_source(p.parent, p.stem))
 
 
-def _guard_label_path(path: Optional[str]) -> None:
-    """Reject a client-supplied label path that escapes the configured image roots.
+def _guard_label_path(path: Optional[str]) -> Optional[str]:
+    """Confine a client-supplied label path and hand back its resolved spelling, or None.
 
-    Label read/write paths are attacker-controlled, so an exposed deployment
-    (``TCIP_IMAGE_ROOTS`` set) must confine them exactly like image serving,
-    otherwise ``write_annotations`` is an arbitrary file write/delete primitive.
+    Label read/write paths are attacker-controlled and ``write_annotations`` would otherwise be
+    an arbitrary file write/delete primitive, so every read and write uses the path this returns.
     """
     if not path:
-        return
+        return None
     try:
-        assert_path_allowed(path)
+        return str(assert_path_allowed(path))
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+def _guarded_audit_root(label_path: Optional[str]) -> Optional[str]:
+    """The dataset root a label write is audited under, confined before anything is written.
+
+    Labels travel with their dataset, so their trail belongs beside them rather than in whichever
+    project happened to open the dataset. A label path outside a dataset tree names no such log,
+    so the write proceeds unaudited and says so; a dataset root the allow-set does not admit
+    refuses the write before it happens.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    root = dataset_root_of(label_path) if label_path else None
+    if root is None:
+        logger.warning("no dataset root for %s; label write not audited", label_path)
+        return None
+    try:
+        return str(assert_path_allowed(root))
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
 
@@ -126,29 +145,22 @@ def _ann_dict(a: Annotation) -> dict:
     return out
 
 
-def _audit_gui_write(payload: "SavePayload") -> None:
+def _audit_gui_write(payload: "SavePayload", label_path: str, root: str) -> None:
     """Record a GUI label-write in the audit log of the dataset it wrote into.
 
-    Labels travel with their dataset, so their trail belongs beside them rather than in
-    whichever project happened to open the dataset. A label path outside a dataset tree names
-    no such log, so the entry is skipped and named rather than guessed into another root.
+    ``root`` is the dataset root :func:`_guarded_audit_root` admitted before the write.
     """
     from tcip_mcp.audit import record_event
-    from tcip_mcp.dataset_layout import dataset_root_of
 
-    root = dataset_root_of(payload.label_path) if payload.label_path else None
-    if root is None:
-        logger.warning("no dataset root for %s; label write not audited", payload.label_path)
-        return
     record_event(
         "gui_save_labels",
         {
             "image_path": payload.image_path,
-            "label_path": payload.label_path,
+            "label_path": label_path,
             "n_annotations": len(payload.annotations),
         },
         source="gui",
-        scope=str(root),
+        scope=root,
     )
 
 
@@ -156,7 +168,7 @@ def _audit_gui_write(payload: "SavePayload") -> None:
 def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
     """Read existing labels for an image and return them in pixel coords."""
     w, h = _image_dims(image_path)
-    _guard_label_path(label_path)
+    label_path = _guard_label_path(label_path)
     annotations: list[dict] = []
     token: Optional[str] = None
     if label_path:
@@ -183,7 +195,8 @@ def save_labels(payload: SavePayload) -> dict:
     (``image_status.json``); until then it reads as unannotated (CLAUDE.md's negative invariant).
     """
     w, h = _image_dims(payload.image_path)
-    _guard_label_path(payload.label_path)
+    label_path = _guard_label_path(payload.label_path)
+    audit_root = _guarded_audit_root(label_path)
 
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -192,23 +205,23 @@ def save_labels(payload: SavePayload) -> dict:
         for ap in payload.annotations
     ]
 
-    written = payload.label_path is not None
+    written = label_path is not None
     token: Optional[str] = None
-    if payload.label_path:
+    if label_path:
         # The lost-update guard, inside the store's own lock: with a token the write is refused
         # unless the stored document still matches it, and the client resolves the 409 by reloading.
         expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
         try:
             version = write_annotations(
-                payload.label_path, annotations, w, h, keep_empty=True, expect=expect
+                label_path, annotations, w, h, keep_empty=True, expect=expect
             )
         except VersionConflict as exc:
             raise HTTPException(409, {"error": "label file changed since it was loaded"}) from exc
         except OSError as exc:
             raise HTTPException(500, f"could not write labels: {exc}") from exc
         token = version.token if version is not None else None
-
-    _audit_gui_write(payload)
+        if audit_root is not None:
+            _audit_gui_write(payload, label_path, audit_root)
 
     return {
         "status": "ok",

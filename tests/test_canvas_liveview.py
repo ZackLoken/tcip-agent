@@ -23,7 +23,7 @@ from tcip_web.app import app  # noqa: E402
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _payload(root: Path, image_path: str, shapes=None, **over) -> dict:
@@ -86,12 +86,8 @@ def test_heartbeat_updates_meta_without_touching_geometry(client, tmp_path):
     assert after == before                                              # geometry blob untouched
 
 
-def test_push_state_rejects_project_root_outside_image_roots(client, tmp_path, monkeypatch):
-    allowed = tmp_path / "allowed"
-    allowed.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
+def test_push_state_rejects_project_root_outside_image_roots(client, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside")
     r = client.post("/api/canvas/state", json=_payload(outside, "C:/img/a.jpg"))
     assert r.status_code == 403
     assert not (outside / ".tcip" / "state" / "canvas_live.json").exists()

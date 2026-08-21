@@ -65,12 +65,21 @@ def _current_user() -> str:
     return current_user()
 
 
+def _guarded(path: str) -> Path:
+    """Confine a client-supplied path and hand back the resolved path every later read uses."""
+    try:
+        return assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
 def _get_engine(dataset_root: str) -> ReviewEngine:
+    """The review engine anchored on a client-supplied dataset root, confined first (403)."""
     from tcip_mcp.prediction_buckets import review_state_dir_of
 
-    key = str(Path(dataset_root).resolve())
+    key = str(_guarded(dataset_root))
     if key not in _engines:
-        state_dir = review_state_dir_of(dataset_root)
+        state_dir = review_state_dir_of(key)
         _engines[key] = ReviewEngine(state_dir=state_dir, current_user=_current_user())
     return _engines[key]
 
@@ -80,14 +89,14 @@ def _audit(scope: str, tool: str, arguments: dict) -> None:
 
     Every mutation these routes make changes a record that travels with the dataset: the verdict
     store, the ground-truth labels and a prediction bucket's provenance stamp all live under the
-    dataset root, so the dataset root the request states is the scope for all of them. Never fails
-    the request.
+    dataset root, so the dataset root the request states is the scope for all of them. The scope
+    is confined before the append, so no audit line lands outside the allowed roots.
     """
     if not scope:
         return
     from tcip_mcp.audit import record_event
 
-    record_event(tool, arguments, source="gui", scope=scope)
+    record_event(tool, arguments, source="gui", scope=str(_guarded(scope)))
 
 
 def _dataset_root_of_all(paths: Iterable[Optional[str]]) -> Optional[str]:
@@ -227,18 +236,15 @@ def _image_dims(path: str) -> tuple[int, int]:
     return image_dimensions(resolve_image_source(p.parent, p.stem))
 
 
-def _guard_path(path: Optional[str]) -> None:
-    """403 if a client-supplied label/dir path escapes the configured image roots.
+def _guard_path(path: Optional[str]) -> Optional[str]:
+    """Confine a client-supplied label/dir path and hand back its resolved spelling, or None.
 
-    ``save_gt`` / ``backup_labels`` write to caller-provided paths, so an exposed
-    deployment (``TCIP_IMAGE_ROOTS`` set) must confine them like image serving.
+    ``save_gt`` / ``backup_labels`` write to caller-provided paths, so every writer uses the
+    path this returns, never the string the client sent. 403 on escape.
     """
     if not path:
-        return
-    try:
-        assert_path_allowed(path)
-    except ValueError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        return None
+    return str(_guarded(path))
 
 
 def _ensure_original_backup(label_path: Optional[str]) -> None:
@@ -320,6 +326,8 @@ def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
               pred_path: Optional[str]) -> ReviewContext:
     w, h = _image_dims(image_path)
     ctx = ReviewContext(img_name=image_name, img_width=w, img_height=h)
+    gt_path = _guard_path(gt_path)
+    pred_path = _guard_path(pred_path)
     if gt_path:
         ctx.gt = read_annotations(gt_path)
     if pred_path:
@@ -545,8 +553,9 @@ def _apply_gt_mutation(
 def record_action(payload: ActionPayload) -> dict:
     """Record a user's accept/reject/edit decision; auto-complete the image when done."""
     _check_classification_scope(payload.subject, payload.attribute)
-    ctx = _load_ctx(payload.image_name, payload.image_path,
-                    gt_path=payload.gt_path, pred_path=payload.pred_path)
+    gt_path = _guard_path(payload.gt_path)
+    pred_path = _guard_path(payload.pred_path)
+    ctx = _load_ctx(payload.image_name, payload.image_path, gt_path=gt_path, pred_path=pred_path)
     engine = _get_engine(payload.dataset_root)
     # GUI-set reviewer drives both the verdict log (reviewed_by, bare) and the GT provenance
     # (accepted_by/created_by, "user:<name>") so the two never disagree on who acted.
@@ -568,7 +577,7 @@ def record_action(payload: ActionPayload) -> dict:
     # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
     work = replace(ctx, gt=list(ctx.gt))
     changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso)
-    if changed and not payload.gt_path:
+    if changed and not gt_path:
         raise HTTPException(
             400, "this verdict writes ground truth, but no annotations path was provided")
 
@@ -578,9 +587,9 @@ def record_action(payload: ActionPayload) -> dict:
     if payload.action == "edited" and changed and landed_idx is not None:
         norm_det = replace(det, gt_idx=landed_idx)
         norm_ctx = work
-    producer_identity = _resolve_producer_identity(payload.pred_path)
-    class_id = _resolve_verdict_class_id(payload.pred_path, payload.class_name)
-    bucket = _bucket_of_file(payload.pred_path)
+    producer_identity = _resolve_producer_identity(pred_path)
+    class_id = _resolve_verdict_class_id(pred_path, payload.class_name)
+    bucket = _bucket_of_file(pred_path)
     engine.record_detection_action(
         bucket, det, ctx, action=payload.action, norm_det=norm_det, norm_ctx=norm_ctx,
         producer_identity=producer_identity, conf_threshold=payload.conf_threshold,
@@ -589,10 +598,9 @@ def record_action(payload: ActionPayload) -> dict:
 
     # Write the single per-image GT file (keep_empty: an emptied GT stays an {"annotations": []}
     # record, not deleted). accept-TP/FN and reject-FP are no-ops.
-    if changed and payload.gt_path:
-        _guard_path(payload.gt_path)
-        _ensure_original_backup(payload.gt_path)  # baseline this file before its first mutation
-        engine.save_gt(work, path=payload.gt_path)
+    if changed and gt_path:
+        _ensure_original_backup(gt_path)  # baseline this file before its first mutation
+        engine.save_gt(work, path=gt_path)
 
     # Annotation status to sync client-side (only when GT changed); an emptied GT reads as
     # "unannotated": a negative needs an explicit Complete, not just an empty file.
@@ -643,12 +651,12 @@ class MarkCompletePayload(BaseModel):
 @router.post("/mark_complete")
 def mark_complete(payload: MarkCompletePayload) -> dict:
     """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases."""
-    _guard_path(payload.gt_path)
-    _guard_path(payload.pred_dir)
+    gt_path = _guard_path(payload.gt_path)
+    pred_dir = _guard_path(payload.pred_dir)
     engine = _get_engine(payload.dataset_root)
-    bucket = _bucket_of_dir(payload.pred_dir)
+    bucket = _bucket_of_dir(pred_dir)
     if payload.completed:
-        producer_identity = _resolve_producer_identity_for_dir(payload.pred_dir, payload.image_name)
+        producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
         # A zero-verdict Complete is FN-adjudication-covered only when it is a genuine negative:
         # the bucket held zero predictions for this image, so there was nothing to individually walk
         # and Complete is itself the confirming act. A bulk-accept of an image the bucket did
@@ -657,8 +665,8 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
         # reference's statistics. No prediction file for this stem reads as "nothing to check" ->
         # also covered.
         is_negative = True
-        if payload.pred_dir:
-            pred_file = Path(payload.pred_dir) / f"{Path(payload.image_name).stem}.json"
+        if pred_dir:
+            pred_file = Path(pred_dir) / f"{Path(payload.image_name).stem}.json"
             is_negative = not _has_objects(pred_file)
         engine.mark_image_reviewed(bucket, payload.image_name,
                                    producer_identity=producer_identity,
@@ -668,8 +676,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     # Derive the annotation status from the GT file on disk: the client's matches snapshot can be
     # stale or null mid-navigation and once wrote negatives for annotated frames. A present file
     # with no annotations of any subject is an empty (negative) record.
-    has_content = bool(payload.gt_path and os.path.isfile(payload.gt_path)
-                       and read_annotations(payload.gt_path))
+    has_content = bool(gt_path and os.path.isfile(gt_path) and read_annotations(gt_path))
     annotation_status = derive_status(completed=payload.completed, has_content=has_content)
     _audit(payload.dataset_root, "gui_review_mark_complete", {
         "image_name": payload.image_name,
@@ -691,10 +698,9 @@ class BackupPayload(BaseModel):
 @router.post("/backup_labels")
 def backup_labels(payload: BackupPayload) -> dict:
     """Top up ``<dir>/.original/``: capture any label file that has no baseline yet."""
-    for d in payload.label_dirs:
-        _guard_path(d)
+    label_dirs = [d for d in (_guard_path(d) for d in payload.label_dirs) if d]
     engine = _get_engine(payload.dataset_root)
-    n = engine.backup_original_labels(*payload.label_dirs)
+    n = engine.backup_original_labels(*label_dirs)
     return {"status": "ok", "files_backed_up": n}
 
 
@@ -713,7 +719,7 @@ class SaveGtPayload(BaseModel):
 def save_gt(payload: SaveGtPayload) -> dict:
     """Persist edited GT (post-review modification) for a single image."""
     w, h = _image_dims(payload.image_path)
-    _guard_path(payload.label_path)
+    label_path = _guard_path(payload.label_path)
     engine = _get_engine(payload.dataset_root)
 
     # The reviewer authors this committed GT; a shape that round-trips its own provenance keeps it.
@@ -724,11 +730,11 @@ def save_gt(payload: SaveGtPayload) -> dict:
         img_name=payload.image_name, img_width=w, img_height=h,
         gt=[annotation_from_payload(d, author=author, now=now_iso) for d in payload.annotations],
     )
-    ok = engine.save_gt(ctx, path=payload.label_path)
+    ok = engine.save_gt(ctx, path=label_path)
     # Ground truth travels with its dataset, so the edit is recorded beside the labels it changed.
     _audit(payload.dataset_root, "gui_review_save_gt", {
         "image_name": payload.image_name,
-        "label_path": payload.label_path,
+        "label_path": label_path,
         "n_annotations": len(payload.annotations),
     })
     return {"status": "ok" if ok else "partial"}
@@ -772,9 +778,8 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     answers for is treated as unvalidated and is promotable over, and a review whose prediction
     documents are no longer the ones the reviewer saw earns nothing at all.
     """
-    bucket_dirs = [req.pred_dir] if req.pred_dir else []
-    for d in bucket_dirs:
-        _guard_path(d)
+    pred_dir = _guard_path(req.pred_dir)
+    bucket_dirs = [pred_dir] if pred_dir else []
     if not bucket_dirs:
         return ValidateReferenceResponse(
             validated=False, reference=None, reviewed_image_count=0, conf=None,
@@ -790,7 +795,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     if named_root is not None and Path(named_root).resolve() != Path(req.dataset_root).resolve():
         raise HTTPException(
             400,
-            f"the predictions at {req.pred_dir} belong to dataset {named_root}, not to "
+            f"the predictions at {pred_dir} belong to dataset {named_root}, not to "
             f"{req.dataset_root}, the dataset this request names. Validate a bucket under its own "
             "dataset root, so the verdicts, the validation record and the stamp all hang off one "
             "dataset.")
@@ -801,7 +806,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     # buckets contributes only what was reviewed here.
     reviewed = {
         name: data
-        for name, data in engine.image_states(_bucket_of_dir(req.pred_dir)).items()
+        for name, data in engine.image_states(_bucket_of_dir(pred_dir)).items()
         if data.get("img_status") == "completed"
     }
     completed = {name: data for name, data in reviewed.items() if Path(name).stem in stems}
@@ -1116,8 +1121,8 @@ def image_statuses(
     on dataset entry to drive the image-level Reviewed/Unreviewed filter and to skip images with
     nothing to review. ``gt_dir``/``pred_dir`` are the per-image label dirs (annotations / a model's
     predictions on the date)."""
-    for d in (gt_dir, pred_dir):
-        _guard_path(d)
+    gt_dir = _guard_path(gt_dir)
+    pred_dir = _guard_path(pred_dir)
     engine = _get_engine(dataset_root)
     return ImageStatusesResponse(
         statuses=engine.get_all_image_statuses(),
@@ -1143,10 +1148,9 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
     validate_reference's identical gate reads as conf_censored. This endpoint exposes the one
     fact needed to warn about that live, in the filter shelf, before a review is even complete.
     """
-    _guard_path(pred_dir)
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
-    sidecar = read_operating_point_sidecar(pred_dir) or {}
+    sidecar = read_operating_point_sidecar(_guarded(pred_dir)) or {}
     conf = ((sidecar.get("operating_point") or {}).get("conf") or {}).get("value")
     return GenerationConfResponse(
         generation_conf=float(conf) if isinstance(conf, (int, float)) else None)
@@ -1259,19 +1263,20 @@ class LaunchPriorityQueuePayload(BaseModel):
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     # checkpoint_path reaches torch.load via build_predictor (the same arbitrary-pickle sink the
     # Inference tab's own launch route confines): same guard, same treatment.
-    for p in (payload.dataset_root, payload.checkpoint_path, payload.images_dir):
-        _guard_path(p)
-    if not Path(payload.checkpoint_path).is_file():
+    dataset_root = _guarded(payload.dataset_root)
+    checkpoint_path = _guarded(payload.checkpoint_path)
+    images_dir = _guarded(payload.images_dir)
+    if not checkpoint_path.is_file():
         raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
-    if not Path(payload.images_dir).is_dir():
+    if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
 
     # The dataset root, not a store path: the tool derives from it the one verdict store _get_engine opens.
     job = PriorityQueueJob(
         job_id=f"pq-{uuid.uuid4().hex[:8]}",
-        checkpoint_path=payload.checkpoint_path,
-        images_dir=payload.images_dir,
-        dataset_root=payload.dataset_root,
+        checkpoint_path=str(checkpoint_path),
+        images_dir=str(images_dir),
+        dataset_root=str(dataset_root),
         method=payload.method,
         budget=payload.budget,
     )
