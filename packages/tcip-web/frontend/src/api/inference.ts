@@ -212,6 +212,12 @@ export type OperationalizationRecord = {
   stated_by: string;
   stated_at: string;
   relayed_note: string;
+  agent_client_name: string | null;
+  agent_client_version: string | null;
+  agent_session: string | null;
+  terminal_session: string | null;
+  harness_session: string | null;
+  harness_effort_at_connect: string | null;
   confirmed_by: string | null;
   confirmed_at: string | null;
   identity_from_request: boolean | null;
@@ -277,6 +283,12 @@ export type TraitSpecStatementRecord = {
   stated_by: string | null;
   stated_at: string | null;
   relayed_note: string | null;
+  agent_client_name: string | null;
+  agent_client_version: string | null;
+  agent_session: string | null;
+  terminal_session: string | null;
+  harness_session: string | null;
+  harness_effort_at_connect: string | null;
   confirmed_by: string | null;
   confirmed_at: string | null;
   identity_from_request: boolean | null;

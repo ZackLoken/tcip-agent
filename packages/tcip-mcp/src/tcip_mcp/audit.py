@@ -27,6 +27,7 @@ from typing import Any, Callable
 from tcip_store import LOG_JSON, Key, StoreDescriptor, append, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp import agent_identity
 from tcip_mcp.project_paths import resolve_state
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,34 @@ def _redact(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _entry(
+    tool: str,
+    arguments: dict[str, Any] | None,
+    status: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The one shape every audit entry starts from: the clock, the tool, its redacted arguments,
+    a caller's extra facts, and the agent identity this process established at its MCP handshake,
+    if it has one.
+
+    Shared by the decorator and both plain emitters, so the stamp an entry carries is decided in
+    one place; an emitter building its own dict would be the drift this module exists to prevent.
+    The identity keys are reserved: a caller's ``extra`` cannot set one, whether to override the
+    handshake's value or to supply one the handshake left absent, so an entry's identity is only
+    ever what the handshake established.
+    """
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tool": tool,
+        "arguments": _redact(arguments) if arguments else {},
+    }
+    if status is not None:
+        entry["status"] = status
+    entry.update({k: v for k, v in (extra or {}).items() if k not in agent_identity.RECORD_FIELDS})
+    entry.update(agent_identity.audit_fields())
+    return entry
+
+
 def _write_entry(entry: dict[str, Any], scope: str | Path | None = None) -> None:
     """Append one audit entry to the log ``scope`` names (lock-guarded + fsync'd), never raising.
 
@@ -154,14 +183,7 @@ def record_event(
     stream rather than several files written by several spellings. ``scope`` names the root
     whose log the entry belongs in (see :func:`audit_log_key`). Best-effort, never raises.
     """
-    entry: dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "tool": tool,
-        "arguments": _redact(arguments) if arguments else {},
-        "status": status,
-    }
-    entry.update(extra)
-    _write_entry(entry, scope)
+    _write_entry(_entry(tool, arguments, status, extra), scope)
 
 
 def record_event_or_raise(
@@ -180,13 +202,7 @@ def record_event_or_raise(
     mutation that already committed and is now unrecorded, so the caller cannot blind-retry it.
     :func:`record_event`'s own callers are unaffected; this is a new sibling, not a change to it.
     """
-    entry: dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "tool": tool,
-        "arguments": _redact(arguments) if arguments else {},
-        "status": status,
-    }
-    entry.update(extra)
+    entry = _entry(tool, arguments, status, extra)
     try:
         append(audit_log_key(scope), entry)
     except Exception as exc:
@@ -283,11 +299,7 @@ def audited(
                 logged_args: dict[str, Any] = dict(bound.arguments)
             except TypeError:
                 logged_args = dict(kwargs)
-            entry: dict[str, Any] = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "tool": tool_name,
-                "arguments": _redact(logged_args) if logged_args else {},
-            }
+            entry = _entry(tool_name, logged_args)
 
             def record() -> None:
                 """Resolve the scope, stamp the duration, and append. Raises what it cannot do."""

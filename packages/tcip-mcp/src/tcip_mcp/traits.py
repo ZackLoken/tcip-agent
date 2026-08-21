@@ -49,6 +49,7 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp import agent_identity
 from tcip_mcp.identity import user_identity
 from tcip_mcp.statements import canonical, content_hash, now_iso
 
@@ -520,16 +521,22 @@ _CARRIED_FORWARD_SPEC_FIELDS = (
 """Fields ``author_trait_spec`` never authors: copied unchanged from an existing spec on a
 restatement, or left at ``TraitSpec``'s own dataclass defaults on first creation."""
 
-TRAIT_SPEC_STATEMENT_FIELDS = ("statement_fields", "rationale", "stated_by", "stated_at", "relayed_note")
-"""Every field a trait-spec authoring statement owns. The confirmation compare-and-set hashes all
-of them, the same discipline ``operationalization.STATEMENT_FIELDS`` already uses."""
+TRAIT_SPEC_STATEMENT_FIELDS = (
+    "statement_fields", "rationale", "stated_by", "stated_at", "relayed_note",
+    *agent_identity.RECORD_FIELDS,
+)
+"""Every field a trait-spec authoring statement owns, the agent identity fields included. The
+confirmation compare-and-set hashes all of them, the same discipline
+``operationalization.STATEMENT_FIELDS`` already uses."""
 
 TRAIT_SPEC_CONFIRMATION_FIELDS = ("confirmed_by", "confirmed_at", "identity_from_request", "record_seen")
 """Every field only :func:`confirm_trait_spec` sets. A statement write refuses a payload with one."""
 
 TRAIT_SPEC_STATEMENT_SURFACE = "author_trait_spec"
 """The producing surface stamped into ``stated_by``, never accepted from a caller: it says a
-statement came in through the authoring tool rather than through a file edit, nothing more."""
+statement came in through the authoring tool rather than through a file edit, nothing more. The
+harness and session that made the call are the agent identity fields beside it, declared by the
+connecting software and no evidence of who the person was."""
 
 TRAIT_SPEC_STATEMENTS_STORE = "trait_spec_statements"
 _STATEMENT_FILE = RootedFileLocator(prefix=("trait_spec_statements",), suffix=".json")
@@ -707,6 +714,7 @@ def author_trait_spec(
         "stated_by": TRAIT_SPEC_STATEMENT_SURFACE,
         "stated_at": now_iso(),
         "relayed_note": str(relayed_note or ""),
+        **agent_identity.statement_fields(),
         **{field: None for field in TRAIT_SPEC_CONFIRMATION_FIELDS},
     }
     ts.replace(statement_key, statement, expect=existing_statement.version)
