@@ -37,6 +37,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
+from tcip_mcp.agent_identity import TERMINAL_SESSION_ENV
 from tcip_mcp.project_paths import repo_root_from_here
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,52 @@ def resolve_terminal_command() -> Optional[list[str]]:
     return [exe]
 
 
+_CLI_VERSIONS: dict[str, Optional[str]] = {}
+VERSION_PROBE_TIMEOUT_S = 15
+
+
+def launched_program(argv: list[str]) -> dict:
+    """What the terminal launches: ``{"executable", "version"}``, the executable being ``argv[0]``
+    and the version what that executable declares to ``--version``.
+
+    Only the resolved CLI (no ``TCIP_TERMINAL_CMD`` override in force) is probed: an override is
+    any argv an operator or a test chose, whose meaning for ``--version`` is unknown, so it is
+    recorded as launched with no version rather than run a second time. The bare executable is
+    probed, not the fenced argv, because the fenced ``claude`` invocation refuses a missing
+    settings file before it answers. Probed once per executable per process with stdin closed and
+    a time bound, ``None`` when it does not answer cleanly. Which agent harness the launched
+    program turns out to be is recorded by the MCP server from that harness's own handshake, not
+    inferred here.
+    """
+    executable = argv[0]
+    if os.environ.get(TERMINAL_CMD_ENV, "").strip():
+        return {"executable": executable, "version": None}
+    if executable not in _CLI_VERSIONS:
+        version: Optional[str] = None
+        try:
+            probe = subprocess.run(
+                [executable, "--version"],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=VERSION_PROBE_TIMEOUT_S,
+                check=False,
+            )
+            first_line = probe.stdout.strip().splitlines()
+            if probe.returncode == 0 and first_line:
+                version = first_line[0].strip()
+        except (OSError, subprocess.TimeoutExpired):
+            logger.debug("version probe of %s did not answer", executable, exc_info=True)
+        _CLI_VERSIONS[executable] = version
+    return {"executable": executable, "version": _CLI_VERSIONS[executable]}
+
+
+def spawn_env(session_id: str) -> dict[str, str]:
+    """The child's environment: this process's own (Claude Code auth included) plus the terminal
+    session id, which the MCP server the agent launches records as a correlation."""
+    return {**os.environ, TERMINAL_SESSION_ENV: session_id}
+
+
 def _prewarm_blocking() -> None:
     """Warm the controllable part of the cold first-spawn into the OS cache (see ``prewarm``)."""
     try:
@@ -231,11 +278,10 @@ def terminal_cwd() -> str:
 class _WinPty:
     """ConPTY via pywinpty. ``read`` returns decoded text (pywinpty decodes)."""
 
-    def __init__(self, argv: list[str], cwd: str, rows: int, cols: int):
+    def __init__(self, argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, str]):
         from winpty import PtyProcess
 
-        # env=None inherits this process's environment (Claude Code auth included).
-        self._p = PtyProcess.spawn(argv, cwd=cwd, dimensions=(rows, cols))
+        self._p = PtyProcess.spawn(argv, cwd=cwd, dimensions=(rows, cols), env=env)
         self.pid = self._p.pid
 
     def read(self) -> str:
@@ -267,7 +313,7 @@ class _WinPty:
 class _PosixPty:
     """stdlib pty + subprocess (used on Linux CI and any POSIX deployment)."""
 
-    def __init__(self, argv: list[str], cwd: str, rows: int, cols: int):
+    def __init__(self, argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, str]):
         import fcntl
         import pty
         import struct
@@ -279,6 +325,7 @@ class _PosixPty:
         self._proc = subprocess.Popen(
             argv,
             cwd=cwd,
+            env=env,
             stdin=slave,
             stdout=slave,
             stderr=slave,
@@ -343,11 +390,12 @@ class _PosixPty:
             pass
 
 
-def spawn_pty(argv: list[str], cwd: str, rows: int, cols: int):
-    """Spawn ``argv`` attached to a platform PTY. Raises ``OSError`` on failure."""
+def spawn_pty(argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, str]):
+    """Spawn ``argv`` attached to a platform PTY under ``env`` (see :func:`spawn_env`). Raises
+    ``OSError`` on failure."""
     if os.name == "nt":
-        return _WinPty(argv, cwd, rows, cols)
-    return _PosixPty(argv, cwd, rows, cols)
+        return _WinPty(argv, cwd, rows, cols, env)
+    return _PosixPty(argv, cwd, rows, cols, env)
 
 
 # ── The reader pump ─────────────────────────────────────────────────────

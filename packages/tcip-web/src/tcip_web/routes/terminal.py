@@ -69,11 +69,26 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
         queue.put_nowait(None)
 
 
+def _record_start(session_id: str, launched: dict) -> None:
+    """One platform audit line per launch, naming the session id and the program it launched.
+
+    The MCP server the agent starts reads this id from its environment and stamps it on its own
+    lines as a declared correlation (any launcher can set that variable, so those lines say what
+    the process claimed); this line says what the backend itself launched under the id. Never
+    fails the request.
+    """
+    from tcip_mcp.audit import record_event
+
+    record_event("agent_terminal_started", {"session_id": session_id, **launched})
+
+
 class TerminalSession:
     """One PTY-attached Claude Code process and its subscriber queues."""
 
     def __init__(self, session_id: str):
         self.id = session_id
+        # What the last start launched (executable and declared version), None before a start.
+        self.launched: Optional[dict] = None
         self._pty = None
         self._lock = threading.Lock()
         self._scrollback: list[str] = []
@@ -96,12 +111,16 @@ class TerminalSession:
             argv = pty_host.resolve_terminal_command()
             if argv is None:
                 return pty_host.terminal_status().get("reason")
+            launched = pty_host.launched_program(argv)
             try:
-                pty = pty_host.spawn_pty(argv, pty_host.terminal_cwd(), rows, cols)
+                pty = pty_host.spawn_pty(
+                    argv, pty_host.terminal_cwd(), rows, cols, pty_host.spawn_env(self.id)
+                )
             except OSError as exc:
                 self._pty = None
                 return f"could not start the agent terminal: {exc}"
             self._pty = pty
+            self.launched = launched
             self._gen += 1
             gen = self._gen
         pty_host.start_reader(
@@ -110,6 +129,7 @@ class TerminalSession:
             lambda: self._on_exit(gen),
             name=f"term-{self.id}-g{gen}",
         )
+        _record_start(self.id, launched)
         return None
 
     def restart(self, rows: int, cols: int) -> Optional[str]:
@@ -248,14 +268,14 @@ def create_session(req: CreateSessionRequest) -> dict:
     with _SESSIONS_LOCK:
         for s in _SESSIONS.values():
             if s.alive():
-                return {"session_id": s.id, "existing": True}
+                return {"session_id": s.id, "existing": True, "launched": s.launched}
         session_id = "term_" + os.urandom(6).hex()
         session = TerminalSession(session_id)
         err = session.start(_clamp(req.rows), _clamp(req.cols))
         if err:
             raise HTTPException(503, err)
         _SESSIONS[session_id] = session
-        return {"session_id": session_id, "existing": False}
+        return {"session_id": session_id, "existing": False, "launched": session.launched}
 
 
 def _require(session_id: str) -> TerminalSession:
@@ -267,7 +287,11 @@ def _require(session_id: str) -> TerminalSession:
 
 @router.get("/sessions")
 def list_terminal_sessions() -> dict:
-    return {"sessions": [{"id": s.id, "alive": s.alive()} for s in _SESSIONS.values()]}
+    return {
+        "sessions": [
+            {"id": s.id, "alive": s.alive(), "launched": s.launched} for s in _SESSIONS.values()
+        ]
+    }
 
 
 @router.post("/sessions/{session_id}/restart")
@@ -284,7 +308,7 @@ def restart_session(session_id: str, req: CreateSessionRequest) -> dict:
         err = session.restart(_clamp(req.rows), _clamp(req.cols))
     if err:
         raise HTTPException(503, err)
-    return {"session_id": session_id, "alive": True}
+    return {"session_id": session_id, "alive": True, "launched": session.launched}
 
 
 async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:

@@ -224,3 +224,70 @@ def test_concurrent_creates_spawn_single_session():
         assert set(ids) == {alive[0].id}
     finally:
         terminal_routes.shutdown_all()
+
+
+# ── what a session records about the program it launched ───────────────
+
+
+def _terminal_start_rows() -> list[dict]:
+    import tcip_mcp.audit as audit_module
+    import tcip_store as ts
+
+    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+    return [row for row in ts.read_log(key).records if row["tool"] == "agent_terminal_started"]
+
+
+def test_create_answers_the_launched_executable_and_no_version_for_an_override(client):
+    """An override argv is any program an operator or a test chose, so it is recorded as launched
+    and never run a second time to ask its version."""
+    body = client.post("/api/terminal/sessions", json={}).json()
+
+    launched = body["launched"]
+    assert Path(launched["executable"]).name == Path(sys.executable).name
+    assert launched["version"] is None
+
+
+def test_the_resolved_cli_is_probed_for_the_version_it_declares(monkeypatch):
+    monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
+    monkeypatch.setenv("TCIP_TERMINAL_CLI", Path(sys.executable).name)
+    argv = pty_host.resolve_terminal_command()
+    assert argv is not None
+
+    launched = pty_host.launched_program(argv)
+
+    assert Path(launched["executable"]).name == Path(sys.executable).name
+    assert launched["version"].startswith("Python ")
+
+
+def test_the_spawned_process_inherits_the_terminal_session_id(client):
+    """The double prints the id it inherited inside brackets, so the read ends at the closing
+    bracket whatever the id is and the assertion, not the stream, decides."""
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
+        banner = _read_until(ws, "]")
+    assert f"[session:{sid}]" in banner
+
+
+def test_each_launch_leaves_one_platform_audit_line_naming_the_session_and_program(client):
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
+        _read_until(ws, "FAKE_TERMINAL_READY")
+        ws.send_json({"type": "input", "data": "exit\r"})
+        _read_until(ws, "Claude Code exited")
+    client.post(f"/api/terminal/sessions/{sid}/restart", json={})
+
+    rows = _terminal_start_rows()
+    assert [row["arguments"]["session_id"] for row in rows] == [sid, sid]
+    assert Path(rows[0]["arguments"]["executable"]).name == Path(sys.executable).name
+    assert rows[0]["arguments"]["version"] is None
+
+
+def test_the_session_list_and_the_restart_answer_the_launched_program(client):
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
+
+    (listed,) = client.get("/api/terminal/sessions").json()["sessions"]
+    assert listed["id"] == sid
+    assert Path(listed["launched"]["executable"]).name == Path(sys.executable).name
+
+    restarted = client.post(f"/api/terminal/sessions/{sid}/restart", json={}).json()
+    assert Path(restarted["launched"]["executable"]).name == Path(sys.executable).name
