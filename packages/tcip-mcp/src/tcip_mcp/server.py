@@ -6,7 +6,11 @@ import logging
 
 from mcp.server import MCPServer
 
-mcp = MCPServer("tcip-pipeline")
+from tcip_mcp import agent_identity
+
+mcp = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
+# Records which harness connected, from the handshake, before any tool call is served.
+mcp.middleware.append(agent_identity.record_connecting_client)
 logger = logging.getLogger(__name__)
 
 # Import tool modules to register their handlers with the server.

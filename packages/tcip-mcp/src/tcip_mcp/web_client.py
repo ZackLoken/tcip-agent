@@ -231,10 +231,13 @@ def post_panel_event(
 
     url = backend_url(f"/api/events/{panel}", project_root=project_root)
     payload = json.dumps({"panel": panel, "event_type": event_type, "data": data}).encode("utf-8")
+    from tcip_mcp import agent_identity
+
+    # The pushing harness and session, as headers, so the backend can say who steered the GUI.
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **agent_identity.http_headers()},
         method="POST",
     )
     try:

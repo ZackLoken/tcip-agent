@@ -33,6 +33,9 @@ src/tcip_mcp/
   project_paths.py, workspace.py     # platform-state-root and workspace-root resolvers
   experiments.py, model_registry.py   # experiment tracking (.tcip/experiments/) and the trained-model registry
   identity.py             # the user:<name> identity convention, spelled once
+  agent_identity.py       # the harness the MCP handshake declared, this run's minted session, and what
+                            # the harness exported about itself, stamped on every audit line, statement
+                            # record and HTTP push; declarations, never verified
   audit.py, project_status.py, web_client.py
 ```
 

@@ -16,6 +16,13 @@ export const STATEMENT_FIELD_LABELS: Record<string, string> = {
   confirmed_by: "Confirmed by",
   confirmed_at: "Confirmed at",
   identity_from_request: "Identity source",
+  // The agent harness the statement arrived through, as that software declared itself.
+  agent_client_name: "Agent harness",
+  agent_client_version: "Harness version",
+  agent_session: "Agent session",
+  terminal_session: "Terminal session",
+  harness_session: "Harness session",
+  harness_effort_at_connect: "Harness effort when it connected",
 
   // Operationalization: what a trait's delivered number means and how the platform decides it.
   statement: "What the number means",

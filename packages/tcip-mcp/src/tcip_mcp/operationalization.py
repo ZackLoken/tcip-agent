@@ -36,6 +36,7 @@ import tcip_store as ts
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, Versioned, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp import agent_identity
 from tcip_mcp.identity import user_identity
 from tcip_mcp.statements import canonical, content_hash, now_iso
 from tcip_mcp.traits import TraitSpec, crops_definitions, get_trait_for, trait_specs_dir
@@ -109,8 +110,11 @@ STATEMENT_FIELDS = (
     "stated_by",
     "stated_at",
     "relayed_note",
+    *agent_identity.RECORD_FIELDS,
 )
-"""Every field a statement owns. The confirmation compare-and-set hashes all of them."""
+"""Every field a statement owns, the agent identity fields included, so a confirmation covers
+the statement and its stated provenance together. The confirmation compare-and-set hashes all of
+them."""
 
 CONFIRMATION_FIELDS = ("confirmed_by", "confirmed_at", "identity_from_request", "confirmed_fields")
 """Every field only the confirmation writer sets. A statement write refuses a payload with one."""
@@ -119,8 +123,9 @@ STATEMENT_SURFACE = "state_trait_operationalization"
 """The producing surface stamped into ``stated_by``, never accepted from a caller.
 
 It says a statement came in through the statement tool rather than through a file edit, and
-nothing more. A stdio MCP server carries no caller identity, so this is not evidence of who wrote
-the record, and anyone writing the file directly can write the same value.
+nothing more. Which harness the call arrived from and which session made it are the agent
+identity fields beside it (``agent_identity``), declared by the connecting software; none of this
+is evidence of who the person was, and anyone writing the file directly can write the same values.
 """
 
 
@@ -697,6 +702,7 @@ def state_operationalization(
         "stated_by": STATEMENT_SURFACE,
         "stated_at": now_iso(),
         "relayed_note": str(relayed_note or ""),
+        **agent_identity.statement_fields(),
         **{field: None for field in CONFIRMATION_FIELDS},
     }
     key = operationalization_key(operationalizations_scope(project_root), trait, delivery_kind)
