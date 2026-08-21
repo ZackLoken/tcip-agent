@@ -15,6 +15,7 @@ from tcip_mcp.audit import audit_log_key
 from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_sidecar
 from tcip_web.app import app
+from tcip_web.state import store
 
 from tests._binding_fixtures import PRODUCER_CHECKPOINT_SHA256
 
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _write_preds(path: Path, subjects: list[str]) -> None:
@@ -62,6 +63,7 @@ def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
 
 
 def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Path) -> None:
+    store.open_project(tmp_path.resolve())
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={
@@ -76,6 +78,7 @@ def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Pat
 
 
 def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: Path) -> None:
+    store.open_project(tmp_path.resolve())
     resp = client.post(
         "/api/results/plant_mapping/load",
         json={"persist_path": str(tmp_path / "missing.json")},
@@ -167,6 +170,8 @@ def _phenology_fixture(
         preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"
     tcip_store.replace(plant_mapping_key(mapping_path), mapping)
+    # The Results doors serve the project the GUI has open, the one this evidence belongs to.
+    store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
             "predictions_by_date": preds, "trait": "catkin"}
 
@@ -696,20 +701,21 @@ def test_export_refuses_a_bucket_whose_id_map_never_carried_the_positive_class(
 
 
 def test_registered_models_confines_project_path_to_allowed_roots(
-    client: TestClient, tmp_path: Path, monkeypatch
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch
 ) -> None:
     allowed = tmp_path / "allowed"
     allowed.mkdir()
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(allowed))
-    outside = tmp_path / "outside"
-    outside.mkdir()
+    outside = tmp_path_factory.mktemp("outside")
     resp = client.get("/api/results/models/registered", params={"project_path": str(outside)})
     assert resp.status_code == 403
 
 
-def test_registered_models_unconfined_when_no_image_roots(
+def test_registered_models_admits_a_project_path_with_no_extra_roots_set(
     client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:
+    """The rail must admit valid work: a project's own directory answers fine with
+    TCIP_IMAGE_ROOTS unset, since the workspace root alone already admits it."""
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
     assert resp.status_code == 200

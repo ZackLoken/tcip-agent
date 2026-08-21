@@ -28,31 +28,110 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 from io import StringIO
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
-from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
+from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, exposed_arrival, within
+from tcip_web.state import store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/results", tags=["results"])
 
 
-def _guard(*paths: str | None) -> None:
-    """Confine client-supplied file paths to the allowed roots (no-op unless TCIP_IMAGE_ROOTS)."""
+def _guarded_path(path: str) -> Path:
+    """Confine a client-supplied path to the allowed roots; the resolved path every read uses."""
+    try:
+        return assert_path_allowed(path)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+def _open_project_root(stated: Optional[str] = None) -> Path:
+    """The project the GUI has open: the only project a Results door exports into or audits under.
+
+    Only the guarded selection route sets it, so a delivery cannot be pointed at a project by
+    naming one in a payload. ``stated`` is a payload's own ``project_root``; when given it must be
+    the same filesystem object as the open project, so the request record a browser replays into
+    the CSV door cannot disagree with what it showed on screen.
+    """
+    root = store.project_root
+    if root is None:
+        raise HTTPException(
+            409, "no project is open; open a project in the GUI before using the Results doors")
+    if stated:
+        try:
+            same = os.path.samefile(_guarded_path(stated), root)
+        except OSError as exc:
+            raise HTTPException(403, f"project_root {stated} cannot be compared with the open "
+                                     f"project {root}: {exc}") from exc
+        if not same:
+            raise HTTPException(
+                403, f"project_root {stated} is not the open project {root}; a delivery belongs "
+                     "to the project the GUI has open")
+    return root
+
+
+def _evidence_roots(root: Path) -> list[Path]:
+    """The open project's own tree plus every dataset root registered to it."""
+    from tcip_mcp.tools.project_tools import read_datasets
+
+    return [root, *(Path(e["path"]) for e in read_datasets(root) if e.get("path"))]
+
+
+def _belonging(root: Path, *paths: Optional[str]) -> list[Optional[Path]]:
+    """Confine evidence paths to the open project: its tree or a dataset registered to it.
+
+    Resolved paths come back in the order given (``None`` for an omitted one), and every later
+    read uses them. A path inside the managed allow-set but outside this project's own set
+    refuses, naming the project and the roots it checked: an allow-list proves a managed
+    filesystem, not that the evidence belongs to the project being delivered from.
+    """
+    roots = _evidence_roots(root)
+    out: list[Optional[Path]] = []
     for p in paths:
         if not p:
+            out.append(None)
             continue
-        try:
-            assert_path_allowed(p)
-        except ValueError as exc:
-            raise HTTPException(403, str(exc)) from exc
+        resolved = _resolved(p)
+        if not any(within(resolved, r) for r in roots):
+            raise HTTPException(
+                403, f"{p} does not belong to project {root}: it is under neither the project "
+                     f"nor a dataset registered to it ({', '.join(str(r) for r in roots)})")
+        out.append(resolved)
+    return out
+
+
+def _resolved(path: str) -> Path:
+    try:
+        return Path(path).resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(400, f"cannot resolve {path}: {exc}") from exc
+
+
+def _reference_file(path: str, request: Request) -> Path:
+    """A breeder-supplied input file read by a door: unconfined from this machine, confined from
+    a routable connection, the same rule the folder picker applies."""
+    if exposed_arrival(request.scope):
+        return _guarded_path(path)
+    return _resolved(path)
+
+
+def _under_project(root: Path, path: str) -> Path:
+    """A path a Results door writes, confined to the open project's own tree (never a dataset)."""
+    resolved = _resolved(path)
+    if not within(resolved, root):
+        raise HTTPException(
+            403, f"{path} is outside the open project {root}; a mapping or a delivery is project "
+                 "state and is written under the project itself")
+    return resolved
 
 
 def _guarded_project_root(project_root: str) -> Path:
@@ -82,20 +161,6 @@ def _audit(project_root: str, tool: str, arguments: dict, **extra: object) -> No
     record_event(tool, arguments, source="gui", scope=project_root, **extra)
 
 
-def _project_root_of_state_path(path: str) -> Optional[str]:
-    """The project root owning a ``<project_root>/.tcip/...`` path, or ``None`` if it isn't one.
-
-    Mirrors ``dataset_layout.dataset_root_of``, anchored on the ``.tcip`` marker directory itself
-    (the one shared platform state dir, see root CLAUDE.md) rather than a fixed depth under it.
-    """
-    parts = Path(path).parts
-    idxs = [k for k, p in enumerate(parts) if p == ".tcip"]
-    if not idxs:
-        return None
-    i = idxs[-1]
-    return str(Path(*parts[:i])) if i > 0 else None
-
-
 # ── Plant mapping ──────────────────────────────────────────────────────
 
 
@@ -108,27 +173,38 @@ class BuildMappingPayload(BaseModel):
 
 
 @router.post("/plant_mapping/build")
-def build_plant_mapping(payload: BuildMappingPayload) -> dict:
-    _guard(payload.images_root, payload.persist_path, *payload.plant_csv_paths)
+def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
+    """Build the image-to-plant mapping from the open project's images and the breeder's plant files.
+
+    The mapping is project state, so it persists under the open project and is audited there, and
+    the images must belong to that project (its tree or a dataset registered to it), so a mapping
+    cannot be built for one project from another project's captures. The plant-location files are
+    the breeder's own reference data, picked from wherever they keep them: from this machine they
+    are read from any path, like the picker that finds them; from a routable connection they are
+    confined to the allowed roots.
+    """
+    root = _open_project_root()
+    (images_root,) = _belonging(root, payload.images_root)
+    assert images_root is not None
+    plant_csvs = [_reference_file(p, request) for p in payload.plant_csv_paths]
+    persist = _under_project(root, payload.persist_path) if payload.persist_path else None
     mapping = plant_mapping.build_mapping(
-        Path(payload.images_root),
-        [Path(p) for p in payload.plant_csv_paths],
+        images_root,
+        plant_csvs,
         dates=payload.dates,
         nn_tolerance_m=payload.nn_tolerance_m,
     )
-    if payload.persist_path:
-        plant_mapping.persist_mapping(mapping, Path(payload.persist_path))
-        root = _project_root_of_state_path(payload.persist_path)
-        if root:
-            _audit(
-                root,
-                "gui_build_plant_mapping",
-                {
-                    "persist_path": payload.persist_path,
-                    "images_root": payload.images_root,
-                    "n_dates": len(mapping),
-                },
-            )
+    if persist is not None:
+        plant_mapping.persist_mapping(mapping, persist)
+        _audit(
+            str(root),
+            "gui_build_plant_mapping",
+            {
+                "persist_path": str(persist),
+                "images_root": str(images_root),
+                "n_dates": len(mapping),
+            },
+        )
 
     summary = {}
     for date, assignments in mapping.items():
@@ -156,8 +232,9 @@ class LoadMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
-    _guard(payload.persist_path)
-    mapping = plant_mapping.load_mapping(Path(payload.persist_path))
+    (persist,) = _belonging(_open_project_root(), payload.persist_path)
+    assert persist is not None
+    mapping = plant_mapping.load_mapping(persist)
     return {
         "mapping": {
             date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
@@ -199,12 +276,14 @@ class _PhenologyMeasurement:
 
     def __init__(
         self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
-        basis, bindings: dict, pred_dirs: list[str],
+        basis, bindings: dict, predictions_by_date: dict[str, str],
     ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
-        # What the count reconciliation verified per bucket, and the buckets it verified.
-        self.bindings, self.pred_dirs = bindings, pred_dirs
+        # What the count reconciliation verified per bucket, and the buckets it verified, by their
+        # resolved paths.
+        self.bindings, self.predictions_by_date = bindings, predictions_by_date
+        self.pred_dirs = list(predictions_by_date.values())
         # The guarded, resolved root every later write and audit entry resolves from.
         self.project_root = project_root
         # What the precondition rested on, re-checked before this measurement reaches a caller.
@@ -260,7 +339,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     )
     from tcip_mcp.traits import TraitUnknownError
 
-    root = _guarded_project_root(payload.project_root)
+    root = _open_project_root(payload.project_root)
     try:
         spec, record, _specs_dir = resolve_trait_and_record(
             payload.trait, STATE_CROSSING_DATES, project_root=root)
@@ -271,12 +350,17 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     if not stated.ok:
         raise HTTPException(400, stated.as_detail())
 
-    _guard(payload.mapping_path, *payload.predictions_by_date.values())
-    mapping_raw = plant_mapping.load_mapping_rows(Path(payload.mapping_path))
+    mapping_path, *resolved_dirs = _belonging(
+        root, payload.mapping_path, *payload.predictions_by_date.values())
+    assert mapping_path is not None
+    predictions_by_date = {
+        date: str(p) for date, p in zip(payload.predictions_by_date, resolved_dirs) if p is not None
+    }
+    mapping_raw = plant_mapping.load_mapping_rows(mapping_path)
     if not mapping_raw:
         raise HTTPException(404, f"no mapping at {payload.mapping_path}")
 
-    pred_dirs = list(payload.predictions_by_date.values())
+    pred_dirs = list(predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs)
     classifier_recon = reconcile_classifier_validity(pred_dirs)
     # The same binding compute_phenology applies, from the same shared owner rather than a second
@@ -307,13 +391,13 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         flags["tile_size"] = tile_recon["validated"]
     gate = check_delivery_gate(flags, acknowledge_unvalidated=payload.acknowledge_unvalidated)
     plants = phenology.per_plant_phenology(
-        mapping_raw, payload.predictions_by_date,
+        mapping_raw, predictions_by_date,
         positive_class_name=spec.positive_class_name, spec=spec,
     )
-    positive_class_id, _msg = phenology.resolve_positive_class_id(spec, payload.predictions_by_date)
+    positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
         spec, plants, validity, gate, positive_class_id, root, stated.basis,
-        recon["bindings"], pred_dirs)
+        recon["bindings"], predictions_by_date)
 
 
 def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
@@ -476,7 +560,7 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
     from tcip_mcp.tools.phenology_tools import _resolve_producer_identity
 
-    producer = _resolve_producer_identity(payload.predictions_by_date)
+    producer = _resolve_producer_identity(measurement.predictions_by_date)
     stamp = {
         "operating_point_conf": measurement.validity["operating_point_conf"],
         "operating_point_validated": measurement.gate.stamp["operating_point"],
@@ -892,10 +976,10 @@ def list_traits(project_root: str) -> dict:
     why, so a breeder facing zero (or fewer than expected) traits can tell "nothing registered" from
     "something is registered but broken" instead of the two reading identically.
     """
-    _guard(project_root)
+    root = _guarded_project_root(project_root)
     from tcip_mcp.traits import load_trait_specs_with_errors
 
-    specs, errors = load_trait_specs_with_errors(project_root=project_root)
+    specs, errors = load_trait_specs_with_errors(project_root=root)
     return {
         "traits": sorted(spec.name for spec in specs),
         "milestone_fractions_by_trait": {
@@ -910,7 +994,7 @@ def list_traits(project_root: str) -> dict:
 
 @router.get("/models/registered")
 def registered_models(project_path: str, tag: Optional[str] = None) -> dict:
-    _guard(project_path)
+    root = _guarded_project_root(project_path)
     from tcip_mcp.tools.model_tools import list_registered_models
 
-    return list_registered_models(project_path, tag)
+    return list_registered_models(str(root), tag)

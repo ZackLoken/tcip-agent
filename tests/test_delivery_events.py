@@ -121,7 +121,7 @@ def test_a_web_route_writes_its_delivery_event_under_the_payloads_root_not_the_p
     payload_root = tmp_path / "payload_project"
     body = _phenology_fixture(payload_root, validated=True, fractions=(0.75, 1.0), detections=4)
 
-    resp = TestClient(app).post("/api/results/per_plant_curves", json=body)
+    resp = TestClient(app, base_url="http://127.0.0.1").post("/api/results/per_plant_curves", json=body)
     assert resp.status_code == 200, resp.text
 
     payload_records = [

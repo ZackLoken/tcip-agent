@@ -23,13 +23,14 @@ import tcip_store as ts
 from tcip_mcp import traits
 from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_web.app import app
+from tcip_web.state import store
 
 _ID_MAP = {"closed": 0, "open": 1}
 
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def _seed_currant_bloom_trait(tmp_path: Path) -> None:
@@ -140,6 +141,8 @@ def _currant_bloom_fixture(
         preds[date_str] = str(bucket)
     mapping_path = tmp_path / "mapping.json"
     ts.replace(plant_mapping_key(mapping_path), mapping)
+    # The Results doors serve the project the GUI has open, the one this evidence belongs to.
+    store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
             "predictions_by_date": preds, "trait": "currant_bloom"}
 
