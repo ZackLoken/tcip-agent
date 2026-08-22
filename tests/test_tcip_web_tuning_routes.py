@@ -276,7 +276,7 @@ def test_sweep_tensorboard_launches_over_a_clean_named_trial_view(
     (trial / "tensorboard").mkdir()
     (trial / "tensorboard" / "marker.txt").write_text("x", encoding="utf-8")
 
-    resp = client.post("/api/tuning/sweeps/hpo_tbsweep1/tensorboard")
+    resp = client.post("/api/tuning/sweeps/hpo_tbsweep1/tensorboard", json={})
     assert resp.status_code == 200
     assert resp.json()["url"] == "http://localhost:6006"
     (logdir, key), = tb_launches
@@ -298,13 +298,13 @@ def test_sweep_tensorboard_view_gains_a_link_for_a_trial_that_appears_later(
     trial_a = _write_trial(sweep, "aaa_00000")
     (trial_a / "tensorboard").mkdir()
 
-    resp = client.post("/api/tuning/sweeps/hpo_tbsweep2/tensorboard")
+    resp = client.post("/api/tuning/sweeps/hpo_tbsweep2/tensorboard", json={})
     view = Path(resp.json()["logdir"])
     assert sorted(p.name for p in view.iterdir()) == ["trial_aaa_00000"]
 
     trial_b = _write_trial(sweep, "bbb_00001")
     (trial_b / "tensorboard").mkdir()
-    client.post("/api/tuning/sweeps/hpo_tbsweep2/tensorboard")
+    client.post("/api/tuning/sweeps/hpo_tbsweep2/tensorboard", json={})
     assert sorted(p.name for p in view.iterdir()) == ["trial_aaa_00000", "trial_bbb_00001"]
 
 
@@ -314,7 +314,7 @@ def test_trial_tensorboard_launches_over_that_trial_s_own_logdir(
     sweep = _write_sweep(hpo_root, "hpo_tbtrial1")
     trial = _write_trial(sweep, "aaa_00000", metrics=[{"epoch": 1}])
 
-    resp = client.post("/api/tuning/sweeps/hpo_tbtrial1/trials/aaa_00000/tensorboard")
+    resp = client.post("/api/tuning/sweeps/hpo_tbtrial1/trials/aaa_00000/tensorboard", json={})
     assert resp.status_code == 200
     (logdir, key), = tb_launches
     assert Path(logdir) == (trial / "tensorboard").resolve()
@@ -336,7 +336,7 @@ def test_stopping_a_trial_tensorboard_uses_that_trial_s_own_key(
     )
     _write_trial(_write_sweep(hpo_root, "hpo_tbstop01"), "aaa_00000")
 
-    resp = client.post("/api/tuning/sweeps/hpo_tbstop01/trials/aaa_00000/tensorboard/stop")
+    resp = client.post("/api/tuning/sweeps/hpo_tbstop01/trials/aaa_00000/tensorboard/stop", json={})
     assert resp.status_code == 200
     assert resp.json()["status"] == "stopped"
     assert stopped == ["sweep_hpo_tbstop01_trial_aaa_00000"]
@@ -345,7 +345,7 @@ def test_stopping_a_trial_tensorboard_uses_that_trial_s_own_key(
 def test_tensorboard_for_an_unknown_sweep_is_a_404(client, hpo_root, tb_launches) -> None:
     for url in ("/api/tuning/sweeps/hpo_missing/tensorboard",
                 "/api/tuning/sweeps/hpo_missing/trials/aaa_00000/tensorboard"):
-        resp = client.post(url)
+        resp = client.post(url, json={})
         assert resp.status_code == 404
         assert "hpo_missing" in resp.json()["detail"]
     assert tb_launches == []

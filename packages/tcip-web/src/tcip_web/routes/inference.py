@@ -35,6 +35,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_OVERLAP,
 )
 from tcip_web.paths import assert_path_allowed
+from tcip_web.routes._body_common import EmptyBodyPayload
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -535,7 +536,7 @@ def get_preview(job_id: str, limit: int = 12) -> dict:
 
 
 @router.post("/jobs/{job_id}/cancel")
-def cancel_job(job_id: str) -> dict:
+def cancel_job(job_id: str, payload: EmptyBodyPayload) -> dict:
     """Request graceful cancellation; the worker stops at the next image boundary."""
     j = _get(job_id)
     if j is None:

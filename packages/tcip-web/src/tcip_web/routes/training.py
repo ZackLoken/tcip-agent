@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from tcip_web.paths import assert_path_allowed, assert_project_root_allowed
 from tcip_web.trust_boundary import origin_allowed
+from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
 
 logger = logging.getLogger(__name__)
@@ -204,7 +205,7 @@ def get_run(run_id: str) -> dict:
 
 
 @router.post("/runs/{run_id}/tensorboard")
-def launch_run_tensorboard(run_id: str) -> dict:
+def launch_run_tensorboard(run_id: str, payload: EmptyBodyPayload) -> dict:
     """Start (or reuse) a TensorBoard serving this run's log directory.
 
     ``tensorboard_manager`` tracks its children in module-level process state, so a TensorBoard
@@ -224,7 +225,7 @@ def launch_run_tensorboard(run_id: str) -> dict:
 
 
 @router.post("/runs/{run_id}/cancel")
-def cancel_run_route(run_id: str) -> dict:
+def cancel_run_route(run_id: str, payload: EmptyBodyPayload) -> dict:
     """Request graceful cancellation of a running run (stops at the next batch boundary).
 
     Wraps the ``cancel_training`` MCP tool: the trainer still writes ``model_final.pt``

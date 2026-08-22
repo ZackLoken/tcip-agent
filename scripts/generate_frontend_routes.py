@@ -14,6 +14,7 @@ routes produce, so a stale module does not reach a browser.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi.routing import APIRoute, APIWebSocketRoute
@@ -63,25 +64,31 @@ def route_name(path: str, method: str) -> str:
     return prefix + ("".join(parts) or "Root")
 
 
-def collect_routes(app) -> list[tuple[str, str, str]]:
-    """Every (name, path, method) the app has registered, sorted by name.
+def iter_api_routes(app) -> Iterator[APIRoute | APIWebSocketRoute]:
+    """Every ``APIRoute``/``APIWebSocketRoute`` the app has actually registered.
 
     Routers are included through wrapper objects rather than flattened onto the app, so this
-    descends into whatever a registered entry carries its own routes under.
+    descends into whatever a registered entry carries its own routes under. The one walk of the
+    app's real route tree; anything that needs to enumerate the app's routes calls this rather
+    than re-descending the router tree itself.
     """
+    for route in app.routes:
+        if isinstance(route, (APIRoute, APIWebSocketRoute)):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from iter_api_routes(route.original_router)
+
+
+def collect_routes(app) -> list[tuple[str, str, str]]:
+    """Every (name, path, method) the app has registered, sorted by name."""
     found: list[tuple[str, str, str]] = []
+    for route in iter_api_routes(app):
+        if isinstance(route, APIRoute):
+            for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+                found.append((route_name(route.path, method), route.path, method))
+        else:
+            found.append((route_name(route.path, "WEBSOCKET"), route.path, "WEBSOCKET"))
 
-    def walk(routes) -> None:
-        for route in routes:
-            if isinstance(route, APIRoute):
-                for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
-                    found.append((route_name(route.path, method), route.path, method))
-            elif isinstance(route, APIWebSocketRoute):
-                found.append((route_name(route.path, "WEBSOCKET"), route.path, "WEBSOCKET"))
-            elif hasattr(route, "original_router"):
-                walk(route.original_router.routes)
-
-    walk(app.routes)
     by_name: dict[str, tuple[str, str, str]] = {}
     for entry in found:
         clash = by_name.get(entry[0])
