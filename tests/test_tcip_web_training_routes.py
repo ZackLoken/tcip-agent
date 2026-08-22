@@ -138,12 +138,12 @@ def test_compare_route_handles_empty_ids(client: TestClient) -> None:
 
 
 def test_cancel_unknown_run_returns_404(client: TestClient) -> None:
-    resp = client.post("/api/training/runs/does-not-exist/cancel")
+    resp = client.post("/api/training/runs/does-not-exist/cancel", json={})
     assert resp.status_code == 404
 
 
 def test_tensorboard_route_404s_for_unknown_run(client: TestClient) -> None:
-    resp = client.post("/api/training/runs/does-not-exist/tensorboard")
+    resp = client.post("/api/training/runs/does-not-exist/tensorboard", json={})
     assert resp.status_code == 404
     assert "does-not-exist" in resp.json()["detail"]
 
@@ -166,7 +166,7 @@ def test_tensorboard_route_launches_under_the_run_output_dir(client: TestClient,
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
     )
 
-    resp = client.post("/api/training/runs/run-42/tensorboard")
+    resp = client.post("/api/training/runs/run-42/tensorboard", json={})
     assert resp.status_code == 200
     assert resp.json()["url"] == "http://localhost:6006"
     assert calls == [(f"{tmp_path}/tensorboard", "run-42")]

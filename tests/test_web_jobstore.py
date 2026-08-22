@@ -80,6 +80,7 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from PIL import Image
 
+    from tcip_web.routes._body_common import EmptyBodyPayload
     from tcip_web.routes.inference import InferenceJob, _register, _worker, cancel_job
 
     images_dir = tmp_path / "images"
@@ -103,14 +104,14 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
                        slice_hw=(640, 640), overlap=0.2)
     _register(job)
 
-    res = cancel_job("j1")
+    res = cancel_job("j1", EmptyBodyPayload())
     assert res["cancel_requested"] is True and job.cancel_event.is_set()
     # Cancelling a job that was never registered is a client-side miss, so it has to reach the
     # browser as a 404 and name the id: any other status reads to the caller as a real outcome.
     from fastapi import HTTPException
 
     with pytest.raises(HTTPException) as cancel_miss:
-        cancel_job("missing")
+        cancel_job("missing", EmptyBodyPayload())
     assert cancel_miss.value.status_code == 404
     assert "missing" in cancel_miss.value.detail
 

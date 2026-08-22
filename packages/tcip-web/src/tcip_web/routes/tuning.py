@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
 
 if TYPE_CHECKING:
@@ -428,7 +429,7 @@ def _ensure_trial_view(sweep_id: str, sweep_root: Path) -> Path:
 
 
 @router.post("/sweeps/{sweep_id}/tensorboard")
-def launch_sweep_tensorboard(sweep_id: str) -> dict:
+def launch_sweep_tensorboard(sweep_id: str, payload: EmptyBodyPayload) -> dict:
     """Start (or reuse) a TensorBoard over the whole sweep, one run per trial.
 
     Rooted at a clean-named link farm (see ``_ensure_trial_view``) rather than the sweep
@@ -444,7 +445,7 @@ def launch_sweep_tensorboard(sweep_id: str) -> dict:
 
 
 @router.post("/sweeps/{sweep_id}/trials/{trial_id}/tensorboard")
-def launch_trial_tensorboard(sweep_id: str, trial_id: str) -> dict:
+def launch_trial_tensorboard(sweep_id: str, trial_id: str, payload: EmptyBodyPayload) -> dict:
     """Start (or reuse) a TensorBoard over a single trial's own log directory."""
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
     from tcip_web.paths import safe_join
@@ -458,7 +459,7 @@ def launch_trial_tensorboard(sweep_id: str, trial_id: str) -> dict:
 
 
 @router.post("/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop")
-def stop_trial_tensorboard(sweep_id: str, trial_id: str) -> dict:
+def stop_trial_tensorboard(sweep_id: str, trial_id: str, payload: EmptyBodyPayload) -> dict:
     """Stop the TensorBoard serving one trial.
 
     TensorBoards share a bounded port range, so a session that opens one per trial and
