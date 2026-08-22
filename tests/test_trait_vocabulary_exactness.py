@@ -125,7 +125,7 @@ def test_write_trait_spec_fields_refuses_to_truncate_an_existing_delivers(tmp_pa
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
 
     with pytest.raises(ValueError, match="invalid spec"):
-        traits.write_trait_spec_fields("leaf", {"delivers": ["leaf_len"]}, [], specs_dir=specs_dir)
+        traits.write_trait_spec_fields("leaf", {"delivers": ["leaf_len"]}, specs_dir=specs_dir)
 
     assert load_trait_specs(specs_dir=specs_dir)[0].delivers == ("leaf_length",)
 
@@ -137,8 +137,7 @@ def test_write_trait_spec_fields_still_accepts_a_real_vocabulary_addition(tmp_pa
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
 
     updated = traits.write_trait_spec_fields(
-        "leaf", {"delivers": ["leaf_length", "leaf_width"]},
-        ["delivers: vocabulary_derived"], specs_dir=specs_dir,
+        "leaf", {"delivers": ["leaf_length", "leaf_width"]}, specs_dir=specs_dir,
     )
     assert updated.delivers == ("leaf_length", "leaf_width")
     assert load_trait_specs(specs_dir=specs_dir)[0].delivers == ("leaf_length", "leaf_width")

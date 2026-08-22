@@ -32,7 +32,6 @@ def test_moving_a_constituting_field_reports_the_superseded_confirmation(project
 
     result = update_trait_spec_fields(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
-        ["positive_class_name: domain_expert_correction"],
     )
 
     assert result["positive_class_name"] == "shed"
@@ -47,7 +46,6 @@ def test_moving_a_field_no_confirmation_rests_on_reports_nothing(project: Path):
 
     result = update_trait_spec_fields(
         str(project), fx.CROSSING_TRAIT, {"notes": "the breeder walked the row again"},
-        ["notes: domain_expert_confirmed"],
     )
 
     assert result["superseded"] == []
@@ -58,7 +56,6 @@ def test_an_unconfirmed_statement_is_not_reported_as_superseded(project: Path):
 
     result = update_trait_spec_fields(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
-        ["positive_class_name: domain_expert_correction"],
     )
 
     assert result["superseded"] == []
@@ -72,7 +69,6 @@ def test_only_the_kinds_resting_on_the_moved_field_are_reported(project: Path):
 
     result = update_trait_spec_fields(
         str(project), fx.COUNT_TRAIT, {"ordinal_agreement_floor": 0.8},
-        ["ordinal_agreement_floor: domain_expert_correction"],
     )
 
     assert result["superseded"] == [
@@ -87,7 +83,6 @@ def test_the_spec_is_written_to_the_project_the_call_names(project: Path, tmp_pa
 
     update_trait_spec_fields(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
-        ["positive_class_name: domain_expert_correction"],
     )
 
     assert fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES).spec.positive_class_name == "shed"
@@ -99,7 +94,6 @@ def test_the_reported_supersession_is_what_the_delivery_precondition_then_refuse
 
     reported = update_trait_spec_fields(
         str(project), fx.CROSSING_TRAIT, {"positive_class_name": "shed"},
-        ["positive_class_name: domain_expert_correction"],
     )["superseded"]
     spec, record, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
     refusal = op.check_operationalization(spec, record, op.STATE_CROSSING_DATES)

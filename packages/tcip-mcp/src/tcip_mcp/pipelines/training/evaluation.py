@@ -421,9 +421,10 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
     and checkpoint selection rest on.
 
     ``localization`` is derived once, the first time real GT is available for a trait with no
-    recorded kind (via ``derivations.derive_localization_kind``),
-    persisted through ``traits.write_trait_spec_fields`` with ``data_derived_at_runtime``
-    provenance, and read from the recorded value on every later call. A recorded kind is also
+    recorded kind (via ``derivations.derive_localization_kind``), persisted through
+    ``traits.write_trait_spec_fields`` and recorded in the audit log naming the trait, the field,
+    the value and the derivation basis, and read from the recorded value on every later call.
+    A recorded kind is also
     cheaply re-checked against what the current data would derive, every real call, divergence
     surfaces a warning (``kind_diverged`` in the returned dict) rather than silently switching,
     per the standing "constrain by observation, not permission" rule; only an explicit re-derive
@@ -462,21 +463,22 @@ def resolve_match_criterion(trait_name: str | None, per_image: list[dict], *,
         kind = live_derived_kind
         kind_source = "data_derived_at_runtime"
         # Stamp via resolution.derived(), not aliased on import, so test_provenance_honesty.py's
-        # AST scanner (which matches the literal call name "derived") actually sees this label; the
-        # TraitSpec.provenance entry below is a separate, free-text record of who decided (for a
-        # human/agent reader), not a substitute for this mechanical check.
+        # AST scanner (which matches the literal call name "derived") actually sees this label.
         from tcip_mcp.pipelines.resolution import derived
         derived("localization_kind", kind,
                derived_from="achievable IoU under annotation jitter (GT characteristic size)")
+        basis = (f"derived from {sum(len(b) for b in boxes_per_image)} GT boxes "
+                 "(achievable IoU under jitter)")
         try:
             from tcip_mcp import traits as traits_module
-            traits_module.write_trait_spec_fields(
-                trait_name, {"localization": kind},
-                [f"localization: data_derived_at_runtime, derived from "
-                 f"{sum(len(b) for b in boxes_per_image)} GT boxes (achievable IoU under jitter)"],
-            )
+            traits_module.write_trait_spec_fields(trait_name, {"localization": kind})
         except ValueError:
             logger.warning("could not persist derived localization kind for %r", trait_name, exc_info=True)
+        else:
+            from tcip_mcp.audit import record_event_or_raise
+            record_event_or_raise("trait_spec_field_derived",
+                                  {"trait": trait_name, "field": "localization", "value": kind,
+                                   "basis": basis})
     else:
         raise ValueError(
             f"trait {trait_name!r} has no recorded localization kind and no GT in this call to "

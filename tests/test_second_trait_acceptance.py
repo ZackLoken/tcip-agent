@@ -56,19 +56,6 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
         "delivers": ["bloom_05per_date", "bloom_50per_date", "bloom_95per_date"],
         "notes": "Test-only, provisional: proves the delivery mechanism "
                  "generalizes to a second trait. Not a domain-expert-confirmed measurement.",
-        "provenance": [
-            "positive_class_name: agent_proposed_unvalidated, authored "
-            "solely to exercise this acceptance test; no domain expert involved.",
-            "count_objective: agent_proposed_unvalidated, a test-only stub value to exercise "
-            "the delivery door, not a real breeder decision (this field is normally only "
-            "set from an actual plain-language answer about what the number needs to be reliable "
-            "for, never authored blind or copied from another trait).",
-            "localization: agent_proposed_unvalidated, a test-only stub value; this fixture "
-            "never runs real GT through derive_localization_kind, so this is not what a "
-            "real trait's recorded value would look like (that comes from data, not authoring).",
-            "milestone_fractions: vocabulary_derived, 0.05/0.50/0.95 from crops.yml's real "
-            "bloom_05per_date/bloom_50per_date/bloom_95per_date entries for currant.",
-        ],
     }
     ts.replace(traits.trait_spec_key(specs_dir, "currant_bloom"), spec, expect=ts.Version.ABSENT)
     # A second trait needs its own confirmed meaning too: nothing about the record is catkin-shaped.
