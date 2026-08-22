@@ -311,6 +311,45 @@ EXECUTABLES = {"claude": CLAUDE, "codex": CODEX, "antigravity": AGY}
 STDIN_FAMILIES = {"claude", "codex"}
 
 
+def describe_fault(meta: dict, failed_extraction: set[str]) -> str:
+    """Why this run does not count as an answer, or an empty string when it does.
+
+    The reasons the exit gate already refuses on, said in words rather than left to a reader to
+    infer from a table cell.
+    """
+    if meta["exit_code"] != 0:
+        return f"the harness exited {meta['exit_code']}"
+    if meta["response_source"] == "empty_response":
+        return "it produced no answer text, so there is nothing to review"
+    if meta["response_source"] == "extraction_failed":
+        return "no answer could be extracted from what it returned"
+    if meta["response_source"] in failed_extraction:
+        return f"its answer was not usable ({meta['response_source']})"
+    if meta.get("model_mismatch"):
+        return (f"it ran on {meta.get('model_used')} after {meta['model_resolved']} was asked for, "
+                "so the answer is not the comparison that was requested")
+    return ""
+
+
+def print_verdict(faults: list[tuple[str, str]], total: int) -> None:
+    """State the run's outcome as the last thing printed, on stdout and stderr both.
+
+    The exit code alone is not enough. A caller that pipes this script into another command takes
+    the pipeline's status from that command, so a refused run reads as a clean one and the only
+    remaining signal is a zero in the chars column of a table that otherwise looks ordinary. This
+    says the verdict in words at the end of the output, where it survives both a pipe and a tail.
+    """
+    if not faults:
+        print(f"\nRUN OK: {total} of {total} families answered.")
+        return
+    lines = [f"\nRUN FAILED: {len(faults)} of {total} families produced no usable answer."]
+    lines += [f"  {family}: {why}" for family, why in faults]
+    lines.append("  Nothing here is reviewable evidence. Re-run before relying on it.")
+    text = "\n".join(lines)
+    print(text)
+    print(text, file=sys.stderr)
+
+
 def denied_write_text(payload: object) -> str:
     """The longest document a harness tried to write and was refused, or an empty string.
 
@@ -593,11 +632,10 @@ def main() -> int:
     summary.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"\nwrote {summary}")
     failed_extraction = {"extraction_failed", "empty_response"}
-    clean = all(
-        m["exit_code"] == 0 and m["response_source"] not in failed_extraction
-        and not m.get("model_mismatch") for m in results
-    )
-    return 0 if clean else 1
+    faults = [(m["family"], describe_fault(m, failed_extraction)) for m in results]
+    faults = [(family, why) for family, why in faults if why]
+    print_verdict(faults, len(results))
+    return 0 if not faults else 1
 
 
 if __name__ == "__main__":
