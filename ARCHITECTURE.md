@@ -186,6 +186,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 2 | 5 |
 | packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 0 | 15 |
 | packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 16 | 1 |
+| packages/tcip-web/src/tcip_web/routes/_body_common.py | The empty JSON body a route with only path parameters declares, forcing a browser onto a preflighted request instead of a simple one. | 0 | 3 |
 | packages/tcip-web/src/tcip_web/routes/_metrics_common.py | The shape both metric routes serve, from whichever log the caller resolved. | 0 | 2 |
 | packages/tcip-web/src/tcip_web/routes/annotate.py | Annotation label CRUD routes for the Annotate tab. | 8 | 1 |
 | packages/tcip-web/src/tcip_web/routes/canvas.py | Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back. | 1 | 1 |
@@ -347,6 +348,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
 | scripts/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 1 | 0 |
 | scripts/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 4 | 0 |
+| scripts/drop_trait_spec_provenance.py | Conform a project's trait-spec records to drop the retired free-text ``provenance`` field, and remove the stale copies an earlier YAML-to-record conform step left behind. | 1 | 0 |
 | scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 1 | 0 |
 | scripts/gate_baseline.py | Run the full quality gate and record per-stage duration and output. | 0 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
@@ -602,10 +604,10 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
-| `update_trait_spec_fields` | `phenology_tools.py:109` | yes | Update one or more fields on an already-registered trait's spec, recording who asserted |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:394` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:555` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:743` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `update_trait_spec_fields` | `phenology_tools.py:109` | yes | Update one or more fields on an already-registered trait's spec. |
+| `calibrate_classifier_operating_point` | `phenology_tools.py:389` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:550` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `compute_phenology` | `phenology_tools.py:738` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -650,10 +652,12 @@ Docstring is the function's docstring first line, verbatim.
 `packages/tcip-web/src/tcip_web/app.py` builds the FastAPI app, registers 6 HTTP routes
 and 2 WebSocket routes directly, then calls `register_all(app)` from
 `packages/tcip-web/src/tcip_web/routes/__init__.py`, which `include_router`s 16 route
-modules under `routes/`, each with a fixed prefix. Verified: `routes/__init__.py` and
-`routes/_metrics_common.py` define no routes of their own (0 `@router.*` decorator sites
-in either file); `_metrics_common.py` holds `metrics_response`, the response shape `training.py`
-and `tuning.py` both answer in.
+modules under `routes/`, each with a fixed prefix. Verified: `routes/__init__.py`,
+`routes/_metrics_common.py`, and `routes/_body_common.py` define no routes of their own (0
+`@router.*` decorator sites in any of the three); `_metrics_common.py` holds `metrics_response`,
+the response shape `training.py` and `tuning.py` both answer in, and `_body_common.py` holds
+`EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
+browser must send a preflighted request rather than reaching the handler as a simple one.
 
 Total HTTP routes at HEAD: 95 (6 on `app.py` plus 89 across the 16 route modules, both
 counts obtained this session by grepping `@app.get/post(` and `@router.get/post(` and
@@ -746,12 +750,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:394` |  <!-- queued: P5-105 delete -->
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:489` |
-| GET | `/jobs/{job_id}` | `get_job` | `routes/inference.py:507` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:524` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:538` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:548` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:395` |  <!-- queued: P5-105 delete -->
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:490` |
+| GET | `/jobs/{job_id}` | `get_job` | `routes/inference.py:508` |
+| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:525` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:539` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:549` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -826,29 +830,29 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/validate` | `preflight_config_route` | `routes/training.py:150` |  <!-- queued: P5-104 delete -->
-| POST | `/launch` | `launch_training_route` | `routes/training.py:164` |  <!-- queued: P5-113 delete -->
-| GET | `/runs` | `list_runs_route` | `routes/training.py:184` |
-| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:200` |
-| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:207` |
-| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:227` |
-| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:242` |  <!-- queued: P5-110 delete -->
-| POST | `/compare` | `compare_runs_route` | `routes/training.py:265` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:319` |
+| POST | `/validate` | `preflight_config_route` | `routes/training.py:151` |  <!-- queued: P5-104 delete -->
+| POST | `/launch` | `launch_training_route` | `routes/training.py:165` |  <!-- queued: P5-113 delete -->
+| GET | `/runs` | `list_runs_route` | `routes/training.py:185` |
+| GET | `/runs/{run_id}` | `get_run` | `routes/training.py:201` |
+| POST | `/runs/{run_id}/tensorboard` | `launch_run_tensorboard` | `routes/training.py:208` |
+| POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:228` |
+| GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:243` |  <!-- queued: P5-110 delete -->
+| POST | `/compare` | `compare_runs_route` | `routes/training.py:266` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:320` |
 
 ### routes/tuning.py, prefix `/api/tuning` (9 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:219` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:254` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:267` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:296` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:329` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:353` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:431` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:447` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:461` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:220` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:255` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:268` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:297` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:330` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:354` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:432` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:448` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:462` |
 
 ### 11 routes with no located frontend caller
 
@@ -953,15 +957,19 @@ launches `.claude/hooks/claude_context_launch.cmd` with `EMBEDDING_PROVIDER`,
 
 `scripts/` (repo root): a non-API surface, not imported by `tcip_mcp`, `tcip_web`, or
 `tcip_annotation` package code; each file is a standalone script invoked directly
-(`python scripts/<name>.py`). 25 files at HEAD excluding `README.md` and `__pycache__`:
-`_paths.py`, `calibrate_operating_point.py`, `check_dataset_identity.py`,
-`compute_disagreements.py`, `cross_family_ask.py`, `distill_learnings.py`, `doctor.py`,
+(`python scripts/<name>.py`). 32 files in `scripts/`, excluding `README.md` and
+`__pycache__` (31 `.py` files and one `.ps1` file):
+`_paths.py`, `_store_bootstrap.py`, `adopt_store.py`, `calibrate_operating_point.py`,
+`check_architecture_citations.py`, `check_architecture_doc.py`, `check_dataset_identity.py`,
+`compute_disagreements.py`, `cross_family_ask.py`,
+`distill_learnings.py`, `doctor.py`, `drop_trait_spec_provenance.py`, `export_store.py`,
 `foreground_fn_candidates.py`, `gate_baseline.py`, `generate_favicon.ps1`,
-`inspect_baseline_weights.py`, `inspect_gps_exif.py`, `list_tools.py`,
-`plant_aware_group_splits.py`, `prove_test_fails_before.py`, `render_candidates_tile.py`,
-`shp_to_plant_csv.py`, `smoke_fence_e2e.py`, `smoke_phenology_e2e.py`,
-`smoke_terminal_e2e.py`, `verify_citations.py`, `verify_claims.py`,
-`verify_doc_examples.py`, `verify_skill_traits.py`, `watch_agent_chat.py`.
+`generate_frontend_routes.py`, `inspect_baseline_weights.py`, `inspect_gps_exif.py`,
+`list_tools.py`, `plant_aware_group_splits.py`, `prove_test_fails_before.py`,
+`render_candidates_tile.py`, `shp_to_plant_csv.py`, `smoke_fence_e2e.py`,
+`smoke_phenology_e2e.py`, `smoke_terminal_e2e.py`, `verify_citations.py`,
+`verify_claims.py`, `verify_doc_examples.py`, `verify_skill_traits.py`,
+`watch_agent_chat.py`.
 
 
 ## On-disk formats
@@ -1764,15 +1772,15 @@ Phase 3 verdict: single.
 ## S37. traits.py trait specs against crops.yml controlled vocabulary
 
 Must agree: a registered trait's delivered phenotypes and units exist in the crops.yml vocabulary.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:232` (`def crops_yml_path(`, the one placement of `.github/skills/crops/crops.yml`, loaded once for every reader of it by `_crops_traits`, line 228).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:275` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:222` (`def crops_yml_path(`, the one placement of `.github/skills/crops/crops.yml`, loaded once for every reader of it by `_crops_traits`, line 228).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:265` (`_spec_from_config` cross-checks each spec against `_crops_vocab`, line 241) and `scripts/verify_skill_traits.py:46` (`load_vocab` checks a skill's trait tokens through that same read, and refuses an empty vocabulary rather than reporting a clean skill).
 Phase 3 verdict: single.
 
 ## S38. Per-project trait spec records .tcip/state/trait_specs/*.json
 
 Must agree: the MCP writer, the loader, and the GUI trait list agree on the spec fields and the reason a spec was skipped.
-Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:317` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 351 and `trait_spec_key` at line 365 addressing one spec).
-Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:391` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:479` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
+Side A: `packages/tcip-mcp/src/tcip_mcp/traits.py:307` (`def trait_specs_dir(`, the one placement, with `TRAIT_SPECS_STORE` at line 351 and `trait_spec_key` at line 365 addressing one spec).
+Side B: `packages/tcip-mcp/src/tcip_mcp/traits.py:381` (`load_trait_specs_with_errors`, the one scan and the one skip-reason list) and `:479` (`write_trait_spec_fields`, the one write, reading and merging compare-and-set against the version it read). `packages/tcip-web/src/tcip_web/routes/results.py:443` and `scripts/doctor.py:211` name the project and let the placement resolve here.
 Phase 3 verdict: single.
 
 ## S39. Phenology CSV column vocabulary
@@ -1856,14 +1864,14 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:547` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:548` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:56` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:318` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:319` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
