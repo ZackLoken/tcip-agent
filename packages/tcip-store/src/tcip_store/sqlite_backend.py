@@ -263,17 +263,66 @@ def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
     )
 
 
-def open_verified(db_path: Path) -> sqlite3.Connection:
+def set_wal(conn: sqlite3.Connection) -> str:
+    """Put one connection's database into WAL, returning the mode it reports afterwards.
+
+    Kept apart from :func:`open_verified` because the caller has to decide where this runs.
+    SQLite takes an exclusive lock to change journal mode and does not consult the busy handler
+    while doing it, so this returns SQLITE_BUSY at once whenever another connection has the
+    database open, however long a busy timeout says to wait. It is only safe under the
+    transition lock, which is the one place no second connection exists.
+    """
+    return str(conn.execute("pragma journal_mode = wal").fetchone()[0]).lower()
+
+
+def convert_to_wal(db_path: Path) -> None:
+    """Put a freshly installed database into WAL, before anything else can open it.
+
+    Neither publication path can build a WAL database directly, because WAL keeps committed data
+    in a sidecar the atomic install does not carry, so the installed file starts in rollback mode
+    and something has to convert it. The one safe moment is this one: still under the transition
+    lock, with the database installed and no other connection against it. Left to each opener
+    instead, the conversion is a race SQLite refuses without ever consulting a busy timeout, so a
+    thread arriving while another holds the database open fails at once rather than waiting.
+
+    Every path that installs a database calls this, the backend's own publication and adoption
+    alike. A database installed without it reads as unusable to the next opener that has no root
+    to lock on, which is what an adopted root's second pass and its export both are.
+    """
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    try:
+        mode = set_wal(conn)
+        if mode != "wal":
+            raise BackendUnavailable(
+                f"{db_path} would not take WAL journal mode at publication and reported "
+                f"{mode!r}: a rollback-journal database blocks every reader behind the "
+                "writer, which is not the exclusion this backend declares"
+            )
+    finally:
+        conn.close()
+
+
+def open_verified(db_path: Path, root: str | None = None,
+                  timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> sqlite3.Connection:
     """Open a published database, verify it, and leave it in WAL at full synchronous.
 
     Identity is checked before anything is set, since switching a database to WAL is a write.
+
+    A database this backend published is already in WAL, set once under the transition lock, so
+    the usual open only reads the mode back. One that is not (a database adopted from files, or
+    a publication whose transition did not complete) is converted here, and ``root`` is what
+    makes that safe: the conversion runs under the same transition lock publication uses, so
+    openers serialize on it instead of racing each other. Without a root there is no lock to
+    take, and a non-WAL database is refused rather than converted by a racing pragma, since
+    that pragma fails the moment a second connection exists and no timeout changes it.
     """
     conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
     try:
         verify_identity(conn, db_path)
         mode = str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
-        if mode != "wal":
-            mode = str(conn.execute("pragma journal_mode = wal").fetchone()[0]).lower()
+        if mode != "wal" and root is not None:
+            with transition_lock(root, timeout_s=timeout_s):
+                mode = set_wal(conn)
         if mode != "wal":
             raise BackendUnavailable(
                 f"{db_path} would not take WAL journal mode and reported {mode!r}: a "
@@ -392,7 +441,7 @@ class SqliteBackend:
             for layout in layouts:
                 self._refuse_unconformed(root, layout)
             self._publish(db_path, root, layouts, keys, timeout_s)
-        conn = open_verified(db_path)
+        conn = open_verified(db_path, root, self.lock_timeout_s)
         try:
             self._verify_layouts(conn, root, layouts, slot)
         except BaseException:
@@ -625,6 +674,7 @@ class SqliteBackend:
                 self._build(temp)
                 _fsync_path(temp)
                 _install_without_clobbering(temp, db_path)
+                convert_to_wal(db_path)
             except BaseException:
                 _remove_quietly(str(temp))
                 raise
@@ -689,11 +739,20 @@ class SqliteBackend:
         return StoreError(f"the store database under {root} refused the operation: {exc}")
 
     @contextmanager
-    def _mapped(self, keys: tuple[Key, ...], waited_s: float = 0.0) -> Iterator[None]:
+    def _mapped(self, keys: tuple[Key, ...], waited_s: float | None = None) -> Iterator[None]:
+        """Turn a driver error raised inside into this layer's own refusal.
+
+        The wait it reports is measured here rather than taken from the caller's configured
+        timeout. A refusal that names the timeout instead reads as a lock held for the full
+        wait, which sent two sessions looking for contention behind a failure that took
+        milliseconds. A caller that already knows the true elapsed time passes it.
+        """
+        started = time.monotonic()
         try:
             yield
         except sqlite3.Error as exc:
-            raise self._translate(exc, keys, waited_s) from exc
+            elapsed = time.monotonic() - started if waited_s is None else waited_s
+            raise self._translate(exc, keys, elapsed) from exc
 
     def _set_busy_timeout(self, conn: sqlite3.Connection, timeout_s: float) -> None:
         conn.execute(f"pragma busy_timeout = {int(max(0.0, timeout_s) * 1000)}")
@@ -716,7 +775,7 @@ class SqliteBackend:
         nothing written.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
-        with self._mapped(keys, timeout):
+        with self._mapped(keys):
             conn = self._connection(
                 keys[0].root, tuple(key.store for key in keys), keys, timeout
             )
@@ -728,7 +787,7 @@ class SqliteBackend:
         except sqlite3.Error as exc:
             raise self._translate(exc, keys, time.monotonic() - started) from exc
         try:
-            with self._mapped(keys, timeout):
+            with self._mapped(keys):
                 self._guard_first_marker(conn, keys)
                 yield conn
                 conn.execute("commit")
