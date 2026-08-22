@@ -315,3 +315,57 @@ def test_the_codex_model_is_read_from_the_config_and_its_source_recorded(runner,
 
     assert runner.resolve_codex_model(None) == ("gpt-from-config", str(config))
     assert runner.resolve_codex_model("gpt-from-flag") == ("gpt-from-flag", "flag")
+
+
+def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
+    runner, tmp_path, monkeypatch, capsys
+):
+    """The exit code is not the only signal a refused run gets.
+
+    A caller that pipes this script somewhere takes the pipeline's status from the last command,
+    so the refusal has to be legible in the output itself, at the end, where a tail still shows it.
+    """
+    monkeypatch.setattr(runner.subprocess, "run",
+                        _stub_run(json.dumps({"status": "SUCCESS", "response": "  "})))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "antigravity", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "antigravity",
+        "--model", "stub-model", "--cwd", str(tmp_path),
+        "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() != 0
+    captured = capsys.readouterr()
+    assert "RUN FAILED" in captured.out
+    assert "antigravity" in captured.out.split("RUN FAILED")[1]
+    assert "no answer text" in captured.out
+    # Last, so a tail of the output cannot cut the verdict off in favour of a "wrote ..." line.
+    assert captured.out.rstrip().splitlines()[-1].strip().startswith("Nothing here is reviewable")
+    assert "RUN FAILED" in captured.err
+
+
+def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
+    runner, tmp_path, monkeypatch, capsys
+):
+    """The verdict must admit a good run too, not only refuse a bad one."""
+    monkeypatch.setattr(runner.subprocess, "run", _stub_run("a real answer from the harness"))
+    monkeypatch.setattr(runner, "harness_version", lambda *a, **k: "stub-version")
+    monkeypatch.setattr(runner.shutil, "which", lambda *a, **k: "/stub/harness")
+    monkeypatch.setitem(runner.BUILDERS, "antigravity", lambda *a, **k: (["stub", "argv"], None))
+    (tmp_path / "q.txt").write_text("question", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "cross_family_ask.py", "--question-id", "qid",
+        "--prompt-file", str(tmp_path / "q.txt"), "--families", "antigravity",
+        "--model", "stub-model", "--cwd", str(tmp_path),
+        "--out", str(tmp_path / "out"), "--timeout", "5",
+    ])
+
+    assert runner.main() == 0
+    captured = capsys.readouterr()
+    assert "RUN OK: 1 of 1 families answered." in captured.out
+    assert "RUN FAILED" not in captured.out
+    assert "RUN FAILED" not in captured.err
