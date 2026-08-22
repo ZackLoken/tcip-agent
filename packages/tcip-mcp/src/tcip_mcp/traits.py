@@ -15,8 +15,8 @@ the breeder hasn't decided yet, rather than refusing to calibrate at all: nobody
 answer what a delivered number needs to be reliable for before any result exists to judge it
 against, so the real confirmation point is the delivered result itself (the review-confirmation
 loop), not a blind precondition. Either field, once a real answer is recorded, gets written through
-``write_trait_spec_fields`` with a ``provenance`` entry naming who decided and how, and is read from
-the recorded value on every later call. A trait whose config omits either field must resolve its own
+``write_trait_spec_fields`` and is read from the recorded value on every later call. A trait whose
+config omits either field must resolve its own
 default or derivation, never silently inherit another trait's value. ``resolve_operating_point``
 stamps whether a given run's ``count_objective`` was trait-authored or the platform default, so the
 distinction is never silently lost downstream.
@@ -92,9 +92,7 @@ class TraitSpec:
     # to COUNT_UNBIASED (the common case for a fraction/ratio phenotype) rather than refusing to
     # calibrate, since nobody can meaningfully answer this before a result exists to judge it
     # against, stamping the run's provenance as trait-authored or platform-default so the
-    # distinction is never lost downstream. Record a real breeder answer via
-    # ``write_trait_spec_fields``, with a ``provenance`` entry naming who decided and why, once one
-    # exists.
+    # distinction is never lost downstream. Record a real breeder answer via write_trait_spec_fields.
     count_objective: str = ""
     # What "a hit" means when validating counts (center_match vs iou_match), not authored: derived
     # once from real GT the first time it's needed and recorded via
@@ -201,14 +199,6 @@ class TraitSpec:
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
     notes: str = ""
-    # Per-field provenance: who actually asserted each semantic choice above, and how firmly, so a
-    # spec's own history is legible instead of living only in a session's memory or, worse, a fabricated
-    # comment. Each entry is ``"<field>: <kind>, <note>"``; ``<kind>`` is one of
-    # domain_expert_confirmed / domain_expert_correction / agent_proposed_unvalidated /
-    # agent_recommended_unconfirmed / vocabulary_derived / data_derived_at_runtime. Not a validation
-    # gate, nothing reads this to decide anything; it exists so the next reader (human or agent) does
-    # not have to guess, or worse, invent, why a field holds the value it does.
-    provenance: tuple[str, ...] = ()
 
 
 class TraitUnknownError(KeyError):
@@ -223,7 +213,7 @@ class TraitUnknownError(KeyError):
 
 _TRAIT_SPECS_RELPATH = Path(".tcip") / "state" / "trait_specs"
 _SPEC_FIELDS = {f.name for f in fields(TraitSpec)}
-_TUPLE_FIELDS = {"milestone_fractions", "delivers", "provenance"}
+_TUPLE_FIELDS = {"milestone_fractions", "delivers"}
 
 SPEC_SUFFIX = ".json"
 """The canonical spec-file suffix, and the only one the store's locator addresses."""
@@ -438,11 +428,10 @@ def load_trait_specs(
 
 
 def write_trait_spec_fields(
-    trait_name: str, fields_: dict, provenance_entries: list[str] | tuple[str, ...],
+    trait_name: str, fields_: dict,
     specs_dir: Path | None = None, *, project_root: str | Path | None = None,
 ) -> TraitSpec:
-    """Update one or more fields on an already-registered trait spec, appending provenance
-    entries recording who asserted the change and how firmly.
+    """Update one or more fields on an already-registered trait spec.
 
     Refuses (raises ``ValueError``) if the trait has no spec record on file, creating a new trait
     is a separate, still-manual authoring step, out of scope here. Re-validates the merged spec
@@ -475,7 +464,6 @@ def write_trait_spec_fields(
 
         merged = dict(data)
         merged.update(fields_)
-        merged["provenance"] = tuple(data.get("provenance") or ()) + tuple(provenance_entries)
 
         spec, reason = _spec_from_config(merged, _crops_vocab())
         if spec is None:
@@ -516,7 +504,7 @@ of ``TraitSpec`` is not here."""
 
 _CARRIED_FORWARD_SPEC_FIELDS = (
     "localization", "localization_tolerance", "localization_tolerance_frac",
-    "sliver_policy", "sliver_frac", "provenance",
+    "sliver_policy", "sliver_frac",
 )
 """Fields ``author_trait_spec`` never authors: copied unchanged from an existing spec on a
 restatement, or left at ``TraitSpec``'s own dataclass defaults on first creation."""

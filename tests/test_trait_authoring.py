@@ -205,43 +205,38 @@ def test_write_trait_spec_fields_updates_and_persists(tmp_path: Path):
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
     updated = traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 2.5}, ["count_bias_tolerance_frac: domain_expert_confirmed"],
-        specs_dir=specs_dir,
+        "leaf", {"count_bias_tolerance_frac": 2.5}, specs_dir=specs_dir,
     )
     assert updated.count_bias_tolerance_frac == 2.5
-    assert "count_bias_tolerance_frac: domain_expert_confirmed" in updated.provenance
     # persisted, not just returned: a fresh load sees the same value
     reloaded = load_trait_specs(specs_dir=specs_dir)
     assert reloaded[0].count_bias_tolerance_frac == 2.5
 
 
-def test_write_trait_spec_fields_appends_provenance_not_replaces(tmp_path: Path):
-    specs_dir = tmp_path / "trait_specs"
-    _write_spec(specs_dir, "leaf", {
-        "delivers": ["leaf_length"], "provenance": ["name: vocabulary_derived"],
-    })
-    updated = traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 3.0}, ["count_bias_tolerance_frac: domain_expert_correction"],
-        specs_dir=specs_dir,
-    )
-    assert updated.provenance == (
-        "name: vocabulary_derived", "count_bias_tolerance_frac: domain_expert_correction",
-    )
-
-
 def test_write_trait_spec_fields_refuses_when_trait_not_already_registered(tmp_path: Path):
     specs_dir = tmp_path / "trait_specs"
     with pytest.raises(ValueError, match="no trait spec record"):
-        traits.write_trait_spec_fields("nonexistent", {"count_bias_tolerance_frac": 1.0}, [], specs_dir=specs_dir)
+        traits.write_trait_spec_fields("nonexistent", {"count_bias_tolerance_frac": 1.0}, specs_dir=specs_dir)
 
 
 def test_write_trait_spec_fields_refuses_an_invalid_merged_spec(tmp_path: Path):
     specs_dir = tmp_path / "trait_specs"
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
     with pytest.raises(ValueError, match="invalid spec"):
-        traits.write_trait_spec_fields("leaf", {"not_a_real_field": 3}, [], specs_dir=specs_dir)
+        traits.write_trait_spec_fields("leaf", {"not_a_real_field": 3}, specs_dir=specs_dir)
     # refusal means nothing was written: the spec is unchanged
     assert load_trait_specs(specs_dir=specs_dir)[0].delivers == ("leaf_length",)
+
+
+def test_write_trait_spec_fields_refuses_a_spec_still_carrying_the_deleted_provenance_field(tmp_path: Path):
+    """A spec record left over with the retired ``provenance`` field is an unknown field to the
+    loader, the same refusal any other unrecognized field gets: no special-cased tolerance for it."""
+    specs_dir = tmp_path / "trait_specs"
+    _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "provenance": ["name: vocabulary_derived"]})
+    assert load_trait_specs(specs_dir=specs_dir) == []
+    specs, errors = load_trait_specs_with_errors(specs_dir=specs_dir)
+    assert specs == []
+    assert "provenance" in errors[0]["reason"]
 
 
 def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -250,10 +245,7 @@ def test_update_trait_spec_fields_tool_end_to_end(tmp_path: Path, monkeypatch: p
     specs_dir = tmp_path / "trait_specs"
     monkeypatch.setattr(traits, "_TRAIT_SPECS_RELPATH", specs_dir)
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"], "count_bias_tolerance_frac": 1.0})
-    result = update_trait_spec_fields(
-        str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0},
-        ["count_bias_tolerance_frac: domain_expert_confirmed"],
-    )
+    result = update_trait_spec_fields(str(tmp_path), "leaf", {"count_bias_tolerance_frac": 4.0})
     assert result["count_bias_tolerance_frac"] == 4.0
     assert get_trait("leaf").count_bias_tolerance_frac == 4.0
     assert result["superseded"] == []
@@ -296,9 +288,7 @@ def test_a_spec_write_that_lost_the_race_is_refused_rather_than_silently_winning
     _write_spec(specs_dir, "leaf", {"delivers": ["leaf_length"]})
     key = traits.trait_spec_key(specs_dir, "leaf")
     stale = ts.read_versioned(key).version
-    traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 1.0}, ["count_bias_tolerance_frac: agent_proposed_unvalidated"],
-        specs_dir=specs_dir)
+    traits.write_trait_spec_fields("leaf", {"count_bias_tolerance_frac": 1.0}, specs_dir=specs_dir)
 
     with pytest.raises(ts.VersionConflict):
         ts.replace(key, {"name": "leaf", "delivers": ["leaf_length"]}, expect=stale)
@@ -374,8 +364,7 @@ def test_a_fresh_sqlite_project_authors_and_updates_a_spec_with_no_specs_directo
     assert [s.name for s in load_trait_specs(specs_dir=specs_dir)] == ["leaf"]
 
     updated = traits.write_trait_spec_fields(
-        "leaf", {"count_bias_tolerance_frac": 1.0},
-        ["count_bias_tolerance_frac: domain_expert_confirmed"], specs_dir=specs_dir,
+        "leaf", {"count_bias_tolerance_frac": 1.0}, specs_dir=specs_dir,
     )
     assert updated.count_bias_tolerance_frac == 1.0
     assert not specs_dir.exists()

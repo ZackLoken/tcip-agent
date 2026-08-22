@@ -231,6 +231,61 @@ def test_resolve_match_criterion_derives_and_persists_when_unrecorded(tmp_path: 
     assert get_trait("leaf").localization == "center_match"
 
 
+def test_resolve_match_criterion_audits_the_derived_localization_write(tmp_path: Path):
+    """The persisted write above is a platform mutation, so it carries an audit line naming the
+    trait, the field, the value and the derivation basis, in this project's own log."""
+    import tcip_store as ts
+
+    from tcip_mcp import audit as audit_module
+
+    _write_bare_trait("leaf")
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+    result = resolve_match_criterion("leaf", _per_image(small_boxes))
+    assert result["kind_source"] == "data_derived_at_runtime"
+
+    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+    rows = [r for r in ts.read_log(key).records if r["tool"] == "trait_spec_field_derived"]
+    assert len(rows) == 1
+    args = rows[0]["arguments"]
+    assert args["trait"] == "leaf"
+    assert args["field"] == "localization"
+    assert args["value"] == "center_match"
+    assert "GT boxes" in args["basis"]
+
+
+def test_resolve_match_criterion_raises_when_the_derived_audit_append_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The spec write already committed by the time the audit line is attempted, so a caller told
+    only by a swallowed warning would read the write as never having happened and blind-retry it.
+    The append failing must raise and name that committed write, not vanish into a log line."""
+    import tcip_store as ts
+
+    from tcip_mcp import audit as audit_module
+    from tcip_mcp.traits import get_trait
+
+    _write_bare_trait("leaf")
+    small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
+
+    real_append = audit_module.append
+
+    def _flaky_append(key, *args, **kwargs):
+        if key.store == audit_module.AUDIT_LOG_STORE:
+            raise RuntimeError("the audit log could not be appended to")
+        return real_append(key, *args, **kwargs)
+
+    monkeypatch.setattr(audit_module, "append", _flaky_append)
+
+    with pytest.raises(audit_module.AuditEntryNotWritten):
+        resolve_match_criterion("leaf", _per_image(small_boxes))
+
+    # the spec write is not routed through audit_module.append, so it already landed.
+    assert get_trait("leaf").localization == "center_match"
+    key = audit_module.audit_log_key(audit_module.platform_audit_scope())
+    rows = [r for r in ts.read_log(key).records if r["tool"] == "trait_spec_field_derived"]
+    assert rows == []
+
+
 def test_derived_localization_kind_is_read_back_as_recorded_on_the_next_call(tmp_path: Path):
     """A kind derived once has to land where the registry reads: the second call on the same
     project reports it as recorded rather than deriving it again from that call's own GT, which is

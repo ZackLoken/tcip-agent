@@ -107,10 +107,9 @@ def build_plant_mapping(
 @mcp.tool()
 @audited
 def update_trait_spec_fields(
-    project_root: str, trait_name: str, fields: dict, provenance_entries: list[str]
+    project_root: str, trait_name: str, fields: dict
 ) -> dict:
-    """Update one or more fields on an already-registered trait's spec, recording who asserted
-    the change and how firmly.
+    """Update one or more fields on an already-registered trait's spec.
 
     Hand-editing a trait spec's YAML directly bypasses the audit record and skips re-validation.
     This refuses if the trait has no existing spec file (creating a new
@@ -136,16 +135,12 @@ def update_trait_spec_fields(
         trait_name: Name of the already-registered trait whose spec file to update.
         fields: `TraitSpec` field names to new values, merged into the existing spec (unknown
             fields, off-vocab `delivers` entries, or an invalid value refuse the whole write).
-        provenance_entries: Free-text entries appended to the spec's existing `provenance` tuple,
-            recording who asserted the change and how firmly.
     """
     import dataclasses
 
     from tcip_mcp import operationalization, traits
 
-    spec = traits.write_trait_spec_fields(
-        trait_name, fields, provenance_entries, project_root=project_root
-    )
+    spec = traits.write_trait_spec_fields(trait_name, fields, project_root=project_root)
     updated = {
         k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
     }
