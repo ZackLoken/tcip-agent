@@ -57,6 +57,7 @@ from tcip_store.sqlite_backend import (
     _HELD_STORES,
     _install_without_clobbering,
     encode_parts,
+    convert_to_wal,
     open_verified,
 )
 
@@ -235,6 +236,7 @@ def adopt_root(
             _fsync_path(temp)
             _revalidate(loaded)
             _install_without_clobbering(temp, db_path)
+            convert_to_wal(db_path)
         except BaseException:
             _remove_quietly(str(temp))
             raise
