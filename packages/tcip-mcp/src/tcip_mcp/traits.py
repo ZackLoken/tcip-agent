@@ -195,6 +195,9 @@ class TraitSpec:
     # an honest, documented limitation of a single scalar field, not a design this platform resolves
     # further here.
     regression_skill_floor: float | None = None
+    # Max relative disagreement a physical-scale reference half may show (scale_calibration.
+    # resolve_physical_scale); None has no platform-provisional fallback, unlike count_bias_tolerance_frac.
+    scale_tolerance_frac: float | None = None
     # crops.yml controlled-vocab trait names this spec is authored to deliver, the anti-fabrication
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
@@ -497,7 +500,7 @@ _AUTHORED_SPEC_FIELDS = (
     "delivers", "positive_class_name", "milestone_fractions", "milestone_on", "majority_milestone",
     "majority_provisional", "phenology_prefix", "majority_label", "count_objective",
     "count_bias_tolerance_frac", "count_error_tolerance", "classifier_agreement_floor",
-    "ordinal_agreement_floor", "regression_skill_floor", "notes",
+    "ordinal_agreement_floor", "regression_skill_floor", "scale_tolerance_frac", "notes",
 )
 """Every ``TraitSpec`` field ``author_trait_spec`` accepts; see its own docstring for why the rest
 of ``TraitSpec`` is not here."""
@@ -614,6 +617,7 @@ def author_trait_spec(
     classifier_agreement_floor: float | None = None,
     ordinal_agreement_floor: float | None = None,
     regression_skill_floor: float | None = None,
+    scale_tolerance_frac: float | None = None,
     notes: str = "",
     rationale: str,
     relayed_note: str = "",
@@ -677,6 +681,7 @@ def author_trait_spec(
         "classifier_agreement_floor": classifier_agreement_floor,
         "ordinal_agreement_floor": ordinal_agreement_floor,
         "regression_skill_floor": regression_skill_floor,
+        "scale_tolerance_frac": scale_tolerance_frac,
         "notes": notes,
     }
     if existing_spec.value is not None:

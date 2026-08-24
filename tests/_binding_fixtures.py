@@ -42,13 +42,14 @@ def file_validation_record(
 ) -> dict:
     """File the record ``stamp`` claims, and return the stamp with its pointer merged in.
 
-    ``pred_dirs`` are the buckets a count claim covers, hashed as they are on disk now, so they must
-    already hold the prediction files the claim is about. The other documents cover no bucket's
-    content and take none.
+    ``pred_dirs`` are the buckets a claim covers, hashed as they are on disk now, so they must
+    already hold what the claim is about: prediction bytes for ``operating_point``, image stems for
+    ``resolve_scale`` (a scale claim is a fact about the bucket's imagery, not its predictions, the
+    same distinction ``seal_validation`` draws). The other documents cover no bucket and take none.
     """
     from tcip_mcp.experiments import _append_validation, create_experiment, experiment_exists
     from tcip_mcp.pipelines.resolution import _DOCUMENT_PARAM, claim_payload, cleared_reference
-    from tcip_mcp.prediction_buckets import bucket_content_digest
+    from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
 
     param_key, validation_kind = _DOCUMENT_PARAM[document]
     reference = cleared_reference(
@@ -56,7 +57,8 @@ def file_validation_record(
         validation_kind=validation_kind,
     )
     root = Path(dataset_root).resolve()
-    covered = {Path(d).resolve().relative_to(root).as_posix(): bucket_content_digest(d)
+    digest_fn = bucket_content_digest if document == "operating_point" else bucket_stems_digest
+    covered = {Path(d).resolve().relative_to(root).as_posix(): digest_fn(d)
                for d in pred_dirs}
     host = producing_experiment_id if producing_experiment_id is not _HOST else experiment_id
 
@@ -94,7 +96,7 @@ def write_bound_sidecar(
     from tcip_mcp.pipelines.resolution import write_sidecar
 
     covered = pred_dirs if pred_dirs is not None else (
-        [pred_dir] if document == "operating_point" else [])
+        [pred_dir] if document in ("operating_point", "resolve_scale") else [])
     bound = file_validation_record(
         stamp, document=document, dataset_root=dataset_root, pred_dirs=covered, **record)
     write_sidecar(pred_dir, bound, document)

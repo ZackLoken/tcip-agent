@@ -11,6 +11,7 @@ reference of its own kind, so an annotations-kind stamp can never clear a physic
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -285,13 +286,20 @@ def _write_scale_sidecar(path, *, validated_against, value=0.05, unit="mm", capt
 
 
 def _write_bound_scale_sidecar(path, dataset_root, *, value=0.05, unit="mm", capture_id=None,
-                               experiment_id="exp-scale"):
-    """A resolve_scale.json sidecar genuinely answered for by a validation record."""
+                               experiment_id="exp-scale", trait="catkin"):
+    """A resolve_scale.json sidecar genuinely answered for by a validation record.
+
+    ``covered_buckets`` keys a bucket by its dataset-relative path, resolved via
+    ``dataset_layout.dataset_root_of``, which only recognizes a path holding one of
+    ``annotations``/``predictions``/``images``; the bucket is nested under ``predictions`` here so
+    that resolution (and the caller's own ``path`` naming) actually agree.
+    """
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
     from tests._binding_fixtures import write_bound_sidecar
 
+    bucket = Path(dataset_root) / "predictions" / Path(path).name
     stamp = {
-        "validated": True, "trait": "catkin",
+        "validated": True, "trait": trait,
         "operating_point": {
             "scale": {
                 "value": value, "unit": unit, "capture_id": capture_id,
@@ -300,10 +308,10 @@ def _write_bound_scale_sidecar(path, dataset_root, *, value=0.05, unit="mm", cap
             },
         },
     }
-    path.mkdir(parents=True, exist_ok=True)
-    write_bound_sidecar(path, stamp, document="resolve_scale", dataset_root=dataset_root,
+    bucket.mkdir(parents=True, exist_ok=True)
+    write_bound_sidecar(bucket, stamp, document="resolve_scale", dataset_root=dataset_root,
                         experiment_id=experiment_id)
-    return str(path)
+    return str(bucket)
 
 
 def test_read_scale_sidecar_round_trips_a_validated_fixture(tmp_path):
@@ -329,7 +337,7 @@ def test_reconcile_scale_validity_ships_when_validated(tmp_path):
     )
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path)
-    recon = reconcile_scale_validity([d])
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin")
     assert recon["operative"] is True
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
     assert recon["unvalidated_buckets"] == []
@@ -339,7 +347,7 @@ def test_reconcile_scale_validity_missing_sidecar_floors(tmp_path):
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
 
     (tmp_path / "preds").mkdir()
-    recon = reconcile_scale_validity([str(tmp_path / "preds")])
+    recon = reconcile_scale_validity([str(tmp_path / "preds")], unit="mm", trait="catkin")
     assert recon["operative"] is True
     assert recon["validated"] == VALIDATED_FALSE
     assert recon["unvalidated_buckets"] == [str(tmp_path / "preds")]
@@ -348,7 +356,7 @@ def test_reconcile_scale_validity_missing_sidecar_floors(tmp_path):
 def test_reconcile_scale_validity_no_pred_dirs_is_not_operative():
     from tcip_mcp.pipelines.resolution import reconcile_scale_validity
 
-    recon = reconcile_scale_validity([])
+    recon = reconcile_scale_validity([], unit="mm", trait="catkin")
     assert recon["operative"] is False
     assert recon["validated"] is None
 
@@ -361,7 +369,7 @@ def test_reconcile_scale_validity_an_annotations_reference_never_clears_it(tmp_p
     )
 
     d = _write_scale_sidecar(tmp_path / "preds", validated_against=VALIDATED_HELD_OUT)
-    recon = reconcile_scale_validity([d])
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin")
     assert recon["validated"] == VALIDATED_FALSE
 
 
@@ -372,7 +380,8 @@ def test_reconcile_scale_validity_capture_id_mismatch_floors(tmp_path):
     )
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, capture_id="2026-02-10_plot7")
-    recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot9")
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin",
+                                    capture_id="2026-02-10_plot9")
     assert recon["validated"] == VALIDATED_FALSE
     assert recon["unvalidated_buckets"] == [d]
 
@@ -384,7 +393,8 @@ def test_reconcile_scale_validity_capture_id_match_ships(tmp_path):
     )
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, capture_id="2026-02-10_plot7")
-    recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot7")
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin",
+                                    capture_id="2026-02-10_plot7")
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
 
 
@@ -397,7 +407,8 @@ def test_reconcile_scale_validity_unscoped_sidecar_applies_to_any_capture(tmp_pa
     )
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, capture_id=None)
-    recon = reconcile_scale_validity([d], capture_id="2026-02-10_plot7")
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin",
+                                    capture_id="2026-02-10_plot7")
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
 
 
@@ -408,5 +419,27 @@ def test_reconcile_scale_validity_asserted_can_only_lower(tmp_path):
     )
 
     d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path)
-    recon = reconcile_scale_validity([d], asserted=VALIDATED_FALSE)
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin", asserted=VALIDATED_FALSE)
     assert recon["validated"] == VALIDATED_FALSE
+
+
+def test_reconcile_scale_validity_unit_mismatch_floors(tmp_path):
+    """A scale stamped in one linear unit cannot clear a delivery stated in another
+    (count-delivery-door design section 2, rule 4): centimetres cannot answer for millimetres."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
+
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path, unit="cm")
+    recon = reconcile_scale_validity([d], unit="mm", trait="catkin")
+    assert recon["validated"] == VALIDATED_FALSE
+    assert recon["unvalidated_buckets"] == [d]
+
+
+def test_reconcile_scale_validity_trait_mismatch_floors(tmp_path):
+    """A scale earned for one trait does not answer for a delivery of another (the same trait
+    binding P4-86 gives the count/ordinal/regression reconcilers, extended to the scale document)."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
+
+    d = _write_bound_scale_sidecar(tmp_path / "preds", tmp_path)
+    recon = reconcile_scale_validity([d], unit="mm", trait="a_different_trait")
+    assert recon["validated"] == VALIDATED_FALSE
+    assert recon["unvalidated_buckets"] == [d]

@@ -23,6 +23,7 @@ import tcip_mcp.tools.meta_tools  # noqa: F401, E402
 import tcip_mcp.tools.phenology_tools  # noqa: F401, E402
 import tcip_mcp.tools.operationalization_tools  # noqa: F401, E402
 import tcip_mcp.tools.trait_spec_authoring_tools  # noqa: F401, E402
+import tcip_mcp.tools.scale_tools  # noqa: F401, E402
 
 try:
     import tcip_mcp.tools.annotation_tools  # noqa: F401, E402

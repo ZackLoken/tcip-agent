@@ -68,6 +68,28 @@ def bucket_content_digest(*dirs: Path | str, memo: dict[str, str] | None = None)
     return h.hexdigest()[:16]
 
 
+def bucket_stems_digest(*dirs: Path | str) -> str:
+    """Identity of the bucket's own image set: a digest over the sorted, combined stems
+    :func:`bucket_stems` enumerates, never over the prediction files' bytes.
+
+    Used where a claim is a fact about which images a bucket holds rather than about what was
+    predicted on them (a physical-scale calibration, :mod:`tcip_mcp.pipelines.measurement.
+    scale_calibration`): re-exporting predictions over the same images changes nothing this digest
+    covers, so a scale claim stands across a re-export, while an image added to or removed from the
+    bucket changes it, correctly floors the claim, and is a real reason to re-run the calibration.
+    Several directories combine in sorted order, mirroring :func:`bucket_content_digest`'s own
+    combination, so the caller's argument order does not matter.
+    """
+    if not dirs:
+        raise ValueError("bucket_stems_digest needs at least one bucket directory to hash")
+    stems = sorted(bucket_stems(*dirs))
+    h = hashlib.sha256()
+    for stem in stems:
+        h.update(stem.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
 def review_state_dir_of(root: str | Path) -> Path:
     """``<root>/.tcip/state``: the review-verdict store for the dataset at ``root``.
 

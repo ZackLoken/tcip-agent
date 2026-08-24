@@ -107,6 +107,33 @@ def _perimeter_px(binary) -> float:
     return float(((4 - neighbors) * b).sum())
 
 
+def _axes_from_points(pts):
+    """PCA over a raw ``(x, y)`` point cloud -> ``(centroid_xy, principal, secondary,
+    major_unit_vector)``, continuous chord spans with no pixel-inclusive correction.
+
+    The shared core behind :func:`_axes` (which adds the rasterized-mask +1 convention on top of
+    this) and :func:`principal_axis_extent_of_points` (which does not, since a bare coordinate
+    list has no pixel grid to be inclusive over).
+    """
+    import numpy as np
+
+    centroid = pts.mean(axis=0)
+    if pts.shape[0] == 1:  # a single point: no orientation to derive, by convention along x
+        return centroid, 0.0, 0.0, np.array([1.0, 0.0])
+    centered = pts - centroid
+    cov = np.cov(centered, rowvar=False)
+    evals, evecs = np.linalg.eigh(cov)  # ascending eigenvalues; columns are eigenvectors
+    major_vec = evecs[:, -1]
+    minor_vec = evecs[:, 0]
+    if major_vec[0] < 0:  # fix sign so orientation is stable (major_x >= 0)
+        major_vec = -major_vec
+    proj_major = centered @ major_vec
+    proj_minor = centered @ minor_vec
+    principal = float(proj_major.max() - proj_major.min())
+    secondary = float(proj_minor.max() - proj_minor.min())
+    return centroid, principal, secondary, major_vec
+
+
 def _axes(binary):
     """PCA on the foreground pixel coords -> (centroid_xy, principal, secondary, major_unit_vector).
 
@@ -117,21 +144,31 @@ def _axes(binary):
 
     ys, xs = np.nonzero(binary)
     pts = np.stack([xs, ys], axis=1).astype(np.float64)
-    centroid = pts.mean(axis=0)
     if pts.shape[0] == 1:  # a single pixel: 1x1, oriented along x by convention
-        return centroid, 1.0, 1.0, np.array([1.0, 0.0])
-    centered = pts - centroid
-    cov = np.cov(centered, rowvar=False)
-    evals, evecs = np.linalg.eigh(cov)  # ascending eigenvalues; columns are eigenvectors
-    major_vec = evecs[:, -1]
-    minor_vec = evecs[:, 0]
-    if major_vec[0] < 0:  # fix sign so orientation is stable (major_x >= 0)
-        major_vec = -major_vec
-    proj_major = centered @ major_vec
-    proj_minor = centered @ minor_vec
-    principal = float(proj_major.max() - proj_major.min()) + 1.0
-    secondary = float(proj_minor.max() - proj_minor.min()) + 1.0
-    return centroid, principal, secondary, major_vec
+        return pts.mean(axis=0), 1.0, 1.0, np.array([1.0, 0.0])
+    centroid, principal, secondary, major_vec = _axes_from_points(pts)
+    return centroid, principal + 1.0, secondary + 1.0, major_vec
+
+
+def principal_axis_extent_of_points(points: Any) -> float:
+    """The principal-axis extent of a set of ``(x, y)`` points, the same orientation-independent
+    PCA primitive :func:`_axes` computes for ``principal_axis_extent_px``, applied directly to a
+    geometry's own vertices (e.g. a reference object's annotated polygon) rather than a rasterized
+    mask, so a reference object's pixel extent needs no raster to rasterize into and carries no
+    discretization error. A continuous chord span, not pixel-inclusive: the rasterized-mask
+    convention ``_axes`` applies does not apply to raw coordinates.
+
+    ``points`` is a flat sequence of ``(x, y)`` pairs; a multi-ring polygon's rings are flattened
+    together before this is called, since one reference annotation is one object regardless of how
+    many rings its geometry carries.
+    """
+    import numpy as np
+
+    pts = np.asarray(list(points), dtype=np.float64)
+    if pts.shape[0] == 0:
+        raise ValueError("principal_axis_extent_of_points needs at least one point")
+    _centroid, principal, _secondary, _major_vec = _axes_from_points(pts)
+    return principal
 
 
 def _attach_physical(result: dict, scale: float, unit: str) -> None:
