@@ -79,7 +79,7 @@ def _write_raw(pred_dir: Path, stamp: dict, document: str = "operating_point") -
 def _count_validity(pred_dir: Path) -> dict:
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
 
-    return reconcile_operating_point_validity([str(pred_dir)])
+    return reconcile_operating_point_validity([str(pred_dir)], trait=TRAIT)
 
 
 def _delivers(validity: dict) -> bool:
@@ -176,13 +176,14 @@ def test_edited_criterion_under_a_genuine_pointer_floors(tmp_path):
              "validated": True, "trait": TRAIT, "checkpoint_sha256": None}
     bound = write_bound_sidecar(pred_dir, stamp, document="ordinal_operating_point",
                                 dataset_root=root)
-    assert reconcile_ordinal_validity([str(pred_dir)])["validated"] == "held_out_annotations"
+    assert reconcile_ordinal_validity(
+        [str(pred_dir)], trait=TRAIT)["validated"] == "held_out_annotations"
 
     edited = {**bound, "operating_point": {"ordinal": {
         "validated_against": "held_out_annotations", "criterion": "spearman"}}}
     _write_raw(pred_dir, edited, "ordinal_operating_point")
 
-    assert reconcile_ordinal_validity([str(pred_dir)])["validated"] == "false"
+    assert reconcile_ordinal_validity([str(pred_dir)], trait=TRAIT)["validated"] == "false"
 
 
 def test_edited_claim_scope_flag_floors_every_dimension(tmp_path):
@@ -195,13 +196,13 @@ def test_edited_claim_scope_flag_floors_every_dimension(tmp_path):
     pred_dir = _bucket(root)
     stamp = _count_stamp(operating_point=_op(tile_size=640),
                          tile_size_validated="persisted_training_geometry")
-    stamp["claim_scope_validated"] = "same_mosaic_content_identity"
+    stamp["claim_scope_validated"] = "same_mosaic_georeferenced_identity"
     bound = write_bound_sidecar(pred_dir, stamp, dataset_root=root)
 
     dirs = [str(pred_dir)]
     assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
     assert reconcile_tile_size_validity(dirs)["validated"] == "persisted_training_geometry"
-    assert reconcile_claim_scope_validity(dirs)["validated"] == "same_mosaic_content_identity"
+    assert reconcile_claim_scope_validity(dirs)["validated"] == "same_mosaic_georeferenced_identity"
 
     _write_raw(pred_dir, {**bound, "claim_scope_validated": "false"})
 
@@ -310,7 +311,7 @@ def test_claim_scope_reader_floors_an_unbacked_stamp(tmp_path):
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     stamp = _count_stamp()
-    stamp["claim_scope_validated"] = "same_mosaic_content_identity"
+    stamp["claim_scope_validated"] = "same_mosaic_georeferenced_identity"
     _write_raw(pred_dir, stamp)
 
     validity = reconcile_claim_scope_validity([str(pred_dir)])
