@@ -24,9 +24,21 @@ class TrainingSection(BaseModel):
     stages: list[StageSpec] | None = None
 
 
+class ModelSourceSchema(BaseModel):
+    # extra="forbid": a misspelled key here is dropped silently by every reader today; refuse
+    # it by name instead of building at the builder's own defaults.
+    model_config = ConfigDict(extra="forbid")
+    builder: str | None = None
+    builder_kwargs: dict | None = None
+    task: str | None = None
+    in_chans: int | None = None
+    source_files: list[str] | None = None
+    image_stats_sampling: dict | None = None
+
+
 class TrainConfigSchema(BaseModel):
     model_config = ConfigDict(extra="allow", protected_namespaces=())
-    model_source: dict | None = None
+    model_source: ModelSourceSchema | None = None
     data: dict | None = None
     training: TrainingSection | None = None
 

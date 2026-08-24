@@ -65,3 +65,38 @@ def test_stage_spec_tolerates_but_no_longer_declares_lr():
 
     assert "lr" not in StageSpec.model_fields
     StageSpec.model_validate({"freeze_to": -1, "epochs": 5, "lr": 1e-3})  # tolerated
+
+
+def test_model_source_refuses_an_undeclared_key_by_name():
+    """A misspelled model_source key is dropped silently by every reader today; the schema names
+    it rather than building the model at the builder's own defaults."""
+    from tcip_mcp.pipelines.schemas import validate_train_config_schema
+
+    issues = validate_train_config_schema({"model_source": {
+        "builder": "m:f", "builder_kwargs": {}, "anchor_ratio": [0.5, 1.0, 2.0],
+    }})
+    assert any("anchor_ratio" in issue for issue in issues)
+
+
+def test_model_source_admits_every_declared_key():
+    """The rail admits valid work: every declared key, including the sixth
+    (image_stats_sampling), validates with no issue."""
+    from tcip_mcp.pipelines.schemas import validate_train_config_schema
+
+    issues = validate_train_config_schema({"model_source": {
+        "builder": "m:f", "builder_kwargs": {"image_mean": [0.1], "image_std": [0.2]},
+        "task": "detection", "in_chans": 1, "source_files": ["m.py"],
+        "image_stats_sampling": {"windows": [["a.tif", None]], "seed": None,
+                                 "pixel_fraction": 1.0, "window_size": None,
+                                 "max_windows_per_image": None},
+    }})
+    assert issues == []
+
+
+def test_two_band_config_declaring_in_chans_only_in_builder_kwargs_is_checked_at_two():
+    """declared_in_chans is the one fallback both the trainer and the predictor read; a config
+    that only declares in_chans inside builder_kwargs must not silently check against 3."""
+    from tcip_mcp.pipelines.model_build import declared_in_chans
+
+    model_source = {"builder": "m:f", "builder_kwargs": {"num_classes": 1, "in_chans": 2}}
+    assert declared_in_chans(model_source) == 2

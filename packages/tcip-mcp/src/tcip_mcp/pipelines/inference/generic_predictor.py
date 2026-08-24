@@ -18,7 +18,12 @@ if TYPE_CHECKING:
     import numpy as np
 
 from tcip_mcp.pipelines.derivations import probe_channels
-from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, STATE_DICT_KEY, build_model
+from tcip_mcp.pipelines.model_build import (
+    MODEL_SOURCE_KEY,
+    STATE_DICT_KEY,
+    build_model,
+    declared_in_chans,
+)
 from tcip_mcp.pipelines.image_utils import BandGroupRef, load_image, pad_tile, pil_to_tensor
 from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 from tcip_mcp.pipelines.resolution import DEFAULT_NMS_IOU
@@ -129,7 +134,8 @@ class GenericPredictor:
         # Task + input channels come from the bespoke model_source's declared ``task`` / ``in_chans``.
         src = self.model_source or {}
         self.task = src.get("task", "unknown")
-        self.in_chans = int(src.get("in_chans", 3))
+        declared = declared_in_chans(src)
+        self.in_chans = declared if declared is not None else 3
 
     @torch.no_grad()
     def predict(self, image_path: str | Path | BandGroupRef) -> dict:
