@@ -137,14 +137,26 @@ def test_rgb_nested_dataset_fingerprints_byte_identically_before_and_after_the_e
     """The images term's extension set widened from a photographic-only set to
     ``image_utils.IMAGE_EXTS`` (adding ``.heic``/``.npy``/``.npz``/``.bandgroup``); ``.jpg`` was a
     member of both the old and the new set, so an RGB-only dataset under ``images/<date>/`` walks
-    the identical file list and hashes to the identical value either side of the change. The
-    literal below was computed by running this exact fixture through the current implementation
-    (``dataset_fingerprint`` on this module's ``_make_dataset`` at commit ``b1069ca2`` plus this
-    change); reading the old ``_FINGERPRINT_IMAGE_EXTS`` set confirms ``.jpg`` was already in it,
-    so the old code would walk the same one file and produce the same hash.
+    the identical file list and hashes to the identical value either side of the change.
+
+    ``_images_term`` hashes each file's raw bytes, never decoded pixels, so the image is written
+    as fixed literal bytes here rather than through Pillow's JPEG encoder: the literal below then
+    depends on nothing but those fixed bytes and the label/registry writers below, not on
+    Pillow/libjpeg's own encoder version or settings.
     """
-    _make_dataset(tmp_path)
-    assert dataset_fingerprint(tmp_path) == "dcddb61316cfb27f"
+    date = "2026-02-11"
+    (tmp_path / "images" / date).mkdir(parents=True)
+    (tmp_path / "images" / date / "IMG_1.jpg").write_bytes(
+        b"fixed-jpeg-bytes-for-fingerprint-test")
+    (tmp_path / "annotations" / date).mkdir(parents=True)
+    json_io.write_annotations(
+        tmp_path / "annotations" / date / "IMG_1.json",
+        [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 64, 64)
+    class_registry.write_registry(
+        tmp_path / "classes.json",
+        ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)))
+
+    assert dataset_fingerprint(tmp_path) == "34c5da3fe6d87ed4"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):

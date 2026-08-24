@@ -152,12 +152,23 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         bk = model_source.get("builder_kwargs")
         bk = bk if isinstance(bk, dict) else {}
         if bk.get("image_mean") is not None or bk.get("image_std") is not None:
-            sampling = model_source.get("image_stats_sampling")
-            if not isinstance(sampling, dict) or not sampling.get("windows"):
+            from pydantic import ValidationError
+
+            from tcip_mcp.pipelines.schemas import ImageStatsSampling
+
+            raw_sampling = model_source.get("image_stats_sampling")
+            sampling_record: ImageStatsSampling | None = None
+            if isinstance(raw_sampling, dict):
+                try:
+                    sampling_record = ImageStatsSampling.model_validate(raw_sampling)
+                except ValidationError:
+                    sampling_record = None
+            if sampling_record is None or not sampling_record.windows:
                 issues.append(
                     "model_source.builder_kwargs carries image_mean/image_std with no "
-                    "model_source.image_stats_sampling beside it: per-band statistics must "
-                    "record which images they were derived from."
+                    "model_source.image_stats_sampling beside it: per-band statistics must carry "
+                    "a non-empty 'windows' list and a 'pixel_fraction', naming which images they "
+                    "were derived from (see derivations.image_stats_provenance)."
                 )
             else:
                 images_dir = data_cfg.get("images_dir") if isinstance(data_cfg, dict) else None
@@ -168,9 +179,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                         ref_path = src_img if isinstance(src_img, Path) else src_img.manifest_path
                         known.add(str(Path(ref_path).resolve()))
                     bad = sorted({
-                        str(w[0]) for w in sampling["windows"]
-                        if isinstance(w, (list, tuple)) and w
-                        and str(Path(w[0]).resolve()) not in known
+                        label for label, _ in sampling_record.windows
+                        if str(Path(label).resolve()) not in known
                     })
                     image_stats_containment = "checked"
                     if bad:
@@ -386,7 +396,15 @@ def launch_training(
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
-    # What the smoke contract above checked, recorded (not re-gated) on the config every checkpoint embeds.
+    # Canonicalize the shape: the GUI/validated schema nests stages/mixed_precision/batch_size
+    # under ``training``, but the trainer reads them from the top level of run.config, without
+    # this hoist a GUI-launched run silently trains the default single stage. (run_hpo already
+    # normalizes inside _apply_hpo_params.)
+    from tcip_mcp.pipelines.schemas import normalize_train_config
+    config = normalize_train_config(config)
+
+    # Recorded on the copy above, never the caller's own config dict, so a launch never hands
+    # back an argument it silently mutated.
     smoke_report = validation.get("smoke") or {}
     model_contract_record = {
         "subject": "the model as built at launch, before any training step",
@@ -398,13 +416,6 @@ def launch_training(
     }
     check_json_value(model_contract_record, path="model_contract")
     config["model_contract"] = model_contract_record
-
-    # Canonicalize the shape: the GUI/validated schema nests stages/mixed_precision/batch_size
-    # under ``training``, but the trainer reads them from the top level of run.config, without
-    # this hoist a GUI-launched run silently trains the default single stage. (run_hpo already
-    # normalizes inside _apply_hpo_params.)
-    from tcip_mcp.pipelines.schemas import normalize_train_config
-    config = normalize_train_config(config)
 
     from tcip_mcp.experiments import experiments_dir
     from tcip_mcp.pipelines.training.generic_trainer import create_run
@@ -1270,7 +1281,8 @@ def _ensure_experiment(
     branch, which never otherwise touches ``status.json`` at all.
     """
     from tcip_mcp.experiments import (
-        create_experiment, overwrite_config_if_pristine, stamp_run_identity,
+        create_experiment, is_pristine, overwrite_config_if_pristine, read_member, read_metrics,
+        stamp_run_identity, status_key,
     )
 
     created = create_experiment(experiment_id, config, data_source=data_source,
@@ -1279,12 +1291,15 @@ def _ensure_experiment(
         stamp_run_identity(experiment_id, run_id, output_dir)
         return experiment_id
 
-    # overwrite_config_if_pristine is the one implementation of the pristine predicate: call it
-    # rather than recompute the same fact here from get_experiment/n_epochs.
-    overwritten = overwrite_config_if_pristine(experiment_id, config)
-    if "error" not in overwritten:
-        stamp_run_identity(experiment_id, run_id, output_dir)
-        return experiment_id
+    # is_pristine is the one implementation of the predicate: only attempt the overwrite when it
+    # says pristine, so a non-pristine id mints its fresh id below with no refusal audited.
+    status = read_member(status_key(experiment_id), {})
+    state = status.get("state") if isinstance(status, dict) else None
+    if is_pristine(state, bool(read_metrics(experiment_id))):
+        overwritten = overwrite_config_if_pristine(experiment_id, config)
+        if "error" not in overwritten:
+            stamp_run_identity(experiment_id, run_id, output_dir)
+            return experiment_id
 
     fresh_id = f"{experiment_id}_{run_id}"
     logger.warning(
@@ -1318,12 +1333,12 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         # list is a set of units, never a per-example list.
         return sorted(set(getattr(ds, "stems", None) or getattr(ds, "_stems", []) or []))
 
+    from tcip_mcp.experiments import ExperimentTerminal
+
     try:
         from tcip_store import store
 
-        from tcip_mcp.experiments import (
-            ExperimentTerminal, experiment_exists, refuse_if_terminal, split_key, status_key,
-        )
+        from tcip_mcp.experiments import experiment_exists, refuse_if_terminal, split_key, status_key
         from tcip_mcp.pipelines.resolution import dataset_hash
 
         labels_dir = data_cfg.get("labels_dir", "")
@@ -1762,15 +1777,18 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     if task in ("detection", "instance_seg") and not (
         data_cfg.get("label_format") or data_cfg.get("coco_json")
     ):
-        from tcip_mcp.pipelines.data.datasets import dir_label_format
+        from tcip_mcp.pipelines.data.datasets import dir_label_format, first_parseable_labels_json
         _labels, _images = src.get("labels_dir", ""), src.get("images_dir", "")
         if _labels and _images:
             _detected_label_format = dir_label_format(_labels)
             if _detected_label_format == "coco":
+                _offending = first_parseable_labels_json(_labels)
                 raise ValueError(
-                    f"data.labels_dir={_labels!r} holds a dataset-level COCO file; set "
-                    "data.coco_json (or data.label_format='coco') to train on it directly, "
-                    "rather than assembling per-image labels that are not there."
+                    f"data.labels_dir={_labels!r} holds a dataset-level COCO file ({_offending}): "
+                    "if the per-image label files in this directory are the ones that should "
+                    "train, move it out of data.labels_dir; if this COCO export is the intended "
+                    "label source, set data.coco_json (or data.label_format='coco') to train on "
+                    "it directly."
                 )
 
     try:

@@ -222,7 +222,9 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
 
 def test_build_dataset_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path):
     """A dataset-level COCO file sitting in labels_dir must not be assembled from per-image files
-    that are not there; it names data.coco_json as the way to train on it directly."""
+    that are not there; the refusal names the offending file and both remedies (move it out, or
+    point data.coco_json at it), since only the breeder knows which is this dataset's real label
+    source."""
     from tcip_mcp.pipelines.data.datasets import build_dataset
     images = tmp_path / "images"
     labels = tmp_path / "detect"
@@ -231,8 +233,26 @@ def test_build_dataset_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_
     (labels / "dataset.json").write_text(json.dumps(
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
-    with pytest.raises(ValueError, match="coco_json"):
+    with pytest.raises(ValueError, match="coco_json") as excinfo:
         build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
+    assert "dataset.json" in str(excinfo.value)
+    assert "move it out" in str(excinfo.value)
+
+
+def test_autoresolve_json_labels_no_ops_without_an_images_dir(tmp_path):
+    """The json branch already required images_dir before assembling; the coco-detection raise
+    must be guarded the same way, not fire against a labels_dir-only call that has nothing to
+    assemble against either way."""
+    from tcip_mcp.pipelines.data.datasets import _autoresolve_json_labels
+
+    labels = tmp_path / "detect"
+    labels.mkdir()
+    (labels / "dataset.json").write_text(json.dumps(
+        {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
+
+    kwargs = {"labels_dir": str(labels), "images_dir": ""}
+    _autoresolve_json_labels(kwargs, subject=CATKIN, attribute=None, id_map={CATKIN: 0}, date=None)
+    assert "coco_data" not in kwargs and "label_format" not in kwargs
 
 
 def test_build_dataset_respects_explicit_format(tmp_path):

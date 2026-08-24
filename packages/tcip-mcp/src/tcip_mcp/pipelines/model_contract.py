@@ -18,6 +18,7 @@ All torch use is lazy (inside the functions) so importing this module stays chea
 
 from __future__ import annotations
 
+import math
 from typing import Any, Protocol, runtime_checkable
 
 _DETECTION_TASKS = {"detection", "instance_seg"}
@@ -183,13 +184,18 @@ def check_model_contract(
         named_grads = [(name, p.grad) for name, p in model.named_parameters()
                        if getattr(p, "grad", None) is not None]
         grads = [g for _, g in named_grads]
+        # float64: an L2 norm summed in the gradient's own float32 dtype can overflow to inf even
+        # when every element is finite, which would fail check_json_value once this is persisted.
+        gradient_magnitudes = {
+            name: float(g.detach().to(torch.float64).norm()) for name, g in named_grads
+        }
         if not grads:
             issues.append("no parameter received a gradient from the train-mode loss")
         elif not all(torch.isfinite(g).all() for g in grads):
             issues.append("some parameter gradients are not finite")
-        # Magnitudes, not gated on: a parameter whose gradient is all zero passes the presence
-        # check above but reads here as exactly what it is, one per named parameter.
-        report["gradient_magnitudes"] = {name: float(g.detach().norm()) for name, g in named_grads}
+        elif not all(math.isfinite(v) for v in gradient_magnitudes.values()):
+            issues.append("some parameter gradient norms are not finite")
+        report["gradient_magnitudes"] = gradient_magnitudes
     except Exception as exc:  # noqa: BLE001
         issues.append(f"train-mode forward/backward failed: {exc}")
 

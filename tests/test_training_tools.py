@@ -613,6 +613,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
 
 def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
+    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.experiments import (
         config_key, create_experiment, lineage_key, log_metrics, read_metrics, status_key,
         update_status,
@@ -639,6 +640,11 @@ def test_ensure_experiment_mints_fresh_id_instead_of_mutating(tmp_path, monkeypa
     lineage = ts.read(lineage_key("exp1_run_9_0"))
     assert lineage["parent_experiment"] == "exp1"
     assert lineage["data_source"] == "imgs_v2"
+
+    # An ordinary relaunch refuses nothing: overwrite_config_if_pristine is never even attempted
+    # against a non-pristine id, so no experiment_mutation_refused line is appended for it.
+    events = ts.read_log(audit_log_key(tmp_path)).records
+    assert not [e for e in events if e.get("tool") == "experiment_mutation_refused"]
 
 
 def test_ensure_experiment_attaches_to_precreated(tmp_path, monkeypatch):

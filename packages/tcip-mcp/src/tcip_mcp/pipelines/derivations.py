@@ -447,8 +447,15 @@ def derive_block_scale_px(
     return max(tile_size, round(spacing_px)), "GT object-spacing (median nearest-neighbor), floored at tile_size"
 
 
+def _image_stats_label(path) -> str:
+    """The path string both normalization-statistics derivations record for one raster: its own
+    path, or a band group's manifest path when the source is a :class:`BandGroupRef`, the same
+    label ``preflight_config``'s containment check resolves the run's own images to."""
+    return str(getattr(path, "manifest_path", path))
+
+
 def band_normalization_stats(
-    image_paths: Sequence[str | Path], num_channels: int, *, max_images: int = 50,
+    image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, max_images: int = 50,
 ) -> tuple[list[float], list[float], list[str]] | None:
     """Per-band ``(mean, std, paths_read)`` in [0, 1] over *this* dataset's rasters, or ``None``.
 
@@ -457,8 +464,9 @@ def band_normalization_stats(
     broadcast the image to 3, and at any count other than 3 they raise inside the transform.
     Sample the training split and pass ``mean``/``std`` to ``build_detector`` as ``image_mean``/
     ``image_std``; ``paths_read`` (the paths this call actually decoded and accepted, after the
-    ``max_images`` cap and after dropping any raster whose band count disagreed) is provenance for
-    ``model_source.image_stats_sampling``, carried beside ``builder_kwargs`` rather than inside it.
+    ``max_images`` cap and after dropping any raster whose band count disagreed) is what
+    :func:`image_stats_provenance` renders into ``model_source.image_stats_sampling``, carried
+    beside ``builder_kwargs`` rather than inside it.
 
     Derive, then pass; never auto-inject (the ``gt_aspect_ratios`` rule): the factory never reads
     the dataset. Pass the derived values through ``model_source.builder_kwargs`` rather than calling
@@ -481,7 +489,7 @@ def band_normalization_stats(
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
         if moments.add(arr):
-            paths_read.append(str(path))
+            paths_read.append(_image_stats_label(path))
     result = moments.result()
     if result is None:
         return None
@@ -533,7 +541,7 @@ class SampledNormalizationStats:
 
     ``sampling`` names the windows read, the seed that chose them and the pixel fraction they
     cover. A caller passes ``mean``/``std`` to ``build_detector`` through
-    ``model_source.builder_kwargs`` and carries ``sampling`` into the same provenance record, since
+    ``model_source.builder_kwargs`` and this whole result to :func:`image_stats_provenance`, since
     these numbers describe a sample of the rasters and not all of their pixels.
     """
 
@@ -543,8 +551,8 @@ class SampledNormalizationStats:
 
 
 def band_normalization_stats_sampled(
-    image_paths: Sequence[str | Path], num_channels: int, *, seed: int, window_size: int,
-    max_windows_per_image: int, max_images: int = 50,
+    image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, seed: int,
+    window_size: int, max_windows_per_image: int, max_images: int = 50,
 ) -> SampledNormalizationStats | None:
     """Per-band ``(mean, std)`` in [0, 1] over seeded pixel windows of this dataset's rasters.
 
@@ -573,7 +581,7 @@ def band_normalization_stats_sampled(
         try:
             with raster_source.open_raster(path, num_channels) as src:
                 total += src.width * src.height
-                label = str(getattr(path, "manifest_path", path))
+                label = _image_stats_label(path)
                 for rect in raster_source.sample_windows(
                         src.width, src.height, seed=seed, window_size=window_size,
                         max_windows=max_windows_per_image):
@@ -589,6 +597,39 @@ def band_normalization_stats_sampled(
     sampling = raster_source.WindowSampling(
         tuple(read), int(seed), covered / total if total else 0.0)
     return SampledNormalizationStats(mean, std, sampling)
+
+
+def image_stats_provenance(
+    result: "tuple[list[float], list[float], list[str]] | SampledNormalizationStats",
+    *, window_size: int | None = None, max_windows_per_image: int | None = None,
+) -> dict:
+    """Render either band-normalization result into ``model_source.image_stats_sampling``.
+
+    Accepts :func:`band_normalization_stats`'s ``(mean, std, paths_read)`` tuple or
+    :func:`band_normalization_stats_sampled`'s :class:`SampledNormalizationStats`, and returns the
+    mapping ``preflight_config`` checks, that rides beside ``builder_kwargs`` rather than inside
+    it. ``window_size``/``max_windows_per_image`` are the sampled call's own parameters, not
+    carried on ``WindowSampling`` itself, so the caller passes them through here to keep a sampled
+    record reproducible; they are ignored for the exact result.
+    """
+    if isinstance(result, SampledNormalizationStats):
+        sampling = result.sampling
+        return {
+            "windows": [[label, {"x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1}]
+                        for label, r in sampling.windows],
+            "seed": sampling.seed,
+            "pixel_fraction": sampling.pixel_fraction,
+            "window_size": window_size,
+            "max_windows_per_image": max_windows_per_image,
+        }
+    _, _, paths_read = result
+    return {
+        "windows": [[path, None] for path in paths_read],
+        "seed": None,
+        "pixel_fraction": 1.0,
+        "window_size": None,
+        "max_windows_per_image": None,
+    }
 
 
 def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,

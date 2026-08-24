@@ -158,14 +158,17 @@ def test_launch_records_what_the_smoke_contract_checked(
         tmp_path: Path, monkeypatch, recorded_children) -> None:
     """launch_training persists a model_contract record (subject/gating/batch_source/dims/issues/
     gradient_magnitudes) onto the config every checkpoint embeds, so config.json and
-    launch_config.json both carry what the launch-time smoke actually checked."""
+    launch_config.json both carry what the launch-time smoke actually checked, and the caller's
+    own config dict is never the one mutated to carry it."""
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
 
     images_dir, labels_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+    launched_config = _detection_config(images_dir, labels_dir)
+    res = training_tools_launch(launched_config, "")
+    assert "model_contract" not in launched_config
 
     from tcip_mcp.experiments import config_key
     from tcip_mcp.tools.training_tools import launch_config_key

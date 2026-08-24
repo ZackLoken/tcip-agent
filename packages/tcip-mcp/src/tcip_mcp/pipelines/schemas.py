@@ -24,6 +24,35 @@ class TrainingSection(BaseModel):
     stages: list[StageSpec] | None = None
 
 
+class ImageStatsWindow(BaseModel):
+    """One pixel rectangle a sampled band-normalization statistic read, in a raster's own grid."""
+
+    model_config = ConfigDict(extra="forbid")
+    x0: int
+    y0: int
+    x1: int
+    y1: int
+
+
+class ImageStatsSampling(BaseModel):
+    """Provenance for ``model_source.builder_kwargs``'s per-band ``image_mean``/``image_std``.
+
+    Rendered by ``derivations.image_stats_provenance`` from whichever of
+    ``band_normalization_stats`` (the exact derivation) or ``band_normalization_stats_sampled``
+    (the windowed one) produced the statistics; never hand-assembled. ``windows`` pairs each
+    source's label with the rectangle read from it, or ``None`` for the exact derivation's own
+    whole-image read (``pixel_fraction`` is then ``1.0`` and ``seed``/``window_size``/
+    ``max_windows_per_image`` are ``None``, an exhaustive read fabricates no seed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    windows: list[tuple[str, ImageStatsWindow | None]]
+    seed: int | None = None
+    pixel_fraction: float
+    window_size: int | None = None
+    max_windows_per_image: int | None = None
+
+
 class ModelSourceSchema(BaseModel):
     # extra="forbid": a misspelled key here is dropped silently by every reader today; refuse
     # it by name instead of building at the builder's own defaults.
@@ -33,7 +62,7 @@ class ModelSourceSchema(BaseModel):
     task: str | None = None
     in_chans: int | None = None
     source_files: list[str] | None = None
-    image_stats_sampling: dict | None = None
+    image_stats_sampling: ImageStatsSampling | None = None
 
 
 class TrainConfigSchema(BaseModel):
