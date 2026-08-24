@@ -578,8 +578,9 @@ def run_inference(
             overrides. A checkpoint that trained untiled on frames that all shared one square size
             derives the edge from that frame instead (``"native_ratio"``), and each tile is run
             through the resize that run's own augmentation config recorded, so the model sees a tile
-            the way it saw a training frame; that edge is a real, weaker geometry basis than a
-            persisted or explicit one, but a delivery door admits it on its own. A checkpoint with
+            the way it saw a training frame; that edge is a real geometry basis, weaker than a
+            persisted one and stronger than an explicit caller edge, and a delivery door admits it
+            on its own. A checkpoint with
             none of those has no real basis to tile at: if ``tile`` ends up ``True`` with no
             resolvable ``tile_size``, this refuses (names the missing basis) rather than fabricate one.
         overlap: Fractional tile overlap (stride = tile_size*(1-overlap)). ``None`` derives from the

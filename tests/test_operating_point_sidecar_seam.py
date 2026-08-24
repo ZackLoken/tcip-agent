@@ -346,6 +346,9 @@ def test_geometry_reference_strength_matches_the_mapping_it_is_defined_beside():
     native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
     assert strength is not None
     assert set(strength) == {VALIDATED_PERSISTED_GEOMETRY, native_ref, VALIDATED_EXPLICIT_GEOMETRY}
+    # A member added to the lookup mapping and not to the strength order, or the reverse, fails.
+    assert set(strength) == set(resolution_mod._GEOMETRY_REFERENCE_BY_SOURCE.values())
+    assert len(strength) == len(resolution_mod._GEOMETRY_REFERENCE_BY_SOURCE)
 
 
 # --- the block-calibrated whole-mosaic regime ---

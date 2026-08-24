@@ -287,6 +287,9 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     sidecar = tcip_store.read(sidecar_key(job.output_dir, "operating_point"))
     tile_ref = sidecar["operating_point"]["tile_size"]["validated_against"]
     assert tile_ref not in (VALIDATED_FALSE, None)
+    from tcip_mcp.pipelines.resolution import VALIDATED_NATIVE_FRAME_GEOMETRY
+
+    assert tile_ref == VALIDATED_NATIVE_FRAME_GEOMETRY
 
 
 def _stub_predictor_for_conf_source(monkeypatch, tmp_path):

@@ -149,10 +149,10 @@ def resolve_tile_geometry(
 
     A ``"native_ratio"`` edge is a real basis to tile at, and a real geometry reference in its own
     right (``resolution.accepted_references("geometry")`` accepts it): it says what the model saw a
-    frame at, mechanically, never a caller's own statement. Ranked weaker than the persisted or
-    explicit tiers when a delivery mixes buckets across them (see
-    :func:`~tcip_mcp.pipelines.resolution.reconcile_tile_size_validity`), but sufficient on its own
-    to gate a delivery. Reproducing the training input geometry also takes the recorded train-time
+    frame at, mechanically, never a caller's own statement. Ranked weaker than the persisted tier
+    and stronger than a caller's explicit edge when a delivery mixes buckets across them (see
+    :func:`~tcip_mcp.pipelines.resolution.reconcile_tile_size_validity`), and sufficient on its
+    own to gate a delivery. Reproducing the training input geometry also takes the recorded train-time
     resize, which this function does not return; the caller pairs it with
     :func:`native_ratio_tile_resize`, or calls :func:`resolve_tile_regime`, which does both.
 
