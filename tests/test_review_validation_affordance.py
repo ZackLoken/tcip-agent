@@ -387,18 +387,43 @@ def test_route_with_no_pred_dir_stamps_nothing_and_says_why(client, tmp_path: Pa
 
 def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(client, tmp_path: Path):
     """A bucket produced by the native-size ratio tier stamps tile_size with
-    source="derived" (the same source a real persisted-training-geometry stamp uses) but
-    validated_against=false: the two bases are distinguishable only by validated_against, never
-    by source alone. This route re-derives tile_size_source off the bucket's own sidecar to
-    thread through resolve_operating_point_from_review; if it read the bare source field it
-    would silently re-resolve a native-ratio bucket as validated persisted geometry the moment a
-    breeder reviews it, defeating the platform's own decision that native-ratio never clears a
-    delivery gate on its own."""
+    source="derived" (the same source a real persisted-training-geometry stamp uses) and
+    validated_against the tier's own reference: the two bases are distinguishable only by
+    validated_against, never by source alone. This route re-derives tile_size_source off the
+    bucket's own sidecar to thread through resolve_operating_point_from_review; if it read the
+    bare source field it would silently re-resolve a native-ratio bucket as validated persisted
+    geometry the moment a breeder reviews it, defeating the platform's own ranking of the two
+    tiers."""
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
+        "value": 128, "source": "derived",
+        "derived_from": "the checkpoint's own uniform untiled training frame",
+        "validated_against": native_ref, "requires_validation": True,
+        "validation_kind": "geometry",
+    })
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 200, resp.text
+    sc = _read_sidecar(pred_dir)
+    restamped = sc["operating_point"]["tile_size"]
+    assert restamped["validated_against"] == native_ref
+    assert restamped["value"] == 128
+
+
+def test_route_never_upgrades_an_edge_with_no_accepted_reference_to_a_validated_geometry(
+        client, tmp_path: Path):
+    """A stamp naming validated_against="false" beside a real tile edge (a stamp nothing in the
+    current vocabulary answers for) keeps the edge (re-read back as tile_size_source "recorded")
+    and must stay unvalidated through the same re-resolution, never silently promoted to any
+    accepted reference nor dropped to None."""
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
     proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
         "value": 128, "source": "derived",
-        "derived_from": "native-size ratio (not an independently validated geometry basis)",
+        "derived_from": "a recorded stamp whose geometry reference the current vocabulary does "
+                        "not accept",
         "validated_against": VALIDATED_FALSE, "requires_validation": True,
         "validation_kind": "geometry",
     })
@@ -409,6 +434,27 @@ def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(cli
     restamped = sc["operating_point"]["tile_size"]
     assert restamped["validated_against"] == VALIDATED_FALSE
     assert restamped["value"] == 128
+
+
+def test_route_never_downgrades_a_bucket_it_cannot_reduce_to_one_accepted_reference(
+        client, tmp_path: Path):
+    """A stamp with no ``validated_against`` key at all (the shape a stamp predating this
+    dimension carries, e.g. valley-farm's own on-disk bucket: ``tile_size.value`` present, no
+    ``validated_against``) means the route cannot name a single accepted reference for it
+    (``review_tile_size_valid_ref`` is ``None`` with a real edge present). Promotion must keep the
+    bucket's own stored tile_size/tiled blocks rather than overwrite them with the freshly
+    re-resolved (floored to "recorded") ones, the same hazard a delivery spanning several buckets
+    with genuinely different real references (one persisted, one explicit) would hit if the merge
+    always wrote the whole-delivery re-resolution over every bucket."""
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
+        "value": 640, "source": "default",
+    })
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 200, resp.text
+    sc = _read_sidecar(pred_dir)
+    assert sc["operating_point"]["tile_size"] == {"value": 640, "source": "default"}
+    assert sc["operating_point"]["tiled"] == {"value": True}
 
 
 def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_path: Path):
