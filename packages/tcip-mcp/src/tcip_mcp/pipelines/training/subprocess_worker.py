@@ -40,21 +40,30 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
     try:
         from tcip_store import store
 
-        from tcip_mcp.experiments import config_key
+        from tcip_mcp.experiments import ExperimentTerminal, config_key, refuse_if_terminal, status_key
 
-        key = config_key(experiment_id)
+        key, st_key = config_key(experiment_id), status_key(experiment_id)
         if not store.exists(key):
             return
-        with store.transaction(key) as txn:
-            cfg = txn.read(key, default={})
-            data_cfg = cfg.setdefault("data", {})
-            if replace:
-                data_cfg["tiling"] = dict(tiling_cfg)
-            else:
-                data_cfg.setdefault("tiling", {}).update(tiling_cfg)
-            if train_native_size is not None:
-                data_cfg["train_native_size"] = list(train_native_size)
-            txn.write(key, cfg)
+        try:
+            with store.transaction(key, st_key) as txn:
+                state = (txn.read(st_key, default={}) or {}).get("state")
+                refuse_if_terminal(experiment_id, "patch_experiment_config_tiling", state)
+                cfg = txn.read(key, default={})
+                data_cfg = cfg.setdefault("data", {})
+                if replace:
+                    data_cfg["tiling"] = dict(tiling_cfg)
+                else:
+                    data_cfg.setdefault("tiling", {}).update(tiling_cfg)
+                if train_native_size is not None:
+                    data_cfg["train_native_size"] = list(train_native_size)
+                txn.write(key, cfg)
+        except ExperimentTerminal:
+            from tcip_mcp.experiments import _audit_refused
+            _audit_refused(experiment_id, "patch_experiment_config_tiling", {})
+            raise
+    except ExperimentTerminal:
+        raise
     except Exception:
         logger.warning("tiling geometry patch-back failed for %s", experiment_id, exc_info=True)
 
@@ -72,18 +81,27 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
     try:
         from tcip_store import store
 
-        from tcip_mcp.experiments import config_key
+        from tcip_mcp.experiments import ExperimentTerminal, config_key, refuse_if_terminal, status_key
 
-        key = config_key(experiment_id)
+        key, st_key = config_key(experiment_id), status_key(experiment_id)
         if not store.exists(key):
             return
-        with store.transaction(key) as txn:
-            cfg = txn.read(key, default={})
-            data_cfg = cfg.setdefault("data", {})
-            data_cfg["subject"] = subject
-            data_cfg["attribute"] = attribute
-            data_cfg["id_map"] = dict(id_map)
-            txn.write(key, cfg)
+        try:
+            with store.transaction(key, st_key) as txn:
+                state = (txn.read(st_key, default={}) or {}).get("state")
+                refuse_if_terminal(experiment_id, "patch_experiment_config_id_map", state)
+                cfg = txn.read(key, default={})
+                data_cfg = cfg.setdefault("data", {})
+                data_cfg["subject"] = subject
+                data_cfg["attribute"] = attribute
+                data_cfg["id_map"] = dict(id_map)
+                txn.write(key, cfg)
+        except ExperimentTerminal:
+            from tcip_mcp.experiments import _audit_refused
+            _audit_refused(experiment_id, "patch_experiment_config_id_map", {})
+            raise
+    except ExperimentTerminal:
+        raise
     except Exception:
         logger.warning("class-id-map patch-back failed for %s", experiment_id, exc_info=True)
 
