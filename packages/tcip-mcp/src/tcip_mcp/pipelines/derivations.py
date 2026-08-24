@@ -622,6 +622,10 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "~1.5x p99 GT objects/image": "tcip_mcp.pipelines.operating_point._max_dets_from_density",
     "model imgsz / persisted training geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
     "persisted training tile geometry": "tcip_mcp.pipelines.resolution.raw_operating_point",
+    "the checkpoint's own uniform untiled training frame":
+        "tcip_mcp.pipelines.inference.predictor._native_ratio_tile_size",
+    "read back from the bucket's own stamp with no accepted geometry reference behind it":
+        "placeholder",
     "caller override": "caller-input",
     "no GT for this dataset; unvalidated placeholder": "placeholder",
 }
