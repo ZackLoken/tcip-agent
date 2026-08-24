@@ -166,3 +166,95 @@ def test_a_calibrated_conf_delivers_the_count_csv_untouched(tmp_path, monkeypatc
     assert stamp["validated"] is True
     assert verify_stamp_binding(
         stamp, bucket, document="operating_point", trait=fx.COUNT_TRAIT).ok
+
+
+def _conf_cell(csv_path):
+    """The delivered CSV's operating_point_conf cell, a Python-repr'd dict (csv.DictWriter's
+    default str() coercion of a non-string value, never JSON), read back with ast.literal_eval."""
+    import ast
+    import csv as csv_module
+
+    with open(csv_path, newline="") as f:
+        row = next(csv_module.DictReader(f))
+    return ast.literal_eval(row["operating_point_conf"])
+
+
+def test_tabulate_counts_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
+    """The rail must admit the ordinary, unstated call: an omitted conf still runs the pass at the
+    platform default, and its provenance says so in both the persisted bucket and the delivered
+    CSV's own operating_point_conf cell, never laundered into 'explicit'."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, read_operating_point_sidecar
+
+    ckpt, images_dir = _prepare(tmp_path, monkeypatch)
+    out_csv = tmp_path / "counts.csv"
+    bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
+
+    r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+                               device="cpu", tile=False, predictions_dir=str(bucket),
+                               acknowledge_unvalidated=True)
+
+    assert "error" not in r, r
+    stamp = read_operating_point_sidecar(bucket)
+    assert stamp["operating_point"]["conf"]["source"] == "default"
+    assert stamp["operating_point"]["conf"]["value"] == DEFAULT_CONF
+    assert _conf_cell(out_csv)["source"] == "default"
+
+
+def test_tabulate_counts_stamps_explicit_conf_source_when_stated_at_the_default(
+    tmp_path, monkeypatch,
+):
+    """A caller-stated conf is stamped 'explicit' even when it happens to equal the platform
+    default, in both the persisted bucket and the delivered CSV."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, read_operating_point_sidecar
+
+    ckpt, images_dir = _prepare(tmp_path, monkeypatch)
+    out_csv = tmp_path / "counts.csv"
+    bucket = tmp_path / "predictions" / "baseline" / "2026-01-01"
+
+    r = itools.tabulate_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT,
+                               conf_threshold=DEFAULT_CONF, device="cpu", tile=False,
+                               predictions_dir=str(bucket), acknowledge_unvalidated=True)
+
+    assert "error" not in r, r
+    stamp = read_operating_point_sidecar(bucket)
+    assert stamp["operating_point"]["conf"]["source"] == "explicit"
+    assert _conf_cell(out_csv)["source"] == "explicit"
+
+
+def test_export_predictions_stamps_default_conf_source_when_omitted(tmp_path, monkeypatch):
+    """The raster/image export door carries the same distinction as tabulate_counts: an omitted
+    conf is never laundered into 'explicit' in the persisted bucket."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, read_operating_point_sidecar
+
+    ckpt, images_dir = _prepare(tmp_path, monkeypatch)
+    out_dir = tmp_path / "preds"
+
+    r = itools.export_predictions(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
+                                  device="cpu", tile=False)
+
+    assert "error" not in r, r
+    stamp = read_operating_point_sidecar(out_dir)
+    assert stamp["operating_point"]["conf"]["source"] == "default"
+    assert stamp["operating_point"]["conf"]["value"] == DEFAULT_CONF
+
+
+def test_export_predictions_stamps_explicit_conf_source_when_stated_at_the_default(
+    tmp_path, monkeypatch,
+):
+    """A caller-stated conf equal to the platform default still stamps 'explicit' through the
+    export door."""
+    import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, read_operating_point_sidecar
+
+    ckpt, images_dir = _prepare(tmp_path, monkeypatch)
+    out_dir = tmp_path / "preds"
+
+    r = itools.export_predictions(ckpt, images_dir=str(images_dir), output_dir=str(out_dir),
+                                  conf_threshold=DEFAULT_CONF, device="cpu", tile=False)
+
+    assert "error" not in r, r
+    stamp = read_operating_point_sidecar(out_dir)
+    assert stamp["operating_point"]["conf"]["source"] == "explicit"

@@ -416,6 +416,7 @@ def resolve_tile_size_param(
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
     max_dets: int | None, tile_size_source: str = "default", tiled_source: str = "default",
+    conf_source: str = "default", max_dets_source: str = "default",
 ) -> ResolvedBundle:
     """The operating point for raw (uncalibrated) inference, the one both doors resolve through.
 
@@ -424,10 +425,16 @@ def raw_operating_point(
     caller must stamp its output ``validated=false``. This is what stops the MCP tool and the web job
     giving a different count (the phenotype) for the same model + images by entry point.
 
-    ``max_dets=None`` is a real, deliberate value (uncapped), not an unset caller: the block
-    calibration export path (``inference_tools._export_predictions_raster``) commits to it on
-    purpose, since a block-calibrated bundle's own density-derived cap is scoped to one reserved
-    band and would truncate a whole-mosaic count if adopted wholesale.
+    Every caller of this function resolves ``max_dets`` to a concrete cap before reaching here
+    (the shared platform default when the caller stated nothing); an uncapped ``max_dets=None`` is
+    a different regime's own deliberate value, built by
+    :func:`block_calibrated_export_operating_point` for the block-calibrated whole-mosaic pass,
+    never by this function.
+
+    ``conf_source``/``max_dets_source`` are the same explicit-vs-default provenance vocabulary
+    ``tile_size_source``/``tiled_source`` already carry for their own params: the caller states which
+    one a value is, so a caller-chosen value that happens to equal the platform default is stamped
+    ``"explicit"``, never silently read back as an untouched default.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
     geometry, ``explicit`` (caller override), or has no real basis at all (``"unavailable"``), so a
@@ -445,13 +452,27 @@ def raw_operating_point(
         tiled_param = ResolvedParam("tiled", tiled, source="explicit", derived_from="caller override")
     else:
         tiled_param = default("tiled", tiled)
+    if conf_source == "explicit":
+        conf_param = ResolvedParam(
+            "conf", conf, source="explicit", derived_from="caller override",
+            requires_validation=True, validation_kind="annotations", validated_against=VALIDATED_FALSE,
+        )
+    else:
+        conf_param = ResolvedParam(
+            "conf", conf, source="default", requires_validation=True,
+            validation_kind="annotations", validated_against=VALIDATED_FALSE,
+        )
+    if max_dets_source == "explicit":
+        max_dets_param = ResolvedParam(
+            "max_dets", max_dets, source="explicit", derived_from="caller override")
+    else:
+        max_dets_param = default("max_dets", max_dets)
     return ResolvedBundle(trait="", dataset_hash=None, params={
-        "conf": ResolvedParam("conf", conf, source="default", requires_validation=True,
-                              validation_kind="annotations", validated_against=VALIDATED_FALSE),
+        "conf": conf_param,
         "cross_tile_nms": default("cross_tile_nms", cross_tile_nms if tiled else None),
         "tiled": tiled_param,
         "tile_size": tile_param,
-        "max_dets": default("max_dets", max_dets),
+        "max_dets": max_dets_param,
     })
 
 

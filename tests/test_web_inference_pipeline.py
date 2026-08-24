@@ -287,3 +287,83 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     sidecar = tcip_store.read(sidecar_key(job.output_dir, "operating_point"))
     tile_ref = sidecar["operating_point"]["tile_size"]["validated_against"]
     assert tile_ref not in (VALIDATED_FALSE, None)
+
+
+def _stub_predictor_for_conf_source(monkeypatch, tmp_path):
+    from PIL import Image
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    class FakePredictor:
+        config = {"data": {"subject": "catkin"}}
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+    return str(ckpt), str(images_dir)
+
+
+def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_default(
+    tmp_path, monkeypatch,
+):
+    """A caller-stated conf/max_dets equal to the platform default is stamped 'explicit', the same
+    distinction tile/tile_size already carry, never silently read back as an untouched default."""
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_CONF, DEFAULT_MAX_DETS, read_operating_point_sidecar,
+    )
+
+    ckpt, images_dir = _stub_predictor_for_conf_source(monkeypatch, tmp_path)
+    out_dir = tmp_path / "out"
+
+    job = InferenceJob(
+        job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
+        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, conf_source="explicit",
+        iou=0.7, slice_hw=(0, 0), overlap=0.2, max_dets=DEFAULT_MAX_DETS,
+        max_dets_source="explicit",
+    )
+    _worker(job)
+
+    assert job.status == "completed"
+    stamp = read_operating_point_sidecar(out_dir)
+    assert stamp["operating_point"]["conf"]["source"] == "explicit"
+    assert stamp["operating_point"]["max_dets"]["source"] == "explicit"
+
+
+def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_path, monkeypatch):
+    """The rail must admit the ordinary, unstated launch: an omitted conf/max_dets still runs the
+    pass at the platform default, unchanged from the explicit-at-default case, and its provenance
+    says 'default' rather than 'explicit'."""
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    from tcip_mcp.pipelines.resolution import (
+        DEFAULT_CONF, DEFAULT_MAX_DETS, read_operating_point_sidecar,
+    )
+
+    ckpt, images_dir = _stub_predictor_for_conf_source(monkeypatch, tmp_path)
+    out_dir = tmp_path / "out"
+
+    job = InferenceJob(
+        job_id="conf-default", checkpoint_path=ckpt, images_dir=images_dir,
+        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, iou=0.7, slice_hw=(0, 0),
+        overlap=0.2, max_dets=DEFAULT_MAX_DETS,
+    )
+    _worker(job)
+
+    assert job.status == "completed"
+    assert job.results[0]["n_detections"] == 1  # the pass ran unchanged at the platform default
+    stamp = read_operating_point_sidecar(out_dir)
+    assert stamp["operating_point"]["conf"]["source"] == "default"
+    assert stamp["operating_point"]["max_dets"]["source"] == "default"

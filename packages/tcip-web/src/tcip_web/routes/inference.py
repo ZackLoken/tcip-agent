@@ -65,6 +65,10 @@ class InferenceJob:
     tile: Optional[bool] = None
     # Whether the caller explicitly chose `tile`, threaded into raw_operating_point's tiled_source.
     tile_source: str = "default"
+    # Same for conf/max_dets: an explicit value equal to the platform default still stamps
+    # "explicit", never silently read back as an untouched one.
+    conf_source: str = "default"
+    max_dets_source: str = "default"
     # Whether slice_hw was the breeder's explicit override or should be re-derived from the
     # checkpoint's own recorded training geometry, tiled or native-frame (resolve_tile_geometry).
     slice_source: str = "default"
@@ -239,6 +243,7 @@ def _worker(job: InferenceJob) -> None:
             conf=job.conf, cross_tile_nms=job.iou, tiled=resolved_tile_bool,
             tiled_source=job.tile_source, tile_size=resolved_tile,
             tile_size_source=tile_size_source, max_dets=job.max_dets,
+            conf_source=job.conf_source, max_dets_source=job.max_dets_source,
         )
 
         # Refuse an ungrounded tile scale before the pass, the same gate export_predictions applies.
@@ -388,7 +393,7 @@ class LaunchInferencePayload(BaseModel):
     slice_h: int | None = None
     slice_w: int | None = None
     overlap: float | None = None
-    max_dets: int = DEFAULT_MAX_DETS
+    max_dets: int | None = None
     postprocess: str = "nms"
     # Write into the named bucket even if it exists. Refused if it has review verdicts; the
     # default (False) auto-redirects to a fresh bucket so a re-run never orphans recorded verdicts.
@@ -451,7 +456,10 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     # conf/iou: no checkpoint-derivation concept applies (unlike tile_size): an omitted value
     # falls back to the same shared defaults resolution.py names, matching the MCP door.
     resolved_conf = DEFAULT_CONF if payload.conf is None else payload.conf
+    conf_source = "default" if payload.conf is None else "explicit"
     resolved_iou = DEFAULT_NMS_IOU if payload.iou is None else payload.iou
+    resolved_max_dets = DEFAULT_MAX_DETS if payload.max_dets is None else payload.max_dets
+    max_dets_source = "default" if payload.max_dets is None else "explicit"
     # slice_h/slice_w/overlap: the "explicit" signal resolve_tile_geometry needs.
     # None here means "derive from the checkpoint's training geometry," resolved in the worker
     # once the predictor is built. slice_hw stays a concrete tuple everywhere else (0 sentinel is
@@ -466,11 +474,13 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
         tile=payload.tile,
         tile_source=tile_source,
         conf=resolved_conf,
+        conf_source=conf_source,
         iou=resolved_iou,
         slice_hw=(payload.slice_h or 0, payload.slice_w or 0),
         slice_source=slice_source,
         overlap=payload.overlap if payload.overlap is not None else DEFAULT_OVERLAP,
-        max_dets=payload.max_dets,
+        max_dets=resolved_max_dets,
+        max_dets_source=max_dets_source,
         postprocess=payload.postprocess,
     )
     _register(job)
