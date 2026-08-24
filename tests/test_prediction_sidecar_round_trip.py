@@ -103,7 +103,7 @@ def test_the_count_operating_points_validity_survives_the_round_trip_to_disk(tmp
     bucket = result["output_dir"]
 
     assert read_operating_point_sidecar(bucket) is not None
-    reconciled = reconcile_operating_point_validity([bucket])
+    reconciled = reconcile_operating_point_validity([bucket], trait="catkin")
     assert reconciled["missing_sidecars"] == []
     assert reconciled["unvalidated_buckets"] == []
     assert reconciled["on_disk_validated"] is True
@@ -171,7 +171,7 @@ def test_a_run_that_dies_before_its_record_leaves_predictions_that_floor(tmp_pat
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert (bucket / "capture_a.json").is_file()
     assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity([str(bucket)])["validated"] == VALIDATED_FALSE
+    assert reconcile_operating_point_validity([str(bucket)], trait="catkin")["validated"] == VALIDATED_FALSE
 
 
 def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, monkeypatch):
@@ -197,7 +197,7 @@ def test_a_run_that_dies_after_its_record_leaves_a_row_no_stamp_names(tmp_path, 
     bucket = tmp_path / "dataset" / "predictions" / "baseline" / "2026-03-01"
     assert find_validation(sealed["experiment_id"], sealed["record_digest"]) is not None
     assert not (bucket / "operating_point.json").exists()
-    assert reconcile_operating_point_validity([str(bucket)])["validated"] == VALIDATED_FALSE
+    assert reconcile_operating_point_validity([str(bucket)], trait="catkin")["validated"] == VALIDATED_FALSE
 
 
 def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monkeypatch):

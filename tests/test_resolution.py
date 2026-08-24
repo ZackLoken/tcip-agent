@@ -80,7 +80,8 @@ def _bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6):
 def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     # A caller asserting validated cannot open the gate when no sidecar backs it.
-    r = reconcile_operating_point_validity([str(tmp_path / "nope")], asserted=VALIDATED_HELD_OUT)
+    r = reconcile_operating_point_validity(
+        [str(tmp_path / "nope")], trait="catkin", asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
     assert r["missing_sidecars"] == [str(tmp_path / "nope")]
 
@@ -88,7 +89,7 @@ def test_reconcile_missing_sidecar_floors_to_false(tmp_path):
 def test_reconcile_all_validated_on_disk(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     dirs = [_bucket(tmp_path, "d1", validated=True), _bucket(tmp_path, "d2", validated=True)]
-    r = reconcile_operating_point_validity(dirs)  # no caller assertion needed
+    r = reconcile_operating_point_validity(dirs, trait="catkin")  # no caller assertion needed
     assert r["validated"] == VALIDATED_HELD_OUT
     assert r["on_disk_validated"] is True
     assert r["conf"] == 0.6
@@ -98,7 +99,7 @@ def test_reconcile_one_unvalidated_bucket_floors_whole_curve(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     d1 = _bucket(tmp_path, "d1", validated=True)
     d2 = _bucket(tmp_path, "d2", validated=False)
-    r = reconcile_operating_point_validity([d1, d2], asserted=VALIDATED_HELD_OUT)
+    r = reconcile_operating_point_validity([d1, d2], trait="catkin", asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
     assert r["unvalidated_buckets"] == [d2]
 
@@ -107,7 +108,7 @@ def test_reconcile_asserted_false_lowers_on_disk_validated(tmp_path):
     from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
     dirs = [_bucket(tmp_path, "d1", validated=True)]
     # The floor: an explicit asserted='false' lowers even a validated-on-disk bucket.
-    r = reconcile_operating_point_validity(dirs, asserted=VALIDATED_FALSE)
+    r = reconcile_operating_point_validity(dirs, trait="catkin", asserted=VALIDATED_FALSE)
     assert r["validated"] == VALIDATED_FALSE
 
 
@@ -116,7 +117,7 @@ def test_reconcile_review_confirmed_reference_preserved(tmp_path):
         VALIDATED_REVIEW_CONFIRMED, reconcile_operating_point_validity,
     )
     dirs = [_bucket(tmp_path, "d1", validated=True, ref=VALIDATED_REVIEW_CONFIRMED)]
-    r = reconcile_operating_point_validity(dirs)
+    r = reconcile_operating_point_validity(dirs, trait="catkin")
     assert r["validated"] == VALIDATED_REVIEW_CONFIRMED  # provenance records which reference
     from tcip_mcp.pipelines.resolution import default
     assert default("lr", 1e-3).value == 1e-3
@@ -412,4 +413,74 @@ def test_unknown_trait_lists_available():
     with pytest.raises(TraitUnknownError) as exc:
         get_trait("banana")
     assert "catkin" in str(exc.value)
+
+
+# --- raw_operating_point: a stated conf/max_dets is never laundered into a default ---
+
+def test_raw_operating_point_stamps_explicit_when_the_caller_states_a_value():
+    """A caller-stated value is stamped 'explicit' even when it happens to equal the platform
+    default, the same distinction tile_size_source/tiled_source already carry."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, raw_operating_point
+
+    bundle = raw_operating_point(
+        conf=DEFAULT_CONF, cross_tile_nms=None, tiled=False, tile_size=None,
+        max_dets=DEFAULT_MAX_DETS, conf_source="explicit", max_dets_source="explicit",
+    )
+    assert bundle.get("conf").source == "explicit"
+    assert bundle.get("conf").derived_from == "caller override"
+    assert bundle.get("max_dets").source == "explicit"
+    assert bundle.get("max_dets").derived_from == "caller override"
+
+
+def test_raw_operating_point_stamps_default_when_the_caller_states_nothing():
+    """The rail must admit the ordinary, unstated call: an omitted conf/max_dets is never
+    laundered into 'explicit'."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS, raw_operating_point
+
+    bundle = raw_operating_point(
+        conf=DEFAULT_CONF, cross_tile_nms=None, tiled=False, tile_size=None,
+        max_dets=DEFAULT_MAX_DETS,
+    )
+    assert bundle.get("conf").source == "default"
+    assert bundle.get("max_dets").source == "default"
+
+
+# --- _reconcile_validity: a stamp earned for one trait does not answer for another ---
+
+def test_reconcile_operating_point_validity_floors_a_trait_mismatch(tmp_path):
+    """A validated count stamp whose trait differs from the delivery's registry trait floors, with
+    a note naming both."""
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
+
+    d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="catkin"
+
+    mismatched = reconcile_operating_point_validity([d], trait="second_trait")
+    assert mismatched["validated"] == VALIDATED_FALSE
+    note = mismatched["binding_notes"][d]
+    assert "catkin" in note and "second_trait" in note
+
+
+def test_reconcile_operating_point_validity_admits_a_matching_trait(tmp_path):
+    """The rail must admit valid work: a delivery whose trait matches the stamp's own still
+    validates."""
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity
+
+    d = _bucket(tmp_path, "d1", validated=True)  # stamped trait="catkin"
+
+    matched = reconcile_operating_point_validity([d], trait="catkin")
+    assert matched["validated"] == VALIDATED_HELD_OUT
+
+
+def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_bucket(tmp_path):
+    """A raw web-door bucket (validated=false, trait=None) still floors as unvalidated through the
+    pre-existing short-circuit, never erroring when the delivery states a real trait the bucket
+    states none of."""
+    from tcip_mcp.pipelines.resolution import reconcile_operating_point_validity, write_sidecar
+
+    d = tmp_path / "raw_bucket"
+    write_sidecar(d, {"validated": False, "trait": None,
+                      "operating_point": {"conf": {"validated_against": None}}})
+
+    r = reconcile_operating_point_validity([str(d)], trait="catkin")
+    assert r["validated"] == VALIDATED_FALSE
     assert "catkin" in registered_traits()

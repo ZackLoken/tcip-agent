@@ -234,7 +234,7 @@ def export_detection_csv(
         # Reconciled from the buckets' own sidecars, floored against the caller assertion, never
         # trusted from the string alone (mirrors export_aggregated_csv's count-trait gating).
         measurement_recon = reconcile_operating_point_validity(
-            pred_dirs, asserted=measurement_validated)
+            pred_dirs, trait=trait, asserted=measurement_validated)
         flags["measurement"] = measurement_recon["validated"]
         tile_recon = reconcile_tile_size_validity(pred_dirs)
         if tile_recon["operative"]:
@@ -242,7 +242,9 @@ def export_detection_csv(
 
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
-        raise ValueError(gate.reason)
+        notes = " ".join(f"{bucket}: {note}" for bucket, note in
+                         sorted(measurement_recon.get("binding_notes", {}).items()) if note)
+        raise ValueError(f"{gate.reason} {notes}".rstrip())
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
     spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)

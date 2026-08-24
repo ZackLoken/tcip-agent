@@ -168,7 +168,7 @@ def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf
     op = {"conf": {"value": conf, "validated_against": ref if validated else VALIDATED_FALSE}}
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
-    stamp = {"validated": validated, "trait": "catkin", "operating_point": op}
+    stamp = {"validated": validated, "trait": fx.COUNT_TRAIT, "operating_point": op}
     if validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
@@ -224,7 +224,7 @@ def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
 
     bucket = _detection_bucket(tmp_path, "preds", validated=True)
     recon = res.reconcile_operating_point_validity(
-        [bucket], asserted=res.VALIDATED_SAME_MOSAIC_IDENTITY)
+        [bucket], trait=fx.COUNT_TRAIT, asserted=res.VALIDATED_SAME_MOSAIC_IDENTITY)
     assert recon["validated"] == VALIDATED_FALSE
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
@@ -308,12 +308,13 @@ def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowled
 
 # ── export_aggregated_csv wired to the ordinal/regression sidecar producer ────
 
-def _scalar_bucket(tmp_path, name, task, *, validated, ref=VALIDATED_HELD_OUT, criterion="r_squared"):
+def _scalar_bucket(tmp_path, name, task, *, validated, ref=VALIDATED_HELD_OUT, criterion="r_squared",
+                   trait="catkin"):
     d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
     document = f"{task}_operating_point"
     stamp = {
-        "validated": validated, "trait": "catkin",
+        "validated": validated, "trait": trait,
         "operating_point": {task: {"validated_against": ref if validated else VALIDATED_FALSE,
                                    "criterion": criterion}},
     }
@@ -330,7 +331,7 @@ def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_pa
     # producer) ships as validated, not floored to VALIDATED_FALSE by the unconditional no-producer path.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True)
+    bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True, trait="astringency")
     out = tmp_path / "o.csv"
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency"}],
@@ -343,7 +344,7 @@ def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_pa
 def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=True)
+    bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=True, trait="fruit_diameter")
     out = tmp_path / "o.csv"
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter"}],
@@ -865,7 +866,8 @@ def test_gui_launch_with_no_tile_field_and_no_checkpoint_geometry_stays_untiled(
 
 # ── the same tile-geometry dimension, read from a written bucket's sidecar ──
 
-def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=None):
+def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=None,
+                  trait=fx.COUNT_TRAIT):
     """A prediction bucket's operating_point.json, the shape export_predictions writes."""
     root = tmp_path / "ds"
     d = root / "predictions" / name
@@ -875,7 +877,7 @@ def _write_bucket(tmp_path, name, *, conf_ref, tile_size_prov=None, validated=No
     if tile_size_prov is not None:
         op["tile_size"] = tile_size_prov
     is_validated = (conf_ref == VALIDATED_HELD_OUT) if validated is None else validated
-    stamp = {"validated": is_validated, "trait": "catkin", "operating_point": op}
+    stamp = {"validated": is_validated, "trait": trait, "operating_point": op}
     if is_validated:
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-{name}")
     else:
@@ -1051,7 +1053,7 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
-    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
@@ -1067,7 +1069,7 @@ def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_side
     is exactly the gap the scale gate closes."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
                               trait_name="plant_surface_area", pred_dirs=[d])
@@ -1093,7 +1095,7 @@ def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
-    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
                          capture_id="2026-02-10_plot7")
     with pytest.raises(ValueError, match="unvalidated measurement"):
@@ -1108,7 +1110,7 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
 
-    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT,
                          capture_id="2026-02-10_plot7")
     out = tmp_path / "o.csv"
@@ -1124,7 +1126,7 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
     reference."""
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
                           pred_dirs=[d], acknowledge_unvalidated=True)

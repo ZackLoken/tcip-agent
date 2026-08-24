@@ -1792,7 +1792,7 @@ def _validity_rank(state: str | None, accepted: tuple[str, ...]) -> int:
 
 def _reconcile_validity(
     pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None, document: str,
-    digest_memo: dict[str, str] | None = None,
+    trait: str | None, digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor a validity dimension against every bucket's on-disk sidecar, generalized.
 
@@ -1801,6 +1801,14 @@ def _reconcile_validity(
     the result) is identical for both dimensions; only which document is read differs, threaded in by
     the thin public wrappers below, which is also what says which parameter and which kind of
     reference that document's claim rests on.
+
+    ``trait`` is the delivery's own registry trait, required (never defaulted) so a caller cannot
+    silently skip stating it; passed straight through to :func:`verify_stamp_binding`, which compares
+    it against the record's own trait only when it is not ``None``. Threaded through by the three
+    measurement wrappers (count/ordinal/regression); :func:`reconcile_classifier_validity` passes
+    ``None``, since the classifier's own trait comparison already runs once, in
+    :func:`bind_classifier_validity`, and duplicating it here would lose the note the delivery doors
+    render from that function's own return.
 
     A stamp whose claim no validation record answers for floors here, with the reason recorded per
     bucket: a claim a bucket wrote for itself is not evidence, and the check lives inside this shared
@@ -1831,7 +1839,7 @@ def _reconcile_validity(
             all_validated = False
             continue
         ref = _sidecar_reference(sc, param_key=param_key, validation_kind=validation_kind)
-        binding = verify_stamp_binding(sc, d, document=document, digest_memo=memo)
+        binding = verify_stamp_binding(sc, d, document=document, digest_memo=memo, trait=trait)
         bindings[str(d)] = binding
         if not binding.ok:
             binding_notes[str(d)] = binding.note
@@ -1867,7 +1875,7 @@ def _reconcile_validity(
 
 
 def reconcile_operating_point_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, trait: str, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the count operating-point validity against every bucket's ``operating_point.json``.
@@ -1876,9 +1884,14 @@ def reconcile_operating_point_validity(
     on-disk sidecar and takes the floor of asserted-vs-on-disk. A missing/unreadable sidecar, or any
     bucket stamped ``validated=false``, floors the whole curve to ``false``, never a crash. See
     :func:`_reconcile_validity` for the shared mechanism.
+
+    ``trait`` is the trait this delivery is actually being produced for, required so a count claim
+    earned for one trait cannot silently answer for a delivery of another; compared against each
+    bucket's own record via :func:`verify_stamp_binding`.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="operating_point", digest_memo=digest_memo,
+        pred_dirs, asserted=asserted, document="operating_point", trait=trait,
+        digest_memo=digest_memo,
     )
 
 
@@ -1893,15 +1906,20 @@ def reconcile_classifier_validity(
     key, never a hand-written sibling. A bucket with no persisted classifier-calibration run floors
     to ``false``: there is no legitimate way to earn a classifier-validated stamp without one, so this
     never falls back to a caller-asserted string.
+
+    Threads no ``trait`` into the shared mechanism (unlike the three measurement reconcilers): the
+    classifier's own trait comparison already runs once, in :func:`bind_classifier_validity`, and
+    duplicating it here would lose the breeder-facing note the delivery doors render from that
+    function's own return.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="classifier_operating_point",
+        pred_dirs, asserted=asserted, document="classifier_operating_point", trait=None,
         digest_memo=digest_memo,
     )
 
 
 def reconcile_ordinal_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, trait: str, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the ordinal compensating-error validity against every bucket's
@@ -1911,22 +1929,26 @@ def reconcile_ordinal_validity(
     classifier dimension, the same shared mechanism, parameterized to a different sidecar file and
     param key. A bucket with no persisted ordinal-calibration run floors to ``false``: there is no
     legitimate way to earn an ordinal-validated stamp without one.
+
+    ``trait`` is required, the same measurement-reconciler trait binding
+    :func:`reconcile_operating_point_validity` performs.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="ordinal_operating_point", digest_memo=digest_memo,
+        pred_dirs, asserted=asserted, document="ordinal_operating_point", trait=trait,
+        digest_memo=digest_memo,
     )
 
 
 def reconcile_regression_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, asserted: str | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, trait: str, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the regression compensating-error validity against every bucket's
     ``regression_operating_point.json``. Same shape as :func:`reconcile_ordinal_validity`, for the
-    regression dimension's own sidecar/param key.
+    regression dimension's own sidecar/param key, including the required ``trait`` binding.
     """
     return _reconcile_validity(
-        pred_dirs, asserted=asserted, document="regression_operating_point",
+        pred_dirs, asserted=asserted, document="regression_operating_point", trait=trait,
         digest_memo=digest_memo,
     )
 

@@ -1463,7 +1463,8 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     binding = verify_stamp_binding(stamp, out, document="ordinal_operating_point", trait="catkin")
     assert binding.ok and binding.claimed, binding.note
     assert binding.experiment_id == res["validated_by"]["experiment_id"]
-    assert reconcile_ordinal_validity([str(out)])["validated"] == VALIDATED_HELD_OUT
+    assert reconcile_ordinal_validity(
+        [str(out)], trait="catkin")["validated"] == VALIDATED_HELD_OUT
 
     # The door ran this checkpoint, so stamp and record both name it and the equality check holds.
     sha = checkpoint_sha256(checkpoint)

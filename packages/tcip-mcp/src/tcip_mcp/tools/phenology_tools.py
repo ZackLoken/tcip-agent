@@ -880,7 +880,7 @@ def compute_phenology(
     # (stamped by export_predictions), floored against any caller assertion, never trusted from the
     # caller's string alone. A missing/unvalidated sidecar floors the whole curve to false.
     recon = reconcile_operating_point_validity(
-        list(predictions_by_date.values()), asserted=operating_point_validated)
+        list(predictions_by_date.values()), trait=trait, asserted=operating_point_validated)
     op_state = recon["validated"]
     if operating_point_conf is None and recon["conf"] is not None:
         operating_point_conf = recon["conf"]  # prefer the on-disk conf over a caller string
