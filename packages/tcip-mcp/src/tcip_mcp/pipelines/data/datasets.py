@@ -179,22 +179,31 @@ def _json_det_targets(path, subject, attribute, id_map):
 
 
 def dir_label_format(labels_dir) -> str | None:
-    """``"json"`` if this dir holds canonical per-image labels, else ``None``.
+    """``"json"``/``"coco"`` if this dir's first parseable ``.json`` file declares that shape,
+    else ``None``.
 
-    Used to route a JSON label store onto the COCO training path. A ``.json`` that is not our
-    schema is not claimed, an unrecognized store must not be read as an all-empty one.
+    Used to route a JSON label store onto the COCO training path. Decides the first parseable
+    file's shape through ``format_io``'s own per-file detection (COCO markers checked first, the
+    same priority a dataset-level COCO reads with everywhere else), rather than a second,
+    disagreeing ``ANNOTATIONS_KEY``-only test; the old ``objects`` schema, which that detection
+    raises on, is treated the same as any other unrecognized shape here: ``None``, never a raise.
+    A ``.json`` that is not one of these shapes is not claimed, an unrecognized store must not be
+    read as an all-empty one.
     """
-    from tcip_annotation.json_io import ANNOTATIONS_KEY
+    from tcip_annotation.format_io import _detect_json_format
 
     d = Path(labels_dir)
     if not d.is_dir():
         return None
     for jp in sorted(d.glob("*.json")):
         try:
-            data = json.loads(jp.read_text(encoding="utf-8"))
+            json.loads(jp.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        return "json" if isinstance(data, dict) and ANNOTATIONS_KEY in data else None
+        try:
+            return _detect_json_format(jp)
+        except ValueError:
+            return None
     return None
 
 
@@ -1521,7 +1530,14 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
     images_dir = kwargs.get("images_dir", "")
     if not labels_dir:
         return
-    if dir_label_format(labels_dir) == "json" and images_dir:
+    detected = dir_label_format(labels_dir)
+    if detected == "coco":
+        raise ValueError(
+            f"labels_dir={labels_dir!r} holds a dataset-level COCO file; pass data.coco_json "
+            "(or label_format='coco') to train on it directly, rather than assembling per-image "
+            "labels that are not there."
+        )
+    if detected == "json" and images_dir:
         kwargs["coco_data"] = assemble_coco(
             labels_dir, images_dir, stems=kwargs.get("stems"),
             subject=subject, attribute=attribute, id_map=id_map, date=date)

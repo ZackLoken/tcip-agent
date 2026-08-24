@@ -28,6 +28,7 @@ from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, store
 from tcip_store.file_backend import RootedFileLocator
 
 MODEL_SOURCE_KEY = "model_source"
+TRAINING_SOURCE_KEY = "training_source"
 STATE_DICT_KEY = "model_state_dict"
 """The checkpoint keys this platform's own payloads carry: the importable model reference
 that rebuilds the module, and the weights that go into it. Both ends of a checkpoint, the
@@ -35,14 +36,21 @@ writer and the reader, import these rather than spelling them, so the payload's 
 is stated once."""
 
 
-def _import_dotted(target: str) -> Any:
-    """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable."""
-    if not isinstance(target, str) or not target:
-        raise ValueError(f"builder must be a non-empty 'module:function' string, got {target!r}")
+def _split_dotted(target: str) -> tuple[str, str]:
+    """Split ``'module.path:function'`` (or ``'module.path.function'``) into ``(module, attr)``,
+    with no resolution or validation of either half; the one place that grammar is spelled."""
     if ":" in target:
         mod_name, _, attr = target.partition(":")
     else:
         mod_name, _, attr = target.rpartition(".")
+    return mod_name, attr
+
+
+def _import_dotted(target: str) -> Any:
+    """Resolve a ``'module.path:function'`` (or ``'module.path.function'``) string to the callable."""
+    if not isinstance(target, str) or not target:
+        raise ValueError(f"builder must be a non-empty 'module:function' string, got {target!r}")
+    mod_name, attr = _split_dotted(target)
     if not mod_name or not attr:
         raise ValueError(f"Invalid dotted builder {target!r}; expected 'module:function'.")
 
@@ -296,7 +304,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     import hashlib
 
     model_source = config.get(MODEL_SOURCE_KEY)
-    training_source = config.get("training_source")
+    training_source = config.get(TRAINING_SOURCE_KEY)
     dataset_source = (config.get("data") or {}).get("dataset_source")
     if not model_source and not training_source and not dataset_source:
         return None
@@ -314,7 +322,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
     # Snapshot the agent's training-loop + dataset modules too (best-effort, resolve mod:fn -> file).
     for dotted in (builder, training_source, dataset_builder):
         if isinstance(dotted, str) and dotted:
-            mod_name = dotted.partition(":")[0] if ":" in dotted else dotted.rpartition(".")[0]
+            mod_name, _ = _split_dotted(dotted)
             try:
                 import importlib
 
