@@ -99,6 +99,19 @@ def test_a_refusal_over_the_classifier_says_the_count_operating_point_is_validat
         assert f"operating_point={VALIDATED_HELD_OUT!r}" in detail, route
 
 
+def test_a_count_stamp_earned_for_a_different_trait_names_the_sidecar_and_both_traits(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A count stamp validated for one trait must not answer for a phenology delivery under a
+    different trait: the refusal names the sidecar and both traits."""
+    body = _phenology_fixture(tmp_path, validated=True, detections=4, count_trait="second_trait")
+
+    for route in DOORS:
+        detail = _refusal_detail(client, body, route)
+        assert "second_trait" in detail and "catkin" in detail, route
+        assert any(bucket in detail for bucket in body["predictions_by_date"].values()), route
+
+
 def test_the_two_refusals_do_not_read_alike(client: TestClient, tmp_path: Path) -> None:
     """The breeder is meant to act on the difference, so the two failures must not produce the same
     text. The unvalidated bucket list is the same in both; what separates them is which dimension

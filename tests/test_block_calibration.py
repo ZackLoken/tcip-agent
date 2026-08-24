@@ -447,7 +447,9 @@ def test_export_predictions_raster_block_calibration_admits_and_uncaps_max_dets(
     sidecar = read_operating_point_sidecar(out_dir)
     assert sidecar["operating_point"]["max_dets"]["value"] is None
     assert sidecar["operating_point"]["max_dets"]["derived_from"].startswith("block calibration")
-    assert sidecar["claim_scope_validated"] == "same_mosaic_georeferenced_identity"
+    # This fixture's mosaic carries no geotransform, so the claim is content-only: the
+    # georeference-aware token is reserved for a training identity that recorded one.
+    assert sidecar["claim_scope_validated"] == "same_mosaic_content_identity"
     assert sidecar["block_calibration"]["experiment_id"] == exp["experiment_id"]
     assert "spatial_manifest" not in sidecar["block_calibration"]
 
@@ -655,6 +657,34 @@ def test_export_predictions_raster_claim_scope_refuses_a_moved_tiepoint_copy(tmp
         experiment_id=exp["experiment_id"], acknowledge_unvalidated=True)
     assert "error" not in acknowledged, acknowledged
     assert acknowledged["claim_scope_validated"] == VALIDATED_FALSE
+    assert "georeferencing mismatch" in acknowledged["claim_scope_note"]
+
+
+def test_export_predictions_raster_claim_scope_admits_a_band_group_trained_export_over_a_georeferenced_target(
+    tmp_path: Path,
+):
+    """A checkpoint trained on a mosaic with no readable geotransform (a band-group source, or an
+    unprojected raster) exported over a target that does carry one clears the claim-scope gate on
+    content alone and stamps the content-only token, never the georeferenced one no comparison
+    for it ever ran."""
+    exp = _build_experiment(tmp_path)
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    georef_copy = tmp_path / "georef_copy.tif"
+    _write_mosaic(georef_copy, seed=0, georeferenced=True)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = tmp_path / "preds"
+    result = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(georef_copy),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        experiment_id=exp["experiment_id"])
+
+    assert "error" not in result, result
+    assert result["claim_scope_validated"] == "same_mosaic_content_identity"
 
 
 def test_export_predictions_raster_without_reserved_region_names_the_real_gap(tmp_path: Path):

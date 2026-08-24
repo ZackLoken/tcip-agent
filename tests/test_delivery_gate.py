@@ -200,6 +200,30 @@ def test_export_detection_csv_pred_dirs_ships_when_bucket_validated(tmp_path):
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
 
+def test_export_detection_csv_floors_a_stamp_earned_for_a_different_trait(tmp_path):
+    """A count stamp validated for one trait must not answer for a delivery under a different
+    trait: the refusal names the sidecar and both traits."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    other_trait = "astringency"
+    record = op.state_operationalization(
+        tmp_path, other_trait, op.PER_IMAGE_COUNT,
+        statement="how many astringent structures the model finds in one frame",
+        mechanism="the calibrated detector over whole frames at the derived operating point",
+        measured_subject=fx.COUNT_SUBJECT, delivered_phenotypes=[],
+    )
+    fx.confirm(tmp_path, other_trait, op.PER_IMAGE_COUNT, record)
+
+    bucket = _detection_bucket(tmp_path, "preds", validated=True)  # stamped trait=fx.COUNT_TRAIT
+    with pytest.raises(ValueError) as exc:
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             trait=other_trait,
+                             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+    message = str(exc.value)
+    assert bucket in message
+    assert fx.COUNT_TRAIT in message and other_trait in message
+
+
 def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
     # A tiled bucket with no persisted training geometry must gate the delivery even though the
     # conf operating point itself cleared, mirroring export_aggregated_csv's tile_size dimension.

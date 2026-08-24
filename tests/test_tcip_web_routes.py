@@ -1042,8 +1042,9 @@ def _launch_setup(tmp_path, monkeypatch):
 def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
-    """A caller-stated conf/max_dets equal to the platform default is stamped 'explicit' on the
-    job, the resolution launch_inference threads into raw_operating_point via the worker."""
+    """A caller-stated conf/max_dets equal to the platform default is recorded as stated on the
+    job, which launch_inference threads into raw_operating_point via the worker to stamp
+    'explicit'."""
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
@@ -1054,8 +1055,8 @@ def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_pa
     })
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
-    assert job.conf_source == "explicit"
-    assert job.max_dets_source == "explicit"
+    assert job.conf_stated is True
+    assert job.max_dets_stated is True
     assert job.conf == DEFAULT_CONF
     assert job.max_dets == DEFAULT_MAX_DETS
 
@@ -1064,7 +1065,7 @@ def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
     client: TestClient, tmp_path: Path, monkeypatch,
 ) -> None:
     """The rail must admit the ordinary, unstated launch: an omitted conf/max_dets still resolves
-    to the platform default and is stamped 'default' on the job, never 'explicit'."""
+    to the platform default and is recorded as unstated on the job, never as stated."""
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
@@ -1075,8 +1076,8 @@ def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
     })
     assert resp.status_code == 200, resp.text
     job = inference_routes._get(resp.json()["job_id"])
-    assert job.conf_source == "default"
-    assert job.max_dets_source == "default"
+    assert job.conf_stated is False
+    assert job.max_dets_stated is False
     assert job.conf == DEFAULT_CONF
     assert job.max_dets == DEFAULT_MAX_DETS
 

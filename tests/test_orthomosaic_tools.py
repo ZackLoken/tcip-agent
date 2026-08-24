@@ -341,6 +341,52 @@ def test_deliver_orthomosaic_plant_counts_refuses_unacknowledged_then_admits(tmp
         assert r["trait_name"] == "stem_count"
 
 
+def test_deliver_orthomosaic_plant_counts_floors_a_stamp_earned_for_a_different_trait(
+    tmp_path, monkeypatch,
+):
+    """A count stamp validated for one trait must not answer for a per-plant delivery under a
+    different trait: the refusal names the sidecar and both traits."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    ckpt = _bespoke_detection_checkpoint(tmp_path)
+    dataset_root = tmp_path / "ds"
+    bucket_dir = dataset_root / "predictions" / "run1"
+    result = export_predictions(
+        ckpt, output_dir=str(bucket_dir), raster_path=str(raster_path), conf_threshold=0.0,
+        tile_size=TILE)
+    assert "error" not in result
+    stem = Path(result["files"][0]).stem
+    _replace_boxes(bucket_dir / f"{stem}.json", [(8.0, 8.0, 12.0, 12.0)])
+    plant_csv = _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT, read_operating_point_sidecar
+    from tests._binding_fixtures import write_bound_sidecar
+
+    stamped = read_operating_point_sidecar(bucket_dir)
+    assert stamped is not None
+    op = dict(stamped["operating_point"])
+    op["conf"] = {**op["conf"], "validated_against": VALIDATED_HELD_OUT}
+    validated_stamp = {**stamped, "operating_point": op, "trait": "astringency", "validated": True}
+    write_bound_sidecar(bucket_dir, validated_stamp, dataset_root=dataset_root,
+                        experiment_id="exp-mismatched-trait")
+
+    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+
+    out_csv = tmp_path / "counts.csv"
+    refused = deliver_orthomosaic_plant_counts(
+        str(bucket_dir), str(raster_path), [str(plant_csv)], str(out_csv), trait_name="stem_count")
+    assert "error" in refused
+    assert not out_csv.exists()
+    assert str(bucket_dir) in refused["error"]
+    assert "astringency" in refused["error"] and fx.COUNT_TRAIT in refused["error"]
+
+
 def test_deliver_orthomosaic_plant_counts_far_detection_is_unmapped(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
     (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)

@@ -247,10 +247,9 @@ def deliver_orthomosaic_plant_counts(
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except ValueError as exc:
-        # The gate's reason names the dimension; only these notes name which bucket failed, and why.
-        notes = " ".join(f"{bucket}: {note}"
-                         for bucket, note in sorted(recon["binding_notes"].items()) if note)
-        return {"error": f"{exc} {notes}".rstrip(),
+        # aggregation.py's own refusal already names the failing bucket and why, through the same
+        # binding_notes_text helper this door's own (identically-scoped) recon would just repeat.
+        return {"error": str(exc),
                 "n_detections": len(assignments), "n_mapped": len(mapped),
                 "n_unmapped": n_unmapped}
 

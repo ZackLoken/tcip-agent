@@ -333,9 +333,9 @@ def test_web_worker_stamps_explicit_conf_and_max_dets_source_at_the_platform_def
 
     job = InferenceJob(
         job_id="conf-explicit", checkpoint_path=ckpt, images_dir=images_dir,
-        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, conf_source="explicit",
+        output_dir=str(out_dir), tile=False, conf=DEFAULT_CONF, conf_stated=True,
         iou=0.7, slice_hw=(0, 0), overlap=0.2, max_dets=DEFAULT_MAX_DETS,
-        max_dets_source="explicit",
+        max_dets_stated=True,
     )
     _worker(job)
 

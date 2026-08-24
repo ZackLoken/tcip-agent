@@ -413,6 +413,7 @@ def test_unknown_trait_lists_available():
     with pytest.raises(TraitUnknownError) as exc:
         get_trait("banana")
     assert "catkin" in str(exc.value)
+    assert "catkin" in registered_traits()
 
 
 # --- raw_operating_point: a stated conf/max_dets is never laundered into a default ---
@@ -424,7 +425,7 @@ def test_raw_operating_point_stamps_explicit_when_the_caller_states_a_value():
 
     bundle = raw_operating_point(
         conf=DEFAULT_CONF, cross_tile_nms=None, tiled=False, tile_size=None,
-        max_dets=DEFAULT_MAX_DETS, conf_source="explicit", max_dets_source="explicit",
+        max_dets=DEFAULT_MAX_DETS, conf_stated=True, max_dets_stated=True,
     )
     assert bundle.get("conf").source == "explicit"
     assert bundle.get("conf").derived_from == "caller override"
@@ -483,4 +484,3 @@ def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_
 
     r = reconcile_operating_point_validity([str(d)], trait="catkin")
     assert r["validated"] == VALIDATED_FALSE
-    assert "catkin" in registered_traits()

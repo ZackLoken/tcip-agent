@@ -243,6 +243,22 @@ def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_pa
             assert next(csv.DictReader(f))["measurement_validated"] == VALIDATED_HELD_OUT
 
 
+def test_a_count_stamp_earned_for_one_trait_floors_a_delivery_of_another(tmp_path):
+    """A count stamp validated for one trait must not answer for a delivery under a different
+    trait: the refusal names the sidecar and both traits."""
+    bucket = _count_bucket(tmp_path, "count_preds")  # stamped trait=fx.COUNT_TRAIT ("stem")
+
+    with pytest.raises(ValueError) as exc:
+        export_aggregated_csv(
+            [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "astringency",
+             "measurement_document": "operating_point", "scale_document": None}],
+            str(tmp_path / "mismatched_trait.csv"), trait_name="astringency",
+            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+    message = str(exc.value)
+    assert bucket in message
+    assert fx.COUNT_TRAIT in message and "astringency" in message
+
+
 def test_a_delivery_naming_no_measurement_document_refuses(tmp_path):
     """A record set that states nothing about which sidecar document its value rests on refuses
     naming the field, rather than falling through to any particular reconciler (the statement rail
