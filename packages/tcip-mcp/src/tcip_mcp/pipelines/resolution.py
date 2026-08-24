@@ -811,15 +811,38 @@ def well_formed_validated_by(stamp: dict | None) -> dict | None:
     return pointer
 
 
-def _check_stamp_claim(stamp: dict, document: str, pred_dir: str | Path) -> None:
-    """Refuse a stamp that claims validation without the two things a claim is unreadable without.
+def _check_stamp_claim(
+    stamp: dict, document: str, pred_dir: str | Path, *, introduced_keys: set[str] | None = None,
+) -> None:
+    """Refuse a stamp whose shape or claim a reader could not trust.
 
-    A validated stamp names the record it was earned from and the trait it was earned for. Neither
-    is defaultable: a pointer this writer filled in would point at nothing, and a trait it guessed
-    would be a claim nobody made. This is a writer-side rail and it closes nothing on its own, since
-    a file written straight to disk never passes here; it exists so a platform producer cannot omit
-    what every reader compares.
+    For the ``operating_point`` document, every top-level key this write actually introduces must
+    be declared: one of ``operating_point_stamp``'s own (:data:`STAMP_KEYS`) or a named producer
+    addition (:data:`STAMP_EXTENSION_KEYS`). ``introduced_keys`` is ``None`` for a fresh
+    :func:`write_sidecar` (the whole stamp is new, so every key is checked) and the merged-minus-
+    stored key set for :func:`update_sidecar` (a promotion over a stamp that already carries a
+    foreign top-level key, from a direct store write or a hand-authored stamp, is not refused for a
+    key it did not itself write). A producer that needs a new key declares it in
+    ``STAMP_EXTENSION_KEYS``; this rail exists so the declared union stays the one place a reader
+    can learn the whole stamp shape, rather than each producer inventing its own beside it. Other
+    documents (classifier/ordinal/regression/scale) carry no such declared shape and are not
+    checked here.
+
+    A validated stamp also names the record it was earned from and the trait it was earned for.
+    Neither is defaultable: a pointer this writer filled in would point at nothing, and a trait it
+    guessed would be a claim nobody made. Both rails are writer-side and close nothing on their own,
+    since a file written straight to disk never passes here; they exist so a platform producer
+    cannot omit what every reader compares.
     """
+    if document == "operating_point":
+        checked = set(stamp) if introduced_keys is None else introduced_keys
+        unknown = checked - STAMP_KEYS - set(STAMP_EXTENSION_KEYS)
+        if unknown:
+            raise ValueError(
+                f"{document}.json at {str(pred_dir)!r} carries undeclared top-level key(s) "
+                f"{sorted(unknown)}. Declare a new producer addition in STAMP_EXTENSION_KEYS "
+                "(resolution.py), naming which producer writes it, before writing it here."
+            )
     if not stamp.get("validated"):
         return
     if well_formed_validated_by(stamp) is None:
@@ -867,11 +890,13 @@ def update_sidecar(
     key = sidecar_key(pred_dir, document)
     with tcip_store.transaction(key) as txn:
         current = txn.read(key, default={})
-        updated = updater(current if isinstance(current, dict) else {})
+        current = current if isinstance(current, dict) else {}
+        updated = updater(current)
         if updated is None:
             return False
         check_json_value(updated, path="stamp")
-        _check_stamp_claim(updated, document, pred_dir)
+        _check_stamp_claim(
+            updated, document, pred_dir, introduced_keys=set(updated) - set(current))
         txn.write(key, updated)
     return True
 
@@ -930,6 +955,39 @@ def operating_point_stamp(
         "produced_at": produced_at,
         **fields,
     }
+
+
+STAMP_KEYS: frozenset[str] = frozenset((
+    "trait", "dataset_hash", "operating_point", "id_map", "validated", "validated_by",
+    "tile_size_validated", "shippable_issues", "checkpoint", "checkpoint_sha256", "experiment_id",
+    "images_dir", "raster_path", "produced_at",
+))
+"""``operating_point_stamp``'s own fourteen keys: the ones it returns unconditionally, before a
+producer's own ``**fields``. Declared literally rather than derived from the signature, since a
+parameter name matching its returned key is this constructor's own convention, not a guarantee;
+``tests/test_operating_point_sidecar_seam.py`` pins the two against each other."""
+
+STAMP_EXTENSION_KEYS: dict[str, str] = {
+    "validated_reference": "the review-promotion path (routes/review.py's _stamp_body)",
+    "validation_source": "the review-promotion path (routes/review.py's _stamp_body)",
+    "review_reference_hash": "the review-promotion path (routes/review.py's _stamp_body)",
+    "review_image_count": "the review-promotion path (routes/review.py's _stamp_body)",
+    "validated_at": "the review-promotion path (routes/review.py's _stamp_body)",
+    "mask_binarize": "the image-export and raster-export doors and the web inference worker, "
+                     "for a bucket carrying masks",
+    "claim_scope_validated": "the raster-export door's block-calibration branch",
+    "block_calibration": "the raster-export door's block-calibration branch",
+    "raster_content_identity": "the raster-export door, recorded for every run of that regime",
+    "overlap": "the web inference worker",
+    "overlap_source": "the web inference worker",
+    "sweep_path": "the image-export door, for a calibrated run that persisted a sweep",
+    "sweep_summary": "the image-export door, for a calibrated run that persisted a sweep",
+}
+"""Every top-level key a producer adds beside ``operating_point_stamp``'s own fourteen, one entry
+per key naming which producer writes it. :func:`write_sidecar`/:func:`update_sidecar` refuse an
+``operating_point`` stamp carrying a top-level key outside ``STAMP_KEYS | STAMP_EXTENSION_KEYS``,
+naming the key and this declaration; a new producer addition is admitted by declaring it here, not
+by the writer silently accepting whatever a caller assembled."""
 
 
 def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
