@@ -234,10 +234,12 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     assert job.tile_source == "explicit"     # never silently overridden to "default" anymore
 
 
-def test_web_worker_refuses_a_tile_scale_taken_from_the_untiled_training_frame(tmp_path, monkeypatch):
+def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_resize(
+        tmp_path, monkeypatch):
     """A checkpoint whose only geometry is its own uniform untiled training frame does justify a
-    tile edge, but never an independently validated one, and this door has no acknowledgement
-    channel. It refuses before the pass rather than writing counts at a scale nothing validated."""
+    tile edge, and (after promotion) a real geometry reference of its own, so this door runs
+    rather than refusing: the stamp carries the tier's own reference and the prediction call
+    receives the resolved tile edge plus the checkpoint's recorded train-time resize."""
     pytest.importorskip("fastapi")
     from PIL import Image
 
@@ -254,13 +256,15 @@ def test_web_worker_refuses_a_tile_scale_taken_from_the_untiled_training_frame(t
         task = "detection"
         train_tile_size = None
         train_native_size = [64, 64]
+        train_augmentation = {"resize": [128, 128]}
 
         def __init__(self, checkpoint_path=None, **kwargs):
             pass
 
         def predict_batch(self, paths, **kw):
-            captured["ran"] = True
-            return []
+            captured.update(kw)
+            return [{"count": 0, "width": 100, "height": 100, "boxes": [], "scores": [], "labels": []}
+                   for _ in paths]
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakeNativeFramePredictor)
@@ -272,6 +276,14 @@ def test_web_worker_refuses_a_tile_scale_taken_from_the_untiled_training_frame(t
     )
     _worker(job)
 
-    assert job.status == "failed"
-    assert "tile scale" in job.error
-    assert "ran" not in captured
+    assert job.status == "completed"
+    assert job.error is None
+    assert captured.get("tile_size") == 64
+    assert captured.get("tile_resize") == (128, 128)
+
+    import tcip_store
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, sidecar_key
+
+    sidecar = tcip_store.read(sidecar_key(job.output_dir, "operating_point"))
+    tile_ref = sidecar["operating_point"]["tile_size"]["validated_against"]
+    assert tile_ref not in (VALIDATED_FALSE, None)

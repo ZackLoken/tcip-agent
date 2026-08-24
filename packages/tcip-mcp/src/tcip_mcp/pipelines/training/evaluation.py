@@ -1294,15 +1294,17 @@ def run_full_frame_evaluation(
     gate (same untiled regime end to end), and is the one to call instead of this function.
 
     ``tile_size``/``overlap`` are resolved by the same precedence ``run_inference`` uses, explicit >
-    the checkpoint's own persisted training geometry > no real basis at all, via the shared
-    ``resolve_tile_geometry``. Unlike the exploratory ``run_inference``, this is the delivery-gating
-    call: a ``tile_size`` with no real basis (not ``"explicit"``/``"derived"``, e.g. no explicit
-    value and nothing persisted on the checkpoint, or a not-independently-validated basis like the
-    native-size-ratio tier) raises rather than silently fabricating one, since a wrong tile
-    scale here is a wrong number that gates a phenotype, not just a wrong preview. ``overlap`` alone
-    falling back to a default does not raise, a checkpoint trained with no tiling overlap convention
-    at all has no persisted overlap analog, which is a legitimate fact, not a missing derivation;
-    only ``tile_size``'s absence changes the object count's scale.
+    the checkpoint's own persisted training geometry > a native-ratio tier (a checkpoint's own
+    recorded uniform untiled training frame) > no real basis at all, via the shared
+    ``resolve_tile_regime``. Unlike the exploratory ``run_inference``, this is the delivery-gating
+    call: ``tile_size`` is gated through the same shared ``resolve_tile_size_param`` every other
+    door resolves through, and a scale with no real basis at all (``"unavailable"``: no explicit
+    value and nothing persisted or derivable from the checkpoint) raises rather than silently
+    fabricating one, since a wrong tile scale here is a wrong number that gates a phenotype, not
+    just a wrong preview. ``overlap`` alone falling back to a default does not raise, a checkpoint
+    trained with no tiling overlap convention at all has no persisted overlap analog, which is a
+    legitimate fact, not a missing derivation; only ``tile_size``'s absence changes the object
+    count's scale.
 
     ``date`` is the capture date the GT's confirmed negatives were recorded under, the key the
     same negative rail reads them by. It is stated by the caller, never taken from ``labels_dir``:
@@ -1315,33 +1317,34 @@ def run_full_frame_evaluation(
     number as one.
     """
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
-    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_geometry
+    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_regime
     from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
+    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
     predictor = build_predictor(
         checkpoint_path=str(ckpt_path), device=device,
         score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
 
-    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
-        predictor, tile_size=tile_size, overlap=overlap)
-    # Only "explicit"/"derived" are a real basis here: "unavailable" (nothing to derive from) and
-    # "native_ratio" (a real basis to tile at all, but never independently validated) both refuse.
-    if tile_size_source not in ("explicit", "derived"):
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+        resolve_tile_regime(predictor, tiled=True, tile_size=tile_size, overlap=overlap))
+    # The shared gate every other door resolves through: acceptance is that vocabulary and nothing
+    # else, never a hand-written tuple of source labels.
+    tile_param = resolve_tile_size_param(resolved_tile, tiled=True, tile_size_source=tile_size_source)
+    if not tile_param.is_shippable:
         raise ValueError(
             f"Cannot resolve a trustworthy tile_size for {ckpt_path}: no explicit tile_size was "
-            "passed and the checkpoint carries no persisted training tile geometry with an "
-            "independently validated basis. This is the delivery-grade gating path (report this "
-            "to gate a delivery); it refuses to silently score at a fabricated or unvalidated "
-            "scale rather than the model's real training scale. If this checkpoint was trained "
-            "without tiling, call evaluate_model with use_tiled_inference=False instead, since "
-            "that untiled regime is its correct delivery gate, with no scale to reconcile. If you "
-            "have genuinely derived (or intend to derive, e.g. from this dataset's object-size "
-            "distribution vs. image resolution, per 'Parameters: derive, don't pin') a tile scale "
-            "for this checkpoint, pass it explicitly via the tiling= dict (and overlap, if known); "
-            "it is not cross-checked against the checkpoint's actual training scale, so state it "
-            "deliberately, not as a guess."
+            "passed and the checkpoint carries no persisted or native-frame training tile geometry. "
+            "This is the delivery-grade gating path (report this to gate a delivery); it refuses to "
+            "silently score at a fabricated scale rather than the model's real training scale. If "
+            "this checkpoint was trained without tiling, call evaluate_model with "
+            "use_tiled_inference=False instead, since that untiled regime is its correct delivery "
+            "gate, with no scale to reconcile. If you have genuinely derived (or intend to derive, "
+            "e.g. from this dataset's object-size distribution vs. image resolution, per "
+            "'Parameters: derive, don't pin') a tile scale for this checkpoint, pass it explicitly "
+            "via the tiling= dict (and overlap, if known); it is not cross-checked against the "
+            "checkpoint's actual training scale, so state it deliberately, not as a guess."
         )
-    tile_size, overlap = resolved_tile, resolved_overlap
+    tile_size, overlap = tile_param.value, resolved_overlap
 
     img_dir, lbl_dir = Path(images_dir), Path(labels_dir)
     # The GT category ids come from the run's single assign_class_ids map, read through the same
@@ -1393,7 +1396,7 @@ def run_full_frame_evaluation(
         # being blocked by predict_tiled's mask contract for masks nothing on this path consumes.
         r = predictor.predict_tiled(str(p), tile_size=tile_size, overlap=overlap,
                                     global_nms_iou=global_nms_iou, postprocess=postprocess,
-                                    require_masks=False)
+                                    require_masks=False, tile_resize=tile_resize)
         w, h = int(r["width"]), int(r["height"])
         dt = [{"category_id": int(lab), "bbox": xywh(*b), "score": float(s)}
               for b, s, lab in zip(r["boxes"], r["scores"], r["labels"])]

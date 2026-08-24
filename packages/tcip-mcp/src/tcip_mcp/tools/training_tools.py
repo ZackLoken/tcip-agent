@@ -1912,9 +1912,9 @@ def evaluate_model(
       * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a tile-trained
         checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Report
         this to gate a delivery for such a checkpoint. Tile geometry is resolved from the
-        checkpoint's own persisted training geometry (or an explicit override); a checkpoint with
-        neither refuses rather than silently fabricating a scale, see
-        ``run_full_frame_evaluation``'s docstring for the full precedence and the escape hatch.
+        checkpoint's own persisted or native-frame training geometry, or an explicit override; a
+        checkpoint with none of those refuses rather than silently fabricating a scale, see
+        ``run_full_frame_evaluation``'s docstring for the full precedence.
 
     Args:
         run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.

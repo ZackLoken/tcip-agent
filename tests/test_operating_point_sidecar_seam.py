@@ -242,20 +242,37 @@ def test_tile_size_source_round_trips_through_its_reference(source):
     assert tile_size_source_of(param.validated_against, tile_size=512) == source
 
 
-def test_native_ratio_tile_edge_does_not_read_back_as_a_validated_geometry():
-    param = resolve_tile_size_param(512, tiled=True, tile_size_source="native_ratio")
+def test_tile_size_source_of_recovers_each_geometry_tier_from_its_own_reference():
+    native_param = resolve_tile_size_param(512, tiled=True, tile_size_source="native_ratio")
+    assert tile_size_source_of(native_param.validated_against, tile_size=512) == "native_ratio"
 
-    assert param.validated_against == VALIDATED_FALSE
-    assert tile_size_source_of(param.validated_against, tile_size=512) == "native_ratio"
+    persisted_param = resolve_tile_size_param(512, tiled=True, tile_size_source="derived")
+    assert tile_size_source_of(persisted_param.validated_against, tile_size=512) == "derived"
+
+    # A reference nothing in the current vocabulary answers for: recorded (the edge is kept), never
+    # laundered back into the tier a bare source label might otherwise suggest.
+    assert tile_size_source_of(VALIDATED_FALSE, tile_size=512) == "recorded"
 
 
 def test_no_tile_size_reads_back_as_the_documented_default():
     assert tile_size_source_of(None, tile_size=None) == "default"
 
 
-def test_accepted_geometry_references_are_the_two_the_resolver_stamps():
-    assert set(accepted_references("geometry")) == {
-        VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY}
+def test_accepted_geometry_references_are_the_three_the_resolver_stamps_in_strength_order():
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
+    assert accepted_references("geometry") == (
+        VALIDATED_PERSISTED_GEOMETRY, native_ref, VALIDATED_EXPLICIT_GEOMETRY)
+
+
+def test_geometry_reference_strength_matches_the_mapping_it_is_defined_beside():
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    strength = getattr(resolution_mod, "GEOMETRY_REFERENCE_STRENGTH", None)
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
+    assert strength is not None
+    assert set(strength) == {VALIDATED_PERSISTED_GEOMETRY, native_ref, VALIDATED_EXPLICIT_GEOMETRY}
 
 
 # --- the block-calibrated whole-mosaic regime ---

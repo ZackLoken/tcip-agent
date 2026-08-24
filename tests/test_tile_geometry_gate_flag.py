@@ -46,10 +46,15 @@ def _bucket(path: Path, provenance: dict) -> str:
 
 
 def test_a_native_ratio_tile_edge_never_reads_back_as_a_persisted_geometry():
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
     prov = _provenance(tile_size=300, tile_size_source="native_ratio")
     assert prov["tile_size"]["source"] == "derived"
     assert prov["tile_size"]["value"] == 300
-    assert tile_size_gate_flag(prov) == VALIDATED_FALSE
+    flag = tile_size_gate_flag(prov)
+    assert flag == native_ref
+    assert flag != VALIDATED_PERSISTED_GEOMETRY
 
 
 def test_a_run_with_no_basis_for_a_scale_carries_no_tile_edge_at_all():
@@ -73,14 +78,41 @@ def test_a_caller_stated_tile_edge_clears_the_tile_gate():
     assert tile_size_gate_flag(prov) == VALIDATED_EXPLICIT_GEOMETRY
 
 
-def test_a_native_ratio_bucket_floors_a_delivery_assembled_beside_a_persisted_one(tmp_path):
-    """A delivery spanning both tiers is only as grounded as the weaker bucket, and the refusal
-    names the bucket whose scale nothing confirmed."""
+def test_a_native_ratio_bucket_ranks_against_the_other_tiers_and_floors_beside_no_basis(tmp_path):
+    """A delivery spanning tiers travels under the weakest one present (never a stronger one some
+    other bucket earned); a bucket with no basis at all still floors the whole dimension."""
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
     persisted = _bucket(tmp_path / "b1", _provenance(tile_size=224, tile_size_source="derived"))
     native = _bucket(tmp_path / "b2", _provenance(tile_size=300, tile_size_source="native_ratio"))
-    recon = reconcile_tile_size_validity([persisted, native])
-    assert recon["operative"] is True
-    assert recon["validated"] == VALIDATED_FALSE
-    assert recon["unvalidated_buckets"] == [native]
-    assert recon["per_bucket"] == {persisted: VALIDATED_PERSISTED_GEOMETRY,
-                                   native: VALIDATED_FALSE}
+    explicit = _bucket(tmp_path / "b3", _provenance(tile_size=512, tile_size_source="explicit"))
+    no_basis = _bucket(tmp_path / "b4", _provenance(tile_size=640, tile_size_source="unavailable"))
+
+    persisted_native = reconcile_tile_size_validity([persisted, native])
+    assert persisted_native["validated"] == native_ref
+
+    native_explicit = reconcile_tile_size_validity([native, explicit])
+    assert native_explicit["validated"] == VALIDATED_EXPLICIT_GEOMETRY
+
+    native_no_basis = reconcile_tile_size_validity([native, no_basis])
+    assert native_no_basis["operative"] is True
+    assert native_no_basis["validated"] == VALIDATED_FALSE
+    assert native_no_basis["unvalidated_buckets"] == [no_basis]
+
+
+def test_a_delivery_of_only_native_frame_buckets_reads_back_as_native_never_persisted(tmp_path):
+    """The weakest-present pick must not default to the strongest reference when nothing stronger
+    is in the set: an all-native-frame delivery reads back as the native reference, never silently
+    upgraded to persisted_training_geometry the way a naive two-branch (explicit/else) reconciler
+    would once the native tier became a real reference."""
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
+    a = _bucket(tmp_path / "a", _provenance(tile_size=64, tile_size_source="native_ratio"))
+    b = _bucket(tmp_path / "b", _provenance(tile_size=64, tile_size_source="native_ratio"))
+
+    recon = reconcile_tile_size_validity([a, b])
+
+    assert recon["validated"] == native_ref
+    assert recon["validated"] != VALIDATED_PERSISTED_GEOMETRY

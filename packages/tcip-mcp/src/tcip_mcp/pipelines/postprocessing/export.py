@@ -159,8 +159,9 @@ def export_detection_csv(
     ``operating_point.json`` sidecar and floored against ``measurement_validated`` (never trusted
     from the string alone). A bucket produced by a tiled run gates on its ``tile_size`` too, the same
     operating point's other gating dimension: the tile edge scales the per-image counts this CSV
-    reports, so a run with no persisted training geometry and no explicit caller override refuses
-    here. Untiled buckets are never gated on it. This CSV carries no dimensional
+    reports, so a run with no persisted training geometry, no recoverable native-frame edge, and no
+    explicit caller override refuses here. Untiled buckets are never gated on it. This CSV carries
+    no dimensional
     value (its rows are ``detection_count``/``avg_confidence``, never an area/length/diameter), so
     the physical-scale dimension (see ``export_aggregated_csv``'s gate on
     ``resolve_scale.json``/``reconcile_scale_validity``) is never operative here: there is nothing in

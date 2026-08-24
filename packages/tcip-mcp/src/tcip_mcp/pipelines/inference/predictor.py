@@ -147,13 +147,14 @@ def resolve_tile_geometry(
     ``run_full_frame_evaluation`` call, so they can't silently disagree on which regime a model
     actually ran in.
 
-    A ``"native_ratio"`` edge is a real basis to tile at all, never an independently validated one:
-    it says what the model saw a frame at, not that tiling this raster at that edge was checked
-    against anything. It stays outside ``resolution.accepted_references("geometry")``, so any gated
-    door requires ``acknowledge_unvalidated=True`` to write a result that rests on it, and
-    ``run_full_frame_evaluation`` refuses it outright. Reproducing the training input geometry also
-    takes the recorded train-time resize, which this function does not return; the caller pairs it
-    with :func:`native_ratio_tile_resize`.
+    A ``"native_ratio"`` edge is a real basis to tile at, and a real geometry reference in its own
+    right (``resolution.accepted_references("geometry")`` accepts it): it says what the model saw a
+    frame at, mechanically, never a caller's own statement. Ranked weaker than the persisted or
+    explicit tiers when a delivery mixes buckets across them (see
+    :func:`~tcip_mcp.pipelines.resolution.reconcile_tile_size_validity`), but sufficient on its own
+    to gate a delivery. Reproducing the training input geometry also takes the recorded train-time
+    resize, which this function does not return; the caller pairs it with
+    :func:`native_ratio_tile_resize`, or calls :func:`resolve_tile_regime`, which does both.
 
     Pure fact-return, never raises: this is a capability, not a policy. Returns
     ``(tile_size, tile_size_source, overlap, overlap_source)`` where ``tile_size`` is ``None`` only
@@ -205,6 +206,32 @@ def native_ratio_tile_resize(predictor: Any, tile_size_source: str) -> tuple[int
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
     return recorded_resize(getattr(predictor, "train_augmentation", None))
+
+
+def resolve_tile_regime(
+    predictor: Any, *, tiled: bool, tile_size: int | None, overlap: float | None,
+) -> tuple[int | None, str, float, str, tuple[int, int] | None]:
+    """Resolve tile_size/overlap plus the resize a native-ratio edge must run each tile through.
+
+    Composes :func:`resolve_tile_geometry` and :func:`native_ratio_tile_resize`, the two facts every
+    tiling door needs together, so a door cannot resolve a native-frame edge and forget to pair it
+    with the resize the checkpoint's own recorded augmentation chain applied to a training frame.
+    ``resolve_tile_geometry`` stays the pure fact-return its own docstring describes, and
+    ``native_ratio_tile_resize`` stays the one place the resize is derived; this wrapper only
+    composes them and raises whatever the resize raises for a native-ratio tier whose recorded
+    augmentation config cannot be built.
+
+    The resize is resolved only when ``tiled``: an untiled run reads no tile geometry, so an
+    unreadable recorded augmentation config must not sink one. A door that always tiles (the raster
+    export, ``run_full_frame_evaluation``) passes ``tiled=True`` unconditionally; ``run_inference``
+    and the web worker pass their own already-resolved tiled bool.
+
+    Returns ``(tile_size, tile_size_source, overlap, overlap_source, tile_resize)``.
+    """
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
+        predictor, tile_size=tile_size, overlap=overlap)
+    tile_resize = native_ratio_tile_resize(predictor, tile_size_source) if tiled else None
+    return resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize
 
 
 def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: Any) -> "Predictor":

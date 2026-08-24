@@ -115,27 +115,27 @@ measurement, and no kind stands in for another), read from the predictions' own
   acknowledge below.
 - A tiled run's `tile_size` is a second gating dimension of the same count operating point, at
   every one of those doors: the tile edge scales the per-image counts, so a run with no persisted
-  training geometry and no explicit caller override refuses exactly as an uncalibrated conf does.
-  Reach a validated tile scale by passing an explicit `tile_size`, or by producing the predictions
-  from a checkpoint whose training tile geometry was persisted. An untiled run is never gated on it.
-  A checkpoint that trained untiled on frames of one square size does justify a tile edge (that
-  frame's own size, each tile run through the resize its recorded augmentation config applied), but
-  that basis says only what the model saw a frame at, never that tiling this imagery at that edge
-  was checked against anything: it is a real-but-unvalidated value the acknowledgement below admits
-  and no gate ever clears on its own.
+  training geometry, no recoverable native-frame edge, and no explicit caller override refuses
+  exactly as an uncalibrated conf does. Three routes reach a validated tile scale, ranked strongest
+  to weakest: a checkpoint whose training tile geometry was persisted; a checkpoint that trained
+  untiled on frames of one square size (that frame's own size, each tile run through the resize its
+  recorded augmentation config applied), a real basis mechanically inferred from the checkpoint's
+  own recorded frame, never stated by a caller, and weaker than the other two when a delivery mixes
+  buckets across tiers, but sufficient on its own to clear the gate; or an explicit caller `tile_size`.
+  An untiled run is never gated on it.
 - To ship a provisional result, pass `acknowledge_unvalidated=True`: the door writes but stamps
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number. A tile scale with no real basis at
   all has no value to ship provisionally either, so `acknowledge_unvalidated` cannot admit that case:
-  it refuses unconditionally, distinct from a real-but-unvalidated value the flag does admit.
+  it refuses unconditionally.
 
 `run_inference` stays fully ungated but honestly stamped: the review loop must be able to produce
 unvalidated predictions to *reach* a validated measurement, so it never refuses on conf; it does
 refuse (unconditionally, no `acknowledge_unvalidated`) when tiling is requested and the checkpoint's
 tile scale has no real basis at all, since there is no number to tile at. `export_predictions`, the
 door that actually persists a prediction bucket other doors treat as ground truth, applies the same
-tile_size gate on top for a value that does have a real (if unvalidated) basis. Conf itself is never
-gated at either door; the measurement gate lives at the final phenotype door.
+tile_size gate on top, which any of the three bases clears. Conf itself is never gated at either
+door; the measurement gate lives at the final phenotype door.
 
 ## Quality Control
 

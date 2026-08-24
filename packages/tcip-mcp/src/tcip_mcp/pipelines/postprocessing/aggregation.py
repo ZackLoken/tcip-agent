@@ -249,8 +249,9 @@ def export_aggregated_csv(
     so the count operating point's validity is read from each ``operating_point.json`` sidecar and
     floored against ``measurement_validated``. A bucket produced by a tiled run gates on its
     ``tile_size`` too, the same operating point's other gating dimension: the tile edge scales the
-    per-image counts this per-plant value aggregates, so a run with no persisted training geometry
-    and no explicit caller override refuses here. Untiled buckets are never gated on it.
+    per-image counts this per-plant value aggregates, so a run with no persisted training geometry,
+    no recoverable native-frame edge, and no explicit caller override refuses here. Untiled buckets
+    are never gated on it.
 
     For an ordinal/regression trait, pass both ``pred_dirs`` (the buckets holding
     ``ordinal_operating_point.json``/``regression_operating_point.json``, written by
@@ -369,9 +370,8 @@ def export_aggregated_csv(
         measurement_recon = reconcile_operating_point_validity(
             pred_dirs, asserted=measurement_validated)
         state = measurement_recon["validated"]
-        # The tile scale is the same operating point's other gating dimension: it scales the
-        # per-image counts this per-plant value aggregates, so a tiled bucket whose tile edge has no
-        # persisted or caller-stated basis is exactly as untrustworthy here as an uncalibrated conf.
+        # The tile scale is the same operating point's other gating dimension: a tiled bucket whose
+        # tile edge has no real basis at all is as untrustworthy here as an uncalibrated conf.
         tile_recon = reconcile_tile_size_validity(pred_dirs)
         if units:
             # A dimensional value is actually present in what's being delivered: the physical scale
