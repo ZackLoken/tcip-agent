@@ -57,14 +57,18 @@ VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a kno
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
 VALIDATED_NATIVE_FRAME_GEOMETRY = "persisted_native_frame_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
-# A raster export target's content identity matched the mosaic a block-calibrated bundle was
-# validated against; check_delivery_gate's own "claim_scope" dimension, never a ResolvedParam.
-VALIDATED_SAME_MOSAIC_IDENTITY = "same_mosaic_content_identity"
+# A raster export target matched the mosaic a block-calibrated bundle was validated against;
+# check_delivery_gate's own "claim_scope" dimension, never a ResolvedParam.
+VALIDATED_SAME_MOSAIC_IDENTITY = "same_mosaic_georeferenced_identity"
 CLAIM_SCOPE_REFERENCES = (VALIDATED_SAME_MOSAIC_IDENTITY,)
 """Which references legitimately clear the claim-scope dimension, stated once for the door that
 writes one and the door that reads it back. Narrower than :data:`VALIDATED_SHIPPABLE` on purpose:
 an annotation or physical reference says nothing about which raster a bucket's predictions were
-produced on, so a sidecar recording one there clears nothing."""
+produced on, so a sidecar recording one there clears nothing. The match is content-identical
+always, and additionally geotransform-identical whenever the recorded identity carries a
+geotransform to compare against (:func:`~tcip_mcp.pipelines.raster_source.georeferenced_raster_identity_mismatch`);
+a training source with no readable geotransform (a band-group source, or an unprojected raster)
+is checked on content alone."""
 VALIDATED_FALSE = "false"
 
 # Which validated_against values legitimately clear validation for which kind of thing being

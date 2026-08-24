@@ -1241,10 +1241,18 @@ def _export_predictions_raster(
                 "this export target against."
             )}
         try:
-            same_mosaic = raster_identity_matches(training_identity, raster_path)
+            if training_identity.get("geotransform") is not None:
+                claim_scope_mismatch = georeferenced_raster_identity_mismatch(
+                    training_identity, raster_path)
+            else:
+                claim_scope_mismatch = (
+                    None if raster_identity_matches(training_identity, raster_path)
+                    else f"{raster_path} is not the raster this identity was recorded on"
+                )
         except ValueError as exc:
             return {"error": f"claim-scope check refused: {exc}"}
-        claim_scope_flag = VALIDATED_SAME_MOSAIC_IDENTITY if same_mosaic else VALIDATED_FALSE
+        claim_scope_flag = (
+            VALIDATED_SAME_MOSAIC_IDENTITY if claim_scope_mismatch is None else VALIDATED_FALSE)
 
         conf_param = block_bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
@@ -1271,7 +1279,9 @@ def _export_predictions_raster(
             gate_flags["tile_size"] = tile_ref
         gate = check_delivery_gate(gate_flags, acknowledge_unvalidated=acknowledge_unvalidated)
         if not gate.ok:
-            return {"error": gate.reason, "tile_size_validated": tile_ref,
+            reason = gate.reason if claim_scope_mismatch is None else (
+                f"{gate.reason} {claim_scope_mismatch}")
+            return {"error": reason, "tile_size_validated": tile_ref,
                     "claim_scope_validated": claim_scope_flag}
         tile_size_validated = gate.stamp.get("tile_size")
         claim_scope_validated = gate.stamp.get("claim_scope")

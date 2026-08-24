@@ -26,7 +26,8 @@ WIDTH, HEIGHT = 3200, 200
 BOX_STEP = 40
 
 
-def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False) -> None:
+def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False,
+                  tiepoint_x: float = 500_000.0) -> None:
     import numpy as np
     import tifffile
 
@@ -40,7 +41,7 @@ def _write_mosaic(path: Path, *, seed: int = 0, georeferenced: bool = False) -> 
         str(path), arr, photometric="rgb",
         extratags=[
             (33550, "d", 3, (1.0, 1.0, 0.0), False),
-            (33922, "d", 6, (0.0, 0.0, 0.0, 500_000.0, 4_800_000.0, 0.0), False),
+            (33922, "d", 6, (0.0, 0.0, 0.0, tiepoint_x, 4_800_000.0, 0.0), False),
             (34735, "H", len(geokeys), geokeys, False),
         ],
     )
@@ -446,7 +447,7 @@ def test_export_predictions_raster_block_calibration_admits_and_uncaps_max_dets(
     sidecar = read_operating_point_sidecar(out_dir)
     assert sidecar["operating_point"]["max_dets"]["value"] is None
     assert sidecar["operating_point"]["max_dets"]["derived_from"].startswith("block calibration")
-    assert sidecar["claim_scope_validated"] == "same_mosaic_content_identity"
+    assert sidecar["claim_scope_validated"] == "same_mosaic_georeferenced_identity"
     assert sidecar["block_calibration"]["experiment_id"] == exp["experiment_id"]
     assert "spatial_manifest" not in sidecar["block_calibration"]
 
@@ -513,7 +514,8 @@ def test_export_predictions_raster_earns_the_record_behind_a_validated_block_cal
     assert result["validated"] is True
     stamp = read_operating_point_sidecar(out_dir)
     assert verify_stamp_binding(stamp, out_dir, document="operating_point", trait="catkin").ok
-    assert reconcile_operating_point_validity([str(out_dir)])["validated"] == VALIDATED_HELD_OUT
+    assert reconcile_operating_point_validity(
+        [str(out_dir)], trait="catkin")["validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_predictions_raster_applies_a_legitimate_zero_cross_tile_nms(
@@ -596,6 +598,65 @@ def test_export_predictions_raster_claim_scope_refuses_cross_mosaic(tmp_path: Pa
     assert not out_dir.exists()
 
 
+def test_export_predictions_raster_claim_scope_admits_a_georeferenced_self_export(
+    tmp_path: Path,
+):
+    """The rail must admit valid work: exporting back over the exact training mosaic, which now
+    carries a real geotransform, clears the claim-scope gate on content and georeferencing both
+    and stamps the georeference-aware token."""
+    plant_csv = tmp_path / "plants.csv"
+    _write_plant_csv(plant_csv)
+    exp = _build_experiment(tmp_path, plant_csv_paths=[str(plant_csv)])
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = tmp_path / "preds"
+    result = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        experiment_id=exp["experiment_id"])
+
+    assert "error" not in result, result
+    assert result["claim_scope_validated"] == "same_mosaic_georeferenced_identity"
+
+
+def test_export_predictions_raster_claim_scope_refuses_a_moved_tiepoint_copy(tmp_path: Path):
+    """A pixel-identical copy of the training mosaic with a moved tiepoint refuses (a different
+    raster to a consumer that resolves pixels through the georeferencing), and the acknowledged
+    provisional path still ships, stamped false exactly as a content mismatch does today."""
+    plant_csv = tmp_path / "plants.csv"
+    _write_plant_csv(plant_csv)
+    exp = _build_experiment(tmp_path, plant_csv_paths=[str(plant_csv)])
+    manifest = exp["spatial_manifest"]
+    _attest_regions_complete(
+        exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
+
+    moved = tmp_path / "moved_tiepoint.tif"
+    _write_mosaic(moved, seed=0, georeferenced=True, tiepoint_x=500_020.0)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
+
+    out_dir = tmp_path / "preds"
+    refused = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(moved),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        experiment_id=exp["experiment_id"])
+    assert "error" in refused
+    assert "georeferencing mismatch" in refused["error"]
+    assert not out_dir.exists()
+
+    acknowledged = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(moved),
+        conf_threshold=0.0, tile_size=TILE, overlap=0.2, trait="catkin",
+        experiment_id=exp["experiment_id"], acknowledge_unvalidated=True)
+    assert "error" not in acknowledged, acknowledged
+    assert acknowledged["claim_scope_validated"] == VALIDATED_FALSE
+
+
 def test_export_predictions_raster_without_reserved_region_names_the_real_gap(tmp_path: Path):
     """A checkpoint whose training experiment has no reserved calibration region (an ordinary
     3-way split) refuses trait+raster_path, but with a message naming the missing reserved
@@ -641,6 +702,52 @@ def test_export_predictions_raster_with_no_trait_is_byte_identical_to_the_origin
 
     op = read_operating_point_sidecar(out_dir)["operating_point"]
     assert op["conf"]["validated_against"] == "false"
+
+
+def test_export_predictions_raster_raw_path_stamps_explicit_conf_source_at_the_default(
+    tmp_path: Path,
+):
+    """A caller-stated conf equal to the platform default is stamped 'explicit' on the raster
+    export's own raw path, never laundered into 'default'."""
+    exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_conf_explicit")
+
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = tmp_path / "preds"
+    result = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        conf_threshold=DEFAULT_CONF, tile_size=TILE, overlap=0.2,
+        experiment_id=exp["experiment_id"])
+    assert "error" not in result, result
+
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    op = read_operating_point_sidecar(out_dir)["operating_point"]
+    assert op["conf"]["source"] == "explicit"
+
+
+def test_export_predictions_raster_raw_path_stamps_default_conf_source_when_omitted(
+    tmp_path: Path,
+):
+    """The rail must admit the ordinary, unstated call: an omitted conf on the raster export's raw
+    path still runs at the platform default, stamped 'default'."""
+    exp = _build_experiment(tmp_path, reserve_frac=0.0, experiment_id="exp_conf_default")
+
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out_dir = tmp_path / "preds"
+    result = export_predictions(
+        exp["checkpoint_path"], output_dir=str(out_dir), raster_path=str(exp["raster_path"]),
+        tile_size=TILE, overlap=0.2, experiment_id=exp["experiment_id"])
+    assert "error" not in result, result
+
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+
+    op = read_operating_point_sidecar(out_dir)["operating_point"]
+    assert op["conf"]["source"] == "default"
+    assert op["conf"]["value"] == DEFAULT_CONF
 
 
 def test_select_gt_for_band_matches_the_dt_sides_center_inclusion_rule():
