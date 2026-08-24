@@ -436,16 +436,12 @@ def test_route_never_upgrades_an_edge_with_no_accepted_reference_to_a_validated_
     assert restamped["value"] == 128
 
 
-def test_route_never_downgrades_a_bucket_it_cannot_reduce_to_one_accepted_reference(
-        client, tmp_path: Path):
-    """A stamp with no ``validated_against`` key at all (the shape a stamp predating this
-    dimension carries, e.g. valley-farm's own on-disk bucket: ``tile_size.value`` present, no
-    ``validated_against``) means the route cannot name a single accepted reference for it
-    (``review_tile_size_valid_ref`` is ``None`` with a real edge present). Promotion must keep the
-    bucket's own stored tile_size/tiled blocks rather than overwrite them with the freshly
-    re-resolved (floored to "recorded") ones, the same hazard a delivery spanning several buckets
-    with genuinely different real references (one persisted, one explicit) would hit if the merge
-    always wrote the whole-delivery re-resolution over every bucket."""
+def test_route_floors_an_edge_whose_stamp_names_no_geometry_reference(client, tmp_path: Path):
+    """A stamp carrying a tile edge and no ``validated_against`` key at all (a stamp shaped
+    before the geometry dimension existed) is re-resolved as ``recorded``: the edge is kept, the
+    dimension is operative and floored, so a delivery over the bucket still gates on geometry.
+    Carrying the stored block forward instead would leave the dimension non-operative and let
+    the delivery ship ungated."""
     proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
         "value": 640, "source": "default",
     })
@@ -453,8 +449,13 @@ def test_route_never_downgrades_a_bucket_it_cannot_reduce_to_one_accepted_refere
         "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
     assert resp.status_code == 200, resp.text
     sc = _read_sidecar(pred_dir)
-    assert sc["operating_point"]["tile_size"] == {"value": 640, "source": "default"}
-    assert sc["operating_point"]["tiled"] == {"value": True}
+    restamped = sc["operating_point"]["tile_size"]
+    assert restamped["value"] == 640
+    assert restamped["requires_validation"] is True
+    assert restamped["validated_against"] == VALIDATED_FALSE
+    from tcip_mcp.pipelines.resolution import tile_size_gate_flag
+
+    assert tile_size_gate_flag(sc["operating_point"]) == VALIDATED_FALSE
 
 
 def test_route_refuses_conf_censored_and_stamps_honest_placeholder(client, tmp_path: Path):
