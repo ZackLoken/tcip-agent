@@ -20,6 +20,8 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | value | float/string | Measurement value |
 | units | string | Physical unit implied by the value's own `value_key`; blank when the key implies none (a count, a px-space value), never inherited from `crops.yml` |
 | value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
+| measurement_document | string | Which sidecar document (`operating_point`, `ordinal_operating_point`, `regression_operating_point`) answers for the measurement that produced `value`, stated by the caller's records and checked against every named bucket |
+| scale_document | string | `resolve_scale` when a per-pixel physical scale produced `value`, blank otherwise |
 | confidence | float | Model confidence [0,1] |
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
@@ -81,9 +83,10 @@ uncharacterized, which is a claim about a quantity that has been defined.
 - `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `trait_name`, which stays a
   crop-vocabulary delivered-phenotype name (the CSV column and the unit cross-check read it), and
   resolve it to the registered trait whose spec `delivers` it: none or more than one refuses. Which
-  record applies follows from `task`, since a count, an ordinal and a regression aggregate rest on
-  three different spec floors and are three separate confirmations. Every row carries a value key
-  and every one has to be inside the confirmed set.
+  record applies follows from the records' own `measurement_document` (`operating_point`,
+  `ordinal_operating_point` or `regression_operating_point`), since a count, an ordinal and a
+  regression aggregate rest on three different spec floors and are three separate confirmations.
+  Every row carries a value key and every one has to be inside the confirmed set.
 
 ## The delivery gate (measurement integrity)
 

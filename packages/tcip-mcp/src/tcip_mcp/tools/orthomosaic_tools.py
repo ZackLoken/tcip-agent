@@ -42,7 +42,6 @@ def deliver_orthomosaic_plant_counts(
     crop: str = "",
     pipeline_version: str = "",
     nn_tolerance_m: float | None = None,
-    measurement_validated: str | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> dict:
     """Per-plant detection counts from a persisted orthomosaic prediction bucket + plant CSV(s).
@@ -109,9 +108,6 @@ def deliver_orthomosaic_plant_counts(
         nn_tolerance_m: Nearest-neighbour match tolerance (m). ``None`` (default) derives it from
             the plant grid's own spacing (:func:`assign_detections_to_plants`'s own default),
             never a pinned constant.
-        measurement_validated: An optional caller assertion of the count operating point's
-            validity. It only lowers the result: the real state is read from the bucket's
-            ``operating_point.json`` sidecar and floored against this.
         acknowledge_unvalidated: Write the CSV even when the count operating point or tile_size
             is unvalidated, stamping the un-validated dimension ``false`` so the
             un-trustworthiness travels downstream.
@@ -215,12 +211,14 @@ def deliver_orthomosaic_plant_counts(
     mapped_plant_ids = {a.plot_name for a in mapped}
     records = [
         {"plant_id": a.plot_name, "plant_id_source": a.source,
-         "plant_id_distance_m": a.distance_m, _PER_PLANT_VALUE_KEY: 1}
+         "plant_id_distance_m": a.distance_m, _PER_PLANT_VALUE_KEY: 1,
+         "measurement_document": "operating_point"}
         for a in mapped
     ]
     # Every plant the scan covers gets a row: an explicit 0 for a plant that matched no
     # detection, never silently absent from the delivery (see the docstring above).
-    records += [{"plant_id": p.plot_name, _PER_PLANT_VALUE_KEY: 0}
+    records += [{"plant_id": p.plot_name, _PER_PLANT_VALUE_KEY: 0,
+                "measurement_document": "operating_point"}
                 for p in plants if p.plot_name not in mapped_plant_ids]
 
     agg = aggregate_per_plant(records, strategy="sum", plant_id_key="plant_id",
@@ -245,7 +243,7 @@ def deliver_orthomosaic_plant_counts(
         csv_path = export_aggregated_csv(
             agg, output_csv_path, trait_name=trait_name, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
-            measurement_validated=measurement_validated, pred_dirs=[predictions_dir],
+            pred_dirs=[predictions_dir],
             acknowledge_unvalidated=acknowledge_unvalidated,
         )
     except ValueError as exc:
@@ -256,11 +254,12 @@ def deliver_orthomosaic_plant_counts(
                 "n_detections": len(assignments), "n_mapped": len(mapped),
                 "n_unmapped": n_unmapped}
 
-    # This door always delivers under the aggregate count kind (no task is threaded through to
-    # export_aggregated_csv); trait was already resolved above, at the meaning-refusal check.
+    # This door always delivers under the aggregate count kind; trait was already resolved above,
+    # at the meaning-refusal check.
     delivery_kind = PER_PLANT_COUNT_AGGREGATE
     record_delivery_binding_event("deliver_orthomosaic_plant_counts", output_csv_path,
                                   [predictions_dir], recon["bindings"],
+                                  measurement_documents=["operating_point"], scale_document=None,
                                   trait=trait, delivery_kind=delivery_kind)
 
     # The CSV's own measurement_validated column is what export_aggregated_csv's gate actually

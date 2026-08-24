@@ -1085,6 +1085,14 @@ _DOCUMENT_PARAM: dict[str, tuple[str, str]] = {
 Read by every reconciler and by the verifier, so a document's validity is decided against one
 parameter of one kind wherever it is read."""
 
+MEASUREMENT_DOCUMENTS: tuple[str, ...] = (
+    "operating_point", "ordinal_operating_point", "regression_operating_point",
+)
+"""The sidecar documents a per-plant/per-image delivery may state as its own
+``measurement_document``: every :data:`_DOCUMENT_PARAM` entry except ``classifier_operating_point``
+(no per-plant aggregate rests on a classifier alone today) and ``resolve_scale`` (a physical scale
+is never itself the measurement it states the unit of)."""
+
 
 def claim_payload(sidecar: dict | None, *, document: str) -> dict:
     """The part of a stamp that constitutes the claim, for the document it is a stamp of.
@@ -1771,6 +1779,8 @@ def record_delivery_binding_event(
     pred_dirs: Sequence[str] | None,
     bindings: Mapping[str, StampBinding],
     *,
+    measurement_documents: Sequence[str],
+    scale_document: str | None,
     trait: str | None = None,
     delivery_kind: str | None = None,
     project_root: str | Path | None = None,
@@ -1798,6 +1808,13 @@ def record_delivery_binding_event(
     root, correct since that process serves exactly one project, but a web route already holding its
     own guarded, resolved root passes it explicitly, the same divergence D11 already closes for the
     operationalization record.
+
+    ``measurement_documents`` names which sidecar document(s) the delivery's own gate reconciled
+    (the count-delivery door's single-element statement, or the phenology doors' fixed
+    ``["operating_point", "classifier_operating_point"]``), and ``scale_document`` names
+    ``"resolve_scale"`` when the delivery also rests on a physical scale, ``None`` otherwise. Both
+    are required, never defaulted, so a caller cannot silently omit what its own gate actually
+    reconciled.
     """
     from tcip_mcp.audit import record_event
 
@@ -1826,6 +1843,8 @@ def record_delivery_binding_event(
             "delivery_kind": delivery_kind,
             "door": door,
             "output_path": output_path,
+            "measurement_documents": list(measurement_documents),
+            "scale_document": scale_document,
             "documents": {
                 bucket: {
                     "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,
@@ -2139,8 +2158,9 @@ def reconcile_claim_scope_validity(
 
 
 def reconcile_scale_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, capture_id: str | None = None,
-    asserted: str | None = None, digest_memo: dict[str, str] | None = None,
+    pred_dirs: list[str] | tuple[str, ...], *, unit: str, trait: str,
+    capture_id: str | None = None, asserted: str | None = None,
+    digest_memo: dict[str, str] | None = None,
 ) -> dict:
     """Floor the physical-scale dimension across every prediction bucket's ``resolve_scale.json``.
 
@@ -2165,14 +2185,21 @@ def reconcile_scale_validity(
     claims to be capture-specific. A caller that passes no ``capture_id`` is not asking for
     cross-capture scoping to be checked at all, so no bucket is floored on this basis.
 
+    ``unit`` is the linear basis the delivery's own value_key implies
+    (:func:`~tcip_mcp.pipelines.measurement.mask_geometry.unit_from_value_key`'s second element): a
+    bucket whose stamped ``operating_point.scale.unit`` differs floors, naming both, so a scale
+    stamped in centimetres cannot clear a delivery in millimetres. ``trait`` is the delivery's own
+    registry trait, threaded into :func:`verify_stamp_binding` the same way the three measurement
+    reconcilers thread it, so a scale earned for another trait floors.
+
     ``asserted``, mirroring :func:`reconcile_operating_point_validity`, may only lower the on-disk
     result, never raise it: a caller string can never launder an ungrounded scale into a shippable one.
 
     Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``, the same
     shape :func:`reconcile_tile_size_validity` returns. ``operative`` is False (``validated``
-    ``None``) only when ``pred_dirs`` itself is empty, there is nothing to reconcile against. No
-    producer writes this document today, so every ``resolve_scale.json`` on disk was hand-authored
-    and floors here for want of a record that answers for it.
+    ``None``) only when ``pred_dirs`` itself is empty, there is nothing to reconcile against. A
+    bucket whose ``resolve_scale.json`` no validation record answers for floors here, whether the
+    stamp was hand-authored or produced by :func:`~tcip_mcp.tools.scale_tools.calibrate_physical_scale`.
     """
     if not pred_dirs:
         return {"operative": False, "validated": None, "per_bucket": {}, "unvalidated_buckets": [],
@@ -2191,7 +2218,17 @@ def reconcile_scale_validity(
             recorded = ((sc.get("operating_point") or {}).get(param_key) or {}).get("capture_id")
             if recorded is not None and recorded != capture_id:
                 ref = VALIDATED_FALSE
-        binding = verify_stamp_binding(sc, d, document="resolve_scale", digest_memo=memo)
+        if ref in accepted:
+            stamped_unit = ((sc.get("operating_point") or {}).get(param_key) or {}).get("unit")
+            if stamped_unit != unit:
+                ref = VALIDATED_FALSE
+                binding_notes[str(d)] = (
+                    f"resolve_scale.json at {str(d)!r} is stamped in {stamped_unit!r}, not the "
+                    f"delivered unit {unit!r}; a scale stamped in one linear unit cannot clear a "
+                    "delivery in another."
+                )
+        binding = verify_stamp_binding(sc, d, document="resolve_scale", trait=trait,
+                                       digest_memo=memo)
         if not binding.ok:
             binding_notes[str(d)] = binding.note
             ref = VALIDATED_FALSE
