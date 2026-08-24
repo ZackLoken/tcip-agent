@@ -79,6 +79,79 @@ def test_stamp_admits_a_producer_specific_field():
     assert _stamp(sweep_path="/artifacts/sweep.json")["sweep_path"] == "/artifacts/sweep.json"
 
 
+# --- the declared key set: one union, checked at the two writers ---
+
+def test_stamp_keys_matches_the_constructors_own_returned_keys():
+    """STAMP_KEYS is declared by hand, not derived from the signature (a parameter name matching
+    its returned key is this constructor's own convention, never a guarantee); this pins the two
+    against each other so they cannot drift apart unnoticed."""
+    from tcip_mcp.pipelines.resolution import STAMP_KEYS
+
+    assert STAMP_KEYS == set(_stamp())
+
+
+def test_write_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
+    """A producer inventing a top-level key nobody declared is refused at the writer, independent
+    of the validated_by rail (validated=False here, so only the key-set check is in play)."""
+    bucket = tmp_path / "bucket"
+    with pytest.raises(ValueError, match="mystery_field"):
+        write_sidecar(bucket, _stamp(validated=False, mystery_field="anything"))
+
+
+def test_write_sidecar_admits_every_declared_extension_key(tmp_path):
+    """The rail must admit valid work: every real producer's own addition (the raster export's
+    claim_scope_validated/block_calibration/raster_content_identity, the web worker's overlap/
+    overlap_source, the review promotion's five, the calibrated run's sweep_path/sweep_summary,
+    mask_binarize) writes cleanly through the declared union."""
+    from tcip_mcp.pipelines.resolution import STAMP_EXTENSION_KEYS
+
+    bucket = tmp_path / "bucket"
+    stamp = _stamp(validated=False, **{key: "x" for key in STAMP_EXTENSION_KEYS})
+    write_sidecar(bucket, stamp)
+    assert read_operating_point_sidecar(bucket) == stamp
+
+
+def test_update_sidecar_refuses_an_undeclared_top_level_key(tmp_path):
+    bucket = tmp_path / "bucket"
+    write_sidecar(bucket, _stamp(validated=False))
+    with pytest.raises(ValueError, match="mystery_field"):
+        update_sidecar(bucket, lambda stored: {**stored, "mystery_field": "x"})
+
+
+def test_update_sidecar_admits_a_promotion_over_a_stamp_carrying_a_pre_existing_foreign_key(
+    tmp_path,
+):
+    """The rail must admit valid work: a direct store write or a hand-authored stamp may already
+    carry a foreign top-level key (the pre-existing conform item the grounding record names), and a
+    later promotion that introduces only declared keys is not refused for a key it did not itself
+    write, only for one it introduces."""
+    import tcip_store
+
+    from tcip_mcp.pipelines.resolution import sidecar_key
+
+    bucket = tmp_path / "bucket"
+    stamp = {**_stamp(validated=False), "hand_authored_field": "legacy"}
+    key = sidecar_key(bucket)
+    with tcip_store.transaction(key) as txn:
+        txn.write(key, stamp)
+
+    ok = update_sidecar(bucket, lambda stored: {**stored, "sweep_path": "/artifacts/sweep.json"})
+
+    assert ok is True
+    assert read_operating_point_sidecar(bucket)["hand_authored_field"] == "legacy"
+
+
+def test_the_key_set_rail_is_scoped_to_the_operating_point_document_only(tmp_path):
+    """Other sidecar documents (classifier/ordinal/regression) carry no declared shape and are not
+    checked here: their own producers already write fields (failures, sweep_data) this constructor
+    never declared."""
+    bucket = tmp_path / "bucket"
+    write_sidecar(
+        bucket, {"validated": False, "trait": "catkin", "failures": [], "sweep_data": {}},
+        "ordinal_operating_point",
+    )
+
+
 # --- the store: locked, compare-and-set, byte-compatible with what readers expect ---
 
 def test_sidecar_write_and_read_round_trip(tmp_path):
