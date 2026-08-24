@@ -99,6 +99,9 @@ def test_a_wrong_kind_reference_floors_the_dimension_it_cannot_clear(dimension, 
     ("classifier", VALIDATED_HELD_OUT),
     ("classifier", VALIDATED_REVIEW_CONFIRMED),
     ("tile_size", res.VALIDATED_PERSISTED_GEOMETRY),
+    # getattr: absent at the baseline (pre-promotion), present after; a baseline run then floors
+    # this case on assertion (None clears nothing) rather than erroring at collection.
+    ("tile_size", getattr(res, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)),
     ("tile_size", res.VALIDATED_EXPLICIT_GEOMETRY),
     ("scale", res.VALIDATED_PHYSICAL_MEASUREMENT),
     ("claim_scope", res.VALIDATED_SAME_MOSAIC_IDENTITY),
@@ -127,8 +130,10 @@ def test_an_unknown_dimension_name_refuses_loudly():
 def test_the_refusal_names_the_failed_dimensions_own_references():
     """The refusal must point at what actually clears the failed dimension: telling a tile-size
     failure to collect annotations sends the caller after a reference that clears nothing."""
+    native_ref = getattr(res, "VALIDATED_NATIVE_FRAME_GEOMETRY", "<no-such-reference>")
     g = check_delivery_gate({"tile_size": VALIDATED_FALSE})
     assert res.VALIDATED_PERSISTED_GEOMETRY in g.reason
+    assert native_ref in g.reason
     assert res.VALIDATED_EXPLICIT_GEOMETRY in g.reason
     assert VALIDATED_HELD_OUT not in g.reason
 
@@ -680,10 +685,10 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
 def test_export_predictions_images_dir_gates_before_the_pass_not_after(tmp_path, monkeypatch):
     """DECIDED #1: the images_dir regime's gate runs before the (expensive) pass, the same
     ordering the raster_path regime already had, not only after run_inference already ran it.
-    A real checkpoint whose only basis is the native-ratio tier (a real but never-shippable
-    basis) must refuse without ever reaching the model's own forward pass; GenericPredictor's
-    predict_batch is monkeypatched to raise if called at all, so this proves the skip, not just
-    that no bucket got written."""
+    A real checkpoint with no tile geometry at all (no persisted tile size, no untiled training
+    frame to derive a native-ratio edge from, no explicit override) must refuse without ever
+    reaching the model's own forward pass; GenericPredictor's predict_batch is monkeypatched to
+    raise if called at all, so this proves the skip, not just that no bucket got written."""
     import numpy as np
     import torch
     from PIL import Image
@@ -704,7 +709,7 @@ def test_export_predictions_images_dir_gates_before_the_pass_not_after(tmp_path,
     ckpt = tmp_path / "m.pt"
     torch.save({
         "model_source": model_source, "model_state_dict": model.state_dict(),
-        "config": {"data": {"train_native_size": [64, 64]}, "augmentation": {}},
+        "config": {"data": {}, "augmentation": {}},
     }, str(ckpt))
 
     images_dir = tmp_path / "images"

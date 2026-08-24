@@ -370,10 +370,8 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     classifier_state, binding_note = bind_classifier_validity(
         classifier_recon["validated"], pred_dirs, pred_dirs, trait=payload.trait,
     )
-    # The tile scale the counts were produced at is the same count operating point's other gating
-    # dimension: a curve is built from per-image counts, and a tile edge with no persisted or
-    # caller-stated basis moves those counts as surely as an uncalibrated conf does. Only operative
-    # for buckets that actually ran tiled, so an untiled delivery is never refused over it.
+    # The tile scale is the other gating dimension: a tile edge with no real basis at all is as
+    # untrustworthy here as an uncalibrated conf, operative only for tiled buckets.
     tile_recon = reconcile_tile_size_validity(pred_dirs)
     validity = {
         "operating_point": recon["validated"],
@@ -426,9 +424,10 @@ def _refusal(measurement: _PhenologyMeasurement) -> str:
     if measurement.validity["unvalidated_tile_size_buckets"]:
         tile_note = (
             f" Tiled bucket(s) {measurement.validity['unvalidated_tile_size_buckets']} carry a "
-            "tile_size with no persisted training geometry and no explicit caller override, so the "
-            "scale their counts were produced at has no basis. Re-export with an explicit tile_size, "
-            "or from a checkpoint whose training tile geometry was persisted."
+            "tile_size with no persisted training geometry, no recoverable native-frame edge, and "
+            "no explicit caller override, so the scale their counts were produced at has no basis. "
+            "Re-export with an explicit tile_size, or from a checkpoint whose training tile "
+            "geometry was persisted."
         )
     return (
         "phenology delivery requires a validated classifier and count operating point, reconciled from "

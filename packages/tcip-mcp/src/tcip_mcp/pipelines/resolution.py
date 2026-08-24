@@ -52,9 +52,10 @@ SOURCES = ("explicit", "derived", "default")
 VALIDATED_HELD_OUT = "held_out_annotations"          # a disjoint held-out split of this dataset's GT
 VALIDATED_REVIEW_CONFIRMED = "reviewer_confirmed_annotations"  # a breeder-confirmed output sample
 VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a known physical dimension
-# A tile scale's own real basis for trust is the checkpoint's own persisted training geometry, or a
-# caller's deliberate stated override (the same two bases run_full_frame_evaluation already accepts).
+# A tile scale's own real basis for trust: persisted tiled training geometry, a checkpoint's own
+# recorded uniform untiled frame (native-ratio, inferred mechanically), or a caller's stated override.
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
+VALIDATED_NATIVE_FRAME_GEOMETRY = "persisted_native_frame_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
 # A raster export target's content identity matched the mosaic a block-calibrated bundle was
 # validated against; check_delivery_gate's own "claim_scope" dimension, never a ResolvedParam.
@@ -73,16 +74,26 @@ VALIDATED_FALSE = "false"
 VALIDATION_KINDS = ("annotations", "physical", "geometry")
 _GEOMETRY_REFERENCE_BY_SOURCE: dict[str, str] = {
     "derived": VALIDATED_PERSISTED_GEOMETRY,
+    "native_ratio": VALIDATED_NATIVE_FRAME_GEOMETRY,
     "explicit": VALIDATED_EXPLICIT_GEOMETRY,
 }
 """Which ``tile_size_source`` earns which geometry reference, stated once for both directions:
 :func:`resolve_tile_size_param` stamps a reference from a source and :func:`tile_size_source_of`
 recovers the source behind a recorded one, so a door reading a persisted stamp back cannot disagree
 with the door that wrote it about what counts as a real basis for a tile scale."""
+
+GEOMETRY_REFERENCE_STRENGTH: tuple[str, ...] = (
+    VALIDATED_PERSISTED_GEOMETRY, VALIDATED_NATIVE_FRAME_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY,
+)
+"""The three geometry references, strongest first: ``derived`` is the exact regime the model
+trained under, the native-frame tier a regime mechanically inferred from the checkpoint's own
+recorded frame, and ``explicit`` a caller's statement never cross-checked against the checkpoint.
+A mixed delivery travels under the weakest member present (:func:`reconcile_tile_size_validity`),
+never the strongest; not a floor rank (:func:`_validity_rank` already means that binary check)."""
 _ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
     "annotations": (VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED),
     "physical": (VALIDATED_PHYSICAL_MEASUREMENT,),
-    "geometry": tuple(_GEOMETRY_REFERENCE_BY_SOURCE.values()),
+    "geometry": GEOMETRY_REFERENCE_STRENGTH,
 }
 
 
@@ -109,22 +120,26 @@ def tile_size_source_of(reference: str | None, *, tile_size: int | None) -> str:
     The inverse of what :func:`resolve_tile_size_param` stamps, for a caller holding a persisted
     stamp rather than a live resolution (the review-promotion path, reading a bucket's sidecar back
     to re-resolve an operating point from it). Reading the reference, never the bare ``source``
-    field a sidecar also carries, is what stops a native-size-ratio tile edge from being re-read as
-    a real persisted geometry: that tier is a basis to tile at all but never an accepted geometry
-    reference, so it comes back as ``"native_ratio"`` whenever a tile size is present with no
-    accepted reference behind it, and ``"default"`` when there is no tile size at all.
+    field a sidecar also carries, is what stops a native-ratio tile edge (source ``"derived"``, same
+    as a real persisted geometry) from being re-read as the stronger tier: each real reference maps
+    back to its own source through the lookup. A tile size present with no accepted reference behind
+    it (a stamp nothing in the current vocabulary answers for, e.g. more than one accepted reference
+    among the buckets a review promotion reads) comes back as ``"recorded"``, kept rather than
+    dropped: the edge is real, only its reference is unrecognized. ``"default"`` is only for no tile
+    size at all.
     """
     for source, accepted in _GEOMETRY_REFERENCE_BY_SOURCE.items():
         if reference == accepted:
             return source
-    return "native_ratio" if tile_size is not None else "default"
+    return "recorded" if tile_size is not None else "default"
 
 
 # Every real (non-"false") reference across every kind, used only where the question is "is this
 # a real reference at all": kind-correctness belongs to accepted_references/_DIMENSION_REFERENCES.
 VALIDATED_SHIPPABLE = (
     VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT,
-    VALIDATED_PERSISTED_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY, VALIDATED_SAME_MOSAIC_IDENTITY,
+    VALIDATED_PERSISTED_GEOMETRY, VALIDATED_NATIVE_FRAME_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY,
+    VALIDATED_SAME_MOSAIC_IDENTITY,
 )
 
 # Shared inference operating-point defaults, referenced by both run_inference and the web route so the
@@ -347,14 +362,15 @@ def resolve_tile_size_param(
 
     Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays a
     plain non-gating fact there (mirrors ``in_chans``), gating it anyway would refuse legitimate
-    untiled work over a dimension that was never operative. When tiled, the value is shippable only
-    when its source names a real basis for trusting the scale: the checkpoint's own persisted
-    training geometry (``"derived"``), or a caller's deliberate explicit override (``"explicit"``,
-    accepted on the same terms ``run_full_frame_evaluation`` already accepts an explicit value on:
-    not cross-checked against the checkpoint's real training scale, but a stated decision, not a
-    guess). ``"native_ratio"`` (a tile edge derived from a checkpoint's own uniform untiled training
-    size) is a real basis to tile at all but never an accepted geometry reference on its own, so it
-    floors to unvalidated exactly like the no-basis case. Any other source (``"unavailable"``, no
+    untiled work over a dimension that was never operative. When tiled, the value is shippable when
+    its source names a real basis for trusting the scale, ranked strongest to weakest (see
+    :data:`GEOMETRY_REFERENCE_STRENGTH`): the checkpoint's own persisted training geometry
+    (``"derived"``); a tile edge mechanically derived from a checkpoint's own uniform untiled
+    training frame (``"native_ratio"``), never stated by a caller; or a caller's deliberate explicit
+    override (``"explicit"``, not cross-checked against the checkpoint's real training scale, but a
+    stated decision, not a guess). ``"recorded"`` (:func:`tile_size_source_of`'s own fallback, a
+    real edge read back off a persisted stamp whose reference the current vocabulary does not
+    accept) keeps the edge, floored to unvalidated. Any other source (``"unavailable"``, no
     persisted geometry and nothing explicit) means nothing justifies a scale at all, so ``tile_size``
     itself is ``None``: never a fabricated number, closing the asymmetry with the delivery-gating
     path (``run_full_frame_evaluation``), which already refuses outright for this exact case.
@@ -367,16 +383,25 @@ def resolve_tile_size_param(
             requires_validation=True, validation_kind="geometry",
             validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["derived"],
         )
+    if tile_size_source == "native_ratio" and tile_size is not None:
+        return derived(
+            "tile_size", int(tile_size),
+            derived_from="the checkpoint's own uniform untiled training frame",
+            requires_validation=True, validation_kind="geometry",
+            validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["native_ratio"],
+        )
     if tile_size_source == "explicit" and tile_size is not None:
         return ResolvedParam(
             "tile_size", int(tile_size), source="explicit", derived_from="caller override",
             requires_validation=True, validation_kind="geometry",
             validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["explicit"],
         )
-    if tile_size_source == "native_ratio":
-        return ResolvedParam(
-            "tile_size", int(tile_size) if tile_size is not None else None, source="derived",
-            derived_from="native-size ratio (not an independently validated geometry basis)",
+    if tile_size_source == "recorded" and tile_size is not None:
+        # SOURCES has no token for a read-back edge; "derived" is the closest, as for native_ratio.
+        return derived(
+            "tile_size", int(tile_size),
+            derived_from="read back from the bucket's own stamp with no accepted geometry "
+                         "reference behind it",
             requires_validation=True, validation_kind="geometry", validated_against=VALIDATED_FALSE,
         )
     return ResolvedParam(
@@ -1917,8 +1942,9 @@ def reconcile_tile_size_validity(
     assemble a phenotype from already-written prediction buckets rather than from a live run. A
     delivery spanning several buckets is only as grounded as its least-grounded tiled bucket, so any
     operative bucket whose tile scale has no real basis floors the whole dimension to
-    ``VALIDATED_FALSE``; when the cleared references differ across buckets the weaker basis
-    (a caller's stated override) is what travels, never the stronger one some other bucket earned.
+    ``VALIDATED_FALSE``; when the cleared references differ across buckets the weakest member of
+    :data:`GEOMETRY_REFERENCE_STRENGTH` present is what travels, never a stronger one some other
+    bucket earned.
 
     Returns ``{operative, validated, per_bucket, unvalidated_buckets, binding_notes}``. ``operative``
     is False (and ``validated`` ``None``) when no bucket ran tiled, in which case the caller adds
@@ -1953,10 +1979,10 @@ def reconcile_tile_size_validity(
                 "binding_notes": binding_notes}
     if unvalidated:
         validated = VALIDATED_FALSE
-    elif VALIDATED_EXPLICIT_GEOMETRY in refs:
-        validated = VALIDATED_EXPLICIT_GEOMETRY
     else:
-        validated = VALIDATED_PERSISTED_GEOMETRY
+        # The weakest member of GEOMETRY_REFERENCE_STRENGTH present travels (last match, strongest
+        # first).
+        validated = next(ref for ref in reversed(GEOMETRY_REFERENCE_STRENGTH) if ref in refs)
     return {"operative": True, "validated": validated, "per_bucket": per_bucket,
             "unvalidated_buckets": unvalidated, "binding_notes": binding_notes}
 

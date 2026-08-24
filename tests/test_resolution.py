@@ -228,16 +228,19 @@ def test_tile_size_no_basis_is_not_shippable():
     assert p.unvalidated_value(acknowledge_unvalidated=True) is None
 
 
-def test_tile_size_native_ratio_is_a_real_basis_but_never_shippable():
-    # A real basis to tile at all (a checkpoint's own uniform untiled training size), but never an
-    # accepted geometry reference on its own: always floors to unvalidated, unlike derived/explicit.
-    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
+def test_tile_size_native_ratio_is_a_real_basis_and_shippable_under_its_own_reference():
+    # A real basis to tile at all (a checkpoint's own uniform untiled training size), and (after
+    # promotion) a real geometry reference in its own right, distinct from a persisted one.
+    import tcip_mcp.pipelines.resolution as resolution_mod
+    from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY, resolve_tile_size_param
 
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
     p = resolve_tile_size_param(300, tiled=True, tile_size_source="native_ratio")
     assert p.requires_validation is True and p.validation_kind == "geometry"
-    assert p.validated_against == VALIDATED_FALSE
-    assert p.is_shippable is False
-    assert p.unvalidated_value(acknowledge_unvalidated=True) == 300
+    assert p.validated_against == native_ref
+    assert p.validated_against != VALIDATED_PERSISTED_GEOMETRY
+    assert p.is_shippable is True
+    assert p.value == 300
 
 
 def test_raw_operating_point_no_basis_tiled_default_surfaces_its_own_shippable_issue():

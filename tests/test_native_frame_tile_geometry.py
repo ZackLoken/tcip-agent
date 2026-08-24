@@ -382,22 +382,26 @@ def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = N
     return str(ckpt)
 
 
-def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on(tmp_path):
+def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on(tmp_path, caplog):
     """The rail admits the work: a caller who asks to tile a checkpoint whose only geometry is its
-    untiled training frame gets a real pass at that frame's edge, with the basis named in the
-    warning and floored to unvalidated in the provenance."""
+    untiled training frame gets a real pass at that frame's edge, the tier's own (accepted, weaker)
+    geometry reference in the provenance, and the basis logged rather than warned about, since a
+    delivery door no longer refuses it."""
+    import logging
+
     from tcip_mcp.tools.inference_tools import run_inference
 
-    r = run_inference(_native_frame_checkpoint(tmp_path, {"resize": [32, 32]}),
-                      image_paths=[_image(tmp_path)], device="cpu", tile=True, conf_threshold=0.0)
+    with caplog.at_level(logging.INFO):
+        r = run_inference(_native_frame_checkpoint(tmp_path, {"resize": [32, 32]}),
+                          image_paths=[_image(tmp_path)], device="cpu", tile=True, conf_threshold=0.0)
 
     assert "error" not in r
     assert r["tiled"] is True and len(r["results"]) == 1
     tile_param = r["operating_point"]["tile_size"]
     assert tile_param["value"] == TILE
-    assert tile_param["validated_against"] == "false"
-    assert "untiled training frame" in r["warning"]
-    assert "(32, 32)" in r["warning"]
+    assert tile_param["validated_against"] != "false"
+    assert "warning" not in r
+    assert any("untiled training frame" in m and "(32, 32)" in m for m in caplog.messages)
 
 
 def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp_path):
@@ -424,20 +428,130 @@ def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run
     assert "error" not in r and r["tiled"] is False and len(r["results"]) == 1
 
 
-def test_delivery_grade_evaluation_refuses_a_native_frame_basis(tmp_path):
-    """The tier is a real basis to tile at, never an independently validated one, so the path whose
-    number gates a phenotype delivery refuses it and names the untiled regime as the right gate."""
+def _native_frame_gt(images_dir: Path, labels_dir: Path) -> None:
+    """A single 128x128 image, ground truth at exactly the middle half of every tile on a gapless
+    2x2 TILE-edge lattice: what ``_MiddleHalfDetector`` reports whatever intermediate resize a
+    tile is run through, so a perfect-match reference isolates the geometry reproduction this
+    admits-valid-work proof is about from any unrelated matching noise.
+    """
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(images_dir / "a.png")
+    json_io.write_annotations(
+        str(labels_dir / "a.json"),
+        [Annotation(subject="catkin", geometry=BBox(*b)) for b in sorted(_expected_middle_half_boxes())],
+        IMAGE, IMAGE)
+
+
+def _persisted_regime_predictor():
+    p = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
+    p.train_tile_size, p.train_overlap = TILE, 0.0
+    p.train_native_size, p.train_augmentation = None, None
+    return p
+
+
+def _native_frame_regime_predictor():
+    """Only the checkpoint's own uniform untiled training frame, with a recorded chain that pins a
+    resize to a different edge than the tile itself, so the reproduction below exercises the
+    resize/rescale round trip rather than comparing two identical no-op calls."""
+    p = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
+    p.train_tile_size, p.train_overlap = None, 0.0
+    p.train_native_size = [TILE, TILE]
+    p.train_augmentation = {"resize": [TILE * 2, TILE * 2]}
+    return p
+
+
+def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_the_persisted_one(
+        tmp_path):
+    """The reproduction the ruling asked for: a checkpoint whose only tiling basis is its own
+    uniform untiled training frame reaches the delivery-grade gate and produces the identical
+    counts, metrics and box coordinates a persisted tiled regime already trusted would, even though
+    its recorded augmentation chain pins a real resize the native-frame regime alone must run each
+    tile through and undo, so the two runs are not merely two identical no-resize calls."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
+    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+
+    images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    _native_frame_gt(images_dir, labels_dir)
+
+    build = predictor_mod.build_predictor
+    try:
+        predictor_mod.build_predictor = lambda **kw: _persisted_regime_predictor()
+        persisted = run_full_frame_evaluation(
+            "ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"),
+            subject="catkin")
+
+        predictor_mod.build_predictor = lambda **kw: _native_frame_regime_predictor()
+        native = run_full_frame_evaluation(
+            "ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out_native"),
+            subject="catkin")
+    finally:
+        predictor_mod.build_predictor = build
+
+    assert "error" not in persisted and "error" not in native
+    assert persisted["tile_size_source"] == "derived"
+    assert native["tile_size_source"] == "native_ratio"
+    assert native["tile_size"] == persisted["tile_size"] == TILE
+    assert persisted["tp"] == 4 and persisted["fp"] == 0 and persisted["fn"] == 0
+    for key in ("tp", "fp", "fn", "n_gt", "n_pred", "precision", "recall", "f1", "map", "map50"):
+        assert native[key] == persisted[key], key
+
+    # The metrics alone cannot distinguish "byte-identical boxes" from "close enough to still
+    # match": run the exact geometry each regime resolved directly and compare coordinates.
+    persisted_predictor, native_predictor = (
+        _persisted_regime_predictor(), _native_frame_regime_predictor())
+    p_tile, _, p_overlap, _, p_resize = resolve_tile_regime(
+        persisted_predictor, tiled=True, tile_size=None, overlap=None)
+    n_tile, _, n_overlap, _, n_resize = resolve_tile_regime(
+        native_predictor, tiled=True, tile_size=None, overlap=None)
+    assert n_resize == (TILE * 2, TILE * 2)
+    r_p = persisted_predictor.predict_tiled(str(images_dir / "a.png"), tile_size=p_tile,
+                                            overlap=p_overlap, tile_resize=p_resize,
+                                            require_masks=False)
+    r_n = native_predictor.predict_tiled(str(images_dir / "a.png"), tile_size=n_tile,
+                                         overlap=n_overlap, tile_resize=n_resize,
+                                         require_masks=False)
+    assert ({tuple(b) for b in r_p["boxes"]} == {tuple(b) for b in r_n["boxes"]}
+            == _expected_middle_half_boxes())
+
+
+def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict_tiled(tmp_path):
+    """The evaluation door never forwarded a resize into ``predict_tiled`` before this change; a
+    native-frame checkpoint whose recorded chain pins one must reach ``predict_tiled`` with it, not
+    silently run each tile at its own native size."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
+    _native_frame_gt(images_dir, labels_dir)
+
+    captured: dict = {}
+
+    def _spy_predictor(**kw):
+        p = _native_frame_regime_predictor()
+        real_predict_tiled = p.predict_tiled
+
+        def _spy(*a, **kwargs):
+            captured.update(kwargs)
+            return real_predict_tiled(*a, **kwargs)
+
+        p.predict_tiled = _spy
+        return p
+
     build = predictor_mod.build_predictor
     try:
-        predictor_mod.build_predictor = lambda **kw: _GeometryStub(train_native_size=[TILE, TILE])
-        with pytest.raises(ValueError, match="use_tiled_inference=False"):
-            run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"))
+        predictor_mod.build_predictor = _spy_predictor
+        r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+                                      str(tmp_path / "out"), subject="catkin")
     finally:
         predictor_mod.build_predictor = build
+
+    assert "error" not in r
+    assert captured.get("tile_resize") == (TILE * 2, TILE * 2)

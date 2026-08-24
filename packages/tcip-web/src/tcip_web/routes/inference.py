@@ -10,8 +10,8 @@ checkpoint through its own native SAHI-style tiling.
 The operating point (conf / NMS IoU / tiling / max_dets) is resolved through the same
 ``raw_operating_point`` bundle as the MCP door and its provenance is stamped alongside the
 predictions, so a GUI run and an agent run can't diverge on the count or hide an unvalidated
-operating point. A run whose tile scale has no persisted or caller-stated basis is refused by the
-shared delivery gate before anything is written, the same refusal ``export_predictions`` makes.
+operating point. A run whose tile scale has no real basis at all is refused by the shared delivery
+gate before anything is written, the same refusal ``export_predictions`` makes.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class InferenceJob:
     # Whether the caller explicitly chose `tile`, threaded into raw_operating_point's tiled_source.
     tile_source: str = "default"
     # Whether slice_hw was the breeder's explicit override or should be re-derived from the
-    # checkpoint's own persisted training geometry (resolve_tile_geometry).
+    # checkpoint's own recorded training geometry, tiled or native-frame (resolve_tile_geometry).
     slice_source: str = "default"
     total: int = 0
     done: int = 0
@@ -221,13 +221,16 @@ def _worker(job: InferenceJob) -> None:
             if job.tile is None else job.tile
         )
 
-        # Derive tile_size/overlap from the checkpoint's own persisted training geometry: the same
-        # resolver run_inference uses. job.slice_source == "explicit" still wins over the derivation.
-        from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+        # Derive tile_size/overlap/resize the same way run_inference does; job.slice_source ==
+        # "explicit" still wins. resolve_tile_regime resolves the resize only when tiled.
+        from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
 
-        resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
-            predictor, tile_size=job.slice_hw[0] if job.slice_source == "explicit" else None,
-            overlap=job.overlap if job.slice_source == "explicit" else None,
+        resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+            resolve_tile_regime(
+                predictor, tiled=resolved_tile_bool,
+                tile_size=job.slice_hw[0] if job.slice_source == "explicit" else None,
+                overlap=job.overlap if job.slice_source == "explicit" else None,
+            )
         )
 
         # Resolve the operating point through the same firewalled bundle as the MCP door: conf is a
@@ -323,6 +326,7 @@ def _worker(job: InferenceJob) -> None:
                 overlap=resolved_overlap,
                 global_nms_iou=job.iou,
                 postprocess=job.postprocess,
+                tile_resize=tile_resize,
             )
             write_predictions_json(output_dir / f"{img.stem}.json", results[0],
                                    created_by=f"model:{Path(job.checkpoint_path).stem}", id_map=id_map)

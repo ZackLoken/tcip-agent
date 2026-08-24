@@ -124,16 +124,19 @@ def test_every_conf_label_the_registered_pickers_can_stamp_has_a_registered_impl
 
 def test_a_native_ratio_tile_source_reaches_the_resolver_intact():
     """``native_ratio`` is the fourth tile-size source and the one whose behavior differs from the
-    no-basis case: it keeps a real tile edge and stamps a derived source, while remaining
-    unvalidated. Collapsing it into the no-basis case would discard a caller's edge silently.
+    no-basis case: it keeps a real tile edge, stamps a derived source, and clears its own geometry
+    reference. Collapsing it into the no-basis case would discard a caller's edge silently.
     """
+    import tcip_mcp.pipelines.resolution as resolution_mod
+
+    native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
                                 tile_size=300, tile_size_source="native_ratio")
     p = b.params["tile_size"]
     assert p._raw == 300
     assert p.source == "derived"
-    assert p.validated_against == VALIDATED_FALSE
-    assert p.is_shippable is False
+    assert p.validated_against == native_ref
+    assert p.is_shippable is True
 
     no_basis = resolve_operating_point("catkin", tiled=True, dataset_hash="h",
                                        tile_size=300, tile_size_source="unavailable")

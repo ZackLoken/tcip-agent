@@ -885,10 +885,8 @@ def compute_phenology(
     if operating_point_conf is None and recon["conf"] is not None:
         operating_point_conf = recon["conf"]  # prefer the on-disk conf over a caller string
 
-    # The tile scale the counts were produced at is the second gating dimension of the same count
-    # operating point: a phenology fraction is built from per-image counts, and a tile edge with no
-    # persisted or caller-stated basis moves those counts as surely as an uncalibrated conf does.
-    # Read from the same sidecars, and only operative for buckets that actually ran tiled.
+    # The tile scale is the second gating dimension of the same count operating point: a tile edge
+    # with no real basis at all is as untrustworthy as an uncalibrated conf.
     tile_recon = reconcile_tile_size_validity(list(predictions_by_date.values()))
 
     # The classifier's validity is read the same way, from classifier_operating_point.json, never a
@@ -923,9 +921,10 @@ def compute_phenology(
         if tile_recon["unvalidated_buckets"]:
             floor_note += (
                 f" Tiled bucket(s) {tile_recon['unvalidated_buckets']} carry a tile_size with no "
-                "persisted training geometry and no explicit caller override, so the scale the "
-                "counts were produced at has no basis. Re-export with an explicit tile_size, or "
-                "from a checkpoint whose training tile geometry was persisted.")
+                "persisted training geometry, no recoverable native-frame edge, and no explicit "
+                "caller override, so the scale the counts were produced at has no basis. "
+                "Re-export with an explicit tile_size, or from a checkpoint whose training tile "
+                "geometry was persisted.")
         if classifier_recon["missing_sidecars"]:
             floor_note += (f" No classifier_operating_point.json found in "
                            f"{classifier_recon['missing_sidecars']}, calibrate the classifier via "

@@ -576,11 +576,10 @@ def run_inference(
             overrides. A checkpoint that trained untiled on frames that all shared one square size
             derives the edge from that frame instead (``"native_ratio"``), and each tile is run
             through the resize that run's own augmentation config recorded, so the model sees a tile
-            the way it saw a training frame; that edge is a real basis to tile at but never an
-            independently validated one, so it comes back with a warning and a delivery door refuses
-            it unless acknowledged. A checkpoint with none of those has no real basis to tile at: if
-            ``tile`` ends up ``True`` with no resolvable ``tile_size``, this refuses (names the
-            missing basis) rather than fabricate one.
+            the way it saw a training frame; that edge is a real, weaker geometry basis than a
+            persisted or explicit one, but a delivery door admits it on its own. A checkpoint with
+            none of those has no real basis to tile at: if ``tile`` ends up ``True`` with no
+            resolvable ``tile_size``, this refuses (names the missing basis) rather than fabricate one.
         overlap: Fractional tile overlap (stride = tile_size*(1-overlap)). ``None`` derives from the
             checkpoint (else 0.2).
         tile_batch_size: Tiles per forward batch.
@@ -686,12 +685,12 @@ def run_inference(
 
     # Derive tile geometry from training geometry unless the caller pinned it. Pure fact-return,
     # never refuses; the warn-and-proceed policy for this exploratory path lives here.
-    from tcip_mcp.pipelines.inference.predictor import (
-        native_ratio_tile_resize, resolve_tile_geometry,
-    )
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
 
-    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
-        predictor, tile_size=tile_size, overlap=overlap)
+    # resolve_tile_regime resolves the resize half only when tiled, so an untiled run is never
+    # sunk by an unreadable recorded augmentation config.
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+        resolve_tile_regime(predictor, tiled=resolved_tile_bool, tile_size=tile_size, overlap=overlap))
     if resolved_tile_bool and resolved_tile is None:
         # Tiling was requested but nothing justifies a scale: refuse rather than fabricate one.
         return {"error": (
@@ -702,21 +701,14 @@ def run_inference(
             "real basis to run at. Pass tile_size explicitly, retrain with tile geometry persisted, "
             "or leave tile unset/False to run untiled."
         )}
-    # The tile as the training chain would have handed it to the model, only when tiling: an untiled
-    # run reads no tile geometry, so an unreadable recorded augmentation config must not sink it.
-    tile_resize = native_ratio_tile_resize(predictor, tile_size_source) if resolved_tile_bool else None
-    geometry_warning = None
     if tile_size_source == "derived":
         logger.info("tile_size %d derived from the checkpoint's training geometry", resolved_tile)
     elif resolved_tile_bool and tile_size_source == "native_ratio":
         resize_note = "" if tile_resize is None else (
             f", each tile run through its recorded train-time resize {tuple(tile_resize)}")
-        geometry_warning = (
-            f"tile_size {resolved_tile} came from this checkpoint's own uniform untiled training "
-            f"frame{resize_note}: a real basis to tile at, never an independently validated one. "
-            "The counts here rest on it, and a delivery door refuses them unless it is acknowledged."
-        )
-        logger.warning(geometry_warning)
+        logger.info(
+            "tile_size %d derived from this checkpoint's own uniform untiled training frame%s",
+            resolved_tile, resize_note)
     # overlap_source == "default" is unremarkable (no persisted overlap analog); only tile_size's
     # absence changes the object count's scale.
 
@@ -909,9 +901,8 @@ def run_inference(
         "results": results,
         **extra,
     }
-    warning = "; ".join(w for w in (geometry_warning, cpu_warning) if w)
-    if warning:
-        out["warning"] = warning
+    if cpu_warning:
+        out["warning"] = cpu_warning
     return out
 
 
@@ -1168,16 +1159,15 @@ def _export_predictions_raster(
 
     The tile_size gate (and, for the ``trait`` path, the claim-scope gate) runs pre-pass, before
     the always-expensive tiled pass. Unlike the ordinary regime (which can fall back to running
-    untiled), this regime always tiles, so a checkpoint with no persisted geometry and no explicit
-    override has no real basis to tile at *at all*: that refusal is unconditional, never
-    overridable via ``acknowledge_unvalidated`` (there is no value to provisionally proceed with),
-    distinct from a real-but-unvalidated tile scale, which the gate below does admit when
-    acknowledged.
+    untiled), this regime always tiles, so a checkpoint with no persisted geometry, no recoverable
+    native-frame edge, and no explicit override has no real basis to tile at *at all*: that refusal
+    is unconditional, never overridable via ``acknowledge_unvalidated`` (there is no value to
+    provisionally proceed with). This door has no real-but-unvalidated tile scale left to admit on
+    acknowledgement: every basis the gate below resolves to either clears it on its own or is this
+    no-basis-at-all case.
     """
     from tcip_mcp.model_registry import resolve_model_identity
-    from tcip_mcp.pipelines.inference.predictor import (
-        build_predictor, native_ratio_tile_resize, resolve_tile_geometry,
-    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_regime
 
     # An unstated cap falls to the shared platform default for the pass; this regime has no
     # per-dataset derivation of one to leave room for.
@@ -1190,8 +1180,10 @@ def _export_predictions_raster(
     )
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
-    resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
-        predictor, tile_size=tile_size, overlap=overlap)
+    # Resolved (resize included) before the raster is opened, so an unreadable recorded
+    # augmentation config refuses here rather than partway through an expensive pass.
+    resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+        resolve_tile_regime(predictor, tiled=True, tile_size=tile_size, overlap=overlap))
     if resolved_tile is None:
         return {"error": (
             f"tile_size could not be resolved for {checkpoint_path}: this checkpoint carries no "
@@ -1199,9 +1191,6 @@ def _export_predictions_raster(
             "always-tiled regime has no real basis to run at. Pass tile_size explicitly, or "
             "retrain with tile geometry persisted."
         )}
-    # Resolved before the raster is opened, so an unreadable recorded augmentation config refuses
-    # here rather than partway through an expensive pass.
-    tile_resize = native_ratio_tile_resize(predictor, tile_size_source)
 
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE, block_calibrated_export_operating_point, check_delivery_gate,
@@ -1459,7 +1448,8 @@ def export_predictions(
     builds on, the same contract an uncalibrated ``conf`` already has. This tool is the one that
     actually persists a prediction bucket other doors treat as ground truth, so it is where the
     refusal belongs: a tiled run whose tile_size has no real basis (no persisted training geometry,
-    no explicit override) refuses to write here unless ``acknowledge_unvalidated=True``, the same
+    no recoverable native-frame edge, no explicit override) refuses to write here unless
+    ``acknowledge_unvalidated=True``, the same
     gate ``tabulate_counts``/``compute_phenology``/the web results routes/``export_aggregated_csv``
     already apply, via the same shared :func:`tcip_mcp.pipelines.resolution.tile_size_gate_flag`.
     Both regimes gate before the (expensive) pass runs: the ``raster_path`` regime uses the
@@ -1706,10 +1696,11 @@ def tabulate_counts(
     ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
     ``measurement_validated=false``. Calibrate per dataset (``trait`` + ``calibration_labels_dir``)
     to reach a validated conf. A tiled run's ``tile_size`` gates the same way, a run with no
-    persisted training geometry and no explicit caller override refuses here too (closing the
-    asymmetry with ``run_full_frame_evaluation``, which already refuses outright for that same
-    case); pass an explicit ``tile_size`` or retrain with tile geometry persisted to reach a
-    validated tile scale. An untiled run is never gated on tile_size at all.
+    persisted training geometry, no recoverable native-frame edge, and no explicit caller override
+    refuses here too (closing the asymmetry with ``run_full_frame_evaluation``, which already
+    refuses outright for that same case); pass an explicit ``tile_size``, retrain with tile geometry
+    persisted, or rely on a checkpoint's own uniform untiled training frame to reach a validated
+    tile scale. An untiled run is never gated on tile_size at all.
 
     A validated CSV also needs the predictions its counts were read off to exist somewhere a
     reviewer can check them, so ``predictions_dir`` is the third gating dimension: without it the
