@@ -374,7 +374,8 @@ def dispatch_train_body(ctx: TrainContext) -> None:
     other, don't reimplement it.
     """
     run = ctx.run
-    training_source = run.config.get("training_source")
+    from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
+    training_source = run.config.get(TRAINING_SOURCE_KEY)
     if training_source:
         from tcip_mcp.pipelines.model_build import _import_dotted
 

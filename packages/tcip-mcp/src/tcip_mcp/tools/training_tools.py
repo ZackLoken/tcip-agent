@@ -85,7 +85,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # training_source seam (mirrors model_source/dataset_source above), a bare "module:function"
     # string, not a dict.
-    training_source = config.get("training_source")
+    from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
+    training_source = config.get(TRAINING_SOURCE_KEY)
     if training_source is not None:
         if not isinstance(training_source, str) or not training_source:
             issues.append("training_source must be a non-empty 'module:function' string")
@@ -1754,27 +1755,35 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
 
-    # 2. Auto group-aware train/val split.
+    # 2. Auto group-aware train/val split. The labels dir's shape decides up front: a dataset-level
+    # COCO here is a caller-fixable config error, raised outside any handler below, not a build failure to degrade.
+    build_src = dict(src)
+    _detected_label_format = None
+    if task in ("detection", "instance_seg") and not (
+        data_cfg.get("label_format") or data_cfg.get("coco_json")
+    ):
+        from tcip_mcp.pipelines.data.datasets import dir_label_format
+        _labels, _images = src.get("labels_dir", ""), src.get("images_dir", "")
+        if _labels and _images:
+            _detected_label_format = dir_label_format(_labels)
+            if _detected_label_format == "coco":
+                raise ValueError(
+                    f"data.labels_dir={_labels!r} holds a dataset-level COCO file; set "
+                    "data.coco_json (or data.label_format='coco') to train on it directly, "
+                    "rather than assembling per-image labels that are not there."
+                )
+
     try:
-        # Assemble the dataset-level COCO once (JSON detection labels) and thread it into
-        # the full + train + val builds below, instead of re-assembling the same COCO three times.
-        # Annotations are matched by image file name, so the full COCO is correct for any stem subset.
-        build_src = dict(src)
-        if task in ("detection", "instance_seg") and not (
-            data_cfg.get("label_format") or data_cfg.get("coco_json")
-        ):
-            from tcip_mcp.pipelines.data.datasets import (
-                assemble_coco, dir_label_format, _resolve_registry_id_map,
-            )
-            _labels, _images = src.get("labels_dir", ""), src.get("images_dir", "")
-            if _labels and _images and dir_label_format(_labels) == "json":
-                _subject, _attribute = src.get("subject"), src.get("attribute")
-                _reg, _id_map = _resolve_registry_id_map(_labels, _subject, _attribute)
-                build_src["coco_data"] = assemble_coco(
-                    _labels, _images, subject=_subject, attribute=_attribute, id_map=_id_map,
-                    date=src.get("date"))
-                build_src["label_format"] = "coco"
-                build_src["num_classes"] = len(_id_map)
+        # Assemble the dataset-level COCO once, threaded into the full + train + val builds below.
+        if _detected_label_format == "json":
+            from tcip_mcp.pipelines.data.datasets import assemble_coco, _resolve_registry_id_map
+            _subject, _attribute = src.get("subject"), src.get("attribute")
+            _reg, _id_map = _resolve_registry_id_map(_labels, _subject, _attribute)
+            build_src["coco_data"] = assemble_coco(
+                _labels, _images, subject=_subject, attribute=_attribute, id_map=_id_map,
+                date=src.get("date"))
+            build_src["label_format"] = "coco"
+            build_src["num_classes"] = len(_id_map)
 
         full_ds = build_dataset(task, **build_src, transforms=transforms)
         stems = list(getattr(full_ds, "stems", None) or getattr(full_ds, "_stems", []))

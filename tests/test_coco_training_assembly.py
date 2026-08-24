@@ -77,6 +77,28 @@ def test_dir_label_format_empty(tmp_path):
     assert dir_label_format(tmp_path / "nope") is None
 
 
+def test_dir_label_format_detects_a_dataset_level_coco(tmp_path):
+    """A dataset-level COCO's 'images'/'categories' markers are checked before 'annotations', the
+    same priority format_io reads a file's shape with everywhere else, so a labels_dir holding one
+    reads 'coco' here too rather than being misclaimed as our per-image json."""
+    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    d = tmp_path / "detect"
+    d.mkdir()
+    (d / "dataset.json").write_text(json.dumps(
+        {"images": [{"id": 1, "file_name": "a.jpg"}], "annotations": [], "categories": []}))
+    assert dir_label_format(d) == "coco"
+
+
+def test_dir_label_format_treats_the_old_objects_schema_as_unrecognized(tmp_path):
+    """The old 'objects' schema, which format_io's detection raises on, is never our per-image
+    json; dir_label_format's own never-raise contract folds that raise into None."""
+    from tcip_mcp.pipelines.data.datasets import dir_label_format
+    d = tmp_path / "detect"
+    d.mkdir()
+    (d / "a.json").write_text(json.dumps({"objects": [{"label": "catkin"}]}))
+    assert dir_label_format(d) is None
+
+
 # ── assemble_coco ───────────────────────────────────────────────────────────
 
 def test_assemble_coco_pairs_labels_with_images(tmp_path):
@@ -162,6 +184,23 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
     assert val_ds.class_distribution == {0: 7}
 
 
+def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path):
+    """training_tools._auto_train_val's own COCO-assembly branch must refuse the same shape
+    build_dataset does, rather than silently training without validation on it."""
+    from tcip_mcp.tools.training_tools import _auto_train_val
+
+    images = tmp_path / "images"
+    labels = tmp_path / "detect"
+    labels.mkdir()
+    _make_images(images, ["img0", "img1"])
+    (labels / "dataset.json").write_text(json.dumps(
+        {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
+
+    with pytest.raises(ValueError, match="coco_json"):
+        _auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
+                                      "subject": CATKIN}, None)
+
+
 # ── build_dataset auto-routes per-image JSON onto the COCO path ──────────────
 
 def test_build_dataset_detection_autoresolves_json(tmp_path):
@@ -179,6 +218,21 @@ def test_build_dataset_detection_autoresolves_json(tmp_path):
     assert target["boxes"].tolist()[0] == pytest.approx([10, 10, 50, 50])
     assert target["labels"].tolist() == [1]  # 0-indexed cid 0 -> 1-indexed
     assert ds.class_distribution == {0: 1}
+
+
+def test_build_dataset_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path):
+    """A dataset-level COCO file sitting in labels_dir must not be assembled from per-image files
+    that are not there; it names data.coco_json as the way to train on it directly."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    images = tmp_path / "images"
+    labels = tmp_path / "detect"
+    labels.mkdir()
+    _make_images(images, ["img0"])
+    (labels / "dataset.json").write_text(json.dumps(
+        {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
+
+    with pytest.raises(ValueError, match="coco_json"):
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels), subject=CATKIN)
 
 
 def test_build_dataset_respects_explicit_format(tmp_path):
