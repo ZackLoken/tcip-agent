@@ -288,16 +288,19 @@ def test_classifier_trust_set_ignores_unbacked_ids(tmp_path):
 
 
 def test_hand_written_scale_stamp_does_not_deliver(tmp_path):
-    """No producer writes a physical scale, so every such stamp on disk was authored by hand."""
+    """A stamp claiming validated with no well-formed validated_by floors regardless of how it was
+    written: calibrate_physical_scale always names a record, so a stamp with none was hand-authored
+    or written by a caller that bypassed the tool."""
     from tcip_mcp.pipelines.resolution import reconcile_scale_validity
 
     root = tmp_path / "ds"
     pred_dir = _bucket(root)
     _write_raw(pred_dir, {"operating_point": {"scale": {
-        "validated_against": "physical_measurement", "value": 0.31, "capture_id": None}},
+        "validated_against": "physical_measurement", "value": 0.31, "unit": "mm",
+        "capture_id": None}},
         "validated": True, "trait": TRAIT}, "resolve_scale")
 
-    validity = reconcile_scale_validity([str(pred_dir)])
+    validity = reconcile_scale_validity([str(pred_dir)], unit="mm", trait=TRAIT)
 
     assert validity["validated"] == "false"
     assert "validated_by" in validity["binding_notes"][str(pred_dir)]

@@ -260,7 +260,8 @@ def test_export_aggregated_csv_refuses_bare_write(tmp_path):
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(
-            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "measurement_document": "operating_point"}],
             str(tmp_path / "o.csv"), trait_name="stem_count")
 
 
@@ -273,7 +274,8 @@ def test_export_aggregated_csv_reconciles_sidecar_floor(tmp_path):
     bucket.mkdir()
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(
-            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "measurement_document": "operating_point"}],
             str(tmp_path / "o.csv"), trait_name="stem_count",
             measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
@@ -288,7 +290,7 @@ def test_export_aggregated_csv_continuous_trait_bare_string_never_trusted(tmp_pa
     with pytest.raises(ValueError):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 3,
-              "value_key": "fruit_diameter"}],
+              "value_key": "fruit_diameter", "measurement_document": "regression_operating_point"}],
             str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT)
 
 
@@ -299,7 +301,8 @@ def test_export_aggregated_csv_continuous_trait_ships_provisional_when_acknowled
 
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter"}],
+        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
+         "measurement_document": "regression_operating_point"}],
         str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
         acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
@@ -334,9 +337,10 @@ def test_export_aggregated_csv_ordinal_trait_ships_when_sidecar_validated(tmp_pa
     bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True, trait="astringency")
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency"}],
+        [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
+         "measurement_document": "ordinal_operating_point"}],
         str(out), trait_name="astringency", measurement_validated=VALIDATED_HELD_OUT,
-        pred_dirs=[bucket], task="ordinal")
+        pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
@@ -347,56 +351,55 @@ def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp
     bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=True, trait="fruit_diameter")
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter"}],
+        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter",
+         "measurement_document": "regression_operating_point"}],
         str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
-        pred_dirs=[bucket], task="regression")
+        pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
 
 def test_export_aggregated_csv_ordinal_trait_floors_on_missing_sidecar(tmp_path):
-    # A bucket with no ordinal_operating_point.json floors to false and refuses (never trusts a
-    # caller-asserted measurement_validated string), the same reconcile-from-disk discipline the
-    # count operating point already has.
+    # A bucket with no ordinal_operating_point.json floors to false and refuses, the same
+    # reconcile-from-disk discipline the count operating point already has.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     bucket = tmp_path / "preds"
     bucket.mkdir()
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(
-            [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency"}],
+            [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
+             "measurement_document": "ordinal_operating_point"}],
             str(tmp_path / "o.csv"), trait_name="astringency",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)],
-            task="ordinal")
+            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
 def test_export_aggregated_csv_regression_trait_floors_on_a_failed_sidecar(tmp_path):
-    # A sidecar that exists but is stamped unvalidated (the calibration ran and refused) must also
-    # refuse, not just an entirely-missing sidecar.
+    # A sidecar that exists but is stamped unvalidated must also refuse, not just an entirely
+    # missing sidecar.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=False)
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(
             [{"plant_id": "p1", "value": 4.2, "observations": 3,
-              "value_key": "fruit_diameter"}],
+              "value_key": "fruit_diameter", "measurement_document": "regression_operating_point"}],
             str(tmp_path / "o.csv"), trait_name="fruit_diameter",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)],
-            task="regression")
+            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
-def test_export_aggregated_csv_rejects_an_unrecognized_task(tmp_path):
-    # A typo'd task must raise, not silently fall through to reconciling pred_dirs against the
-    # count operating point's own sidecar (a different dimension, wrong validity determination).
+def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_path):
+    # A typo'd measurement_document must raise rather than reconciling against the wrong
+    # dimension: the statement rail replacing the old task-typo guard.
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     bucket = _scalar_bucket(tmp_path, "preds", "ordinal", validated=True)
-    with pytest.raises(ValueError, match="task must be"):
+    with pytest.raises(ValueError, match="measurement_document"):
         export_aggregated_csv(
-            [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency"}],
+            [{"plant_id": "p1", "value": 2, "observations": 3, "value_key": "astringency",
+             "measurement_document": "oridnal_operating_point"}],
             str(tmp_path / "o.csv"), trait_name="astringency",
-            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)],
-            task="oridnal")
+            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[str(bucket)])
 
 
 # ── tabulate_counts reads the run's resolved validity, not a caller string ─
@@ -967,7 +970,8 @@ def test_export_aggregated_csv_refuses_a_fabricated_tile_size_with_a_validated_c
                       tile_size_prov=_tile(VALIDATED_FALSE, 640))
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(
-            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "measurement_document": "operating_point"}],
             str(tmp_path / "o.csv"), trait_name="stem_count", pred_dirs=[d])
 
 
@@ -981,7 +985,8 @@ def test_export_aggregated_csv_ships_when_the_tile_scale_has_a_real_basis(tmp_pa
                       tile_size_prov=_tile(VALIDATED_PERSISTED_GEOMETRY, 224))
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}], str(out),
+        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+         "measurement_document": "operating_point"}], str(out),
         trait_name="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
@@ -997,7 +1002,8 @@ def test_export_aggregated_csv_never_gates_an_untiled_bucket_on_tile_size(tmp_pa
                                       "validation_kind": None, "validated_against": None})
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}], str(out),
+        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+         "measurement_document": "operating_point"}], str(out),
         trait_name="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
@@ -1013,7 +1019,8 @@ def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_p
                       tile_size_prov=_tile(VALIDATED_FALSE, 640))
     out = tmp_path / "o.csv"
     export_aggregated_csv(
-        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}], str(out),
+        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+         "measurement_document": "operating_point"}], str(out),
         trait_name="stem_count", pred_dirs=[d], acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
@@ -1021,7 +1028,8 @@ def test_export_aggregated_csv_acknowledged_tile_size_floors_the_row_stamp(tmp_p
 
 # ── export_aggregated_csv gates a dimensional value_key on its physical scale too ──
 
-def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05, unit="mm"):
+def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05, unit="mm",
+                         trait="plant_surface_area"):
     """A bucket's resolve_scale.json, the shape reconcile_scale_validity reads, alongside its
     operating_point.json in the same directory."""
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT
@@ -1029,7 +1037,7 @@ def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05
     path.mkdir(parents=True, exist_ok=True)
     is_validated = validated_against == VALIDATED_PHYSICAL_MEASUREMENT
     stamp = {
-        "validated": is_validated, "trait": "catkin",
+        "validated": is_validated, "trait": trait,
         "operating_point": {
             "scale": {
                 "value": value, "unit": unit, "capture_id": capture_id,
@@ -1039,14 +1047,15 @@ def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05
         },
     }
     if is_validated:
-        write_bound_sidecar(path, stamp, document="resolve_scale", dataset_root=path,
+        write_bound_sidecar(path, stamp, document="resolve_scale", dataset_root=path.parent.parent,
                             experiment_id=f"exp-scale-{path.name}")
     else:
         (path / "resolve_scale.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(path)
 
 
-_DIM_RESULTS = [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2"}]
+_DIM_RESULTS = [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
+                "measurement_document": "operating_point", "scale_document": "resolve_scale"}]
 
 
 def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tmp_path):
@@ -1061,6 +1070,7 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
     assert rows[0]["units"] == "mm2"
+    assert rows[0]["scale_document"] == "resolve_scale"
 
 
 def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_sidecar(tmp_path):
@@ -1083,8 +1093,10 @@ def test_export_aggregated_csv_count_trait_never_gates_on_scale(tmp_path):
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
-    export_aggregated_csv([{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}],
-                          str(out), trait_name="stem_count", pred_dirs=[d])
+    export_aggregated_csv(
+        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+         "measurement_document": "operating_point"}],
+        str(out), trait_name="stem_count", pred_dirs=[d])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
@@ -1134,9 +1146,160 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
 
+def test_export_aggregated_csv_refuses_a_stated_scale_with_no_physical_unit(tmp_path):
+    """A stated scale_document with a value_key implying no physical unit is refused: a physical
+    scale cannot answer for a non-dimensional value (count-delivery-door design section 2, rule 4)."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    with pytest.raises(ValueError, match="scale_document"):
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "measurement_document": "operating_point", "scale_document": "resolve_scale"}],
+            str(tmp_path / "o.csv"), trait_name="stem_count", pred_dirs=[d])
+
+
+def test_export_aggregated_csv_refuses_a_dimensional_operating_point_delivery_with_no_stated_scale(
+    tmp_path,
+):
+    """A value_key implying a physical unit under operating_point with no stated scale_document
+    refuses outright: a dimensional number from a detection/segmentation bucket has nothing
+    answering for its unit without one (rule 4), distinct from the gate floor above, which is for a
+    delivery that at least states the scale it rests on."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
+    with pytest.raises(ValueError, match="scale_document"):
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
+             "measurement_document": "operating_point"}],
+            str(tmp_path / "o.csv"), trait_name="plant_surface_area", pred_dirs=[d])
+
+
+def test_export_aggregated_csv_regression_head_delivers_a_dimensional_value_with_no_scale(tmp_path):
+    """The rail must admit valid work: a regression head's prediction is in the trait's declared
+    unit by construction, so a dimensional delivery under regression_operating_point with no stated
+    scale_document ships cleanly, unlike the same shape under operating_point above."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    fx.confirm_aggregate(tmp_path, "fruit_diameter", op.PER_PLANT_REGRESSION_AGGREGATE,
+                         delivered_phenotype="fruit_diameter", value_keys=["fruit_diameter_mm"])
+    bucket = _scalar_bucket(tmp_path, "preds", "regression", validated=True, trait="fruit_diameter")
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(
+        [{"plant_id": "p1", "value": 4.2, "observations": 3, "value_key": "fruit_diameter_mm",
+         "measurement_document": "regression_operating_point"}],
+        str(out), trait_name="fruit_diameter", measurement_validated=VALIDATED_HELD_OUT,
+        pred_dirs=[bucket])
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["units"] == "mm"
+    assert rows[0]["scale_document"] == ""
+
+
+def test_export_aggregated_csv_refuses_a_declared_unit_trait_with_a_pixel_space_key(tmp_path):
+    """A trait declaring a physical unit (fruit_diameter, mm in crops.yml) whose delivered
+    value_key implies none refuses under operating_point: a value with no unit suffix delivered
+    under a unit-declared trait is not that trait's number (P4-45). The value_key itself
+    ('fruit_diameter', no unit suffix) is confirmed for stem_count-style count aggregation in the
+    fixture above, so only the document differs from the passing regression scenario elsewhere in
+    this file."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="fruit_diameter")
+    with pytest.raises(ValueError, match="declared units"):
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 4.2, "observations": 1,
+             "value_key": "fruit_diameter", "measurement_document": "operating_point"}],
+            str(tmp_path / "o.csv"), trait_name="fruit_diameter", pred_dirs=[d])
+
+
+def test_export_aggregated_csv_refuses_classifier_operating_point_as_a_measurement_document(
+    tmp_path,
+):
+    """No per-plant aggregate this door delivers rests on a classifier alone; a record naming
+    classifier_operating_point as its measurement_document refuses."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    with pytest.raises(ValueError, match="classifier_operating_point"):
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "measurement_document": "classifier_operating_point"}],
+            str(tmp_path / "o.csv"), trait_name="stem_count", acknowledge_unvalidated=True)
+
+
+def test_export_aggregated_csv_refuses_resolve_scale_as_a_measurement_document(tmp_path):
+    """A physical scale is never itself the measurement it states the unit of; naming resolve_scale
+    as measurement_document refuses."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    with pytest.raises(ValueError, match="resolve_scale"):
+        export_aggregated_csv(
+            [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+             "measurement_document": "resolve_scale"}],
+            str(tmp_path / "o.csv"), trait_name="stem_count", acknowledge_unvalidated=True)
+
+
+def test_aggregate_per_plant_refuses_a_plant_whose_images_disagree_on_the_statement(tmp_path):
+    """A statement that disagrees with itself is not a statement: aggregate_per_plant refuses
+    rather than collapsing to 'mixed' the way plant_id_source does."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
+
+    records = [
+        {"image": "a1", "plant_id": "PLANT_A", "count": 2,
+         "measurement_document": "operating_point"},
+        {"image": "a2", "plant_id": "PLANT_A", "count": 4,
+         "measurement_document": "regression_operating_point"},
+    ]
+    with pytest.raises(ValueError, match="measurement_document"):
+        aggregate_per_plant(records, strategy="count", value_key="count")
+
+
+def test_a_plant_with_no_value_at_all_refuses_naming_the_plant(tmp_path):
+    """A per-plant row whose value is None (no observation carried the value_key) refuses at the
+    door, naming the plant, rather than writing an empty cell beside a validated stamp (P4-46)."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        aggregate_per_plant,
+        export_aggregated_csv,
+    )
+
+    records = [
+        {"image": "a1", "plant_id": "PLANT_A", "count": 5,
+         "measurement_document": "operating_point"},
+        {"image": "b1", "plant_id": "PLANT_B", "measurement_document": "operating_point"},
+    ]
+    summaries = aggregate_per_plant(records, strategy="count", value_key="count")
+    with pytest.raises(ValueError, match="PLANT_B"):
+        export_aggregated_csv(summaries, str(tmp_path / "o.csv"), trait_name="stem_count",
+                              acknowledge_unvalidated=True)
+
+
+def test_a_plant_with_a_real_zero_ships_beside_one_with_a_value(tmp_path):
+    """The rail must admit valid work: a plant with a genuine 0 observation is a real measured
+    absence, never confused with the missing-observation case above."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        aggregate_per_plant,
+        export_aggregated_csv,
+    )
+
+    records = [
+        {"image": "a1", "plant_id": "PLANT_A", "count": 5,
+         "measurement_document": "operating_point"},
+        {"image": "b1", "plant_id": "PLANT_B", "count": 0,
+         "measurement_document": "operating_point"},
+    ]
+    summaries = aggregate_per_plant(records, strategy="count", value_key="count")
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(summaries, str(out), trait_name="stem_count",
+                          acknowledge_unvalidated=True)
+    rows = {r["plant_id"]: r for r in csv.DictReader(out.open())}
+    assert rows["PLANT_B"]["value"] == "0"
+
+
 # ── the provenance columns a delivery may carry ────────────────────────────
 
-_COUNT_RESULTS = [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count"}]
+_COUNT_RESULTS = [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+                  "measurement_document": "operating_point"}]
 
 
 def _delivered_row(out_path):
@@ -1306,3 +1469,333 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
     assert len(rows) == 1, rows
     assert rows[0]["arguments"]["pred_dirs"] == [str(bucket)]
     assert _audit_rows(tmp_path, "export_detection_csv") == []
+
+
+# ── calibrate_physical_scale: the producer for resolve_scale.json ─────────
+
+_SCALE_PX_PER_MM = 10.0  # a fixed 0.1 mm/px reference scale, chosen for round test numbers
+
+
+def _rect_points(length_px, width_px, angle_deg=0.0, center=(500.0, 500.0)):
+    """Four corners of a length x width rectangle, rotated ``angle_deg`` about its own centre."""
+    import math
+
+    hl, hw = length_px / 2.0, width_px / 2.0
+    local = [(-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw)]
+    a = math.radians(angle_deg)
+    cos_a, sin_a = math.cos(a), math.sin(a)
+    cx, cy = center
+    return [(cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a) for x, y in local]
+
+
+def _write_reference_annotation(labels_dir, stem, *, subject, points_by_annotation,
+                                width=1000, height=1000):
+    """One reference image's per-image JSON, carrying one Polygon annotation per entry in
+    ``points_by_annotation`` (each entry a ring's own point list), all under ``subject``."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, Polygon
+
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    anns = [Annotation(subject=subject, geometry=Polygon(rings=[points]))
+           for points in points_by_annotation]
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), anns, width, height)
+
+
+def _write_reference_bbox(labels_dir, stem, *, subject, points, width=1000, height=1000):
+    """A reference image annotated with a BBox instead of a Polygon (the refused geometry kind)."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    ann = Annotation(subject=subject, geometry=BBox(min(xs), min(ys), max(xs), max(ys)))
+    json_io.write_annotations(str(labels_dir / f"{stem}.json"), [ann], width, height)
+
+
+def _write_reference_csv(path, rows):
+    """``rows`` is ``[(stem, physical_extent, unit), ...]``."""
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["image_stem", "physical_extent", "unit"])
+        for row in rows:
+            writer.writerow(row)
+
+
+def _author_scale_tolerance(tmp_path, trait, tolerance_frac=0.1):
+    from tcip_mcp.traits import write_trait_spec_fields
+
+    write_trait_spec_fields(trait, {"scale_tolerance_frac": tolerance_frac}, project_root=tmp_path)
+
+
+def _calibration_setup(tmp_path, *, lengths_px, unit="mm", angle_deg_by_index=None):
+    """A bucket carrying one real prediction plus one reference-object image per entry in
+    ``lengths_px``, and the reference labels/CSV a calibrate_physical_scale call reads, each
+    reference's physical_extent derived from the same fixed scale. Returns (pred_dir, labels_dir,
+    reference_csv, stems, group_key_map)."""
+    root = tmp_path / "ds"
+    pred_dir = root / "predictions" / "preds"
+    write_prediction(pred_dir, "img_a")
+    labels_dir = tmp_path / "reference_labels"
+    csv_path = tmp_path / "reference.csv"
+    stems = [f"r{i}" for i in range(1, len(lengths_px) + 1)]
+    rows = []
+    for i, (stem, length_px) in enumerate(zip(stems, lengths_px)):
+        angle = (angle_deg_by_index or {}).get(i, 0.0)
+        points = _rect_points(length_px, 10.0, angle)
+        _write_reference_annotation(labels_dir, stem, subject="cal_bar",
+                                    points_by_annotation=[points])
+        write_prediction(pred_dir, stem)
+        physical = round(length_px / _SCALE_PX_PER_MM, 6)
+        rows.append((stem, physical, unit))
+    _write_reference_csv(csv_path, rows)
+    group_key_map = {s: s for s in stems}
+    return str(pred_dir), str(labels_dir), str(csv_path), stems, group_key_map
+
+
+def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_path):
+    """The whole chain: the tool's own gate, seal, write, the reconciler that reads it back, and a
+    mask-geometry area delivered under it, proving the producer and the door agree. The scale is
+    stamped into the same bucket a real detection run produced, the shape a delivery actually
+    reads: one bucket carrying both operating_point.json and resolve_scale.json."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    # References are written into the bucket before it seals, so the count operating point's
+    # digest covers the final file set (adding files after sealing would invalidate that claim).
+    bucket_dir = tmp_path / "ds" / "predictions" / "preds"
+    labels_dir = tmp_path / "reference_labels"
+    ref_csv = tmp_path / "reference.csv"
+    stems = ["r1", "r2", "r3", "r4"]
+    rows = []
+    for stem in stems:
+        points = _rect_points(100.0, 10.0)
+        _write_reference_annotation(labels_dir, stem, subject="cal_bar",
+                                    points_by_annotation=[points])
+        write_prediction(bucket_dir, stem)
+        rows.append((stem, round(100.0 / _SCALE_PX_PER_MM, 6), "mm"))
+    _write_reference_csv(ref_csv, rows)
+    group_key_map = {s: s for s in stems}
+
+    bucket = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
+                           trait="plant_surface_area")
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=bucket, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=str(labels_dir),
+        reference_csv=str(ref_csv), group_key_map=group_key_map)
+
+    assert result["passed"] is True, result
+    assert result["value"] == pytest.approx(0.1)  # 10 mm implied over a 100 px reference length
+    assert result["validated_by"] is not None
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, reconcile_scale_validity
+
+    recon = reconcile_scale_validity([bucket], unit="mm", trait="plant_surface_area")
+    assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    out = tmp_path / "o.csv"
+    export_aggregated_csv(
+        [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
+         "measurement_document": "operating_point", "scale_document": "resolve_scale"}],
+        str(out), trait_name="plant_surface_area", pred_dirs=[bucket])
+    out_rows = list(csv.DictReader(out.open()))
+    assert out_rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert out_rows[0]["units"] == "mm2"
+
+
+def test_calibrate_physical_scale_survives_a_prediction_re_export(tmp_path):
+    """A scale claim binds to the bucket's own image stems, not its prediction bytes: re-exporting
+    predictions over the same images must leave a validated scale standing."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert result["passed"] is True, result
+
+    write_prediction(Path(pred_dir), "img_a", count=9)  # re-export: same images, new bytes
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, reconcile_scale_validity
+
+    recon = reconcile_scale_validity([pred_dir], unit="mm", trait="plant_surface_area")
+    assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+
+def test_calibrate_physical_scale_copied_sidecar_refuses(tmp_path):
+    """A resolve_scale.json copied into another bucket fails on membership: the covered set names
+    only the bucket the claim was actually earned against."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert result["passed"] is True, result
+
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE,
+        read_scale_sidecar,
+        reconcile_scale_validity,
+        write_sidecar,
+    )
+
+    other = Path(tmp_path) / "ds" / "predictions" / "other"
+    write_prediction(other, "img_z")
+    write_sidecar(other, read_scale_sidecar(pred_dir), "resolve_scale")
+
+    recon = reconcile_scale_validity([str(other)], unit="mm", trait="plant_surface_area")
+    assert recon["validated"] == VALIDATED_FALSE
+    assert recon["unvalidated_buckets"] == [str(other)]
+
+
+def test_calibrate_physical_scale_refuses_a_box_reference_geometry(tmp_path):
+    """A bounding box's long side is the object's projected extent, orientation-dependent in both
+    directions; the tool refuses it outright rather than deriving a scale from it."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0])
+    # Overwrite one reference's annotation with a BBox instead of a Polygon.
+    _write_reference_bbox(Path(labels_dir), stems[0], subject="cal_bar",
+                          points=_rect_points(100.0, 10.0))
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert "error" in result
+    assert "Polygon" in result["error"] or "polygon" in result["error"]
+
+
+def test_calibrate_physical_scale_refuses_a_reference_stem_outside_the_bucket(tmp_path):
+    """A reference object photographed in some other capture says nothing about this bucket's
+    scale; the tool refuses naming the stems outside the bucket rather than trusting the CSV."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0])
+    # Add a reference row/annotation for a stem never written into the bucket.
+    _write_reference_annotation(Path(labels_dir), "outsider", subject="cal_bar",
+                                points_by_annotation=[_rect_points(100.0, 10.0)])
+    with open(ref_csv, "a", newline="") as f:
+        csv.writer(f).writerow(["outsider", 10.0, "mm"])
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map={**group_key_map, "outsider": "outsider"})
+    assert "error" in result
+    assert "outsider" in result["error"]
+
+
+def test_calibrate_physical_scale_refuses_an_image_with_two_reference_annotations(tmp_path):
+    """An image carrying more than one annotation of the reference subject is ambiguous: the tool
+    refuses rather than picking one."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0])
+    _write_reference_annotation(
+        Path(labels_dir), stems[0], subject="cal_bar",
+        points_by_annotation=[_rect_points(100.0, 10.0), _rect_points(80.0, 8.0, center=(200, 200))])
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert "error" in result
+
+
+def test_calibrate_physical_scale_refuses_with_no_authored_tolerance(tmp_path):
+    """TraitSpec.scale_tolerance_frac unset has no platform-provisional fallback: the tool refuses
+    and names the field, never validating against a platform-invented number."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert "error" in result
+    assert "scale_tolerance_frac" in result["error"]
+
+
+def test_resolve_physical_scale_refuses_too_few_references_per_half(tmp_path):
+    """Either half with fewer than two references refuses, naming the count: an unreplicated
+    measurement validates nothing."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0])
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert result["passed"] is False
+    assert any(f.startswith("insufficient_") for f in result["failures"]), result["failures"]
+
+
+def test_resolve_physical_scale_refuses_a_wildly_inconsistent_reference_set(tmp_path):
+    """A holdout that disagrees with itself, or with the calibration half, by more than the
+    authored tolerance cannot validate to it: the reference set's own precision is the floor."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area", tolerance_frac=0.05)
+    root = tmp_path / "ds"
+    pred_dir = root / "predictions" / "preds"
+    write_prediction(pred_dir, "img_a")
+    labels_dir = tmp_path / "reference_labels"
+    csv_path = tmp_path / "reference.csv"
+    # Four references, each at a genuinely different implied scale (0.05, 0.1, 0.15, 0.5 mm/px):
+    # any 2-2 split disagrees with itself or across halves by far more than 5%.
+    scales = [0.05, 0.1, 0.15, 0.5]
+    stems = [f"r{i}" for i in range(1, 5)]
+    rows = []
+    for stem, scale in zip(stems, scales):
+        points = _rect_points(100.0, 10.0)
+        _write_reference_annotation(labels_dir, stem, subject="cal_bar",
+                                    points_by_annotation=[points])
+        write_prediction(pred_dir, stem)
+        rows.append((stem, round(100.0 * scale, 4), "mm"))
+    _write_reference_csv(csv_path, rows)
+    group_key_map = {s: s for s in stems}
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=str(pred_dir), dataset_root=str(root),
+        unit="mm", reference_subject="cal_bar", labels_dir=str(labels_dir),
+        reference_csv=str(csv_path), group_key_map=group_key_map)
+    assert result["passed"] is False, result
+
+
+def test_calibrate_physical_scale_a_45_degree_bar_validates_the_same_as_axis_aligned(tmp_path):
+    """The reference's pixel extent is the principal-axis extent of its own geometry, orientation-
+    independent: a bar annotated at 45 degrees implies the same scale an axis-aligned one does."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0], angle_deg_by_index={0: 45.0})
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
+        group_key_map=group_key_map)
+    assert result["passed"] is True, result
+    assert result["value"] == pytest.approx(0.1)  # 10 mm implied over a 100 px reference length

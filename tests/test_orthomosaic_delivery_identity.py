@@ -208,7 +208,8 @@ def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
     return export_aggregated_csv(
-        [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count"}],
+        [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
+          "measurement_document": "operating_point"}],
         str(tmp_path / name),
         trait_name="stem_count", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[str(bucket)])

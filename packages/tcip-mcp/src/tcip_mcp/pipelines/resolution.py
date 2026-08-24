@@ -1150,8 +1150,9 @@ _DOCUMENT_RESOLVERS: dict[str, dict[str, _Resolver]] = {
             "trait_name", "experiment_id"),
     },
     "resolve_scale": {
-        "resolve_scale": _Resolver(
-            "tcip_mcp.pipelines.measurement.mask_geometry", "resolve_scale", None, None),
+        "resolve_physical_scale": _Resolver(
+            "tcip_mcp.pipelines.measurement.scale_calibration", "resolve_physical_scale",
+            None, None),
     },
 }
 """Which resolvers may earn which document's claim, named rather than handed in. A caller supplies
@@ -1379,6 +1380,17 @@ def open_validation(
     )
 
 
+_CALIBRATION_EXPERIMENT_DERIVATION: dict[str | None, str] = {
+    None: "a claim earned at a delivery door for predictions no run in this platform's "
+         "experiment record produced",
+    "resolve_scale": "a physical-scale claim earned against a breeder-supplied reference, not "
+                     "predictions any run produced",
+}
+"""What a calibration experiment minted by :func:`seal_validation` says it is, by document, read
+by ``None`` for every document with no more specific sentence of its own (every document but
+``resolve_scale`` today)."""
+
+
 def seal_validation(
     draft: ValidationDraft,
     *,
@@ -1403,9 +1415,16 @@ def seal_validation(
     moved or copied whole still verifies while a bucket moved to a different place inside it does
     not. A bucket outside the stated dataset root cannot be keyed that way and is refused here, the
     same claim being unverifiable on the reading side.
+
+    For the ``operating_point`` document the digest is over the bucket's prediction bytes
+    (:func:`~tcip_mcp.prediction_buckets.bucket_content_digest`), since that claim is about what was
+    predicted. For ``resolve_scale`` the digest is over the bucket's own image stems
+    (:func:`~tcip_mcp.prediction_buckets.bucket_stems_digest`) instead: a scale claim is a fact
+    about the bucket's imagery, not its predictions, so re-exporting predictions over the same
+    images must not floor it, while an image added to or removed from the bucket must.
     """
     from tcip_mcp.experiments import _append_validation, ensure_calibration_experiment
-    from tcip_mcp.prediction_buckets import bucket_content_digest
+    from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
 
     if draft.token not in _OPEN_DRAFTS:
         raise ValueError(
@@ -1421,7 +1440,8 @@ def seal_validation(
         )
 
     covered: dict[str, str] = {}
-    if draft.document == "operating_point":
+    if draft.document in ("operating_point", "resolve_scale"):
+        digest_fn = bucket_content_digest if draft.document == "operating_point" else bucket_stems_digest
         for d in bucket_dirs:
             resolved = Path(d).resolve()
             try:
@@ -1429,11 +1449,11 @@ def seal_validation(
             except ValueError:
                 raise ValueError(
                     f"prediction bucket {str(resolved)!r} is not under dataset root {str(root)!r}, "
-                    "so a count claim covering it has no dataset-relative key to record. Write the "
-                    "predictions into the dataset's own predictions layout "
-                    "(resolve_prediction_bucket) to earn a validated count."
+                    f"so a {draft.document} claim covering it has no dataset-relative key to "
+                    "record. Write the predictions into the dataset's own predictions layout "
+                    "(resolve_prediction_bucket) to earn a validated claim."
                 ) from None
-            covered[key] = bucket_content_digest(resolved)
+            covered[key] = digest_fn(resolved)
     elif bucket_dirs:
         raise ValueError(
             f"a {draft.document} claim covers no prediction bucket's content: it is earned against a "
@@ -1465,8 +1485,8 @@ def seal_validation(
     experiment_id = draft.producing_experiment_id or ensure_calibration_experiment(
         document=draft.document, checkpoint_sha256=draft.checkpoint_sha256,
         reference_identity=draft.reference_identity, trait=draft.trait,
-        config={"derived_from": "a claim earned at a delivery door for predictions no run in this "
-                                "platform's experiment record produced"},
+        config={"derived_from": _CALIBRATION_EXPERIMENT_DERIVATION.get(
+            draft.document, _CALIBRATION_EXPERIMENT_DERIVATION[None])},
     )
     body = {
         "document": draft.document,
@@ -1535,7 +1555,7 @@ def verify_stamp_binding(
     detects a replacement whose size and timestamp were restored.
     """
     from tcip_mcp.experiments import experiment_exists, experiments_scope, find_validation
-    from tcip_mcp.prediction_buckets import bucket_content_digest
+    from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
 
     param_key, validation_kind = _DOCUMENT_PARAM[document]
     stamp = sidecar or {}
@@ -1611,29 +1631,32 @@ def verify_stamp_binding(
             f"for: the stamp's {', '.join(_CLAIM_KEYS[document])} disagree with the values the gate "
             "was run over. Re-calibrate to earn a record for the values being delivered.", **known)
 
-    if document == "operating_point":
+    if document in ("operating_point", "resolve_scale"):
         resolved = Path(bucket).resolve()
         dataset_root = _dataset_root_of(resolved)
+        noun = "count" if document == "operating_point" else "scale"
         if dataset_root is None:
             return floored(
-                f"operating_point.json at {bucket!r} claims a validated count from a bucket under no "
+                f"{document}.json at {bucket!r} claims a validated {noun} from a bucket under no "
                 "dataset root, so the covered set cannot be located. Write the predictions into the "
                 "dataset's own predictions layout (resolve_prediction_bucket) to earn a validated "
-                "count.", **known)
+                f"{noun}.", **known)
         key = resolved.relative_to(dataset_root).as_posix()
         covered = row.get("covered_buckets") or {}
         if key not in covered:
             return floored(
-                f"operating_point.json at {bucket!r} claims a validated count, and record "
+                f"{document}.json at {bucket!r} claims a validated {noun}, and record "
                 f"{record_digest!r} covers {sorted(covered)} rather than {key!r}. Write to a fresh "
                 "bucket variant and re-validate.", **known)
-        recomputed = bucket_content_digest(resolved, memo=digest_memo)
+        recomputed = (bucket_content_digest(resolved, memo=digest_memo)
+                     if document == "operating_point" else bucket_stems_digest(resolved))
         if recomputed != covered[key]:
+            what = "prediction files" if document == "operating_point" else "image set"
             return floored(
-                f"the prediction files in {bucket!r} hash to {recomputed!r}, and record "
-                f"{record_digest!r} was earned over {covered[key]!r}: a file has been added, "
-                "replaced or removed since the claim was earned. Write to a fresh bucket variant "
-                "and re-validate.", **known)
+                f"the {what} in {bucket!r} hash to {recomputed!r}, and record {record_digest!r} "
+                f"was earned over {covered[key]!r}: a file has been added, replaced or removed "
+                "since the claim was earned. Write to a fresh bucket variant and re-validate.",
+                **known)
 
     return StampBinding(ok=True, claimed=True, **known)
 
