@@ -132,6 +132,51 @@ def test_flat_layout_does_not_collide_with_a_subdir_literally_named_annotations(
     assert resolution._labels_term(flat / "annotations") != resolution._labels_term(nested / "annotations")
 
 
+def test_rgb_nested_dataset_fingerprints_byte_identically_before_and_after_the_extension_widening(
+        tmp_path):
+    """The images term's extension set widened from a photographic-only set to
+    ``image_utils.IMAGE_EXTS`` (adding ``.heic``/``.npy``/``.npz``/``.bandgroup``); ``.jpg`` was a
+    member of both the old and the new set, so an RGB-only dataset under ``images/<date>/`` walks
+    the identical file list and hashes to the identical value either side of the change. The
+    literal below was computed by running this exact fixture through the current implementation
+    (``dataset_fingerprint`` on this module's ``_make_dataset`` at commit ``b1069ca2`` plus this
+    change); reading the old ``_FINGERPRINT_IMAGE_EXTS`` set confirms ``.jpg`` was already in it,
+    so the old code would walk the same one file and produce the same hash.
+    """
+    _make_dataset(tmp_path)
+    assert dataset_fingerprint(tmp_path) == "dcddb61316cfb27f"
+
+
+def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):
+    """.bandgroup was not walked before this change (a mixed dataset's changed manifest content
+    certified as identical). It is hashed as its own bytes, like any other file, so changing the
+    manifest alone, with its named band files held byte-for-byte fixed, must change the
+    fingerprint; it also fingerprints deterministically across two calls."""
+    date = "2026-02-11"
+    images = tmp_path / "images" / date
+    images.mkdir(parents=True)
+    (tmp_path / "annotations" / date).mkdir(parents=True)
+    Image.new("L", (16, 16), color=10).save(images / "band_r.png")
+    Image.new("L", (16, 16), color=20).save(images / "band_nir.png")
+    manifest_path = images / "capture_1.bandgroup"
+    json.dump({"bands": {"r": "band_r.png", "nir": "band_nir.png"}}, open(manifest_path, "w"))
+    json_io.write_annotations(
+        tmp_path / "annotations" / date / "capture_1.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 16, 16)
+    class_registry.write_registry(
+        tmp_path / "classes.json",
+        ClassRegistry(subjects=(Subject(name="catkin"),)))
+
+    fp1 = dataset_fingerprint(tmp_path)
+    assert fp1 is not None
+    assert dataset_fingerprint(tmp_path) == fp1  # deterministic across two calls
+
+    # Rewrite the manifest's own bytes; the band files it names are untouched.
+    json.dump({"bands": {"r": "band_r.png", "nir": "band_nir.png"},
+              "central_wavelength_nm": {"r": 660.0, "nir": 850.0}}, open(manifest_path, "w"))
+    assert dataset_fingerprint(tmp_path) != fp1
+
+
 def test_bespoke_dataset_has_no_fingerprint(tmp_path):
     # images but no labels, and labels but no images, both -> None (never a fabricated identity)
     (tmp_path / "images" / "d").mkdir(parents=True)

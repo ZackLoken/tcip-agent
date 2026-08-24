@@ -561,9 +561,6 @@ def csv_dataset_hash(csv_path: str | Path) -> str:
     return h.hexdigest()[:16]
 
 
-_FINGERPRINT_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-
-
 def _labels_term(annotations_root: Path) -> str | None:
     """Whole-dataset label identity, composed from :func:`dataset_hash` per label dir.
 
@@ -602,8 +599,10 @@ def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
     """
     if not images_root.is_dir():
         return None
+    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+
     files = sorted(p for p in images_root.rglob("*")
-                   if p.is_file() and p.suffix.lower() in _FINGERPRINT_IMAGE_EXTS)
+                   if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
     if not files:
         return None
     old: dict[str, str] = {}
@@ -706,6 +705,11 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     existing ``dataset.json``/experiment ``lineage.json`` written under the 3-term formula reads as
     changed even with identical on-disk content. That is expected, not corruption, experiments are
     immutable, so old lineage records keep their old fingerprint value rather than being rewritten.
+    A second such shift: the image term now walks ``image_utils.IMAGE_EXTS`` (``.heic``/``.npy``/
+    ``.npz``/``.bandgroup`` included, a ``.bandgroup`` manifest hashed as its own bytes like any
+    other file) rather than a narrower photographic-only set, so a dataset holding one of those four
+    extensions gets a new value and a multispectral-only dataset gets a real fingerprint instead of
+    ``None``.
     """
     from tcip_mcp.dataset_layout import annotation_root, image_root
 
