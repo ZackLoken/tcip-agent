@@ -993,25 +993,10 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
         The trait is written only when a gate was cleared, so a bucket carries the trait its claim
         was earned for and an honest placeholder claims no scope at all.
-
-        ``op_prov`` carries the tile_size the review re-resolved for the whole delivery, which is
-        only a single fact when the sidecars agreed on one accepted reference
-        (``review_tile_size_valid_ref``). When they did not (a stamp carrying an edge with no
-        accepted reference behind it, or more than one reference across sidecars), re-resolution
-        floors to "recorded", and writing that over a bucket would replace the tile block its own
-        producer stamped. In that case each bucket keeps its own stored tile_size/tiled block
-        instead of the re-resolved one.
         """
-        op_to_write = op_prov
-        if review_tile_size_valid_ref is None and review_tile_size is not None:
-            stored_op = stored.get("operating_point") or {}
-            op_to_write = dict(op_prov)
-            for key in ("tile_size", "tiled"):
-                if key in stored_op:
-                    op_to_write[key] = stored_op[key]
         merged = dict(stored)
         merged.update({
-            "operating_point": op_to_write,
+            "operating_point": op_prov,
             "validated": result["validated"],
             "validated_reference": result["reference"],
             "validation_source": "review_confirmed",
