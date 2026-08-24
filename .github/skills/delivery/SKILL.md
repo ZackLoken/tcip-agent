@@ -120,9 +120,9 @@ measurement, and no kind stands in for another), read from the predictions' own
   to weakest: a checkpoint whose training tile geometry was persisted; a checkpoint that trained
   untiled on frames of one square size (that frame's own size, each tile run through the resize its
   recorded augmentation config applied), a real basis mechanically inferred from the checkpoint's
-  own recorded frame, never stated by a caller, and weaker than the other two when a delivery mixes
-  buckets across tiers, but sufficient on its own to clear the gate; or an explicit caller `tile_size`.
-  An untiled run is never gated on it.
+  own recorded frame, never stated by a caller, and sufficient on its own to clear the gate; or an
+  explicit caller `tile_size`. A delivery that mixes buckets across tiers travels under the weakest
+  tier present. An untiled run is never gated on it.
 - To ship a provisional result, pass `acknowledge_unvalidated=True`: the door writes but stamps
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest
   provisional delivery, never for silently shipping a bare number. A tile scale with no real basis at

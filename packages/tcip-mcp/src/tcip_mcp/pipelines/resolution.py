@@ -441,11 +441,12 @@ def raw_operating_point(
     ``"explicit"``, never silently read back as an untouched default.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
-    geometry, ``explicit`` (caller override), or has no real basis at all (``"unavailable"``), so a
-    train/infer scale mismatch is visible in the provenance rather than silent, and whether tiled
-    inference's tile_size has a real basis at all: see :func:`resolve_tile_size_param`, a tiled run
-    with no persisted/explicit basis is a real, gating-firewalled unvalidated dimension (``tile_size``
-    itself ``None``, never a fabricated number), not silently shippable engineering trivia.
+    geometry, ``native_ratio`` (the checkpoint's own uniform untiled frame), ``explicit`` (caller
+    override), ``recorded`` (read back off a stamp with no accepted reference behind it), or has no
+    real basis at all (``"unavailable"``), so a train/infer scale mismatch is visible in the
+    provenance rather than silent: see :func:`resolve_tile_size_param`, a tiled run with no basis
+    at all is a real, gating-firewalled unvalidated dimension (``tile_size`` itself ``None``, never
+    a fabricated number), not silently shippable engineering trivia.
     ``tiled_source`` is the same provenance vocabulary for the boolean itself: a caller that
     explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed nothing gets
     ``"default"``. Both callers of this function derive their own concrete ``tiled`` bool (no shared
