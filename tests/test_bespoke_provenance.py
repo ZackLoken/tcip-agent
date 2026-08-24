@@ -152,6 +152,15 @@ def test_stamp_and_kind_fallback():
     assert _kind_from_ckpt({"model_source": _model_source(), "model_state_dict": {}}, "x.pt") == KIND_TCIP_MODULE
 
 
+def test_stamp_model_ref_refuses_a_payload_with_no_weights():
+    """A payload sniffed as a loadable tcip module (model_source present) must carry its weights,
+    or the predictor fails at inference with a bare KeyError naming no contract."""
+    import pytest
+
+    with pytest.raises(ValueError, match="model_state_dict"):
+        stamp_model_ref({"metrics": {"val_loss": 0.2}}, {"model_source": _model_source()})
+
+
 # --------------------------------------------------------------------------
 # build_predictor rebuilds the bespoke model from its builder (no exec) + predicts
 # --------------------------------------------------------------------------
@@ -180,6 +189,31 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
     Image.new("RGB", (64, 64), (120, 120, 120)).save(img)
     out = predictor.predict(str(img))
     assert {"boxes", "scores", "labels", "count"} <= set(out)  # measurable detection output
+
+
+def test_predictor_loads_at_two_channels_when_in_chans_is_declared_only_in_builder_kwargs(tmp_path):
+    """declared_in_chans is the one fallback GenericPredictor, resolve_contract_dims and
+    generic_trainer._expected_in_chans all read; a two-band config declaring in_chans only in
+    builder_kwargs must load its images at two channels, not silently default to 3."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+
+    src = {"builder": "tests.bespoke_models:build_bespoke_classifier",
+          "builder_kwargs": {"num_classes": 2, "in_chans": 2}, "task": "classification"}
+    model = build_model({"model_source": src})
+    ckpt = tmp_path / "model_best.pt"
+    payload = stamp_model_ref({"model_state_dict": model.state_dict()}, {"model_source": src})
+    torch.save(payload, ckpt)
+
+    predictor = GenericPredictor(str(ckpt), device="cpu")
+    assert predictor.in_chans == 2
+
+    arr = (np.random.rand(16, 16, 2) * 255).astype(np.uint8)
+    img = tmp_path / "two_band.npy"
+    np.save(img, arr)
+    out = predictor.predict(str(img))
+    assert out  # decoded and forwarded at 2 channels with no shape-mismatch error
 
 
 # --------------------------------------------------------------------------

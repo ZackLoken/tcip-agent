@@ -347,10 +347,20 @@ def stamp_model_ref(payload: dict, config: dict, *, experiment_id: str | None = 
     both reproducible, kind-routable, and traceable back to the run that produced them. Uses
     ``setdefault``, an explicit value the caller already put in ``payload`` wins. ``experiment_id``
     is optional: a raw/foreign checkpoint legitimately has none, so it is stamped only when known.
+
+    Refuses to stamp ``kind``/``model_source`` onto a payload with no ``STATE_DICT_KEY``: that
+    stamp is what a predictor sniffs to load the checkpoint's weights, and a payload with none
+    would fail at inference with a bare ``KeyError`` naming no contract.
     """
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE
 
     if config.get(MODEL_SOURCE_KEY):
+        if STATE_DICT_KEY not in payload:
+            raise ValueError(
+                f"stamp_model_ref refuses to stamp {MODEL_SOURCE_KEY!r}/'kind' onto a payload "
+                f"with no {STATE_DICT_KEY!r}: a checkpoint sniffed as a loadable tcip module must "
+                "carry its weights."
+            )
         payload.setdefault(MODEL_SOURCE_KEY, config[MODEL_SOURCE_KEY])
         payload.setdefault("kind", KIND_TCIP_MODULE)
     eid = experiment_id if experiment_id is not None else config.get("experiment_id")
