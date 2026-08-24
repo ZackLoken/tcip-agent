@@ -154,6 +154,33 @@ def test_launched_run_records_the_datasets_identity_in_its_lineage(
     assert lineage["dataset_fingerprint"] == registered["fingerprint"]
 
 
+def test_launch_records_what_the_smoke_contract_checked(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """launch_training persists a model_contract record (subject/gating/batch_source/dims/issues/
+    gradient_magnitudes) onto the config every checkpoint embeds, so config.json and
+    launch_config.json both carry what the launch-time smoke actually checked."""
+    pytest.importorskip("torchvision")
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+
+    from tcip_mcp.experiments import config_key
+    from tcip_mcp.tools.training_tools import launch_config_key
+
+    config = ts.read(config_key(res["experiment_id"]))
+    record = config["model_contract"]
+    assert record["subject"] == "the model as built at launch, before any training step"
+    assert record["gating"] is True
+    assert record["issues"] == []
+    assert isinstance(record["gradient_magnitudes"], dict) and record["gradient_magnitudes"]
+
+    launch_config = ts.read(launch_config_key(Path(res["output_dir"])))
+    assert launch_config["model_contract"] == record
+
+
 def training_tools_launch(config: dict, output_dir: str) -> dict:
     """Launch and assert the config was accepted, so a preflight refusal never reads as a
     provenance failure in the tests above."""

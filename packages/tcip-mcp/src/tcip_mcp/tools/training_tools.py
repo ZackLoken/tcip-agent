@@ -385,6 +385,19 @@ def launch_training(
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
+    # What the smoke contract above checked, recorded (not re-gated) on the config every checkpoint embeds.
+    smoke_report = validation.get("smoke") or {}
+    model_contract_record = {
+        "subject": "the model as built at launch, before any training step",
+        "gating": True,
+        "batch_source": smoke_report.get("batch_source"),
+        "dims": smoke_report.get("dims"),
+        "issues": smoke_report.get("issues", []),
+        "gradient_magnitudes": smoke_report.get("gradient_magnitudes"),
+    }
+    check_json_value(model_contract_record, path="model_contract")
+    config["model_contract"] = model_contract_record
+
     # Canonicalize the shape: the GUI/validated schema nests stages/mixed_precision/batch_size
     # under ``training``, but the trainer reads them from the top level of run.config, without
     # this hoist a GUI-launched run silently trains the default single stage. (run_hpo already
