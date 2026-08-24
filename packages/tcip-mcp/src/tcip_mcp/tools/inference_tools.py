@@ -532,7 +532,7 @@ def run_inference(
     checkpoint_path: str,
     image_paths: list[str] | None = None,
     images_dir: str | None = None,
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float | None = None,
     device: str | None = None,
     tile: bool | None = None,
     tile_size: int | None = None,
@@ -561,7 +561,9 @@ def run_inference(
         checkpoint_path: Path to model .pt checkpoint.
         image_paths: List of specific image paths.
         images_dir: Directory containing images to process.
-        conf_threshold: Minimum confidence score.
+        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and runs at the
+            platform default, stamped ``"default"``; a stated value is honored as an explicit
+            override and stamped as one, including when it happens to equal the platform default.
         device: Device to use ('cuda' or 'cpu').
         tile: Enable tiled (SAHI-style) detection inference. ``None`` (default) derives it from the
             checkpoint's own training tile geometry (``predictor.train_tile_size is not None``), not
@@ -627,6 +629,10 @@ def run_inference(
     # the resolver, the only thing that can derive one from the data.
     applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
     applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
+    max_dets_source = "default" if max_dets is None else "explicit"
+    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
+    # Named distinctly from the response's own "conf_source" field below, a different fact.
+    conf_provenance_source = "default" if conf_threshold is None else "explicit"
 
     if dry_run:
         # No model load here: an unset ``tile`` is a pending derivation (the checkpoint decides
@@ -642,7 +648,7 @@ def run_inference(
             "dry_run": True,
             "checkpoint_path": checkpoint_path,
             "operating_point": {
-                "conf": conf_threshold,
+                "conf": applied_conf,
                 "cross_tile_nms": cross_tile_nms_dry,
                 "tiled": tiled_dry,
                 "tiled_source": tiled_source_dry,
@@ -666,7 +672,7 @@ def run_inference(
     predictor = build_predictor(
         checkpoint_path=checkpoint_path,
         device=device,
-        score_threshold=conf_threshold,
+        score_threshold=applied_conf,
         nms_iou=applied_nms_iou,
         max_dets=applied_max_dets,
     )
@@ -845,9 +851,10 @@ def run_inference(
         # its in-model conf; the bundle stamps it validated_against=false so the un-trustworthiness of
         # this uncalibrated operating point (the count is the phenotype) travels with the result.
         op_bundle = raw_operating_point(
-            conf=conf_threshold, cross_tile_nms=applied_nms_iou, tiled=resolved_tile_bool,
+            conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=resolved_tile_bool,
             tile_size=resolved_tile, max_dets=applied_max_dets, tile_size_source=tile_size_source,
-            tiled_source=tiled_source,
+            tiled_source=tiled_source, conf_source=conf_provenance_source,
+            max_dets_source=max_dets_source,
         )
         extra = {"validated": False, "conf_source": "default"}
 
@@ -1127,7 +1134,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
 
 def _export_predictions_raster(
     *, checkpoint_path: str, raster_path: str, out: Path, resolution, device: str | None,
-    conf_threshold: float, tile_size: int | None, overlap: float | None, tile_batch_size: int,
+    conf_threshold: float | None, tile_size: int | None, overlap: float | None, tile_batch_size: int,
     global_nms_iou: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
     experiment_id: str | None, acknowledge_unvalidated: bool, trait: str | None = None,
 ) -> dict:
@@ -1173,9 +1180,12 @@ def _export_predictions_raster(
     # per-dataset derivation of one to leave room for.
     applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
     applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
+    raw_max_dets_source = "default" if max_dets is None else "explicit"
+    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
+    raw_conf_source = "default" if conf_threshold is None else "explicit"
 
     predictor = build_predictor(
-        checkpoint_path=checkpoint_path, device=device, score_threshold=conf_threshold,
+        checkpoint_path=checkpoint_path, device=device, score_threshold=applied_conf,
         nms_iou=applied_nms_iou, max_dets=applied_max_dets,
     )
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
@@ -1208,7 +1218,9 @@ def _export_predictions_raster(
         from tcip_mcp.pipelines.block_calibration import (
             BlockCalibrationRefused, resolve_block_calibration_records,
         )
-        from tcip_mcp.pipelines.raster_source import raster_identity_matches
+        from tcip_mcp.pipelines.raster_source import (
+            georeferenced_raster_identity_mismatch, raster_identity_matches,
+        )
         from tcip_mcp.pipelines.resolution import VALIDATED_SAME_MOSAIC_IDENTITY
 
         try:
@@ -1282,9 +1294,10 @@ def _export_predictions_raster(
         # Always tiled (a raster too large to load whole has no untiled alternative); every input
         # the gate needs is already resolved, so it runs here, before the expensive raster pass.
         op_bundle = raw_operating_point(
-            conf=conf_threshold, cross_tile_nms=applied_nms_iou, tiled=True,
+            conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=True,
             tile_size=resolved_tile, max_dets=applied_max_dets,
             tile_size_source=tile_size_source, tiled_source="default",
+            conf_source=raw_conf_source, max_dets_source=raw_max_dets_source,
         )
         op_provenance = op_bundle.to_provenance()["operating_point"]
 
@@ -1398,7 +1411,7 @@ def export_predictions(
     checkpoint_path: str,
     images_dir: str | None = None,
     output_dir: str = "",
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float | None = None,
     device: str | None = None,
     tile: bool | None = None,
     tile_size: int | None = None,
@@ -1480,7 +1493,9 @@ def export_predictions(
         images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
         output_dir: Directory for output .json prediction file(s). A relative path resolves
             against the project root, never the server process's cwd.
-        conf_threshold: Minimum confidence score.
+        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and forwards
+            that on, leaving the value to run at the platform default; a stated value is an
+            explicit override even when it equals the platform default.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects (``images_dir`` regime only;
             ``raster_path`` is always tiled). ``None`` (default) forwards to ``run_inference``
@@ -1669,7 +1684,7 @@ def tabulate_counts(
     images_dir: str,
     output_path: str,
     trait: str,
-    conf_threshold: float = DEFAULT_CONF,
+    conf_threshold: float | None = None,
     device: str | None = None,
     tile: bool | None = None,
     tile_size: int | None = None,
@@ -1722,7 +1737,9 @@ def tabulate_counts(
         trait: The registered trait whose confirmed per-image-count operationalization this
             delivery rests on, and whose operating point is calibrated per dataset (with
             ``calibration_labels_dir``). Required.
-        conf_threshold: Minimum confidence score.
+        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and forwards
+            that on, leaving the value to run at the platform default; a stated value is an
+            explicit override even when it equals the platform default.
         device: Device to use.
         tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
             ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct

@@ -271,8 +271,8 @@ def test_raw_operating_point_untiled_never_gates_tile_size():
 
 
 def test_raw_operating_point_max_dets_none_is_a_real_uncapped_value():
-    # A deliberate value (uncapped), not an unset caller: the block-calibration export path
-    # commits to it on purpose, never coerced into DEFAULT_MAX_DETS or refused for being falsy.
+    # A deliberate value (uncapped), not an unset caller, whatever source it carries: never
+    # coerced into DEFAULT_MAX_DETS or refused for being falsy.
     from tcip_mcp.pipelines.resolution import raw_operating_point
 
     b = raw_operating_point(conf=0.9, cross_tile_nms=0.3, tiled=True, tile_size=64, max_dets=None)

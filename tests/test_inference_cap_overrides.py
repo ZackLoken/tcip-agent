@@ -165,6 +165,36 @@ def test_a_stated_cap_governs_the_pass_the_predictor_actually_runs(inference_cal
     assert inference_call.built["max_dets"] == 77
 
 
+def test_an_unstated_cap_on_the_raw_path_stamps_the_default_source(inference_call):
+    """The raw (uncalibrated) path never resolves through resolve_operating_point, so it has its
+    own source-stamping to get right: an unstated max_dets/conf is stamped 'default', and the pass
+    itself still runs at the platform default conf."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+
+    result = inference_call()
+
+    op = result["operating_point"]
+    assert op["max_dets"]["source"] == "default"
+    assert op["conf"]["source"] == "default"
+    assert inference_call.built["score_threshold"] == DEFAULT_CONF
+
+
+def test_a_stated_cap_on_the_raw_path_stamps_explicit_even_at_the_platform_default(
+    inference_call,
+):
+    """The rail this row exists for: a caller-stated cap that happens to equal the platform
+    default is stamped 'explicit' on the raw path too, never laundered into 'default'."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
+
+    result = inference_call(max_dets=DEFAULT_MAX_DETS, conf_threshold=DEFAULT_CONF)
+
+    op = result["operating_point"]
+    assert op["max_dets"]["source"] == "explicit"
+    assert op["max_dets"]["value"] == DEFAULT_MAX_DETS
+    assert op["conf"]["source"] == "explicit"
+    assert op["conf"]["value"] == DEFAULT_CONF
+
+
 def test_the_public_inference_tools_agree_that_an_unstated_cap_is_none():
     """One sentinel across the door: a concrete default on any one of them would erase the stated
     versus unstated distinction for every caller of that door."""
@@ -174,6 +204,21 @@ def test_the_public_inference_tools_agree_that_an_unstated_cap_is_none():
         params = inspect.signature(tool).parameters
         assert params["global_nms_iou"].default is None, tool.__name__
         assert params["max_dets"].default is None, tool.__name__
+
+
+def test_the_dry_run_report_shows_the_applied_conf_never_the_raw_none(tmp_path):
+    """The dry-run report has to show the value the pass will actually run at: an omitted conf is
+    None on the wire, and reporting that bare None would tell a caller nothing about what their
+    run would do."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"not-a-real-checkpoint")
+
+    result = run_inference(checkpoint_path=str(checkpoint), image_paths=[], dry_run=True)
+
+    assert result["operating_point"]["conf"] == DEFAULT_CONF
 
 
 def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monkeypatch):

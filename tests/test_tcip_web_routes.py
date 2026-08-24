@@ -1020,6 +1020,67 @@ def test_inference_launch_writes_an_unreviewed_bucket_in_place(
     assert Path(body["output_dir"]) == prediction_dir(dataset_root, "baseline", date)
 
 
+def _launch_setup(tmp_path, monkeypatch):
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_web.routes import inference as inference_routes
+
+    monkeypatch.setattr(inference_routes, "_worker", lambda job: None)
+    platform_root = tmp_path / "platform"
+    (platform_root / ".tcip" / "state").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_root))
+
+    dataset_root = tmp_path / "data"
+    date = "2026-02-11"
+    images = image_dir(dataset_root, date)
+    images.mkdir(parents=True)
+    Image.new("RGB", (100, 100), (110, 110, 110)).save(images / "img.png")
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    return str(ckpt), str(dataset_root), date, inference_routes
+
+
+def test_inference_launch_resolves_explicit_conf_and_max_dets_source_from_the_payload(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """A caller-stated conf/max_dets equal to the platform default is stamped 'explicit' on the
+    job, the resolution launch_inference threads into raw_operating_point via the worker."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
+
+    ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root, "model_name": "baseline",
+        "date": date, "conf": DEFAULT_CONF, "max_dets": DEFAULT_MAX_DETS,
+    })
+    assert resp.status_code == 200, resp.text
+    job = inference_routes._get(resp.json()["job_id"])
+    assert job.conf_source == "explicit"
+    assert job.max_dets_source == "explicit"
+    assert job.conf == DEFAULT_CONF
+    assert job.max_dets == DEFAULT_MAX_DETS
+
+
+def test_inference_launch_defaults_conf_and_max_dets_source_when_omitted(
+    client: TestClient, tmp_path: Path, monkeypatch,
+) -> None:
+    """The rail must admit the ordinary, unstated launch: an omitted conf/max_dets still resolves
+    to the platform default and is stamped 'default' on the job, never 'explicit'."""
+    from tcip_mcp.pipelines.resolution import DEFAULT_CONF, DEFAULT_MAX_DETS
+
+    ckpt, dataset_root, date, inference_routes = _launch_setup(tmp_path, monkeypatch)
+
+    resp = client.post("/api/inference/launch", json={
+        "checkpoint_path": ckpt, "dataset_root": dataset_root, "model_name": "baseline",
+        "date": date,
+    })
+    assert resp.status_code == 200, resp.text
+    job = inference_routes._get(resp.json()["job_id"])
+    assert job.conf_source == "default"
+    assert job.max_dets_source == "default"
+    assert job.conf == DEFAULT_CONF
+    assert job.max_dets == DEFAULT_MAX_DETS
+
+
 # ── /api/state ───────────────────────────────────────────────────────────
 
 
