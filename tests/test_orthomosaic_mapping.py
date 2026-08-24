@@ -241,7 +241,7 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
     if in_chans != 3:
         stats = band_normalization_stats([str(raster_path)], in_chans)
         assert stats is not None
-        mean, std = stats
+        mean, std, paths_read = stats
         builder_kwargs["image_mean"] = mean
         builder_kwargs["image_std"] = std
 

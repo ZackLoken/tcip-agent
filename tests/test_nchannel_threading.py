@@ -183,7 +183,8 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(tmp_path,
         np.save(p, arr)
         paths.append(p)
 
-    mean, std = band_normalization_stats(paths, 5)
+    mean, std, paths_read = band_normalization_stats(paths, 5)
+    assert sorted(paths_read) == sorted(str(p) for p in paths)
     actual = torch.stack([pil_to_tensor(load_image(p, 5)) for p in paths])  # [N, C, H, W]
     expected_mean = actual.permute(1, 0, 2, 3).reshape(5, -1).mean(dim=1)
     expected_std = actual.permute(1, 0, 2, 3).reshape(5, -1).std(dim=1, unbiased=False)

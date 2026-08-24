@@ -142,9 +142,45 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     probed = None
                 if probed is not None:
                     b = ResolvedBundle(trait="", dataset_hash=None, params={
-                        "in_chans": _resolved_default(
-                            "in_chans", int(model_source["in_chans"]))})
+                        "in_chans": _resolved_default("in_chans", declared)})
                     issues.extend(validate_resolved_bundle(b, probed_channels=probed))
+
+    # Normalization provenance: per-band builder_kwargs statistics must carry which images produced them.
+    image_stats_containment: str | None = None
+    if isinstance(model_source, dict):
+        bk = model_source.get("builder_kwargs")
+        bk = bk if isinstance(bk, dict) else {}
+        if bk.get("image_mean") is not None or bk.get("image_std") is not None:
+            sampling = model_source.get("image_stats_sampling")
+            if not isinstance(sampling, dict) or not sampling.get("windows"):
+                issues.append(
+                    "model_source.builder_kwargs carries image_mean/image_std with no "
+                    "model_source.image_stats_sampling beside it: per-band statistics must "
+                    "record which images they were derived from."
+                )
+            else:
+                images_dir = data_cfg.get("images_dir") if isinstance(data_cfg, dict) else None
+                if images_dir and Path(images_dir).is_dir():
+                    from tcip_mcp.pipelines.image_utils import list_logical_images
+                    known = set()
+                    for src_img in list_logical_images(images_dir).values():
+                        ref_path = src_img if isinstance(src_img, Path) else src_img.manifest_path
+                        known.add(str(Path(ref_path).resolve()))
+                    bad = sorted({
+                        str(w[0]) for w in sampling["windows"]
+                        if isinstance(w, (list, tuple)) and w
+                        and str(Path(w[0]).resolve()) not in known
+                    })
+                    image_stats_containment = "checked"
+                    if bad:
+                        issues.append(
+                            f"model_source.image_stats_sampling names path(s) {bad} outside "
+                            f"data.images_dir={images_dir!r}."
+                        )
+                else:
+                    # A bespoke dataset_source run legitimately has no data.images_dir to check
+                    # window paths against; say so rather than silently skip or pass.
+                    image_stats_containment = "not_checked"
 
     # Split-policy validation: mirrors the channel firewall above, only fires when a
     # grouping policy is actually declared, probes the dataset's stems the same way the channel
@@ -238,6 +274,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             issues.append(str(exc))
 
     result: dict = {"valid": False, "issues": issues, "warnings": warnings}
+    if image_stats_containment is not None:
+        result["image_stats_containment"] = image_stats_containment
 
     # Smoke: build the model and run the correctness contract at the resolved dims, so a broken
     # bespoke builder is caught here (before the training subprocess spawns) rather than surfacing

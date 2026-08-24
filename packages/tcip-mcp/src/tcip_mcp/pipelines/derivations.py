@@ -449,14 +449,16 @@ def derive_block_scale_px(
 
 def band_normalization_stats(
     image_paths: Sequence[str | Path], num_channels: int, *, max_images: int = 50,
-) -> tuple[list[float], list[float]] | None:
-    """Per-band ``(mean, std)`` in [0, 1] over *this* dataset's rasters, or ``None``.
+) -> tuple[list[float], list[float], list[str]] | None:
+    """Per-band ``(mean, std, paths_read)`` in [0, 1] over *this* dataset's rasters, or ``None``.
 
     The statistics a detector normalizes with. torchvision defaults to 3-element ImageNet values,
     which are wrong on any band set that is not RGB photography: at 1 channel they silently
     broadcast the image to 3, and at any count other than 3 they raise inside the transform.
-    Sample the training split and pass the result to ``build_detector`` as ``image_mean``/
-    ``image_std``.
+    Sample the training split and pass ``mean``/``std`` to ``build_detector`` as ``image_mean``/
+    ``image_std``; ``paths_read`` (the paths this call actually decoded and accepted, after the
+    ``max_images`` cap and after dropping any raster whose band count disagreed) is provenance for
+    ``model_source.image_stats_sampling``, carried beside ``builder_kwargs`` rather than inside it.
 
     Derive, then pass; never auto-inject (the ``gt_aspect_ratios`` rule): the factory never reads
     the dataset. Pass the derived values through ``model_source.builder_kwargs`` rather than calling
@@ -472,13 +474,19 @@ def band_normalization_stats(
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 
     moments = _BandMoments(num_channels)
+    paths_read: list[str] = []
     for path in list(image_paths)[:max_images]:
         try:
             arr = pil_to_tensor(load_image(path, num_channels)).numpy().astype(np.float64)
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
-        moments.add(arr)
-    return moments.result()
+        if moments.add(arr):
+            paths_read.append(str(path))
+    result = moments.result()
+    if result is None:
+        return None
+    mean, std = result
+    return mean, std, paths_read
 
 
 class _BandMoments:
@@ -497,15 +505,16 @@ class _BandMoments:
         self.sqs = np.zeros(self.num_channels, dtype=np.float64)
         self.pixels = 0
 
-    def add(self, tensor_pixels) -> None:
-        """Accumulate one ``[C, H, W]`` float64 block, skipping a block whose band count disagrees
-        with this accumulator's (its pixels are not the same bands)."""
+    def add(self, tensor_pixels) -> bool:
+        """Accumulate one ``[C, H, W]`` float64 block; returns whether it was accepted (its band
+        count disagreeing with this accumulator's means the pixels are not the same bands)."""
         if tensor_pixels.shape[0] != self.num_channels:
-            return
+            return False
         flat = tensor_pixels.reshape(self.num_channels, -1)
         self.sums += flat.sum(axis=1)
         self.sqs += (flat ** 2).sum(axis=1)
         self.pixels += flat.shape[1]
+        return True
 
     def result(self) -> tuple[list[float], list[float]] | None:
         """Per-band ``(mean, std)``, or ``None`` when no pixels were accumulated at all."""
