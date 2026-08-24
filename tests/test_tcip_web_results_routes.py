@@ -91,6 +91,7 @@ def _phenology_fixture(
     tmp_path: Path, *, validated: bool, images_per_plant: int = 1,
     fractions: tuple[float, ...] = (0.0, 0.10, 0.60, 1.0), id_map: dict | None = None,
     detections: int = 10, producing_experiment_id: str | None = "exp-1",
+    count_trait: str = "catkin",
 ) -> dict:
     """A mapping + per-date prediction buckets, written through the platform's own writers.
 
@@ -105,6 +106,11 @@ def _phenology_fixture(
     The trait and its confirmed operationalization are registered in the very root this body names,
     because that is the root the doors resolve both from. A caller passing a subdirectory gets a
     project that is whole, rather than one whose spec lives somewhere else.
+
+    ``count_trait`` is the trait the count operating point's own sidecar and validation record are
+    earned for, ``"catkin"`` by default (matching the delivered trait); a caller wanting a
+    stamp/record earned for a different trait than the one the body delivers under passes it, the
+    classifier stamp stays earned for ``"catkin"`` regardless, so only the count dimension mismatches.
     """
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
@@ -148,14 +154,14 @@ def _phenology_fixture(
         if validated:
             sidecar.update({
                 "validated": True,
-                "trait": "catkin",
+                "trait": count_trait,
                 "operating_point": {"conf": {"value": 0.4, "validated_against": "held_out_annotations"}},
                 "experiment_id": producing_experiment_id,
                 "checkpoint_sha256": checkpoint_sha256,
             })
             write_bound_sidecar(bucket, sidecar, dataset_root=root,
                                 experiment_id=f"exp-op-{date_str}",
-                                producing_experiment_id=producing_experiment_id, trait="catkin")
+                                producing_experiment_id=producing_experiment_id, trait=count_trait)
             classifier_stamp = {
                 "validated": True, "trait": "catkin", "experiment_id": producing_experiment_id,
                 "operating_point": {"classifier": {"value": "elongated",

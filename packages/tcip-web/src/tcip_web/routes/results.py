@@ -379,6 +379,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         "operating_point_conf": recon["conf"],
         "missing_operating_point_sidecars": recon["missing_sidecars"],
         "unvalidated_buckets": recon["unvalidated_buckets"],
+        "binding_notes": recon["binding_notes"],
         "missing_classifier_sidecars": classifier_recon["missing_sidecars"],
         "classifier_binding_note": binding_note,
         "tile_size": tile_recon["validated"],
@@ -420,6 +421,8 @@ def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
 
 
 def _refusal(measurement: _PhenologyMeasurement) -> str:
+    from tcip_mcp.pipelines.resolution import binding_notes_text
+
     tile_note = ""
     if measurement.validity["unvalidated_tile_size_buckets"]:
         tile_note = (
@@ -441,6 +444,8 @@ def _refusal(measurement: _PhenologyMeasurement) -> str:
         "Produce the predictions via a calibrated export_predictions and calibrate the classifier "
         "via calibrate_classifier_operating_point."
         + tile_note
+        + (f" {binding_notes_text(measurement.validity['binding_notes'])}"
+           if measurement.validity["binding_notes"] else "")
         + (f" {measurement.validity['classifier_binding_note']}"
            if measurement.validity["classifier_binding_note"] else "")
     )

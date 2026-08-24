@@ -630,10 +630,9 @@ def run_inference(
     # the resolver, the only thing that can derive one from the data.
     applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
     applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
-    max_dets_source = "default" if max_dets is None else "explicit"
+    max_dets_stated = max_dets is not None
     applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
-    # Named distinctly from the response's own "conf_source" field below, a different fact.
-    conf_provenance_source = "default" if conf_threshold is None else "explicit"
+    conf_stated = conf_threshold is not None
 
     if dry_run:
         # No model load here: an unset ``tile`` is a pending derivation (the checkpoint decides
@@ -854,8 +853,8 @@ def run_inference(
         op_bundle = raw_operating_point(
             conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=resolved_tile_bool,
             tile_size=resolved_tile, max_dets=applied_max_dets, tile_size_source=tile_size_source,
-            tiled_source=tiled_source, conf_source=conf_provenance_source,
-            max_dets_source=max_dets_source,
+            tiled_source=tiled_source, conf_stated=conf_stated,
+            max_dets_stated=max_dets_stated,
         )
         extra = {"validated": False, "conf_source": "default"}
 
@@ -1181,9 +1180,9 @@ def _export_predictions_raster(
     # per-dataset derivation of one to leave room for.
     applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
     applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
-    raw_max_dets_source = "default" if max_dets is None else "explicit"
+    raw_max_dets_stated = max_dets is not None
     applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
-    raw_conf_source = "default" if conf_threshold is None else "explicit"
+    raw_conf_stated = conf_threshold is not None
 
     predictor = build_predictor(
         checkpoint_path=checkpoint_path, device=device, score_threshold=applied_conf,
@@ -1212,6 +1211,7 @@ def _export_predictions_raster(
     block_prov: dict | None = None
     block_evidence: dict | None = None
     claim_scope_validated: str | None = None
+    claim_scope_mismatch: str | None = None
     bucket_root = _bucket_dataset_root(out)
     draft = None
 
@@ -1222,7 +1222,9 @@ def _export_predictions_raster(
         from tcip_mcp.pipelines.raster_source import (
             georeferenced_raster_identity_mismatch, raster_identity_matches,
         )
-        from tcip_mcp.pipelines.resolution import VALIDATED_SAME_MOSAIC_IDENTITY
+        from tcip_mcp.pipelines.resolution import (
+            VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY, VALIDATED_SAME_MOSAIC_IDENTITY,
+        )
 
         try:
             block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
@@ -1245,15 +1247,17 @@ def _export_predictions_raster(
             if training_identity.get("geotransform") is not None:
                 claim_scope_mismatch = georeferenced_raster_identity_mismatch(
                     training_identity, raster_path)
+                claim_scope_token = VALIDATED_SAME_MOSAIC_IDENTITY
             else:
                 claim_scope_mismatch = (
                     None if raster_identity_matches(training_identity, raster_path)
                     else f"{raster_path} is not the raster this identity was recorded on"
                 )
+                claim_scope_token = VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY
         except ValueError as exc:
             return {"error": f"claim-scope check refused: {exc}"}
         claim_scope_flag = (
-            VALIDATED_SAME_MOSAIC_IDENTITY if claim_scope_mismatch is None else VALIDATED_FALSE)
+            claim_scope_token if claim_scope_mismatch is None else VALIDATED_FALSE)
 
         conf_param = block_bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable
@@ -1308,7 +1312,7 @@ def _export_predictions_raster(
             conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=True,
             tile_size=resolved_tile, max_dets=applied_max_dets,
             tile_size_source=tile_size_source, tiled_source="default",
-            conf_source=raw_conf_source, max_dets_source=raw_max_dets_source,
+            conf_stated=raw_conf_stated, max_dets_stated=raw_max_dets_stated,
         )
         op_provenance = op_bundle.to_provenance()["operating_point"]
 
@@ -1413,6 +1417,8 @@ def _export_predictions_raster(
         response["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=out)
     if block_prov is not None:
         response["claim_scope_validated"] = claim_scope_validated
+        if claim_scope_mismatch is not None:
+            response["claim_scope_note"] = claim_scope_mismatch
     return response
 
 

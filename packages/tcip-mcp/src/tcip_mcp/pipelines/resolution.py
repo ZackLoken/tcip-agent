@@ -57,18 +57,23 @@ VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a kno
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
 VALIDATED_NATIVE_FRAME_GEOMETRY = "persisted_native_frame_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
-# A raster export target matched the mosaic a block-calibrated bundle was validated against;
-# check_delivery_gate's own "claim_scope" dimension, never a ResolvedParam.
+# A raster export target matched the mosaic a block-calibrated bundle was validated against; two
+# references, one per comparison the export door actually had the basis to run.
 VALIDATED_SAME_MOSAIC_IDENTITY = "same_mosaic_georeferenced_identity"
-CLAIM_SCOPE_REFERENCES = (VALIDATED_SAME_MOSAIC_IDENTITY,)
+VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY = "same_mosaic_content_identity"
+CLAIM_SCOPE_REFERENCES = (VALIDATED_SAME_MOSAIC_IDENTITY, VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY)
 """Which references legitimately clear the claim-scope dimension, stated once for the door that
 writes one and the door that reads it back. Narrower than :data:`VALIDATED_SHIPPABLE` on purpose:
 an annotation or physical reference says nothing about which raster a bucket's predictions were
-produced on, so a sidecar recording one there clears nothing. The match is content-identical
-always, and additionally geotransform-identical whenever the recorded identity carries a
-geotransform to compare against (:func:`~tcip_mcp.pipelines.raster_source.georeferenced_raster_identity_mismatch`);
-a training source with no readable geotransform (a band-group source, or an unprojected raster)
-is checked on content alone."""
+produced on, so a sidecar recording one there clears nothing.
+
+``VALIDATED_SAME_MOSAIC_IDENTITY`` asserts content identity and geotransform identity to the
+training raster (:func:`~tcip_mcp.pipelines.raster_source.georeferenced_raster_identity_mismatch`),
+earned when the recorded training identity carries a geotransform to compare against.
+``VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY`` asserts content identity alone
+(:func:`~tcip_mcp.pipelines.raster_source.raster_identity_matches`), earned when the training
+identity has none (a band-group source, or an unprojected raster): the weaker claim, for the
+comparison the export door actually had the basis to run."""
 VALIDATED_FALSE = "false"
 
 # Which validated_against values legitimately clear validation for which kind of thing being
@@ -143,7 +148,7 @@ def tile_size_source_of(reference: str | None, *, tile_size: int | None) -> str:
 VALIDATED_SHIPPABLE = (
     VALIDATED_HELD_OUT, VALIDATED_REVIEW_CONFIRMED, VALIDATED_PHYSICAL_MEASUREMENT,
     VALIDATED_PERSISTED_GEOMETRY, VALIDATED_NATIVE_FRAME_GEOMETRY, VALIDATED_EXPLICIT_GEOMETRY,
-    VALIDATED_SAME_MOSAIC_IDENTITY,
+    VALIDATED_SAME_MOSAIC_IDENTITY, VALIDATED_SAME_MOSAIC_CONTENT_IDENTITY,
 )
 
 # Shared inference operating-point defaults, referenced by both run_inference and the web route so the
@@ -420,7 +425,7 @@ def resolve_tile_size_param(
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
     max_dets: int | None, tile_size_source: str = "default", tiled_source: str = "default",
-    conf_source: str = "default", max_dets_source: str = "default",
+    conf_stated: bool = False, max_dets_stated: bool = False,
 ) -> ResolvedBundle:
     """The operating point for raw (uncalibrated) inference, the one both doors resolve through.
 
@@ -435,10 +440,10 @@ def raw_operating_point(
     :func:`block_calibrated_export_operating_point` for the block-calibrated whole-mosaic pass,
     never by this function.
 
-    ``conf_source``/``max_dets_source`` are the same explicit-vs-default provenance vocabulary
-    ``tile_size_source``/``tiled_source`` already carry for their own params: the caller states which
-    one a value is, so a caller-chosen value that happens to equal the platform default is stamped
-    ``"explicit"``, never silently read back as an untouched default.
+    ``conf_stated``/``max_dets_stated`` say whether the caller explicitly chose that value, mapped
+    to the same explicit-vs-default provenance vocabulary ``tile_size_source``/``tiled_source``
+    already carry for their own params: a caller-chosen value that happens to equal the platform
+    default is stamped ``"explicit"``, never silently read back as an untouched default.
 
     ``tile_size_source`` records whether the tile edge was ``derived`` from the checkpoint's training
     geometry, ``native_ratio`` (the checkpoint's own uniform untiled frame), ``explicit`` (caller
@@ -457,7 +462,7 @@ def raw_operating_point(
         tiled_param = ResolvedParam("tiled", tiled, source="explicit", derived_from="caller override")
     else:
         tiled_param = default("tiled", tiled)
-    if conf_source == "explicit":
+    if conf_stated:
         conf_param = ResolvedParam(
             "conf", conf, source="explicit", derived_from="caller override",
             requires_validation=True, validation_kind="annotations", validated_against=VALIDATED_FALSE,
@@ -467,7 +472,7 @@ def raw_operating_point(
             "conf", conf, source="default", requires_validation=True,
             validation_kind="annotations", validated_against=VALIDATED_FALSE,
         )
-    if max_dets_source == "explicit":
+    if max_dets_stated:
         max_dets_param = ResolvedParam(
             "max_dets", max_dets, source="explicit", derived_from="caller override")
     else:
@@ -989,10 +994,12 @@ STAMP_EXTENSION_KEYS: dict[str, str] = {
     "sweep_summary": "the image-export door, for a calibrated run that persisted a sweep",
 }
 """Every top-level key a producer adds beside ``operating_point_stamp``'s own fourteen, one entry
-per key naming which producer writes it. :func:`write_sidecar`/:func:`update_sidecar` refuse an
-``operating_point`` stamp carrying a top-level key outside ``STAMP_KEYS | STAMP_EXTENSION_KEYS``,
-naming the key and this declaration; a new producer addition is admitted by declaring it here, not
-by the writer silently accepting whatever a caller assembled."""
+per key naming which producer writes it. :func:`write_sidecar` refuses a fresh ``operating_point``
+stamp whose body carries a top-level key outside ``STAMP_KEYS | STAMP_EXTENSION_KEYS``;
+:func:`update_sidecar` refuses only a key the update itself introduces relative to the stored
+stamp, never one the stored stamp already carried. Either refusal names the key and this
+declaration; a new producer addition is admitted by declaring it here, not by the writer silently
+accepting whatever a caller assembled."""
 
 
 def read_operating_point_sidecar(pred_dir: str | Path) -> dict | None:
@@ -1887,6 +1894,17 @@ def record_delivery_binding_event(
         tcip_store.replace(key, record)
     except Exception:
         logger.warning("Failed to write delivery_events record for door %r", door, exc_info=True)
+
+
+def binding_notes_text(notes: Mapping[str, str]) -> str:
+    """Render a reconciler's ``binding_notes`` as one refusal-ready line naming each bucket and why.
+
+    The one join every delivery door renders a floored binding's notes through, so a refusal names
+    the failing sidecar and the reason exactly once; a door that also reconciles the same buckets
+    for its own bindings must not append a second, separately-derived copy of what another door's
+    exception already carries.
+    """
+    return " ".join(f"{bucket}: {note}" for bucket, note in sorted(notes.items()) if note)
 
 
 def _validity_rank(state: str | None, accepted: tuple[str, ...]) -> int:

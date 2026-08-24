@@ -129,7 +129,7 @@ def _write_stamp_bypassing_claim_rail(dir_path: Path, stamp: dict, document: str
 def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, conf: float = 0.4,
                       id_map: dict | None = None, experiment_id: str | None = None,
                       checkpoint_sha256: str | None = None,
-                      tile_size_prov: dict | None = None) -> None:
+                      tile_size_prov: dict | None = None, trait: str = "catkin") -> None:
     """The operating_point.json a calibrated export_predictions writes.
 
     ``tile_size_prov`` is the tile_size param's own provenance entry, present for a run that
@@ -144,7 +144,7 @@ def _write_op_sidecar(dir_path: Path, *, dataset_root: Path, validated: bool, co
         op["tile_size"] = tile_size_prov
     stamp = {
         "validated": validated,
-        "trait": "catkin",
+        "trait": trait,
         "operating_point": op,
         "id_map": id_map,
         "experiment_id": experiment_id,
@@ -213,6 +213,39 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     assert "error" not in res, res
     assert res["positive_class_assessed"] is True
     assert out_csv.exists()
+
+
+def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp_path: Path) -> None:
+    """A count stamp validated for one trait must not answer for a phenology delivery under a
+    different trait: the refusal names the sidecar and both traits."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["dormant"])
+    _write_preds(d2, "P1_b", ["elongated"])
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, trait="second_trait")
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, trait="second_trait")
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    res = compute_phenology(
+        trait="catkin",
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        classifier_pred_dirs=[str(d1)],
+        operating_point_conf=0.4,
+        operating_point_validated="held_out_annotations",
+    )
+
+    assert "error" in res
+    assert not out_csv.exists()
+    assert "second_trait" in res["error"] and "catkin" in res["error"]
+    assert str(d1) in res["error"] or str(d2) in res["error"]
 
 
 def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_path: Path) -> None:

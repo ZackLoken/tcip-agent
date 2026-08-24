@@ -221,6 +221,7 @@ def export_detection_csv(
     from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE,
+        binding_notes_text,
         check_delivery_gate,
         delivered_provenance,
         record_delivery_binding_event,
@@ -252,8 +253,7 @@ def export_detection_csv(
 
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
-        notes = " ".join(f"{bucket}: {note}" for bucket, note in
-                         sorted(measurement_recon.get("binding_notes", {}).items()) if note)
+        notes = binding_notes_text(measurement_recon.get("binding_notes", {}))
         raise ValueError(f"{gate.reason} {notes}".rstrip())
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.

@@ -869,6 +869,7 @@ def compute_phenology(
     # and in that case stamp the CSV validated=false so the un-trustworthiness travels downstream.
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity,
+        binding_notes_text,
         check_delivery_gate,
         reconcile_classifier_validity,
         reconcile_operating_point_validity,
@@ -929,6 +930,8 @@ def compute_phenology(
             floor_note += (f" No classifier_operating_point.json found in "
                            f"{classifier_recon['missing_sidecars']}, calibrate the classifier via "
                            "calibrate_classifier_operating_point before delivering.")
+        if recon["binding_notes"]:
+            floor_note += f" {binding_notes_text(recon['binding_notes'])}"
         if classifier_binding_note:
             floor_note += f" {classifier_binding_note}"
         return {
