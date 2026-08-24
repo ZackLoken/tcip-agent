@@ -232,7 +232,7 @@ def deliver_orthomosaic_plant_counts(
         reconcile_operating_point_validity,
     )
 
-    recon = reconcile_operating_point_validity([predictions_dir])
+    recon = reconcile_operating_point_validity([predictions_dir], trait=trait)
     provenance = delivered_provenance(
         {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
          "experiment_id": sidecar.get("experiment_id"),

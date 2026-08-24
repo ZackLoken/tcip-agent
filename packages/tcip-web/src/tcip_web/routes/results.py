@@ -361,7 +361,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         raise HTTPException(404, f"no mapping at {payload.mapping_path}")
 
     pred_dirs = list(predictions_by_date.values())
-    recon = reconcile_operating_point_validity(pred_dirs)
+    recon = reconcile_operating_point_validity(pred_dirs, trait=payload.trait)
     classifier_recon = reconcile_classifier_validity(pred_dirs)
     # The same binding compute_phenology applies, from the same shared owner rather than a second
     # copy: a classifier stamp calibrated for another trait or against a run that did not produce

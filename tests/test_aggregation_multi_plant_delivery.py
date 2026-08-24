@@ -175,7 +175,7 @@ def _count_bucket(tmp_path, name, *, validated=True):
     d = root / "predictions" / name
     write_prediction(d, "img_a")
     stamp = {
-        "validated": validated, "trait": "catkin",
+        "validated": validated, "trait": fx.COUNT_TRAIT,
         "operating_point": {"conf": {
             "value": 0.55,
             "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
@@ -192,7 +192,7 @@ def _ordinal_bucket(tmp_path, name, *, validated=True):
     d = tmp_path / name
     d.mkdir(parents=True, exist_ok=True)
     stamp = {
-        "validated": validated, "trait": "catkin",
+        "validated": validated, "trait": "astringency",
         "operating_point": {"ordinal": {
             "validated_against": VALIDATED_HELD_OUT if validated else VALIDATED_FALSE,
             "criterion": "quadratic_weighted_kappa",

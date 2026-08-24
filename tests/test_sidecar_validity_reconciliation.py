@@ -85,7 +85,7 @@ def test_a_count_bucket_stamped_unvalidated_never_reads_back_its_recorded_refere
     reinstate the bucket, and the threshold it names must not travel out of it either."""
     d = _count_bucket(tmp_path / "b1", bundle_flag=False,
                       recorded_reference=VALIDATED_HELD_OUT, conf=0.62)
-    r = reconcile_operating_point_validity([d], asserted=VALIDATED_HELD_OUT)
+    r = reconcile_operating_point_validity([d], trait="catkin", asserted=VALIDATED_HELD_OUT)
     assert r["validated"] == VALIDATED_FALSE
     assert r["per_bucket"] == {d: VALIDATED_FALSE}
     assert r["unvalidated_buckets"] == [d]
@@ -141,7 +141,7 @@ def test_a_bucket_with_no_sidecar_floors_a_curve_assembled_beside_a_validated_on
                           validation_kind="annotations")
     absent = tmp_path / "b2"
     absent.mkdir()
-    r = reconcile_operating_point_validity([good, str(absent)])
+    r = reconcile_operating_point_validity([good, str(absent)], trait="catkin")
     assert r["validated"] == VALIDATED_FALSE
     assert r["on_disk_validated"] is False
     assert r["missing_sidecars"] == [str(absent)]
@@ -175,7 +175,7 @@ def test_buckets_that_ran_at_different_thresholds_report_no_single_operating_poi
                        recorded_reference=VALIDATED_REVIEW_CONFIRMED, document="operating_point",
                        dataset_root=root, experiment_id="exp-b", value=0.41,
                        validation_kind="annotations")
-    mixed = reconcile_operating_point_validity([a, b])
+    mixed = reconcile_operating_point_validity([a, b], trait="catkin")
     assert mixed["validated"] == VALIDATED_HELD_OUT
     assert mixed["conf"] is None
 
@@ -183,7 +183,7 @@ def test_buckets_that_ran_at_different_thresholds_report_no_single_operating_poi
                        recorded_reference=VALIDATED_REVIEW_CONFIRMED, document="operating_point",
                        dataset_root=root, experiment_id="exp-c", value=0.41,
                        validation_kind="annotations")
-    agreed = reconcile_operating_point_validity([b, c])
+    agreed = reconcile_operating_point_validity([b, c], trait="catkin")
     assert agreed["validated"] == VALIDATED_REVIEW_CONFIRMED
     assert agreed["conf"] == 0.41
 
@@ -196,7 +196,7 @@ def test_a_raster_identity_reference_never_clears_the_count_dimension(tmp_path):
     clear it because it happens to be a real reference somewhere."""
     d = _count_bucket(tmp_path / "b1", bundle_flag=True,
                       recorded_reference=VALIDATED_SAME_MOSAIC_IDENTITY, conf=0.62)
-    r = reconcile_operating_point_validity([d])
+    r = reconcile_operating_point_validity([d], trait="catkin")
     assert r["validated"] == VALIDATED_FALSE
     assert r["per_bucket"] == {d: VALIDATED_FALSE}
     assert r["unvalidated_buckets"] == [d]

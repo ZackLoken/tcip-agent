@@ -359,16 +359,18 @@ def export_aggregated_csv(
                          else {"operative": False, "validated": None})
     measurement_recon: dict = {"bindings": {}}
     if pred_dirs and task == "ordinal":
-        measurement_recon = reconcile_ordinal_validity(pred_dirs, asserted=measurement_validated)
+        measurement_recon = reconcile_ordinal_validity(
+            pred_dirs, trait=trait, asserted=measurement_validated)
         state = measurement_recon["validated"]
     elif pred_dirs and task == "regression":
-        measurement_recon = reconcile_regression_validity(pred_dirs, asserted=measurement_validated)
+        measurement_recon = reconcile_regression_validity(
+            pred_dirs, trait=trait, asserted=measurement_validated)
         state = measurement_recon["validated"]
     elif pred_dirs:
         # A count trait: the measurement validity is the count operating point's, read from the
         # buckets' sidecars and floored against any caller assertion (never trusted from the string).
         measurement_recon = reconcile_operating_point_validity(
-            pred_dirs, asserted=measurement_validated)
+            pred_dirs, trait=trait, asserted=measurement_validated)
         state = measurement_recon["validated"]
         # The tile scale is the same operating point's other gating dimension: a tiled bucket whose
         # tile edge has no real basis at all is as untrustworthy here as an uncalibrated conf.
@@ -392,7 +394,9 @@ def export_aggregated_csv(
         flags["claim_scope"] = claim_scope_recon["validated"]
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
-        raise ValueError(gate.reason)
+        notes = " ".join(f"{bucket}: {note}" for bucket, note in
+                         sorted(measurement_recon.get("binding_notes", {}).items()) if note)
+        raise ValueError(f"{gate.reason} {notes}".rstrip())
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
     spec_now, record_now, _ = resolve_trait_and_record(trait, delivery_kind)
