@@ -597,10 +597,11 @@ def _labels_term(annotations_root: Path) -> str | None:
 
 
 def _images_term(images_root: Path, cache_path: Path | None) -> str | None:
-    """Whole-dataset image identity from each image's *pixel bytes* (content, not name/size), so a
-    re-encode under the same filename changes identity (closes the labels-only/pixel-blind gap). Each
-    file's sha is cached by ``(relpath, size, mtime_ns)`` so only changed files re-hash; a cache miss
-    always hashes the bytes. ``None`` when there are no images (bespoke/imageless).
+    """Whole-dataset image identity from each image's *raw file bytes* (content, not name/size), so a
+    re-encode under the same filename changes identity (closes the labels-only/pixel-blind gap); a
+    ``.bandgroup`` manifest is hashed as its own raw JSON bytes the same way, never decoded pixels.
+    Each file's sha is cached by ``(relpath, size, mtime_ns)`` so only changed files re-hash; a
+    cache miss always hashes the bytes. ``None`` when there are no images (bespoke/imageless).
     """
     if not images_root.is_dir():
         return None
@@ -695,11 +696,12 @@ def _confirmations_term(dataset_root: Path) -> str:
 
 
 def dataset_fingerprint(dataset_root: str | Path) -> str | None:
-    """Whole-dataset content identity: labels + image pixels + registry + confirmed negatives.
+    """Whole-dataset content identity: labels + image files + registry + confirmed negatives.
 
     A superset of :func:`dataset_hash` (which stays the per-split-subset firewall key): the label term
-    *calls* ``dataset_hash``; the image term hashes pixel bytes; the registry term digests the canonical
-    class registry; the confirmations term digests the dataset-native confirmed-negative store.
+    *calls* ``dataset_hash``; the image term hashes each file's raw bytes; the registry term digests
+    the canonical class registry; the confirmations term digests the dataset-native confirmed-negative
+    store.
     Content-addressed, so it is machine-independent (a moved dataset keeps its fingerprint) and detects
     a change to any of the four (a re-encode, a relabel, a registry edit, confirming/un-confirming a
     negative). ``None`` for a dataset with no images or no labels (e.g. a bespoke ``dataset_source``),

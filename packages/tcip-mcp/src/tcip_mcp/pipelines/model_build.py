@@ -66,8 +66,9 @@ def _import_dotted(target: str) -> Any:
 def declared_in_chans(model_source: dict | None) -> int | None:
     """The channel count ``model_source`` declares: its own ``in_chans``, falling back to
     ``builder_kwargs.in_chans``. ``None`` when neither declares it (the caller's own default,
-    never baked in here), so every reader of this fact (``resolve_contract_dims``,
-    ``generic_trainer._expected_in_chans``) agrees on where it lives.
+    never baked in here), so every reader of this fact (``resolve_contract_dims`` in this module,
+    ``generic_trainer._expected_in_chans``, ``GenericPredictor.__init__`` and
+    ``training_tools.preflight_config``'s channel firewall) agrees on where it lives.
     """
     if not isinstance(model_source, dict):
         return None

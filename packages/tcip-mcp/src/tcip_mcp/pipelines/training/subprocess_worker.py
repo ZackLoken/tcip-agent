@@ -37,10 +37,12 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
     stamped, lands beside it. Never sinks the run if there is no experiment record to patch
     (experiment tracking is best-effort throughout this path, same as every other write in
     it)."""
+    from tcip_mcp.experiments import ExperimentTerminal
+
     try:
         from tcip_store import store
 
-        from tcip_mcp.experiments import ExperimentTerminal, config_key, refuse_if_terminal, status_key
+        from tcip_mcp.experiments import config_key, refuse_if_terminal, status_key
 
         key, st_key = config_key(experiment_id), status_key(experiment_id)
         if not store.exists(key):
@@ -78,10 +80,12 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
     before the build too, the call site is chosen for symmetry with the tiling patch, not because
     the dataset build is a precondition for it. Never sinks the run if there is no experiment
     record to patch."""
+    from tcip_mcp.experiments import ExperimentTerminal
+
     try:
         from tcip_store import store
 
-        from tcip_mcp.experiments import ExperimentTerminal, config_key, refuse_if_terminal, status_key
+        from tcip_mcp.experiments import config_key, refuse_if_terminal, status_key
 
         key, st_key = config_key(experiment_id), status_key(experiment_id)
         if not store.exists(key):

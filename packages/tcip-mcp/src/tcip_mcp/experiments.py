@@ -336,6 +336,9 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
     one (so the check and the write it guards see the same value) or via :func:`_current_state`
     when it doesn't. The one implementation of "is this experiment terminal" every writer of an
     experiment member consults, rather than each comparing against ``_TERMINAL_STATES`` itself.
+    :func:`update_status` is the one exception: its rule differs (a terminal record refuses only a
+    move to a *non*-terminal state, not a move between two terminal states or a repeat of the
+    current one), so it keeps its own comparison rather than calling this.
 
     Never audits itself: an audit line is a log append, which cannot run inside a record
     transaction (``store.transaction`` only ever holds ``kind="record"`` keys), and a caller
@@ -413,6 +416,19 @@ def create_experiment(
     }
 
 
+def is_pristine(state: str | None, has_metrics: bool) -> bool:
+    """Whether an experiment record with this ``state`` and ``has_metrics`` may still take a full
+    ``config.json`` rewrite: ``state == "created"`` and no metrics logged yet.
+
+    The one implementation of the pristine predicate. :func:`overwrite_config_if_pristine` calls
+    it from inside the transaction that reads ``state``; ``_ensure_experiment`` calls it first, on
+    its own untransacted read, to decide whether to attempt that overwrite at all, so a relaunch
+    under a non-pristine id mints its fresh id straight away instead of provoking (and auditing) a
+    refusal nothing needed.
+    """
+    return state == "created" and not has_metrics
+
+
 def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
     """Rewrite ``config.json`` with the config actually launched, but only while the experiment is
     still pristine (state == "created" and no epochs logged yet).
@@ -421,10 +437,9 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     before effective tiling geometry and the training seed are resolved (see
     ``training_tools.launch_training``). Reusing that id via ``_ensure_experiment``'s pristine-reuse
     branch would otherwise ship a permanently stale snapshot describing a config that was never
-    trained. Refuses (and audits the refusal) once the record is no longer pristine, a "created"
-    record that already has metrics rows must stay protected too, so this checks the same full
-    predicate ``_ensure_experiment`` uses (by calling this function), not just the terminal-state
-    lock alone.
+    trained. Refuses (and audits the refusal) once :func:`is_pristine` says the record is no
+    longer pristine, a "created" record that already has metrics rows must stay protected too, not
+    just the terminal-state lock alone.
 
     The state read and the write are one transaction (closing the race where a concurrent
     ``update_status``/patch flips the record between the check and the write); the metrics-log
@@ -442,7 +457,7 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     with store.transaction(cfg_key, st_key) as txn:
         status = txn.read(st_key, default={})
         state = status.get("state") if isinstance(status, dict) else None
-        refused = state != "created" or has_metrics
+        refused = not is_pristine(state, has_metrics)
         if not refused:
             txn.write(cfg_key, config)
     if refused:
@@ -914,10 +929,12 @@ def update_lineage(
     refused: dict[str, Any] = {}
     with store.transaction(key, state) as txn:
         lineage = txn.read(key, default={})
-        # Terminal-state lock (additive-only): once terminal, a still-empty field may take its first
-        # write (the post-completion predictions link, model_weights on registration), but a
-        # populated field is frozen, no overwrite of a recorded lineage edge.
-        if (txn.read(state, default={}) or {}).get("state") in _TERMINAL_STATES:
+        current_state = (txn.read(state, default={}) or {}).get("state")
+        # Additive-only, unlike refuse_if_terminal's own all-or-nothing refusal: a still-empty
+        # field may take its first write post-terminal, only a populated one is frozen.
+        try:
+            refuse_if_terminal(experiment_id, "update_lineage", current_state)
+        except ExperimentTerminal:
             refused = {k: v for k, v in updates.items()
                        if lineage.get(k) not in (None, "", [], {}) and lineage.get(k) != v}
             if refused:

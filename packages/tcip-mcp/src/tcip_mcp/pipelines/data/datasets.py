@@ -178,6 +178,22 @@ def _json_det_targets(path, subject, attribute, id_map):
     return boxes, labels, n_unlabeled
 
 
+def first_parseable_labels_json(labels_dir) -> Path | None:
+    """The first parseable ``.json`` file in ``labels_dir``, sorted: the file
+    :func:`dir_label_format` decides its shape from, exposed separately so a refusal naming a
+    dataset-level COCO export can point at the actual file, not just the directory."""
+    d = Path(labels_dir)
+    if not d.is_dir():
+        return None
+    for jp in sorted(d.glob("*.json")):
+        try:
+            json.loads(jp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        return jp
+    return None
+
+
 def dir_label_format(labels_dir) -> str | None:
     """``"json"``/``"coco"`` if this dir's first parseable ``.json`` file declares that shape,
     else ``None``.
@@ -192,19 +208,13 @@ def dir_label_format(labels_dir) -> str | None:
     """
     from tcip_annotation.format_io import _detect_json_format
 
-    d = Path(labels_dir)
-    if not d.is_dir():
+    jp = first_parseable_labels_json(labels_dir)
+    if jp is None:
         return None
-    for jp in sorted(d.glob("*.json")):
-        try:
-            json.loads(jp.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        try:
-            return _detect_json_format(jp)
-        except ValueError:
-            return None
-    return None
+    try:
+        return _detect_json_format(jp)
+    except ValueError:
+        return None
 
 
 def trainable_stems(
@@ -1516,9 +1526,13 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
                              id_map: dict[str, int], date) -> None:
     """Route a name-based per-image-JSON label dir onto the assembled-COCO path for training/eval.
 
-    No-op when the caller pinned a format or already supplied COCO data. The single ``id_map`` is
+    No-op when the caller pinned a format, already supplied COCO data, or has no ``images_dir`` to
+    assemble against (both branches below share that one precondition). The single ``id_map`` is
     threaded into ``assemble_coco`` (and thus the one ``to_coco_dataset`` call), so the assembled
     categories rest on the same name→id derivation as the loader targets and the contract dims.
+    A dataset-level COCO export sitting alongside real per-image label files is refused by name,
+    with both remedies stated (move the export out, or point ``data.coco_json`` at it), since
+    only the breeder knows which of the two is this dataset's real label source.
 
     ``date`` is the caller's own, the same one the dataset class hands ``trainable_stems``, so the
     assembled COCO and the partition that consumes it read one confirmation bucket rather than two
@@ -1528,16 +1542,18 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
         return
     labels_dir = kwargs.get("labels_dir", "")
     images_dir = kwargs.get("images_dir", "")
-    if not labels_dir:
+    if not labels_dir or not images_dir:
         return
     detected = dir_label_format(labels_dir)
     if detected == "coco":
+        offending = first_parseable_labels_json(labels_dir)
         raise ValueError(
-            f"labels_dir={labels_dir!r} holds a dataset-level COCO file; pass data.coco_json "
-            "(or label_format='coco') to train on it directly, rather than assembling per-image "
-            "labels that are not there."
+            f"labels_dir={labels_dir!r} holds a dataset-level COCO file ({offending}): if the "
+            "per-image label files in this directory are the ones that should train, move it out "
+            "of labels_dir; if this COCO export is the intended label source, pass data.coco_json "
+            "(or label_format='coco') to train on it directly."
         )
-    if detected == "json" and images_dir:
+    if detected == "json":
         kwargs["coco_data"] = assemble_coco(
             labels_dir, images_dir, stems=kwargs.get("stems"),
             subject=subject, attribute=attribute, id_map=id_map, date=date)

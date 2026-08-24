@@ -6,6 +6,8 @@ Covers ``build_model`` dispatch (``model_source`` only) and the behavioral
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -80,6 +82,33 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes():
     named = dict(model.named_parameters())
     assert set(mags) <= set(named)  # every reported name is a real parameter of this model
     assert all(isinstance(v, float) and v >= 0.0 for v in mags.values())
+
+
+def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
+    """Each element of this parameter's gradient is finite (2e38, under float32's ~3.4e38 max), so
+    the elementwise finiteness gate passes, but summing their squares in the gradient's own
+    float32 dtype overflows: ``torch.tensor([2e38, 2e38]).norm()`` is ``inf`` even though every
+    element is finite. The recorded magnitude must be computed at higher precision so the report
+    stays the JSON-encodable value ``check_json_value`` needs downstream, never an ``inf``."""
+    import torch.nn as nn
+
+    class _NearOverflowGradient(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.w = nn.Parameter(torch.ones(2))
+            self.w.register_hook(lambda grad: grad * 2e38)
+            self.lin = nn.Linear(4, 4)
+
+        def forward(self, images, targets=None):
+            if self.training:
+                return {"loss": self.w.sum() + self.lin(torch.rand(1, 4)).sum() * 0}
+            return {"logits": self.lin(torch.rand(1, 4))}
+
+    report = check_model_contract(_NearOverflowGradient(), "classification", num_classes=2)
+    assert report["ok"], report["issues"]
+    norm = report["gradient_magnitudes"]["w"]
+    assert math.isfinite(norm)
+    assert norm == pytest.approx(2e38 * 2 ** 0.5, rel=1e-6)
 
 
 def test_check_model_contract_rejects_prediction_free_eval_output():
