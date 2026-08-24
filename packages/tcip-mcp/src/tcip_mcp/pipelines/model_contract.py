@@ -148,7 +148,8 @@ def check_model_contract(
 
     issues: list[str] = []
     report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None,
-                              "eval_output_type": None, "not_smokeable": None}
+                              "eval_output_type": None, "not_smokeable": None,
+                              "gradient_magnitudes": None}
     if sample_batch is None and task not in _SYNTHESIZABLE_TASKS:
         # Do not invent a target shape for a task we have no schema for: a green report earned
         # against a guessed shape proves nothing. Say so, and let the caller smoke it with a real
@@ -179,11 +180,16 @@ def check_model_contract(
         if not torch.isfinite(torch.tensor(lv)):
             issues.append(f"train-mode loss is not finite ({lv})")
         loss.backward()
-        grads = [p.grad for p in model.parameters() if getattr(p, "grad", None) is not None]
+        named_grads = [(name, p.grad) for name, p in model.named_parameters()
+                       if getattr(p, "grad", None) is not None]
+        grads = [g for _, g in named_grads]
         if not grads:
             issues.append("no parameter received a gradient from the train-mode loss")
         elif not all(torch.isfinite(g).all() for g in grads):
             issues.append("some parameter gradients are not finite")
+        # Magnitudes, not gated on: a parameter whose gradient is all zero passes the presence
+        # check above but reads here as exactly what it is, one per named parameter.
+        report["gradient_magnitudes"] = {name: float(g.detach().norm()) for name, g in named_grads}
     except Exception as exc:  # noqa: BLE001
         issues.append(f"train-mode forward/backward failed: {exc}")
 

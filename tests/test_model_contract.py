@@ -68,6 +68,20 @@ def test_check_model_contract_classification_ok():
     assert report["train_loss"] is not None
 
 
+def test_check_model_contract_records_per_parameter_gradient_magnitudes():
+    """A model whose parameters all took zero gradient must read as what it is: the presence
+    conjunct only asks whether a .grad exists, not what it is, so the report also states each
+    named parameter's gradient norm rather than gating the report on presence alone."""
+    model = bespoke_models.build_bespoke_classifier(num_classes=2)
+    report = check_model_contract(model, "classification", num_classes=2)
+    assert report["ok"], report["issues"]
+    mags = report["gradient_magnitudes"]
+    assert isinstance(mags, dict) and mags
+    named = dict(model.named_parameters())
+    assert set(mags) <= set(named)  # every reported name is a real parameter of this model
+    assert all(isinstance(v, float) and v >= 0.0 for v in mags.values())
+
+
 def test_check_model_contract_rejects_prediction_free_eval_output():
     """A dict is the shape, not the content: an output with no tensor is not a measurement."""
     import torch.nn as nn
