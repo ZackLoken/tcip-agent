@@ -123,9 +123,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # Channel firewall: probe one sample raster and check its band count against the declared
     # in_chans, so a channel-wrong train is caught here rather than deep in the training subprocess.
     # Only fires when a raster is actually readable, never a false-fail on an empty/absent dir.
-    if isinstance(model_source, dict) and model_source.get("in_chans") is not None and data_cfg:
+    if isinstance(model_source, dict) and data_cfg:
+        from tcip_mcp.pipelines.model_build import declared_in_chans
+        declared = declared_in_chans(model_source)
         images_dir = data_cfg.get("images_dir")
-        if images_dir and Path(images_dir).is_dir():
+        if declared is not None and images_dir and Path(images_dir).is_dir():
             from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
             sample = next((f for f in sorted(Path(images_dir).iterdir())
                            if f.suffix.lower() in IMAGE_EXTS), None)

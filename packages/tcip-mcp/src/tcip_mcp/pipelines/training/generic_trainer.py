@@ -32,6 +32,7 @@ from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
     STATE_DICT_KEY,
     build_model,
+    declared_in_chans,
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
@@ -580,11 +581,10 @@ def apply_stage_freeze(
 
 
 def _expected_in_chans(config: dict) -> int:
-    """Input channels the model expects, from ``model_source.in_chans``."""
-    src = config.get(MODEL_SOURCE_KEY)
-    if isinstance(src, dict):
-        return int(src.get("in_chans", 3))
-    return 3
+    """Input channels the model expects: ``model_source.in_chans``, falling back to
+    ``model_source.builder_kwargs.in_chans`` (:func:`declared_in_chans`), else 3."""
+    in_chans = declared_in_chans(config.get(MODEL_SOURCE_KEY))
+    return in_chans if in_chans is not None else 3
 
 
 def _validate_input_channels(config: dict, loader: DataLoader) -> None:

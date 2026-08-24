@@ -55,6 +55,25 @@ def _import_dotted(target: str) -> Any:
         raise ValueError(f"Builder {attr!r} not found in module {mod_name!r}.") from exc
 
 
+def declared_in_chans(model_source: dict | None) -> int | None:
+    """The channel count ``model_source`` declares: its own ``in_chans``, falling back to
+    ``builder_kwargs.in_chans``. ``None`` when neither declares it (the caller's own default,
+    never baked in here), so every reader of this fact (``resolve_contract_dims``,
+    ``generic_trainer._expected_in_chans``) agrees on where it lives.
+    """
+    if not isinstance(model_source, dict):
+        return None
+    bk = model_source.get("builder_kwargs")
+    bk = bk if isinstance(bk, dict) else {}
+    value = model_source.get("in_chans", bk.get("in_chans"))
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_from_model_source(model_source: dict) -> Any:
     """Import the agent's builder and call it. Registry-free; no ``exec``.
 
@@ -106,7 +125,8 @@ def resolve_contract_dims(config: dict, task: str) -> dict:
         except (TypeError, ValueError):
             return fallback
 
-    in_chans = _int(ms.get("in_chans", bk.get("in_chans")), 3)
+    in_chans = declared_in_chans(ms) if isinstance(ms, dict) else None
+    in_chans = in_chans if in_chans is not None else 3
     num_classes = _int(bk.get("num_classes"), 1)
 
     data = config.get("data") or {}
