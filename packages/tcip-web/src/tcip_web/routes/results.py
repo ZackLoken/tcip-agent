@@ -477,6 +477,9 @@ def per_plant_curves(payload: PhenologyPayload) -> dict:
 
     record_delivery_binding_event("results.per_plant_curves", None,
                                   measurement.pred_dirs, measurement.bindings,
+                                  measurement_documents=["operating_point",
+                                                         "classifier_operating_point"],
+                                  scale_document=None,
                                   trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
                                   project_root=measurement.project_root)
     return {
@@ -507,6 +510,9 @@ def onset_dates(payload: PhenologyPayload) -> dict:
 
     record_delivery_binding_event("results.onset_dates", None,
                                   measurement.pred_dirs, measurement.bindings,
+                                  measurement_documents=["operating_point",
+                                                         "classifier_operating_point"],
+                                  scale_document=None,
                                   trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
                                   project_root=measurement.project_root)
     return {"rows": measurement.milestone_rows(), **_disclosure(measurement)}
@@ -603,6 +609,9 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     })
     record_delivery_binding_event("results.export_csv", str(saved_path),
                                   measurement.pred_dirs, measurement.bindings,
+                                  measurement_documents=["operating_point",
+                                                         "classifier_operating_point"],
+                                  scale_document=None,
                                   trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
                                   project_root=measurement.project_root)
     headers["X-TCIP-Saved-To"] = str(saved_path)

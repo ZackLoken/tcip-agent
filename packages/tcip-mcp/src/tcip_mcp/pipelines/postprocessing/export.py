@@ -139,6 +139,12 @@ def _mask_geometry_for_export(
 _PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "operating_point_conf",
                        "produced_at", "measurement_validated", "validation_record"]
 
+_MEASUREMENT_DOCUMENT = "operating_point"
+"""What this CSV's counts always rest on: a per-image detection count is always the count
+operating point, never a scalar head or a physical scale, so ``measurement_document`` is a
+constant here rather than a per-row statement (contrast ``export_aggregated_csv``, whose rows can
+carry any of the three per-plant measurement documents)."""
+
 
 def export_detection_csv(
     image_results: list[dict],
@@ -177,6 +183,10 @@ def export_detection_csv(
     verification the gate already ran, so a producer this delivery cannot corroborate is reported
     unknown rather than repeated from the stamp that asserted it, and ``validation_record`` names the
     record a reader can open to see what the claim was earned against.
+
+    Every row also carries ``measurement_document``, always ``"operating_point"``: a detection count
+    never rests on a scalar head or a physical scale, so this is a constant column, unlike
+    ``export_aggregated_csv``'s own per-row statement.
 
     Meaning door: a count nobody defined is not a measurement, so this refuses before it composes
     the gate's flags unless ``trait``'s ``per_image_count`` operationalization is recorded and
@@ -258,7 +268,8 @@ def export_detection_csv(
     stamp = delivered_provenance(provenance, measurement_recon["bindings"],
                                  columns=_PROVENANCE_COLUMNS)
     stamp["measurement_validated"] = gate.column_stamp("measurement")
-    fieldnames = ["image", "detection_count", "avg_confidence"] + _PROVENANCE_COLUMNS
+    fieldnames = (["image", "detection_count", "avg_confidence", "measurement_document"]
+                 + _PROVENANCE_COLUMNS)
 
     with open(output_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -271,10 +282,13 @@ def export_detection_csv(
                 "image": Path(r.get("image", "")).name,
                 "detection_count": r.get("count", len(r.get("boxes", []))),
                 "avg_confidence": round(avg_conf, 4),
+                "measurement_document": _MEASUREMENT_DOCUMENT,
                 **stamp,
             })
 
     record_delivery_binding_event("export_detection_csv", output_path, pred_dirs,
                                   measurement_recon["bindings"],
+                                  measurement_documents=[_MEASUREMENT_DOCUMENT],
+                                  scale_document=None,
                                   trait=trait, delivery_kind=PER_IMAGE_COUNT)
     return output_path

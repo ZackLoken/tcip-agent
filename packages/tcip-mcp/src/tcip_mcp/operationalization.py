@@ -71,16 +71,16 @@ _CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
     PER_PLANT_REGRESSION_AGGREGATE: ("regression_skill_floor",),
 }
 
-_AGGREGATE_KIND_BY_TASK: dict[str | None, str] = {
-    None: PER_PLANT_COUNT_AGGREGATE,
-    "ordinal": PER_PLANT_ORDINAL_AGGREGATE,
-    "regression": PER_PLANT_REGRESSION_AGGREGATE,
+_AGGREGATE_KIND_BY_DOCUMENT: dict[str, str] = {
+    "operating_point": PER_PLANT_COUNT_AGGREGATE,
+    "ordinal_operating_point": PER_PLANT_ORDINAL_AGGREGATE,
+    "regression_operating_point": PER_PLANT_REGRESSION_AGGREGATE,
 }
-"""Which aggregate kind a per-plant delivery is recorded under, by the task its door was called for.
-
-The mapping is total over the tasks the aggregate door accepts, so the kind is derived rather than
-guessed, and a confirmation covers the one floor the delivery in front of the breeder rests on.
-"""
+"""Which aggregate kind a per-plant delivery is recorded under, by the sidecar document the
+delivery's own records stated as their ``measurement_document`` (see ``export_aggregated_csv``'s
+statement rail). Total over the documents a per-plant aggregate may rest on: ``classifier_operating_
+point`` and ``resolve_scale`` name no aggregate kind here, since no per-plant aggregate this door
+delivers rests on either alone."""
 
 _PHENOTYPE_NAMING_KINDS = frozenset({
     STATE_CROSSING_DATES,
@@ -144,19 +144,22 @@ def constituting_fields(delivery_kind: str) -> tuple[str, ...]:
     return fields
 
 
-def aggregate_delivery_kind(task: str | None) -> str:
-    """The delivery kind a per-plant aggregate of ``task`` is recorded and confirmed under.
+def aggregate_delivery_kind(measurement_document: str) -> str:
+    """The delivery kind a per-plant aggregate resting on ``measurement_document`` is recorded and
+    confirmed under.
 
     The three aggregate kinds rest on three different spec floors, and which one applies is decided
-    by the task the door was called for, never by the record's reader. A task outside the set the
-    door accepts raises rather than falling back to a kind the delivery would not rest on.
+    by the sidecar document the delivery's own records stated they rest on, never by the record's
+    reader and never by a caller-supplied task string. A document outside the set a per-plant
+    aggregate may rest on (``classifier_operating_point``, ``resolve_scale``, or an undeclared name)
+    raises rather than falling back to a kind the delivery would not rest on.
     """
-    if task not in _AGGREGATE_KIND_BY_TASK:
+    if measurement_document not in _AGGREGATE_KIND_BY_DOCUMENT:
         raise ValueError(
-            f"no aggregate delivery kind for task {task!r}; the tasks are "
-            f"{[t for t in _AGGREGATE_KIND_BY_TASK if t is not None]} or None for a count"
+            f"no aggregate delivery kind for measurement_document {measurement_document!r}; a "
+            f"per-plant aggregate rests on one of {sorted(_AGGREGATE_KIND_BY_DOCUMENT)}"
         )
-    return _AGGREGATE_KIND_BY_TASK[task]
+    return _AGGREGATE_KIND_BY_DOCUMENT[measurement_document]
 
 
 def resolve_trait_for_phenotype(

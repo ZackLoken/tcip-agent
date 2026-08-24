@@ -233,19 +233,20 @@ def seed_confirmed_aggregate(
     delivered_phenotype: str,
     *,
     value_keys: Sequence[str],
-    task: str | None = None,
+    measurement_document: str = "operating_point",
     **overrides: Any,
 ) -> dict[str, Any]:
-    """Confirm an aggregate record the way the door reaches it: by phenotype and by task.
+    """Confirm an aggregate record the way the door reaches it: by phenotype and by document.
 
     The traits are registered by :func:`seed_delivery_traits`; the phenotype names which of them
-    this record belongs to and the task names which kind, both resolved through the same functions
-    the door resolves them with, so a module seeded this way is seeded for the call it makes.
+    this record belongs to and ``measurement_document`` names which kind, both resolved through the
+    same functions the door resolves them with, so a module seeded this way is seeded for the call
+    it makes.
     """
     return confirm_aggregate(
         project_root,
         op.resolve_trait_for_phenotype(delivered_phenotype, project_root=project_root),
-        op.aggregate_delivery_kind(task),
+        op.aggregate_delivery_kind(measurement_document),
         delivered_phenotype=delivered_phenotype,
         value_keys=value_keys,
         **overrides,

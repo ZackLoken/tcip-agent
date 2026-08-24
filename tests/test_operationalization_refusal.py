@@ -765,8 +765,11 @@ def _count_rows() -> list[dict]:
     return [{"image": "a.jpg", "count": 3, "scores": [0.9]}]
 
 
-def _aggregate_rows(value_key: str | None = "count") -> list[dict]:
-    row = {"plant_id": "p1", "value": 5, "observations": 2}
+def _aggregate_rows(
+    value_key: str | None = "count", *, measurement_document: str = "operating_point"
+) -> list[dict]:
+    row = {"plant_id": "p1", "value": 5, "observations": 2,
+          "measurement_document": measurement_document}
     return [row if value_key is None else {**row, "value_key": value_key}]
 
 
@@ -931,25 +934,26 @@ def test_ordinal_and_count_aggregates_need_their_own_records(delivery_root: Path
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    rows = _aggregate_rows("astringency")
     fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_ORDINAL_AGGREGATE,
                          delivered_phenotype="astringency", value_keys=["astringency"])
 
+    ordinal_rows = _aggregate_rows("astringency", measurement_document="ordinal_operating_point")
     ordinal_csv = tmp_path / "ordinal.csv"
-    export_aggregated_csv(rows, str(ordinal_csv), trait_name="astringency", task="ordinal",
+    export_aggregated_csv(ordinal_rows, str(ordinal_csv), trait_name="astringency",
                           acknowledge_unvalidated=True)
     assert ordinal_csv.exists()
 
+    count_rows = _aggregate_rows("astringency")
     count_csv = tmp_path / "count.csv"
     with pytest.raises(ValueError) as excinfo:
-        export_aggregated_csv(rows, str(count_csv), trait_name="astringency",
+        export_aggregated_csv(count_rows, str(count_csv), trait_name="astringency",
                               acknowledge_unvalidated=True)
     assert op.PER_PLANT_COUNT_AGGREGATE in str(excinfo.value)
     assert not count_csv.exists()
 
     fx.confirm_aggregate(tmp_path, "astringency", op.PER_PLANT_COUNT_AGGREGATE,
                          delivered_phenotype="astringency", value_keys=["astringency"])
-    export_aggregated_csv(rows, str(count_csv), trait_name="astringency",
+    export_aggregated_csv(count_rows, str(count_csv), trait_name="astringency",
                           acknowledge_unvalidated=True)
 
     assert count_csv.exists()

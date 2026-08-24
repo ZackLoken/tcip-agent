@@ -819,7 +819,8 @@ def test_delivery_events_route_lists_a_recorded_event(client: TestClient, tmp_pa
     from tcip_mcp.pipelines.resolution import record_delivery_binding_event
 
     record_delivery_binding_event(
-        "test_door", None, [], {}, trait=STATEMENT_TRAIT, delivery_kind=PER_IMAGE_COUNT,
+        "test_door", None, [], {}, measurement_documents=["operating_point"],
+        scale_document=None, trait=STATEMENT_TRAIT, delivery_kind=PER_IMAGE_COUNT,
         project_root=tmp_path,
     )
 

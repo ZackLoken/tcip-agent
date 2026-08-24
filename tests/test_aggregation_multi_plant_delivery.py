@@ -30,8 +30,8 @@ def _recorded_meaning(tmp_path):
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
     fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"],
-                                task="ordinal")
-    # A delivery that omits the task rests on the same trait's count aggregate, its own record.
+                                measurement_document="ordinal_operating_point")
+    # A delivery stating operating_point rests on the same trait's count aggregate, its own record.
     fx.seed_confirmed_aggregate(tmp_path, "astringency", value_keys=["astringency"])
 
 
@@ -98,14 +98,17 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     n_images and identity columns belong to the plant named in that row. A cohort-wide number in
     n_images tells the breeder a single-image plant was measured from six."""
     results = [
-        {"image": "a1", "plant_id": "PLANT_A", "count": 2,
+        {"image": "a1", "plant_id": "PLANT_A", "count": 2, "measurement_document": "operating_point",
          "plant_id_source": "gnss_sequence", "plant_id_distance_m": 0.4},
-        {"image": "a2", "plant_id": "PLANT_A", "count": 4,
+        {"image": "a2", "plant_id": "PLANT_A", "count": 4, "measurement_document": "operating_point",
          "plant_id_source": "gnss_sequence", "plant_id_distance_m": 1.9},
-        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "plant_id_source": "gnss_sequence"},
-        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "plant_id_source": "qr_code"},
-        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_id_source": "qr_code"},
-        {"image": "c1", "plant_id": "PLANT_C", "count": 7},
+        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "measurement_document": "operating_point",
+         "plant_id_source": "gnss_sequence"},
+        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "measurement_document": "operating_point",
+         "plant_id_source": "qr_code"},
+        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "measurement_document": "operating_point",
+         "plant_id_source": "qr_code"},
+        {"image": "c1", "plant_id": "PLANT_C", "count": 7, "measurement_document": "operating_point"},
     ]
     summaries = aggregate_per_plant(results, strategy="count", value_key="count")
 
@@ -207,40 +210,49 @@ def _ordinal_bucket(tmp_path, name, *, validated=True):
 
 
 def test_an_ordinal_delivery_never_clears_the_gate_on_the_count_dimension(tmp_path):
-    """Which sidecar dimension a delivery reconciles against comes from the caller's stated task, so
-    an ordinal trait delivered with the task omitted has no count operating point behind it and must
-    refuse rather than ship stamped with a dimension nothing validated. The two matching pairings
-    still ship, so the rail admits the legitimate deliveries it exists to protect."""
+    """Which sidecar dimension a delivery reconciles against comes from the records' own stated
+    measurement_document, so a bucket holding only operating_point.json cannot answer for records
+    naming ordinal_operating_point, and must refuse rather than ship stamped with a dimension
+    nothing validated. The two matching pairings still ship, so the rail admits the legitimate
+    deliveries it exists to protect."""
     ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
     count_only = _count_bucket(tmp_path, "count_preds")
-    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3,
-             "value_key": "astringency"}]
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
-        export_aggregated_csv(rows, str(tmp_path / "omitted_task.csv"),
-                              trait_name="astringency",
-                              measurement_validated=VALIDATED_HELD_OUT,
-                              pred_dirs=[ordinal_only])
-
-    with pytest.raises(ValueError, match="unvalidated measurement"):
-        export_aggregated_csv(rows, str(tmp_path / "wrong_dimension.csv"),
-                              trait_name="astringency",
-                              measurement_validated=VALIDATED_HELD_OUT,
-                              pred_dirs=[count_only], task="ordinal")
+        export_aggregated_csv(
+            [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
+             "measurement_document": "ordinal_operating_point", "scale_document": None}],
+            str(tmp_path / "wrong_dimension.csv"), trait_name="astringency",
+            measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     matched_ordinal = tmp_path / "matched_ordinal.csv"
-    export_aggregated_csv(rows, str(matched_ordinal), trait_name="astringency",
-                          measurement_validated=VALIDATED_HELD_OUT,
-                          pred_dirs=[ordinal_only], task="ordinal")
+    export_aggregated_csv(
+        [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
+         "measurement_document": "ordinal_operating_point", "scale_document": None}],
+        str(matched_ordinal), trait_name="astringency",
+        measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
     matched_count = tmp_path / "matched_count.csv"
-    export_aggregated_csv([{"plant_id": "PLANT_A", "value": 4, "observations": 3,
-                            "value_key": "count"}],
-                          str(matched_count), trait_name="stem_count",
-                          measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
+    export_aggregated_csv(
+        [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
+         "measurement_document": "operating_point", "scale_document": None}],
+        str(matched_count), trait_name="stem_count",
+        measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[count_only])
 
     for path in (matched_ordinal, matched_count):
         with open(path, newline="") as f:
             assert next(csv.DictReader(f))["measurement_validated"] == VALIDATED_HELD_OUT
+
+
+def test_a_delivery_naming_no_measurement_document_refuses(tmp_path):
+    """A record set that states nothing about which sidecar document its value rests on refuses
+    naming the field, rather than falling through to any particular reconciler (the statement rail
+    that replaces the old task-omission gap, count-delivery-door design section 5, P4-20)."""
+    ordinal_only = _ordinal_bucket(tmp_path, "ordinal_preds")
+    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency"}]
+
+    with pytest.raises(ValueError, match="measurement_document"):
+        export_aggregated_csv(rows, str(tmp_path / "unstated.csv"), trait_name="astringency",
+                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[ordinal_only])
 
 
 def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
@@ -248,11 +260,11 @@ def test_a_caller_downgrade_floors_a_validated_ordinal_sidecar(tmp_path):
     the ordinal dimension: a caller who knows the measurement is not validated saying so must refuse
     the delivery, not be overruled by the on-disk stamp."""
     bucket = _ordinal_bucket(tmp_path, "ordinal_preds")
-    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3,
-             "value_key": "astringency"}]
+    rows = [{"plant_id": "PLANT_A", "value": 2, "observations": 3, "value_key": "astringency",
+             "measurement_document": "ordinal_operating_point", "scale_document": None}]
 
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(rows, str(tmp_path / "downgraded.csv"),
                               trait_name="astringency",
                               measurement_validated=VALIDATED_FALSE,
-                              pred_dirs=[bucket], task="ordinal")
+                              pred_dirs=[bucket])
