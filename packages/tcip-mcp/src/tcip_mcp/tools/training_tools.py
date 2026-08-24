@@ -1269,7 +1269,7 @@ def _ensure_experiment(
     branch, which never otherwise touches ``status.json`` at all.
     """
     from tcip_mcp.experiments import (
-        create_experiment, get_experiment, overwrite_config_if_pristine, stamp_run_identity,
+        create_experiment, overwrite_config_if_pristine, stamp_run_identity,
     )
 
     created = create_experiment(experiment_id, config, data_source=data_source,
@@ -1278,13 +1278,10 @@ def _ensure_experiment(
         stamp_run_identity(experiment_id, run_id, output_dir)
         return experiment_id
 
-    existing = get_experiment(experiment_id, metrics_limit=1)
-    pristine = (
-        existing.get("status", {}).get("state") == "created"
-        and not existing.get("n_epochs")
-    )
-    if pristine:
-        overwrite_config_if_pristine(experiment_id, config)
+    # overwrite_config_if_pristine is the one implementation of the pristine predicate: call it
+    # rather than recompute the same fact here from get_experiment/n_epochs.
+    overwritten = overwrite_config_if_pristine(experiment_id, config)
+    if "error" not in overwritten:
         stamp_run_identity(experiment_id, run_id, output_dir)
         return experiment_id
 
@@ -1307,8 +1304,10 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
     The same seed yields a different split if the label set changes, so a metric is only reproducible
     with the exact train/val membership recorded beside it. The whole-dataset ``dataset_fingerprint``
     (+ id) records the content identity too, so this artifact is literally "fingerprint + split",
-    content identity + membership + seed in one immutable record. Best-effort, a provenance write must
-    never sink a launch.
+    content identity + membership + seed in one immutable record. Best-effort against an ordinary
+    write failure, but a write refused because the experiment is already terminal
+    (:class:`~tcip_mcp.experiments.ExperimentTerminal`) propagates: a run whose provenance record
+    was refused is a failed run, not a silently degraded one.
 
     The one writer of that member; :func:`~tcip_mcp.experiments.read_split_manifest` is the one
     reader every consumer of the membership goes through.
@@ -1321,7 +1320,9 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
     try:
         from tcip_store import store
 
-        from tcip_mcp.experiments import experiment_exists, split_key
+        from tcip_mcp.experiments import (
+            ExperimentTerminal, experiment_exists, refuse_if_terminal, split_key, status_key,
+        )
         from tcip_mcp.pipelines.resolution import dataset_hash
 
         labels_dir = data_cfg.get("labels_dir", "")
@@ -1354,7 +1355,18 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         if spatial:
             manifest["spatial"] = spatial
         if experiment_exists(experiment_id):
-            store.replace(split_key(experiment_id), manifest)
+            key, st_key = split_key(experiment_id), status_key(experiment_id)
+            try:
+                with store.transaction(key, st_key) as txn:
+                    state = (txn.read(st_key, default={}) or {}).get("state")
+                    refuse_if_terminal(experiment_id, "persist_split_manifest", state)
+                    txn.write(key, manifest)
+            except ExperimentTerminal:
+                from tcip_mcp.experiments import _audit_refused
+                _audit_refused(experiment_id, "persist_split_manifest", {})
+                raise
+    except ExperimentTerminal:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("split manifest persist failed for %s: %s", experiment_id, exc)
 

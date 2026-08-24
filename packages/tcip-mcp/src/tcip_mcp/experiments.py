@@ -320,6 +320,33 @@ def _current_state(experiment_id: str) -> str | None:
     return status.get("state") if isinstance(status, dict) else None
 
 
+class ExperimentTerminal(RuntimeError):
+    """A write reached an experiment record already in a terminal state (completed/failed;
+    cancelled stays resumable and is never terminal here). Raised by :func:`refuse_if_terminal`;
+    a caller that reports refusal as a return value (``log_metrics``, ``record_artifact``) catches
+    it and maps it to that value, a caller for whom the lost write is itself a run failure (the
+    training worker's provenance patches, the split manifest) lets it propagate uncaught.
+    """
+
+
+def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
+    """Raise :class:`ExperimentTerminal` if ``state`` is terminal.
+
+    ``state`` is the value the caller already read, inside its own transaction when it holds
+    one (so the check and the write it guards see the same value) or via :func:`_current_state`
+    when it doesn't. The one implementation of "is this experiment terminal" every writer of an
+    experiment member consults, rather than each comparing against ``_TERMINAL_STATES`` itself.
+
+    Never audits itself: an audit line is a log append, which cannot run inside a record
+    transaction (``store.transaction`` only ever holds ``kind="record"`` keys), and a caller
+    checking this from inside its own transaction would have the append raise
+    ``TransactionMisuse``. The caller audits the refusal once its transaction has closed (or
+    immediately, when it holds none).
+    """
+    if state in _TERMINAL_STATES:
+        raise ExperimentTerminal(f"Experiment {experiment_id} is {state} (terminal); refusing to {op}.")
+
+
 def _audit_refused(experiment_id: str, op: str, detail: dict[str, Any]) -> None:
     """Record a refused post-terminal mutation on the append-only audit log (best-effort)."""
     try:
@@ -396,19 +423,33 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     branch would otherwise ship a permanently stale snapshot describing a config that was never
     trained. Refuses (and audits the refusal) once the record is no longer pristine, a "created"
     record that already has metrics rows must stay protected too, so this checks the same full
-    predicate ``_ensure_experiment`` uses, not just the terminal-state lock alone.
+    predicate ``_ensure_experiment`` uses (by calling this function), not just the terminal-state
+    lock alone.
+
+    The state read and the write are one transaction (closing the race where a concurrent
+    ``update_status``/patch flips the record between the check and the write); the metrics-log
+    read is not, a log key cannot join a record transaction (``tcip_store.transaction`` requires
+    ``kind="record"``), so a metric logged in that narrow window is the one residual this cannot
+    close, it can only ever make the record look non-pristine, never the reverse.
     """
     check_json_value(config, path="config")
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
     has_metrics = bool(read_metrics(experiment_id))
-    state = _current_state(experiment_id)
-    if state != "created" or has_metrics:
+    cfg_key, st_key = config_key(experiment_id), status_key(experiment_id)
+    state: str | None = None
+    refused = False
+    with store.transaction(cfg_key, st_key) as txn:
+        status = txn.read(st_key, default={})
+        state = status.get("state") if isinstance(status, dict) else None
+        refused = state != "created" or has_metrics
+        if not refused:
+            txn.write(cfg_key, config)
+    if refused:
         _audit_refused(experiment_id, "overwrite_config_if_pristine",
                        {"state": state, "has_metrics": has_metrics})
         return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
                          f"overwrite its config.json."}
-    store.replace(config_key(experiment_id), config)
     return {"experiment_id": experiment_id, "overwritten": True}
 
 
@@ -646,9 +687,11 @@ def log_metrics(
         return {"error": f"Experiment not found: {experiment_id}"}
 
     # Terminal-state lock: a completed/failed run's metric history is frozen, no new epochs.
-    if _current_state(experiment_id) in _TERMINAL_STATES:
+    try:
+        refuse_if_terminal(experiment_id, "log_metrics", _current_state(experiment_id))
+    except ExperimentTerminal as exc:
         _audit_refused(experiment_id, "log_metrics", {"epoch": epoch})
-        return {"error": f"Experiment {experiment_id} is terminal; refusing to log a new epoch."}
+        return {"error": str(exc)}
 
     entry = {
         "epoch": epoch,
@@ -825,6 +868,8 @@ def record_artifact(
         return {"error": f"Experiment not found: {experiment_id}"}
 
     key, state = artifacts_key(experiment_id), status_key(experiment_id)
+    current: str | None = None
+    refused_overwrite = False
     with store.transaction(key, state) as txn:
         artifacts = txn.read(key, default={})
         current = (txn.read(state, default={}) or {}).get("state")
@@ -836,9 +881,12 @@ def record_artifact(
             txn.write(key, artifacts)
 
     if refused_overwrite:
-        _audit_refused(experiment_id, "record_artifact", {"artifact": name})
-        return {"error": f"Experiment {experiment_id} is terminal; artifact {name!r} already "
-                         f"recorded and is immutable.", "artifact": name}
+        try:
+            refuse_if_terminal(experiment_id, "record_artifact", current)
+        except ExperimentTerminal as exc:
+            _audit_refused(experiment_id, "record_artifact", {"artifact": name})
+            return {"error": f"{exc} Artifact {name!r} is already recorded and is immutable.",
+                    "artifact": name}
     return {"experiment_id": experiment_id, "artifact": name, "path": path}
 
 
