@@ -1156,6 +1156,22 @@ def test_state_tab_push_rejects_unknown_tabs(client: TestClient) -> None:
     assert client.get("/api/state").json()["active_tab"] == before
 
 
+def test_state_socket_broadcasts_a_mutation_while_open(client: TestClient) -> None:
+    """A mutation made while ``/ws/state`` is connected pushes the same envelope shape the
+    connect-time replay sends: the broadcast and the replay build it from different inputs
+    (a subscriber payload versus the store's own snapshot and version), and only this exercises
+    the broadcast path."""
+    with client.websocket_connect("ws://127.0.0.1/ws/state") as ws:
+        replay = ws.receive_json()
+        assert replay["type"] == "state_snapshot"
+        client.post("/api/state/tab", json={"active_tab": "training"})
+        pushed = ws.receive_json()
+    assert pushed["type"] == "state_snapshot"
+    assert pushed["state"]["active_tab"] == "training"
+    assert pushed["version"] == replay["version"] + 1
+    client.post("/api/state/tab", json={"active_tab": "annotate"})
+
+
 def test_annotate_open_rejects_an_unknown_mode(client: TestClient) -> None:
     before = client.get("/api/state").json()["mode"]
     resp = client.post("/api/annotate/open", json={
