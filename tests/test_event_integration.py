@@ -158,14 +158,6 @@ class TestPostPanelEventRoute:
         assert state["mode"] == "point"
         assert state["active_subject"] == "catkin"
 
-    def test_valid_panels_is_the_tabs_plus_app(self) -> None:
-        """``VALID_PANELS`` derives from the same ``TAB_NAMES`` tuple ``ActiveTab`` produces, so
-        the panel set and the tab vocabulary cannot drift apart; the frontend's own tab list and
-        panel subscriptions are generated from ``TAB_NAMES`` in turn (types.generated.ts)."""
-        from tcip_mcp.web_client import TAB_NAMES
-
-        assert VALID_PANELS == frozenset(TAB_NAMES) | {"app"}
-
 
 class TestPushPanelDataTool:
     """Verify the MCP tool posts via HTTP and aliases legacy panel names."""

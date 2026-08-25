@@ -10,6 +10,10 @@ legal dependency direction and the same one ``VALID_PANELS`` already takes. A de
 each side would be two stores wearing one name, and whichever imported first would decide where
 the documents land.
 
+The tab vocabulary (``ActiveTab``/``TAB_NAMES``) lives here for the same reason: the agent's own
+``focus`` tool takes a tab name over the wire, so the vocabulary is the protocol's, and
+``tcip_web.state`` imports it rather than declaring its own.
+
 Port discovery order:
   1. ``TCIP_WEB_PORT`` environment variable.
   2. The port record under the pinned platform root.
@@ -154,6 +158,7 @@ validates against."""
 TAB_NAMES = get_args(ActiveTab)
 
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
+# The pusher and the receiver both validate against this one set, so neither drifts apart.
 VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
 
 

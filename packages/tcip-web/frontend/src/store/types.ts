@@ -1,6 +1,7 @@
 /**
- * Types mirroring the Python backend's GuiState and the name-based label schema.
- * Keep in sync with packages/tcip-web/src/tcip_web/state.py and routes/{annotate,review,classes}.py.
+ * GuiState's dataset/view/reference/review fields mirror state.py by hand (TabName and Mode
+ * instead derive from the generated GuiVocabulary interface); the label schema below mirrors
+ * routes/{annotate,review,classes}.py.
  */
 
 import type { ActionPayload, GuiVocabulary } from "@/api/types.generated";
