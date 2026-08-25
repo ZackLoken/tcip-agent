@@ -75,6 +75,8 @@ for the full contract; the seams you use here are:
   the same resolved dims; prove it learns cheaply first with `ctx.overfit_check()` (voluntary,
   non-gating). For a task outside the ones `build_dataset` routes, pass `sample_batch=`, an
   `(images, targets)` pair from your dataset, since no synthetic target shape is invented for it.
+  `launch_training(overfit_check=True)` runs the same diagnostic at launch, on the contract's own
+  batch, and records the result on the run's `model_contract`, before your loop ever starts.
 - A custom `train(ctx)` when the technique needs one (a new loss schedule, a two-stage curriculum,
   a contrastive pretext, EMA weights, a distillation loop). Point `training_source` at it. The
   `TrainContext` (`pipelines.training.envelope`) hands you the craft library: leakage-free loaders,
@@ -83,8 +85,10 @@ for the full contract; the seams you use here are:
   and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
   sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
   metrics and checkpoints through those sinks and the run stays audited, immutably versioned, and
-  provenance-snapshotted no matter what your loop does. `ctx.default_train()` is a convenience to
-  call, extend, or replace.
+  provenance-snapshotted no matter what your loop does. `ctx.record_artifact` is a free-form sink
+  for any other name; the reserved name `"model_weights"` routes to `ctx.set_final_weights`
+  instead, with a warning, since that name is the run's deliverable. `ctx.default_train()` is a
+  convenience to call, extend, or replace.
 
   Registration needs one more explicit fact: save under `"model_best"`/`"model_final"`, or
   call `ctx.set_final_weights(path)` yourself; otherwise a "completed" run with no discoverable

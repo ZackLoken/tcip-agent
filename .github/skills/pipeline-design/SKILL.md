@@ -118,7 +118,10 @@ Three seams make bespoke work first-class, and the platform guarantees integrity
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
   contract for you: `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
   in_chans/num_classes/img_size before the training thread spawns, so a broken builder fails the
-  launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on demand.
+  launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on
+  demand; `launch_training(overfit_check=True)` runs `ctx.overfit_check`'s own diagnostic at
+  launch, on the contract's batch, and records the result on the run's `model_contract`, never
+  gating (a valid model can fail twenty steps on noise).
 - `training_source` points the envelope at your custom `train(ctx)`. The `TrainContext` (`ctx`,
   `pipelines.training.envelope`) hands you the craft library: prebuilt leakage-free loaders,
   `ctx.build_optimizer` / `ctx.build_scheduler` / `ctx.evaluate` / `ctx.set_seed`, the
@@ -126,8 +129,11 @@ Three seams make bespoke work first-class, and the platform guarantees integrity
   and the correctness checks `ctx.check_contract` / `ctx.overfit_check`, plus the envelope-owned
   sinks `ctx.log_metrics`, `ctx.save_checkpoint`, `ctx.record_artifact`, `ctx.should_cancel`. Route
   your loop's metrics and checkpoints through those sinks and the run stays audited, immutably
-  versioned, and provenance-snapshotted no matter what your loop does. `ctx.default_train()` is
-  one convenience, not a requirement: call it, extend it, or replace it entirely.
+  versioned, and provenance-snapshotted no matter what your loop does. `ctx.record_artifact` is a
+  free-form sink for any other name; the name `"model_weights"` is reserved for the run's
+  deliverable and is routed to `ctx.set_final_weights` instead, with a warning, rather than
+  recorded or raised. `ctx.default_train()` is one convenience, not a requirement: call it,
+  extend it, or replace it entirely.
 
   Registration needs one more fact your loop states explicitly. A checkpoint saved via
   `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is found automatically after your

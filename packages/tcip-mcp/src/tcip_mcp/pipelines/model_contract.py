@@ -21,6 +21,8 @@ from __future__ import annotations
 import math
 from typing import Any, Protocol, runtime_checkable
 
+from tcip_store.values import finite_or_none, stored_number
+
 _DETECTION_TASKS = {"detection", "instance_seg"}
 # The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
 # unsupported (the platform has no fixed task taxonomy), but it cannot be smoked blind, so the
@@ -285,11 +287,12 @@ def overfit_check(
                                         img_size=img_size, device=dev))
     except ValueError as exc:  # no schema for this task: report, never raise (this returns a dict)
         return {"passed": False, "losses": [], "initial": None, "final": None, "issue": str(exc)}
-    optimizer = torch.optim.Adam((p for p in model.parameters() if p.requires_grad), lr=lr)
-
     losses: list[float] = []
     issue: str | None = None
     try:
+        # Built inside the try: a model with no trainable parameter (every parameter frozen, a
+        # legitimate stage-0 configuration) makes Adam raise, and that belongs in the report.
+        optimizer = torch.optim.Adam((p for p in model.parameters() if p.requires_grad), lr=lr)
         model.train()
         for _ in range(max(1, steps)):
             optimizer.zero_grad()
@@ -314,3 +317,19 @@ def overfit_check(
         "final": losses[-1] if losses else None,
         "issue": issue,
     }
+
+
+def render_overfit_report(report: dict) -> dict:
+    """An :func:`overfit_check` report in the form a record can carry.
+
+    A diverging model's raw report may hold ``nan`` or ``inf``, values the canonical JSON codec
+    refuses outright. ``initial`` and ``final`` are named scalars, so each goes through
+    :func:`tcip_store.values.stored_number`, which keeps a null beside a sibling field naming the
+    non-finite state; ``losses`` is a positional list with no sibling slot per entry, so each goes
+    through :func:`tcip_store.values.finite_or_none`, which drops the state and keeps the null.
+    """
+    rendered: dict[str, Any] = {"passed": report["passed"], "issue": report["issue"]}
+    rendered.update(stored_number("initial", report["initial"]))
+    rendered.update(stored_number("final", report["final"]))
+    rendered["losses"] = [finite_or_none(v) for v in report["losses"]]
+    return rendered

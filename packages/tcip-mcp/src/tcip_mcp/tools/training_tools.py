@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 # Round-robins unpinned concurrent launches across available GPUs (no-op with 0-1 devices).
 _gpu_round_robin = itertools.count()
 
+# Serializes the overfit diagnostic's reseed-run-restore, since the RNG streams are process-global.
+_OVERFIT_CHECK_LOCK = threading.Lock()
+
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
 
@@ -325,9 +328,24 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             elif not report["ok"]:
                 issues.extend(f"model contract: {msg}" for msg in report["issues"])
             if overfit:
+                from tcip_mcp.pipelines.training.generic_trainer import (
+                    capture_rng_state, restore_rng_state,
+                )
+
                 # Same batch the contract used, otherwise this re-synthesizes and reports a false
                 # "does not learn" for exactly the bespoke tasks the real-batch path exists for.
-                result["overfit_check"] = overfit_check(model, task, sample_batch=batch, **dims)
+                with _OVERFIT_CHECK_LOCK:
+                    rng_state = capture_rng_state()
+                    try:
+                        raw_report = overfit_check(model, task, sample_batch=batch, **dims)
+                    except Exception as exc:  # noqa: BLE001, becomes the report's issue only
+                        raw_report = {
+                            "passed": False, "losses": [], "initial": None, "final": None,
+                            "issue": f"overfit check failed: {exc}",
+                        }
+                    finally:
+                        restore_rng_state(rng_state)
+                result["overfit_check"] = raw_report
         except Exception as exc:  # noqa: BLE001, a build/contract crash is itself a blocking issue
             issues.append(f"model smoke build failed: {exc}")
 
@@ -366,7 +384,7 @@ def launch_config_key(output_dir: Path | str) -> Key:
 @audited
 def launch_training(
     config: dict, output_dir: str = "", resume_from: str = "",
-    max_wall_clock_seconds: float | None = None,
+    max_wall_clock_seconds: float | None = None, overfit_check: bool = False,
 ) -> dict:
     """Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder.
 
@@ -386,22 +404,35 @@ def launch_training(
             own by then, it is terminated and the run marked failed with that reason, no
             cooperative grace period is attempted (a hung process isn't responding to cooperative
             signals). Omit for no timeout (the default).
+        overfit_check: When True, runs the voluntary ``overfit_check`` diagnostic (twenty
+            optimizer steps at the training tile edge, on the CPU, inside this synchronous call)
+            on the same batch the contract proved, before the subprocess spawns, and records the
+            result on the run's ``model_contract`` under ``overfit_check``. Never gates: a valid
+            model can fail twenty steps on noise, so only the contract itself decides ``valid``.
+            Default False, since the cost is one the agent elects per launch rather than pays on
+            every one.
     """
     # The caller's config is stored twice, as the launch config and as the experiment's
     # snapshot, so what it holds is checked before either write.
     check_json_value(config, path="config")
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
-    validation = preflight_config(config, smoke=True)
+    validation = preflight_config(config, smoke=True, overfit=overfit_check)
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
-    # Canonicalize the shape: the GUI/validated schema nests stages/mixed_precision/batch_size
-    # under ``training``, but the trainer reads them from the top level of run.config, without
-    # this hoist a GUI-launched run silently trains the default single stage. (run_hpo already
-    # normalizes inside _apply_hpo_params.)
+    # GUI schema nests stages/batch_size under ``training``; the trainer reads them top-level.
+    # run_hpo normalizes separately, inside _apply_hpo_params.
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
+
+    # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
+    # build, not inside it, on the same batch.
+    raw_overfit_report = validation.get("overfit_check")
+    rendered_overfit_report = None
+    if raw_overfit_report is not None:
+        from tcip_mcp.pipelines.model_contract import render_overfit_report
+        rendered_overfit_report = render_overfit_report(raw_overfit_report)
 
     # Recorded on the copy above, never the caller's own config dict, so a launch never hands
     # back an argument it silently mutated.
@@ -414,6 +445,7 @@ def launch_training(
         "issues": smoke_report.get("issues", []),
         "gradient_magnitudes": smoke_report.get("gradient_magnitudes"),
         "operating_point_knobs": smoke_report.get("operating_point_knobs"),
+        "overfit_check": rendered_overfit_report,
     }
     check_json_value(model_contract_record, path="model_contract")
     config["model_contract"] = model_contract_record
@@ -500,6 +532,7 @@ def launch_training(
         "output_dir": run.output_dir,
         "tensorboard": tb_info,
         "pid": proc.pid,
+        "overfit_check": rendered_overfit_report,
     }
 
 
@@ -1319,7 +1352,7 @@ def _ensure_experiment(
     branch, which never otherwise touches ``status.json`` at all.
     """
     from tcip_mcp.experiments import (
-        create_experiment, is_pristine, overwrite_config_if_pristine, read_member, read_metrics,
+        create_experiment, is_pristine, overwrite_config_if_pristine, read_member,
         stamp_run_identity, status_key,
     )
 

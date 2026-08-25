@@ -72,6 +72,30 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
         torch.backends.cudnn.benchmark = False
 
 
+def capture_rng_state() -> dict[str, Any]:
+    """Snapshot the four generator streams set_seed seeds, restorable with restore_rng_state.
+
+    Lets a caller that reseeds transiently (the overfit diagnostic) put the generators back
+    exactly where a concurrent caller left them, rather than leaving the process-global streams
+    seeded after a voluntary check.
+    """
+    return {
+        "python_rng_state": random.getstate(),
+        "numpy_rng_state": np.random.get_state(),
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+    }
+
+
+def restore_rng_state(state: dict[str, Any]) -> None:
+    """Restore generator state captured by capture_rng_state."""
+    torch.set_rng_state(state["torch_rng_state"])
+    if torch.cuda.is_available() and state.get("cuda_rng_state") is not None:
+        torch.cuda.set_rng_state_all(state["cuda_rng_state"])
+    np.random.set_state(state["numpy_rng_state"])
+    random.setstate(state["python_rng_state"])
+
+
 def loader_worker_init(worker_id: int, seed: int | None = None,
                        num_workers: int | None = None) -> None:
     """DataLoader worker-process initializer, module-level so it pickles under Windows spawn
@@ -431,10 +455,7 @@ def _save_checkpoint(
         "metrics": _checkpoint_metrics(metrics),
         # Full RNG state at save time, so a resume can pick the streams up exactly where
         # they were rather than silently re-seeding from stream position zero.
-        "python_rng_state": random.getstate(),
-        "numpy_rng_state": np.random.get_state(),
-        "torch_rng_state": torch.get_rng_state(),
-        "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        **capture_rng_state(),
     }, config), key)
 
 
@@ -826,11 +847,7 @@ def train(
             # overwrite the freshly-seeded ones rather than starting over from stream position
             # zero. Older checkpoints predating this field degrade gracefully to the fresh seed.
             if "torch_rng_state" in ckpt:
-                torch.set_rng_state(ckpt["torch_rng_state"])
-                if torch.cuda.is_available() and ckpt.get("cuda_rng_state") is not None:
-                    torch.cuda.set_rng_state_all(ckpt["cuda_rng_state"])
-                np.random.set_state(ckpt["numpy_rng_state"])
-                random.setstate(ckpt["python_rng_state"])
+                restore_rng_state(ckpt)
                 run.rng_state_restored = True
             else:
                 run.rng_state_restored = False
