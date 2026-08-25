@@ -476,8 +476,10 @@ def _finalize_run(ctx: TrainContext) -> None:
         if run.status == "completed" and ctx.final_weights is not None:
             result = complete_run(exp_id, ctx.final_weights)
             if "error" in result:
-                # completed is the last durable write of a run: a refusal here means the record
-                # was already terminal (e.g. the wall-clock watchdog raced it to failed first).
+                # completed is the last durable write of a run: a refusal here means the record was already terminal (e.g. the wall-clock watchdog raced it to failed first).
+                # Reconcile run.status to what the record actually holds, as the phantom-weights branch below does, so the closing training_run audit event agrees with it.
+                run.status = result.get("state") or run.status
+                run.error = result["error"]
                 logger.warning("Run %s: completion refused (%s); weights at %s were not "
                                "registered.", run.run_id, result["error"], ctx.final_weights)
             else:

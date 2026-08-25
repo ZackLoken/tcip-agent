@@ -1216,7 +1216,7 @@ def _export_predictions_raster(
         # transaction, so this is the one chance to refuse before the export writes anything.
         from tcip_mcp.experiments import pointer_frozen
 
-        frozen = pointer_frozen(identity["experiment_id"], "lineage", "predictions")
+        frozen = pointer_frozen(identity["experiment_id"], "lineage", "predictions", str(out))
         if frozen is not None:
             return {"error": frozen}
 
@@ -1705,11 +1705,11 @@ def export_predictions(
 
     exp_id = result.get("experiment_id")
     if exp_id:
-        # Checked before the publisher writes the bucket: a blob write cannot join the record's
-        # own transaction, so this is the one chance to refuse before anything lands on disk.
+        # Checked before the publisher writes the bucket: inference itself already ran and was
+        # audited by this point, so this refuses only the file write that would follow it.
         from tcip_mcp.experiments import pointer_frozen
 
-        frozen = pointer_frozen(exp_id, "lineage", "predictions")
+        frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
         if frozen is not None:
             return {"error": frozen}
 

@@ -189,6 +189,37 @@ def test_a_second_orthomosaic_export_against_a_completed_experiment_refuses_befo
     assert not out2.exists()
 
 
+def test_a_same_path_orthomosaic_export_against_a_completed_experiment_admits_the_second_run(
+        tmp_path, monkeypatch):
+    """A rail must admit valid work: re-exporting into the same raster bucket path records the
+    same lineage value the completed experiment already holds, so the additive lock's same-value
+    conjunct admits it rather than refusing a legitimate re-run."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    from tcip_mcp.experiments import create_experiment, update_status
+    create_experiment("expOrthoSame", {"model_source": {"builder": "x:y"}})
+    update_status("expOrthoSame", "running")
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    ckpt = _bespoke_detection_checkpoint(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out = tmp_path / "preds"
+    r1 = export_predictions(ckpt, output_dir=str(out), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2,
+                            experiment_id="expOrthoSame")
+    assert "error" not in r1, r1
+    update_status("expOrthoSame", "completed")
+
+    r2 = export_predictions(ckpt, output_dir=str(out), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2,
+                            experiment_id="expOrthoSame")
+    assert "error" not in r2, r2
+
+
 def test_export_predictions_raster_refuses_missing_checkpoint_cleanly(tmp_path, monkeypatch):
     """A missing checkpoint must return an honest {"error": ...}, the same shape every other
     refusal in this door uses, never an uncaught FileNotFoundError out of the MCP tool: the

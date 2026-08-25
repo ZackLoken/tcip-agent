@@ -131,7 +131,12 @@ def materialize_review_dataset(
         # own transaction, so this is the one chance to refuse before anything lands on disk.
         from tcip_mcp.experiments import pointer_frozen
 
-        frozen = pointer_frozen(experiment_id, "artifacts", "curated_dataset")
+        frozen = pointer_frozen(experiment_id, "artifacts", "curated_dataset", output_dir)
+        if frozen is not None:
+            return {"error": frozen}
+        # review_session's own value (the counts below) is unknown this early, so no value here
+        # can equal a repeat's; a presence check for a record already populated on this field alone.
+        frozen = pointer_frozen(experiment_id, "lineage", "review_session", None)
         if frozen is not None:
             return {"error": frozen}
 

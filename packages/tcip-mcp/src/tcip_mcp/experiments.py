@@ -430,6 +430,14 @@ def is_pristine(state: str | None, metrics_logged: bool) -> bool:
     return state == "created" and not metrics_logged
 
 
+def metrics_logged_of(status: dict[str, Any] | None) -> bool:
+    """Whether a status record already carries the ``metrics_logged`` marker :func:`log_metrics`
+    stamps before its first append: the one read of that field, shared by
+    :func:`overwrite_config_if_pristine`'s own transaction and ``_ensure_experiment``'s outside
+    read, rather than each re-deriving it from the record."""
+    return bool(status.get("metrics_logged")) if isinstance(status, dict) else False
+
+
 def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
     """Rewrite ``config.json`` with the config actually launched, but only while the experiment is
     still pristine (state == "created" and no epochs logged yet).
@@ -457,7 +465,7 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     with store.transaction(cfg_key, st_key) as txn:
         status = txn.read(st_key, default={})
         state = status.get("state") if isinstance(status, dict) else None
-        metrics_logged = bool(status.get("metrics_logged")) if isinstance(status, dict) else False
+        metrics_logged = metrics_logged_of(status)
         refused = not is_pristine(state, metrics_logged)
         if not refused:
             txn.write(cfg_key, config)
@@ -467,6 +475,16 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
         return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
                          f"overwrite its config.json."}
     return {"experiment_id": experiment_id, "overwritten": True}
+
+
+def _mark_completed(status: dict[str, Any]) -> None:
+    """Write the terminal completed state into a status record in place: state, heartbeat and
+    ended timestamp together, the one transition :func:`update_status` and :func:`complete_run`
+    both apply when a run finishes normally, so neither carries its own copy of the triple."""
+    now = datetime.now(timezone.utc).isoformat()
+    status["state"] = "completed"
+    status["heartbeat"] = now
+    status["ended"] = now
 
 
 def update_status(experiment_id: str, state: str, *, error: str | None = None) -> dict[str, Any]:
@@ -488,16 +506,18 @@ def update_status(experiment_id: str, state: str, *, error: str | None = None) -
             current in _TERMINAL_STATES and state != current and state not in _TERMINAL_STATES
         )
         if not refused_reopen:
-            status["state"] = state
+            if state == "completed":
+                _mark_completed(status)
+            else:
+                status["state"] = state
+                now = datetime.now(timezone.utc).isoformat()
+                status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
+                if state == "running" and not status.get("started"):
+                    status["started"] = now
+                if state == "failed":
+                    status["ended"] = now
             if error is not None:
                 status["error"] = error
-
-            now = datetime.now(timezone.utc).isoformat()
-            status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
-            if state == "running" and not status.get("started"):
-                status["started"] = now
-            if state in ("completed", "failed"):
-                status["ended"] = now
 
             txn.write(key, status)
 
@@ -515,12 +535,15 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
     in named-key order and is not crash-atomic across keys, so a crash between the two leaves the
     pointer on a record still ``running`` (a detectably stale state), never ``completed`` with no
     pointer. Refuses (and audits, once the transaction has closed) a run already terminal, naming
-    the weights file that exists on disk so an operator can find it.
+    the weights file that exists on disk so an operator can find it; the error carries the state
+    the record actually holds (``completed`` or ``failed``), for a caller that must reconcile its
+    own in-memory status against it.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     art_key, st_key = artifacts_key(experiment_id), status_key(experiment_id)
+    current: str | None = None
     try:
         with store.transaction(art_key, st_key) as txn:
             status = txn.read(st_key, default={})
@@ -533,15 +556,12 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
             }
             txn.write(art_key, artifacts)
 
-            now = datetime.now(timezone.utc).isoformat()
-            status["state"] = "completed"
-            status["heartbeat"] = now
-            status["ended"] = now
+            _mark_completed(status)
             txn.write(st_key, status)
     except ExperimentTerminal as exc:
         _audit_refused(experiment_id, "complete_run", {"final_weights": final_weights})
         return {"error": f"{exc} Final weights at {final_weights!r} were not recorded.",
-                "final_weights": final_weights}
+                "final_weights": final_weights, "state": current}
 
     return {"experiment_id": experiment_id, "state": "completed", "model_weights": final_weights}
 
@@ -739,7 +759,8 @@ def log_metrics(
     Stamps ``status.json["metrics_logged"] = True`` before appending, the record
     :func:`is_pristine` reads instead of a log key no record transaction can name. The marker
     goes before the append, not after, so a marker written but then an append that fails still
-    reads non-pristine, never the reverse.
+    reads non-pristine, never the reverse. A failure inside that marker transaction is left to
+    raise rather than caught: no marker means no row follows it, the safe direction.
     """
     check_json_value(metrics, path="metrics")
     if not experiment_exists(experiment_id):
@@ -935,24 +956,44 @@ def _pointer_populated(doc: dict[str, Any], field: str) -> bool:
     return doc.get(field) not in (None, "", [], {})
 
 
+def _artifact_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool:
+    """The artifacts member's additive lock: a name already present freezes, regardless of
+    whether the value recorded under it is itself falsy. Presence, not populated-ness, is the
+    lock's baseline semantics here, so a name recorded with a falsy entry stays frozen too."""
+    return field in doc
+
+
+def _lineage_write_refused(doc: dict[str, Any], field: str, value: Any) -> bool:
+    """The lineage member's additive lock: a populated field freezes unless the write would
+    record the same value it already holds, so a repeat of an idempotent write (the same bucket
+    path exported twice, say) is admitted rather than refused."""
+    return _pointer_populated(doc, field) and doc.get(field) != value
+
+
+# One predicate per member, evaluated by pointer_frozen, record_artifact and update_lineage alike
+# so the three never carry separate copies of what "frozen" means for that member.
+_MEMBER_WRITE_REFUSED = {"artifacts": _artifact_write_refused, "lineage": _lineage_write_refused}
 _POINTER_MEMBER_KEYS = {"artifacts": artifacts_key, "lineage": lineage_key}
 
 
-def pointer_frozen(experiment_id: str, member: str, field: str) -> str | None:
-    """Whether writing ``field`` into the named member (``"artifacts"`` or ``"lineage"``) would
-    be refused right now: the field already populated and the experiment terminal.
+def pointer_frozen(experiment_id: str, member: str, field: str, value: Any) -> str | None:
+    """Whether writing ``value`` into ``field`` of the named member (``"artifacts"`` or
+    ``"lineage"``) would be refused right now: the experiment terminal and the member's own
+    additive lock (:data:`_MEMBER_WRITE_REFUSED`), the same predicate :func:`record_artifact` and
+    :func:`update_lineage` evaluate inside their transactions.
 
     An untransacted pre-check for a caller about to write a file outside the store (a blob write
     cannot join a record transaction), so it can refuse by name before writing anything, rather
     than after. The window between this read and the write is real, the record could still turn
-    terminal in between, and :func:`record_artifact`/:func:`update_lineage`'s own transactional
-    refusal, sharing this same predicate, still catches that residual; this only spares the
-    ordinary case its file write. Returns the refusal text, or ``None`` when the write would be
-    admitted.
+    terminal in between, and the writer's own transactional refusal, sharing this same predicate,
+    still catches that residual; this only spares the ordinary case its file write. Returns the
+    refusal text, or ``None`` when the write would be admitted.
     """
     doc = read_member(_POINTER_MEMBER_KEYS[member](experiment_id), {})
     state = _current_state(experiment_id)
-    if state in _TERMINAL_STATES and _pointer_populated(doc if isinstance(doc, dict) else {}, field):
+    if state in _TERMINAL_STATES and _MEMBER_WRITE_REFUSED[member](
+        doc if isinstance(doc, dict) else {}, field, value
+    ):
         return (f"Experiment {experiment_id} is {state} (terminal); {member}.{field} is already "
                 "recorded and is immutable.")
     return None
@@ -975,7 +1016,8 @@ def record_artifact(
         current = (txn.read(state, default={}) or {}).get("state")
         # Terminal-state lock (additive-only): a new artifact name may be recorded post-completion,
         # but an existing one is frozen, no silent overwrite of a delivered pointer.
-        refused_overwrite = current in _TERMINAL_STATES and _pointer_populated(artifacts, name)
+        refused_overwrite = current in _TERMINAL_STATES and _MEMBER_WRITE_REFUSED["artifacts"](
+            artifacts, name, path)
         if not refused_overwrite:
             artifacts[name] = {"path": path, "recorded": datetime.now(timezone.utc).isoformat()}
             txn.write(key, artifacts)
@@ -1004,8 +1046,8 @@ def update_lineage(
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill:
-    # the additive-only lock below would otherwise permit a first write to an empty identity field.
+    # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill: the additive-only lock below would otherwise permit a first write to an empty identity field even post-terminal.
+    # That write would be a silent change to what data the run trained on.
     identity_updates = {k: updates.pop(k) for k in ("dataset_id", "dataset_fingerprint") if k in updates}
     if identity_updates:
         _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
@@ -1021,7 +1063,7 @@ def update_lineage(
             refuse_if_terminal(experiment_id, "update_lineage", current_state)
         except ExperimentTerminal:
             refused = {k: v for k, v in updates.items()
-                       if _pointer_populated(lineage, k) and lineage.get(k) != v}
+                       if _MEMBER_WRITE_REFUSED["lineage"](lineage, k, v)}
             if refused:
                 updates = {k: v for k, v in updates.items() if k not in refused}
         lineage.update(updates)

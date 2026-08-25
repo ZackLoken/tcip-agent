@@ -193,15 +193,20 @@ def _train_races_the_wall_clock_watchdog(ctx):
 def test_a_wall_clock_failed_record_reached_by_finalize_run_registers_nothing(tmp_path):
     """The behaviour change this row states: after the change, a run whose stored record turned
     terminal out from under it stays failed with no pointer and no registry entry, rather than
-    ending completed and registered."""
+    ending completed and registered. complete_run's refusal reconciles ctx.run.status to the
+    failed state the record actually holds, so the closing training_run audit event names failed
+    too, rather than contradicting the record it closed over."""
     from tcip_mcp.experiments import artifacts_key
     from tcip_mcp.model_registry import ModelRegistry
 
     ctx = _start(tmp_path, "expWallClock", "_train_races_the_wall_clock_watchdog")
 
-    assert ctx.run.status == "completed"  # the body itself finished normally
+    # The body itself finished normally, but the completion write was refused (the watchdog's
+    # failed already landed), so ctx.run.status is reconciled to what the record holds.
+    assert ctx.run.status == "failed"
     assert ctx.final_weights.endswith("model_best.pt")
     assert Path(ctx.final_weights).is_file()
     assert ModelRegistry(str(tmp_path)).get_model("expWallClock") is None
     assert _experiment_state(tmp_path, "expWallClock") == "failed"
     assert "model_weights" not in ts.read(artifacts_key("expWallClock"))
+    assert _audit_statuses(tmp_path) == ["running", "failed"]

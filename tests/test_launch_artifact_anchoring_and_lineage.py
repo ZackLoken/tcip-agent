@@ -226,6 +226,43 @@ def test_launch_with_overfit_check_records_the_rendered_report(
     assert config["model_contract"]["overfit_check"] == res["overfit_check"]
 
 
+def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """A model whose loss diverges to nan under the overfit diagnostic never blocks the launch,
+    since the check is voluntary and non-gating: the run proceeds, and the persisted report
+    renders the non-finite losses as null with the state named beside them, so the record this
+    launch writes still passes check_json_value on what the diagnostic actually observed."""
+    pytest.importorskip("torchvision")
+    from tcip_store import check_json_value
+
+    from tcip_mcp.experiments import config_key
+    from tcip_mcp.tools import training_tools
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    config = {
+        "model_source": {"builder": "tests.bespoke_models:build_diverging_detection",
+                         "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 96},
+                         "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                 "subject": "catkin", "auto_val": False},
+        "training": {"batch_size": 1, "stages": [{"freeze_to": -1, "epochs": 1}],
+                     "mixed_precision": False, "device": "cpu"},
+    }
+    res = training_tools.launch_training(config, "", overfit_check=True)
+    assert "error" not in res, res
+
+    record = ts.read(config_key(res["experiment_id"]))["model_contract"]
+    check_json_value(record, path="model_contract")
+    report = record["overfit_check"]
+    assert report["passed"] is False
+    assert any(loss is None for loss in report["losses"])
+    assert report.get("final_state") in ("nan", "positive_infinity", "negative_infinity")
+
+
 def training_tools_launch(config: dict, output_dir: str) -> dict:
     """Launch and assert the config was accepted, so a preflight refusal never reads as a
     provenance failure in the tests above."""

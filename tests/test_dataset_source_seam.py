@@ -122,11 +122,13 @@ def test_dataset_source_key_has_one_home():
     ``kw["dataset_source"] = ...``, whose left side names ``build_dataset``'s parameter, not a
     config key) is untouched by design. A bare ``grep`` is not this test: the literal
     legitimately survives in docstrings, parameter names and one function name across these
-    modules. A reader importing the constant under a local re-spelling instead of the real one
+    modules. The literal scan covers every load shape the key could still hide behind: a
+    ``.get(``/``.pop(``/``.setdefault(`` call, a subscript, or an ``in``/``not in`` membership
+    test. A reader importing the constant under a local re-spelling instead of the real one
     would still pass the absence half alone, so the second half requires a genuine
-    ``from ... import DATASET_SOURCE_KEY``, not just a same-named local variable. ``datasets.py``
-    no longer reads the key at all now that the constant has moved out of it, so it is checked
-    for absence only.
+    ``from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY``, not just a same-named
+    local variable or an import from anywhere else. ``datasets.py`` no longer reads the key at
+    all now that the constant has moved out of it, so it is checked for absence only.
     """
     import ast
     from pathlib import Path
@@ -149,11 +151,14 @@ def test_dataset_source_key_has_one_home():
         literal_loads = [
             node for node in ast.walk(tree)
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "get" and node.args
+                and node.func.attr in ("get", "pop", "setdefault") and node.args
                 and isinstance(node.args[0], ast.Constant)
                 and node.args[0].value == "dataset_source")
             or (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
                 and isinstance(node.slice, ast.Constant) and node.slice.value == "dataset_source")
+            or (isinstance(node, ast.Compare)
+                and any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops)
+                and isinstance(node.left, ast.Constant) and node.left.value == "dataset_source")
         ]
         assert not literal_loads, f"{name} still reads a raw 'dataset_source' literal"
 
@@ -163,6 +168,7 @@ def test_dataset_source_key_has_one_home():
             assert loaded, f"{name} never loads DATASET_SOURCE_KEY"
         if name in imports_it:
             imported = any(isinstance(n, ast.ImportFrom)
+                           and n.module == "tcip_mcp.pipelines.model_build"
                            and any(a.name == "DATASET_SOURCE_KEY" for a in n.names)
                            for n in ast.walk(tree))
-            assert imported, f"{name} reads DATASET_SOURCE_KEY without importing it"
+            assert imported, f"{name} reads DATASET_SOURCE_KEY without importing it from model_build"
