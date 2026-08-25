@@ -29,6 +29,7 @@ from tcip_store.file_backend import RootedFileLocator
 
 MODEL_SOURCE_KEY = "model_source"
 TRAINING_SOURCE_KEY = "training_source"
+DATASET_SOURCE_KEY = "dataset_source"
 STATE_DICT_KEY = "model_state_dict"
 """The checkpoint keys this platform's own payloads carry: the importable model reference
 that rebuilds the module, and the weights that go into it. Both ends of a checkpoint, the
@@ -306,7 +307,7 @@ def snapshot_model_source(config: dict, exp_dir: Any) -> dict | None:
 
     model_source = config.get(MODEL_SOURCE_KEY)
     training_source = config.get(TRAINING_SOURCE_KEY)
-    dataset_source = (config.get("data") or {}).get("dataset_source")
+    dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)
     if not model_source and not training_source and not dataset_source:
         return None
 

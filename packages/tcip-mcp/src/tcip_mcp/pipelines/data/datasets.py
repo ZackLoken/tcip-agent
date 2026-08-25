@@ -1493,9 +1493,6 @@ _DATASET_MAP = {
     "regression": RegressionDataset,
 }
 
-DATASET_SOURCE_KEY = "dataset_source"
-
-
 def build_from_dataset_source(dataset_source: dict, **kwargs: Any) -> Dataset:
     """Import the agent's dataset builder and call it, the bespoke-task escape (mirrors
     ``build_from_model_source``). Registry-free, no ``exec``: the builder is imported like any
