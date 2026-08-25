@@ -6,7 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
-from tests._dense_op_fixtures import dense_records  # noqa: E402
+from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_class_avg_size,
     pick_count_unbiased,
@@ -56,19 +56,16 @@ def _records(idp="c", *, shift: float = 0.0):
     return [a, b]
 
 
-def _good_cal_holdout(*, shift: float = 5.0):
-    """A dense, realistic reference: a good detector with one low-conf spurious detection per image
-    (a realistic false-positive profile) that vanishes once conf crosses it, so the count-unbiased
-    pick lands at the high, correct-match score (0.9), comfortably above a real calibration floor,
-    with zero bias/dispersion and full recall/precision on the holdout.
-    """
-    miss = [0] * N_IMAGES
-    fp = [1] * N_IMAGES
-    cal = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
-                         shift=shift, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    return cal, hold
+def test_good_cal_holdout_is_distinct_on_geometry_not_a_shared_shift():
+    from tcip_mcp.pipelines.operating_point import _record_content_hash
+
+    cal, hold = good_cal_holdout()
+    cal_hashes = {_record_content_hash(r) for r in cal}
+    hold_hashes = {_record_content_hash(r) for r in hold}
+    assert cal_hashes.isdisjoint(hold_hashes)
+    cal_counts = {len(r["gt"]) for r in cal}
+    hold_counts = {len(r["gt"]) for r in hold}
+    assert cal_counts != hold_counts
 
 
 def test_gt_class_avg_size_derived_from_data():
@@ -181,7 +178,7 @@ def test_derive_max_dets_from_counts_is_the_shared_formula_records_delegate_to()
 
 def test_resolve_operating_point_validated_with_holdout():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
@@ -227,7 +224,7 @@ def test_resolve_operating_point_missing_image_ids_fails_closed():
 
 def test_resolve_operating_point_biased_holdout_is_unshippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    cal, _ = _good_cal_holdout()
+    cal, _ = good_cal_holdout()
     # a dense holdout with a real, consistent per-image miss (not just a sparse fixture's one-off
     # spread), count bias -3/image, well beyond tolerance regardless of dispersion/SE.
     biased_hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
@@ -291,7 +288,7 @@ def test_resolve_operating_point_train_disjointness_unresolvable_when_split_miss
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     # A known experiment_id whose split.json can't be read fails closed (unresolvable), unlike the
     # experiment_id=None case (a foreign/unregistered checkpoint).
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1",
                                 calibration_records=cal, holdout_records=hold,
                                 staged_conf_floor=0.01, experiment_id="does-not-exist")
@@ -313,7 +310,7 @@ def test_resolve_operating_point_train_disjointness_resolvable_no_leak_still_val
     tcip_store.replace(split_key("exp2"), {"train": ["z_0_0", "z_0_1"], "group_by": "tile_prefix"})
 
     # Calibration/holdout use id prefixes "c"/"h", disjoint from training's "z" group.
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
@@ -339,7 +336,7 @@ def test_resolve_operating_point_cal_rects_none_is_byte_identical(tmp_path, monk
     tcip_store.replace(split_key("exp_rects_noop"), {
         "train": ["mosaic::strip_x_1"], "group_by": "spatial_strip",
     })
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
 
     omitted = resolve_operating_point("catkin", tiled=False, dataset_hash="h1",
                                       calibration_records=cal, holdout_records=hold,
@@ -373,7 +370,7 @@ def test_resolve_operating_point_cal_rects_switches_to_geometric_check(tmp_path,
             "test_region": [[750, 0, 1000, 1000]],
         },
     })
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     cal_id = cal[0]["image_id"]
 
     leaked = resolve_operating_point(
@@ -396,7 +393,7 @@ def test_resolve_operating_point_fabricated_tile_size_floors_shippability_even_w
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE
 
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=True, tile_size=640,
                                 staged_conf_floor=0.01)
@@ -416,7 +413,7 @@ def test_resolve_operating_point_derived_tile_size_is_shippable():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, tiled=True, tile_size=224,
                                 tile_size_source="derived", staged_conf_floor=0.01)

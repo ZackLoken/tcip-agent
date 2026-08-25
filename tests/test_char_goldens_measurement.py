@@ -44,26 +44,10 @@ from tests._binding_fixtures import (  # noqa: E402
     write_bound_sidecar,
 )
 from tests._trait_fixtures import CATKIN  # noqa: E402
-from tests._dense_op_fixtures import dense_records  # noqa: E402
+from tests._dense_op_fixtures import good_cal_holdout  # noqa: E402
 
 # seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
-
-_N_IMAGES = 20
-_OBJECTS_PER_IMAGE = 80
-
-
-def _good_cal_holdout(*, shift: float = 5.0):
-    """A dense, realistic reference: a good detector with one low-conf spurious
-    detection per image; the count-unbiased pick lands at the high, correct-match score (0.9)
-    once that low-conf FP is filtered out, with zero bias/dispersion on the holdout."""
-    miss = [0] * _N_IMAGES
-    fp = [1] * _N_IMAGES
-    cal = dense_records(n_images=_N_IMAGES, objects_per_image=_OBJECTS_PER_IMAGE, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=_N_IMAGES, objects_per_image=_OBJECTS_PER_IMAGE, id_prefix="h",
-                         shift=shift, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    return cal, hold
 
 
 # ── shared fixture helpers ────────────────────────────────────────────────
@@ -154,7 +138,7 @@ def test_golden_resolve_operating_point_validated_conf():
     # sparse fixture still correctly refuses).
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
@@ -281,7 +265,7 @@ def _stamp(bundle, *, validated: bool, issues: list[str]) -> dict:
 def test_golden_stamp_shape_calibrated_validated():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
-    cal, hold = _good_cal_holdout()
+    cal, hold = good_cal_holdout()
     # tiled=False: this golden is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1",
