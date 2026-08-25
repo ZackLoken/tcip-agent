@@ -60,10 +60,9 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
                 if train_native_size is not None:
                     data_cfg["train_native_size"] = list(train_native_size)
                 txn.write(key, cfg)
-        except ExperimentTerminal:
-            from tcip_mcp.experiments import _audit_refused
-            _audit_refused(experiment_id, "patch_experiment_config_tiling", {})
-            raise
+        except ExperimentTerminal as exc:
+            from tcip_mcp.experiments import audit_refusal_reraising
+            audit_refusal_reraising(experiment_id, "patch_experiment_config_tiling", {}, exc)
     except ExperimentTerminal:
         raise
     except Exception:
@@ -100,10 +99,9 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
                 data_cfg["attribute"] = attribute
                 data_cfg["id_map"] = dict(id_map)
                 txn.write(key, cfg)
-        except ExperimentTerminal:
-            from tcip_mcp.experiments import _audit_refused
-            _audit_refused(experiment_id, "patch_experiment_config_id_map", {})
-            raise
+        except ExperimentTerminal as exc:
+            from tcip_mcp.experiments import audit_refusal_reraising
+            audit_refusal_reraising(experiment_id, "patch_experiment_config_id_map", {}, exc)
     except ExperimentTerminal:
         raise
     except Exception:

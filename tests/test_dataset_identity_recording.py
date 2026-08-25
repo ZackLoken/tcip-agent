@@ -58,6 +58,25 @@ def test_update_lineage_cannot_change_or_backfill_identity(exp_dir):
     assert ts.read(exp.lineage_key("e2"))["dataset_fingerprint"] is None
 
 
+def test_update_lineage_still_applies_legitimate_updates_when_identity_audit_fails(exp_dir, monkeypatch):
+    """A dropped identity update is audited before the transaction that applies the call's other,
+    legitimate updates; when that audit append itself fails, the transaction must still run (the
+    legitimate update must still land) and the append failure is raised at the end, not lost."""
+    create_experiment("e3", {}, dataset_id="abc123", dataset_fingerprint="ff00")
+
+    def _boom(*a, **k):
+        raise OSError("simulated audit append failure")
+
+    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
+
+    with pytest.raises(OSError):
+        update_lineage("e3", dataset_fingerprint="DIFFERENT", model_weights="w.pt")
+
+    # The legitimate update landed despite the identity-refusal's own audit line failing.
+    assert ts.read(exp.lineage_key("e3"))["model_weights"] == "w.pt"
+    assert ts.read(exp.lineage_key("e3"))["dataset_fingerprint"] == "ff00"  # still not backfilled
+
+
 def test_compare_experiments_surfaces_shared_fingerprint(exp_dir):
     create_experiment("a", {}, dataset_id="1", dataset_fingerprint="ff")
     create_experiment("b", {}, dataset_id="1", dataset_fingerprint="ff")
