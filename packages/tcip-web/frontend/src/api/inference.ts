@@ -3,7 +3,7 @@
 import { decodeRefusal, getJson, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import type { JobStatus } from "@/api/types.generated";
-import { createReconnectingSocket } from "@/lib/reconnectingSocket";
+import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
 /**
  * One entry from the project's trained-model registry, as the browser reads it.
@@ -70,30 +70,13 @@ export const inferenceApi = {
  * backoff if the socket drops mid-run. The server sends a single ``final`` frame at a
  * terminal state and closes; once seen we stop reconnecting (the job is done, not lost).
  */
-function frameType(data: string): string | undefined {
-  try {
-    return (JSON.parse(data) as Record<string, unknown>).type as string | undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function openInferenceStream(
   jobId: string,
   onMessage: (msg: Record<string, unknown>) => void,
 ): () => void {
   const socket = createReconnectingSocket({
     url: wsUrl(ROUTES.socketInferenceJobsByJobIdStream(jobId)),
-    isTerminal: (data) => frameType(data) === "final",
-    onMessage: (data) => {
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(data);
-      } catch {
-        return;
-      }
-      onMessage(msg);
-    },
+    ...jsonFrameHandlers<Record<string, unknown>>(onMessage, (frame) => frame.type === "final"),
   });
   socket.start();
   return () => socket.stop();

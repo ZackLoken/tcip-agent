@@ -128,6 +128,17 @@ describe("createReconnectingSocket", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("restarts after a stop while the socket was still connecting", () => {
+    // A stop() that leaves the connecting guard set strands every later start() at it.
+    const socket = createReconnectingSocket({ url: "ws://x/four-b", onMessage: vi.fn() });
+    socket.start();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    socket.stop(); // never called .open(): the socket is still CONNECTING
+    socket.start();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
   it("stops reconnecting once a frame marks the stream terminal", () => {
     const socket = createReconnectingSocket({
       url: "ws://x/five",

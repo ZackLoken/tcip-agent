@@ -139,6 +139,15 @@ describe("openInferenceStream", () => {
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it("parses each frame once, not once for the terminal check and again for the handler", () => {
+    openInferenceStream("j1", vi.fn());
+    lastSocket().open();
+    const parseSpy = vi.spyOn(JSON, "parse");
+    lastSocket().message(JSON.stringify({ type: "progress", done: 1, total: 4 }));
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+    parseSpy.mockRestore();
+  });
 });
 
 describe("openTrainingStream", () => {
@@ -208,5 +217,14 @@ describe("openTrainingStream", () => {
     stop();
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("parses each frame once, not once for the terminal check and again for the handler", () => {
+    openTrainingStream("/data/proj", "r1", vi.fn());
+    lastSocket().open();
+    const parseSpy = vi.spyOn(JSON, "parse");
+    lastSocket().message(JSON.stringify({ type: "row", run_id: "r1", row: { epoch: 2 } }));
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+    parseSpy.mockRestore();
   });
 });
