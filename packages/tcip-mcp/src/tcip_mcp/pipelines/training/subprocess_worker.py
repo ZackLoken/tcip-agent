@@ -141,7 +141,9 @@ def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dic
     """
     if task not in ("detection", "instance_seg") or not data_cfg.get("subject"):
         return None
-    if data_cfg.get("dataset_source") or data_cfg.get("coco_json") \
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
+
+    if data_cfg.get(DATASET_SOURCE_KEY) or data_cfg.get("coco_json") \
             or (data_cfg.get("label_format") or "").lower() == "coco":
         return None
     from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map

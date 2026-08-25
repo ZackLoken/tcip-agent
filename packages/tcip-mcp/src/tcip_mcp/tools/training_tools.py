@@ -88,7 +88,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # training_source seam (mirrors model_source/dataset_source above), a bare "module:function"
     # string, not a dict.
-    from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY, TRAINING_SOURCE_KEY
     training_source = config.get(TRAINING_SOURCE_KEY)
     if training_source is not None:
         if not isinstance(training_source, str) or not training_source:
@@ -104,10 +104,10 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     data_cfg = config.get("data")
     if not data_cfg:
         issues.append("Missing 'data' section")
-    elif data_cfg.get("dataset_source") is not None:
+    elif data_cfg.get(DATASET_SOURCE_KEY) is not None:
         # Bespoke dataset seam (mirrors model_source): the agent's builder owns loading, so the
         # known-loader images_dir/labels_dir aren't required, only the builder must import.
-        dataset_source = data_cfg["dataset_source"]
+        dataset_source = data_cfg[DATASET_SOURCE_KEY]
         if not isinstance(dataset_source, dict) or not dataset_source.get("builder"):
             issues.append("data.dataset_source must be a dict with a 'builder' (module:function)")
         else:
@@ -232,7 +232,7 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # loaders (a dataset_source's own admission logic is the agent's to report, not this rail's).
     task_for_coverage = (model_source.get("task") if isinstance(model_source, dict) else None) \
         or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
-    if (isinstance(data_cfg, dict) and data_cfg.get("dataset_source") is None
+    if (isinstance(data_cfg, dict) and data_cfg.get(DATASET_SOURCE_KEY) is None
             and task_for_coverage in ("detection", "instance_seg")):
         images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
         if images_dir and labels_dir and Path(images_dir).is_dir() and Path(labels_dir).is_dir():
@@ -1468,6 +1468,8 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
     so the build reads the bucket the GUI wrote instead of one taken from the labels path. A run
     over ``annotations/<date>/`` sets it; a tree that carries no date leaves it unset.
     """
+    from tcip_mcp.pipelines.model_build import DATASET_SOURCE_KEY
+
     if task in ("detection", "instance_seg"):
         kw = {"images_dir": data_cfg.get("images_dir", ""),
               "labels_dir": data_cfg.get("labels_dir", ""),
@@ -1490,11 +1492,10 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
         kw = {"images_dir": data_cfg.get("images_dir", "")}
         if data_cfg.get("csv_path"):
             kw["csv_path"] = data_cfg["csv_path"]
-    if data_cfg.get("dataset_source"):
-        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder for a
-        # task the known loaders don't cover. Threaded through src so the split machinery still
-        # passes it (with stems) to every train/val build below.
-        kw["dataset_source"] = data_cfg["dataset_source"]
+    if data_cfg.get(DATASET_SOURCE_KEY):
+        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder, threaded
+        # through src so the split machinery passes it (with stems) to every train/val build below.
+        kw["dataset_source"] = data_cfg[DATASET_SOURCE_KEY]  # left names build_dataset's param
     return kw
 
 

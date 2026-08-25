@@ -111,3 +111,58 @@ def test_snapshot_records_dataset_builder(tmp_path: Path):
                for e in manifest["files"])
     saved = ts.read(snapshot_manifest_key(tmp_path))
     assert saved["dataset_builder"] == manifest["dataset_builder"]
+
+
+def test_dataset_source_key_has_one_home():
+    """Structural (AST-only, no import of the module under test): the four modules that once
+    spelled the ``dataset_source`` config key as a bare literal now read it only through the
+    one constant, ``model_build.DATASET_SOURCE_KEY``.
+
+    Checked in Load context only, so the seventh site (``training_tools.py``'s
+    ``kw["dataset_source"] = ...``, whose left side names ``build_dataset``'s parameter, not a
+    config key) is untouched by design. A bare ``grep`` is not this test: the literal
+    legitimately survives in docstrings, parameter names and one function name across these
+    modules. A reader importing the constant under a local re-spelling instead of the real one
+    would still pass the absence half alone, so the second half requires a genuine
+    ``from ... import DATASET_SOURCE_KEY``, not just a same-named local variable. ``datasets.py``
+    no longer reads the key at all now that the constant has moved out of it, so it is checked
+    for absence only.
+    """
+    import ast
+    from pathlib import Path
+
+    import tcip_mcp
+
+    src_root = Path(tcip_mcp.__file__).resolve().parent
+    files = {
+        "pipelines/data/datasets.py": src_root / "pipelines" / "data" / "datasets.py",
+        "pipelines/model_build.py": src_root / "pipelines" / "model_build.py",
+        "pipelines/training/subprocess_worker.py":
+            src_root / "pipelines" / "training" / "subprocess_worker.py",
+        "tools/training_tools.py": src_root / "tools" / "training_tools.py",
+    }
+    imports_it = {"pipelines/training/subprocess_worker.py", "tools/training_tools.py"}
+    uses_it = imports_it | {"pipelines/model_build.py"}
+
+    for name, path in files.items():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        literal_loads = [
+            node for node in ast.walk(tree)
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "dataset_source")
+            or (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load)
+                and isinstance(node.slice, ast.Constant) and node.slice.value == "dataset_source")
+        ]
+        assert not literal_loads, f"{name} still reads a raw 'dataset_source' literal"
+
+        if name in uses_it:
+            loaded = any(isinstance(n, ast.Name) and n.id == "DATASET_SOURCE_KEY"
+                        and isinstance(n.ctx, ast.Load) for n in ast.walk(tree))
+            assert loaded, f"{name} never loads DATASET_SOURCE_KEY"
+        if name in imports_it:
+            imported = any(isinstance(n, ast.ImportFrom)
+                           and any(a.name == "DATASET_SOURCE_KEY" for a in n.names)
+                           for n in ast.walk(tree))
+            assert imported, f"{name} reads DATASET_SOURCE_KEY without importing it"
