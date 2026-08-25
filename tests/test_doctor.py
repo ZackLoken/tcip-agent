@@ -278,7 +278,8 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_pa
                           ("chestnut_burr_counter_v3", b"other weights")):
         ckpt = ckpt_dir / f"{name}.pt"
         ckpt.write_bytes(payload)
-        registry.register_model(name=name, checkpoint_path=str(ckpt), config={}, metrics={})
+        registry.register_model(name=name, checkpoint_path=str(ckpt), config={}, metrics={},
+                                metrics_source=None)
         paths[name] = ckpt
     for ckpt in paths.values():
         ckpt.unlink()
@@ -313,6 +314,31 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     scratch_line = next(ln for ln in entry_lines if "scratch_detector" in ln)
     assert "checkpoint missing" in ghost_line and "test/temp" not in ghost_line
     assert "test/temp" in scratch_line and "checkpoint missing" not in scratch_line
+
+
+def test_registry_entry_with_no_metrics_source_is_flagged(tmp_path):
+    """A registry entry that predates the metrics_source field is reported, not read as though
+    the platform had verified its numbers."""
+    root = _layout_project(tmp_path, "2026-03-04")
+    # Off root.anchor, not tmp_path: a path under pytest's own tmp tree would also trip the
+    # test/temp-checkpoint pollution check, which this test isn't exercising.
+    ckpt_dir = Path(root.anchor) / "tcip_no_metrics_source_fixture"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt = ckpt_dir / "model.pt"
+    ckpt.write_bytes(b"weights")
+    models = root / ".tcip" / "models"
+    models.mkdir(parents=True)
+    (models / "registry.json").write_text(json.dumps(
+        [{"name": "legacy", "checkpoint_path": str(ckpt), "metrics": {"val_map50": 0.5}}]))
+
+    try:
+        res = _run(root, file_layout=True)
+        assert res.returncode == 1, res.stdout
+        matches = _lines(res.stdout, "metrics_source")
+        assert len(matches) == 1 and "legacy" in matches[0], res.stdout
+    finally:
+        ckpt.unlink()
+        ckpt_dir.rmdir()
 
 
 def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):

@@ -205,6 +205,8 @@ class ModelRegistry:
         metrics: dict | None = None,
         tags: list[str] | None = None,
         kind: str | None = None,
+        *,
+        metrics_source: str | None,
     ) -> dict:
         """Register a trained model with SHA-256 integrity checksum.
 
@@ -216,6 +218,12 @@ class ModelRegistry:
             tags: Optional tags for filtering.
             kind: Model kind (``tcip_module``; open to a future foreign kind) so the GUI + agent
                 know how to run it; ``build_predictor`` can still sniff it at inference time.
+            metrics_source: Which path produced ``metrics``: ``"trainer"`` (the platform's own
+                ``default_train``, which measured them), ``"training_source"`` (a bespoke loop's
+                own saved state, unverified), ``"caller"`` (an explicit-mode argument,
+                unverified), or ``None`` when ``metrics`` is empty. Required, never derived here:
+                the two production callers (``register_model_from_experiment`` and the
+                ``register_model`` tool) compute it from which path actually produced the run.
 
         Raises:
             FileNotFoundError: ``checkpoint_path`` does not exist, refuses to register a
@@ -223,9 +231,22 @@ class ModelRegistry:
             TypeError / ValueError: ``config`` or ``metrics`` holds something JSON cannot
                 carry. Both arrive from a caller (an agent's own dict, or a checkpoint's
                 stamped metrics), so the offending field is named before anything is stored.
+                ``ValueError`` also covers ``metrics_source`` disagreeing with whether
+                ``metrics`` is empty.
         """
         check_json_value(config, path="config")
         check_json_value(metrics or {}, path="metrics")
+        has_metrics = bool(metrics)
+        if has_metrics and metrics_source is None:
+            raise ValueError(
+                "register_model: metrics is non-empty but metrics_source is None; name the path "
+                "that produced these numbers ('trainer', 'training_source', or 'caller')."
+            )
+        if not has_metrics and metrics_source is not None:
+            raise ValueError(
+                f"register_model: metrics_source={metrics_source!r} but metrics is empty; a "
+                "source with nothing to source is not a real pairing."
+            )
         ckpt = Path(checkpoint_path)
         if not ckpt.is_file():
             raise FileNotFoundError(
@@ -244,6 +265,7 @@ class ModelRegistry:
             "registered_at": datetime.now(timezone.utc).isoformat(),
             "config": config,
             "metrics": metrics or {},
+            "metrics_source": metrics_source,
             "tags": tags or [],
         }
         # Lock-guarded read-modify-write: re-read the stored index under the lock so a
@@ -308,7 +330,7 @@ class ModelRegistry:
         return None
 
     def best_model(
-        self, metric_key: str = "val_map50", *, higher_is_better: bool | None = None
+        self, metric_key: str, *, higher_is_better: bool, include_unverified: bool = False,
     ) -> dict | None:
         """Get the registered model with the best value for ``metric_key``.
 
@@ -316,15 +338,19 @@ class ModelRegistry:
         skipped, not scored as a sentinel, so ``None`` cleanly means "no model has it". A
         value that is not a finite number is skipped for the same reason: it compares false
         against every candidate, so an incumbent holding one could never be displaced.
-        ``higher_is_better`` defaults to a name heuristic: loss/error keys rank ascending,
-        everything else (map/f1/accuracy/…) descending.
+        ``metric_key`` and ``higher_is_better`` are both required: this reader guesses neither
+        the metric nor its direction from the key's spelling. By default only an entry whose
+        ``metrics_source`` is ``"trainer"``, the one path the platform itself measured, is
+        ranked; ``include_unverified=True`` also ranks ``"training_source"`` and ``"caller"``
+        entries, whose numbers nothing here verified. An entry with no ``metrics_source`` key at
+        all (a malformed record predating the field) is treated as unverified.
         """
-        if higher_is_better is None:
-            lk = metric_key.lower()
-            higher_is_better = not ("loss" in lk or "error" in lk)
         best = None
         best_val: float | None = None
         for m in self._index:
+            source = m.get("metrics_source")
+            if source != "trainer" and not include_unverified:
+                continue
             val = m.get("metrics", {}).get(metric_key)
             if not isinstance(val, (int, float)) or isinstance(val, bool):
                 continue
