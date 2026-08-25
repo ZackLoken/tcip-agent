@@ -210,4 +210,45 @@ describe("InferenceTab job table", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Status: running · 4 \/ 9/)).toBeInTheDocument();
   });
+
+  it("carries a final frame's error into the watched job panel", async () => {
+    vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [job({ job_id: "inf-live" })] });
+
+    render(<InferenceTab />);
+    fireEvent.click(await screen.findByRole("button", { name: "Watch" }));
+    await waitFor(() => expect(vi.mocked(openInferenceStream)).toHaveBeenCalled());
+
+    const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
+    act(() => onFrame({ type: "final", status: "failed", error: "job not found" }));
+
+    expect(await screen.findByText(/Error: job not found/)).toBeInTheDocument();
+  });
+
+  it("shows the frame's error alone once the poll no longer lists the watched job", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(inferenceApi.listJobs).mockResolvedValueOnce({
+        jobs: [job({ job_id: "inf-gone" })],
+      });
+
+      render(<InferenceTab />);
+      await vi.waitFor(() => expect(screen.getByText("inf-gone")).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: "Watch" }));
+
+      const onFrame = vi.mocked(openInferenceStream).mock.calls[0][1];
+      act(() => onFrame({ type: "final", error: "job not found" }));
+      expect(screen.getByText(/Error: job not found/)).toBeInTheDocument();
+      expect(screen.getByText(/Status: running/)).toBeInTheDocument();
+
+      vi.mocked(inferenceApi.listJobs).mockResolvedValue({ jobs: [] });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+
+      expect(screen.getByText(/Error: job not found/)).toBeInTheDocument();
+      expect(screen.queryByText(/Status:/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -35,7 +35,11 @@ export function InferenceTab() {
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
+  // Whether the watched job still appeared in the last poll: false once a job is delisted, so
+  // the panel shows its last error alone rather than a status line frozen on a job that is gone.
+  const [activeJobListed, setActiveJobListed] = useState(true);
   const streamRef = useRef<(() => void) | null>(null);
+  const activeJobId = activeJob?.job_id ?? null;
 
   const refreshModels = useCallback(() => {
     if (!projectRoot) return;
@@ -85,13 +89,24 @@ export function InferenceTab() {
         .then((r) => {
           setJobs(r.jobs);
           setJobsError(null);
+          if (activeJobId) {
+            const row = r.jobs.find((j) => j.job_id === activeJobId);
+            setActiveJobListed(row !== undefined);
+            if (row) {
+              setActiveJob((prev) =>
+                prev && prev.job_id === activeJobId
+                  ? { ...row, error: row.error ?? prev.error }
+                  : prev,
+              );
+            }
+          }
         })
         .catch((e) => {
           setJobsError(
             `Could not load inference jobs: ${e instanceof Error ? e.message : String(e)}`,
           );
         }),
-    [],
+    [activeJobId],
   );
 
   useEffect(() => {
@@ -100,7 +115,6 @@ export function InferenceTab() {
     return () => clearInterval(t);
   }, [refreshJobs]);
 
-  const activeJobId = activeJob?.job_id;
   useEffect(() => {
     if (!activeJobId) return;
     streamRef.current?.();
@@ -120,6 +134,9 @@ export function InferenceTab() {
                 total: asNum(msg.total, prev.total),
                 status: (msg.status as InferenceJob["status"]) ?? prev.status,
                 warning: (msg.warning as string | null | undefined) ?? prev.warning,
+                // A progress frame carries no error key at all and must not clear one already
+                // shown; a final frame's presence of the key decides, including error: null.
+                error: "error" in msg ? (msg.error as string | null) : prev.error,
               } as InferenceJob)
             : prev,
         );
@@ -160,6 +177,7 @@ export function InferenceTab() {
           };
           setJobs((prev) => [stub, ...prev]);
           setActiveJob(stub);
+          setActiveJobListed(true);
           if (res.bucket_redirected) {
             useStore
               .getState()
@@ -326,7 +344,13 @@ export function InferenceTab() {
                   </td>
                   <td>
                     <div className="flex gap-1">
-                      <button className="tcip-btn text-[11px]" onClick={() => setActiveJob(j)}>
+                      <button
+                        className="tcip-btn text-[11px]"
+                        onClick={() => {
+                          setActiveJob(j);
+                          setActiveJobListed(true);
+                        }}
+                      >
                         Watch
                       </button>
                       {CANCELLABLE.has(j.status) && (
@@ -350,9 +374,11 @@ export function InferenceTab() {
             <div className="text-[11px] text-tcip-muted">
               Output: <span className="font-mono">{activeJob.output_dir}</span>
             </div>
-            <div className="text-[11px] mt-1 tabular-nums">
-              Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
-            </div>
+            {activeJobListed && (
+              <div className="text-[11px] mt-1 tabular-nums">
+                Status: {activeJob.status} · {activeJob.done} / {activeJob.total}
+              </div>
+            )}
             {activeJob.error && (
               <div className="text-[11px] text-tcip-fp mt-1">Error: {activeJob.error}</div>
             )}

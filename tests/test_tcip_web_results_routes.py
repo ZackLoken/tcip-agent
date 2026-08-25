@@ -764,3 +764,16 @@ def test_inference_list_jobs_endpoint(client: TestClient) -> None:
     resp = client.get("/api/inference/jobs")
     assert resp.status_code == 200
     assert "jobs" in resp.json()
+
+
+def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
+    client: TestClient,
+) -> None:
+    """The not-found frame is typed the same as a run's own terminal frame, so the client stops
+    reconnecting against a job that will never exist instead of retrying forever."""
+    with client.websocket_connect("ws://127.0.0.1/api/inference/jobs/does-not-exist/stream") as ws:
+        frame = ws.receive_json()
+    assert frame["type"] == "final"
+    assert frame["error"] == "job not found"
+
+

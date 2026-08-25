@@ -139,7 +139,7 @@ def rehydrate() -> None:
 
     The worker threads are gone, so a persisted non-terminal job is dead: it is
     surfaced as ``interrupted``. Only the fields the API exposes are restored (the
-    per-image results list isn't persisted), so preview/results_tail come back empty.
+    per-image results list isn't persisted), so ``/preview`` comes back empty.
     """
     from tcip_web import jobstore
 
@@ -580,7 +580,9 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
     await websocket.accept()
     job = _get(job_id)
     if job is None:
-        await websocket.send_json({"error": "job not found"})
+        # Typed the same as a run's own terminal frame, so the client stops reconnecting instead
+        # of retrying forever against a job that will never exist.
+        await websocket.send_json({"type": "final", "error": "job not found"})
         await websocket.close()
         return
     try:

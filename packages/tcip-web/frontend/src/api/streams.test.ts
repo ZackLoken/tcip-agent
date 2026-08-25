@@ -120,6 +120,18 @@ describe("openInferenceStream", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
+  it("stops reconnecting once the not-found frame arrives, since it is typed final", () => {
+    const onMessage = vi.fn();
+    openInferenceStream("j1", onMessage);
+    lastSocket().open();
+    lastSocket().message(JSON.stringify({ type: "final", error: "job not found" }));
+    expect(onMessage).toHaveBeenCalledWith({ type: "final", error: "job not found" });
+
+    lastSocket().drop();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it("closing the stream suppresses any further reconnect", () => {
     const stop = openInferenceStream("j1", vi.fn());
     lastSocket().open();
