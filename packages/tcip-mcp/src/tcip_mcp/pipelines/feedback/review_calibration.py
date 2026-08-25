@@ -64,7 +64,9 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "Not yet. Nothing states the confidence floor these predictions were actually generated or "
      "filtered at, so the check has nothing to reconcile the picked confidence against, whether "
      "that is a generation cutoff or review filter this route could not read, or a bespoke model "
-     "with no confidence knob the platform can set. Review a bucket whose staging floor is known."),
+     "whose module exposes no operating-point knob under a recognized name: the platform looks "
+     "for score_thresh, nms_thresh or detections_per_img on the module itself, its "
+     "detector.roi_heads, or its detector. Review a bucket whose staging floor is known."),
     (("insufficient_adjudication_coverage",),
      'Not yet. At least one of these reviewed images shows no evidence that missed objects were '
      'checked for. For images that had no ground truth before this review: uncheck "Reviewed" on '
@@ -401,6 +403,7 @@ def resolve_operating_point_from_review(
     holdout_ratio: float = 0.5,
     experiment_id: str | None = None,
     staged_conf_floor: float | None = None,
+    experiment_id_ambiguous: bool = False,
 ) -> ResolvedBundle:
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
@@ -442,6 +445,13 @@ def resolve_operating_point_from_review(
     ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
     longer among the reviewed images, or when its lock file is corrupt, this
     propagates to the caller rather than crashing later on a missing dict lookup.
+
+    ``experiment_id_ambiguous`` is true when the caller's own buckets named more than one
+    producing run rather than none at all (``routes/review.py`` collapses both cases to
+    ``experiment_id=None`` before this function ever sees it, since neither can vouch for one
+    run's disjointness); carried onto the sealed train-disjointness fact so
+    :func:`describe_review_validation` can tell the two apart in its breeder-facing sentence,
+    never asserted by the resolver itself.
     """
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.operating_point import (
@@ -472,6 +482,11 @@ def resolve_operating_point_from_review(
         adjudication_covered=lambda r: bool(r.get("adjudication_covered")),
     )
     attach_split_policy_provenance(bundle, locked)
+    conf = bundle.params.get("conf")
+    if conf is not None and isinstance(conf.sweep, dict):
+        td = conf.sweep.get("train_disjointness")
+        if isinstance(td, dict):
+            td["experiment_id_ambiguous"] = experiment_id_ambiguous
     return bundle
 
 
@@ -521,8 +536,12 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
         td = sweep.get("train_disjointness") or {}
         run_note = ""
         if not td.get("checked"):
-            run_note = (" The bucket names no producing run, so the reviewed images were not "
-                        "checked against that run's training split.")
+            if td.get("experiment_id_ambiguous"):
+                run_note = (" The reviewed predictions were produced by more than one run, so "
+                            "there is no single training split to check the images against.")
+            else:
+                run_note = (" The bucket names no producing run, so the reviewed images were not "
+                            "checked against that run's training split.")
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
                   f"model's counts closely enough to use as a validation reference for "
                   f"results.{miss_note}{run_note}")

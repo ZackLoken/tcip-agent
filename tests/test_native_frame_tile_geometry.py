@@ -567,7 +567,11 @@ def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
 
     with pytest.raises(TileEdgeContradiction) as exc_info:
         resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)
-    assert "64" in str(exc_info.value) and "128" in str(exc_info.value)
+    assert str(exc_info.value) == (
+        "stated tile_size 64 contradicts this checkpoint's own persisted training tile geometry "
+        "of 128. Pass tile_size 128 to match the checkpoint, or leave tile_size unset to derive "
+        "it from the checkpoint."
+    )
 
 
 def test_an_explicit_edge_contradicting_the_native_frame_refuses():
@@ -577,7 +581,11 @@ def test_an_explicit_edge_contradicting_the_native_frame_refuses():
 
     with pytest.raises(TileEdgeContradiction) as exc_info:
         resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)
-    assert "64" in str(exc_info.value) and "512" in str(exc_info.value)
+    assert str(exc_info.value) == (
+        "stated tile_size 64 contradicts this checkpoint's own recorded untiled training frame "
+        "of 512. Pass tile_size 512 to match the checkpoint, or leave tile_size unset to derive "
+        "it from the checkpoint."
+    )
 
 
 def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
@@ -624,6 +632,24 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
 
     assert (edge, source) == (64, "explicit")
     assert explicit_edge_provenance(stub, 64) == "stated on a checkpoint that records no tile geometry"
+
+
+def test_explicit_edge_provenance_refuses_to_describe_a_contradicting_edge():
+    """An edge that differs from geometry the checkpoint does record is a contradiction, never a
+    checkpoint that records no tile geometry: the helper must not describe it that way."""
+    from tcip_mcp.pipelines.inference.predictor import (
+        TileEdgeContradiction, explicit_edge_provenance,
+    )
+
+    stub = _GeometryStub(train_tile_size=128)
+
+    with pytest.raises(TileEdgeContradiction) as exc_info:
+        explicit_edge_provenance(stub, 64)
+    assert str(exc_info.value) == (
+        "stated tile_size 64 contradicts this checkpoint's own persisted training tile geometry "
+        "of 128. Pass tile_size 128 to match the checkpoint, or leave tile_size unset to derive "
+        "it from the checkpoint."
+    )
 
 
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:

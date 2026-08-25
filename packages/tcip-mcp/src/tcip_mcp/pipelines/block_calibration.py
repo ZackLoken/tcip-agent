@@ -397,7 +397,7 @@ def resolve_block_calibration_records(
     density_cap = derive_max_dets_from_counts(
         list(cal_gt_counts.values()) + list(test_gt_counts.values()))
 
-    applied = set_detector_operating_point(
+    applied, applied_attribute_path = set_detector_operating_point(
         predictor.model, score_thresh=0.01, detections_per_img=density_cap)
     predictor.score_threshold = applied.get("score_thresh", 0.01)
     # predict_tiled's separate post-merge full-band cap is never reset by construction alone.
@@ -439,7 +439,7 @@ def resolve_block_calibration_records(
         "max_dets_derived_from": (
             "~1.5x p99 GT objects/image, pooled across all calibration+test bands"),
         "staged_conf_floor": applied.get("score_thresh"),
-        "staged_conf_floor_attribute_path": applied.get("attribute_path"),
+        "staged_conf_floor_attribute_path": applied_attribute_path,
         "cal_rects": cal_rects, "hold_rects": test_rects,
     }
     bundle = resolve_operating_point(trait_name, experiment_id=experiment_id, **resolver_inputs)

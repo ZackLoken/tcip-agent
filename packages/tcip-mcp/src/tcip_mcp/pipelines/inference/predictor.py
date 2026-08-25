@@ -17,7 +17,7 @@ is the phenotype).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, runtime_checkable
 
 from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, STATE_DICT_KEY
 
@@ -192,6 +192,14 @@ class TileEdgeContradiction(ValueError):
     """A caller-stated tile edge that differs from the checkpoint's own recorded tile geometry."""
 
 
+def _raise_tile_edge_contradiction(edge: int, recorded: int, kind: str) -> NoReturn:
+    raise TileEdgeContradiction(
+        f"stated tile_size {int(edge)} contradicts this checkpoint's own {kind} of "
+        f"{recorded}. Pass tile_size {recorded} to match the checkpoint, or leave "
+        "tile_size unset to derive it from the checkpoint."
+    )
+
+
 def _recorded_geometry_edge(predictor: Any) -> tuple[int | None, str]:
     """The checkpoint's own recorded tile edge a stated edge is checked against, and what kind of
     record it came from: the persisted training tile geometry when the checkpoint carries one, else
@@ -214,16 +222,22 @@ def explicit_edge_provenance(predictor: Any, edge: int) -> str:
     checkpoint's persisted training tile geometry, equal to the edge its recorded untiled training
     frame yields (run without that frame's own recorded resize, which the stated-edge path never
     applies), or stated on a checkpoint that records no tile geometry at all.
+
+    Raises :class:`TileEdgeContradiction` if ``edge`` differs from a recorded geometry the
+    checkpoint does carry: that is a contradiction :func:`resolve_tile_regime` should already have
+    refused, and this helper must not describe such a checkpoint as recording no tile geometry.
     """
     recorded, kind = _recorded_geometry_edge(predictor)
-    if recorded is not None and int(recorded) == int(edge):
+    if recorded is None:
+        return "stated on a checkpoint that records no tile geometry"
+    if int(recorded) == int(edge):
         if kind == "persisted training tile geometry":
             return "equal to the checkpoint's persisted training tile geometry"
         return (
             "equal to the edge the checkpoint's recorded untiled training frame yields, run "
             "without that frame's own recorded resize"
         )
-    return "stated on a checkpoint that records no tile geometry"
+    _raise_tile_edge_contradiction(int(edge), recorded, kind)
 
 
 def native_ratio_tile_resize(predictor: Any, tile_size_source: str) -> tuple[int, int] | None:
@@ -281,11 +295,7 @@ def resolve_tile_regime(
     if tiled and tile_size is not None:
         recorded, kind = _recorded_geometry_edge(predictor)
         if recorded is not None and int(recorded) != int(tile_size):
-            raise TileEdgeContradiction(
-                f"stated tile_size {int(tile_size)} contradicts this checkpoint's own recorded "
-                f"{kind} of {recorded}. Pass tile_size {recorded} to match the checkpoint, or "
-                "leave tile_size unset to derive it from the checkpoint."
-            )
+            _raise_tile_edge_contradiction(int(tile_size), recorded, kind)
     resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
         predictor, tile_size=tile_size, overlap=overlap)
     tile_resize = native_ratio_tile_resize(predictor, tile_size_source) if tiled else None

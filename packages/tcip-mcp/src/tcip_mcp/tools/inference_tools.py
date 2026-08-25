@@ -278,8 +278,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # literal) is threaded into resolve_operating_point as the reference's staged_conf_floor, the
     # same value this call actually applied, per CLAUDE.md's "when two paths must agree, call one
     # from the other."
-    applied = set_detector_operating_point(predictor.model, score_thresh=0.01,
-                                           detections_per_img=density_cap)
+    applied, applied_attribute_path = set_detector_operating_point(
+        predictor.model, score_thresh=0.01, detections_per_img=density_cap)
     predictor.score_threshold = applied.get("score_thresh", 0.01)
 
     n_excluded_incomplete_attribute = 0
@@ -334,7 +334,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         "tiled": tile, "tiled_source": tiled_source,
         "cross_tile_nms": cross_tile_nms, "max_dets": max_dets,
         "staged_conf_floor": applied.get("score_thresh"),
-        "staged_conf_floor_attribute_path": applied.get("attribute_path"),
+        "staged_conf_floor_attribute_path": applied_attribute_path,
     }
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)

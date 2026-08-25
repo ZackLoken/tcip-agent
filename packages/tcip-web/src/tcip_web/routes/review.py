@@ -765,9 +765,6 @@ class ValidateReferenceResponse(BaseModel):
     conf: Optional[float]  # the derived count operating point (for transparency)
     reason: str  # plain-language, breeder-facing, always present
     buckets_stamped: list[str]
-    # Whether the sealed (or already-sealed) row's train-disjointness check actually ran; null on
-    # every refusal site, where no row was sealed and none was read to answer for.
-    train_disjointness_checked: Optional[bool] = None
 
 
 @router.post("/validate_reference")
@@ -828,14 +825,10 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     if all(b.claimed and b.ok for b in bindings.values()):
         ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_against")
                     for sc in sidecars.values()), None)
-        existing_td = next((b.train_disjointness for b in bindings.values()
-                            if b.train_disjointness is not None), None)
         return ValidateReferenceResponse(
             validated=True, reference=ref, reviewed_image_count=n, conf=None,
             reason="These predictions are already validated, so a review reference isn't needed here.",
-            buckets_stamped=[],
-            train_disjointness_checked=(
-                existing_td.get("checked") if existing_td is not None else None))
+            buckets_stamped=[])
 
     if n == 0:
         return ValidateReferenceResponse(
@@ -940,6 +933,20 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
                            and review_tiled is not None else "default")
 
+    # Refuse here, naming the bucket(s), rather than let the resolver's bare ValueError surface.
+    if review_tile_size_source == "explicit" and review_tile_size_derived_from is None:
+        per_bucket_derived_from = {
+            d: ((sc.get("operating_point") or {}).get("tile_size") or {}).get("derived_from")
+            for d, sc in sidecars.items()
+        }
+        raise HTTPException(
+            400,
+            "these predictions carry an explicit tile edge but disagree about, or omit, why it is "
+            f"trusted ({per_bucket_derived_from}), so the review promotion cannot state one "
+            "derivation for the validated claim. Validate the disagreeing bucket separately, or "
+            "re-export the predictions from one run so their stamps agree.",
+        )
+
     # One spelling of the evidence, shared by the description and open_validation's own resolver run.
     resolver_inputs = {
         "review_state": review_state,
@@ -953,6 +960,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "tiled_source": review_tiled_source,
         # The root the verdict store was opened on, so the split lock travels with the verdicts.
         "scope_root": req.dataset_root,
+        # True when the buckets named more than one producing run, false when none named one: both
+        # collapse review_experiment_id to None above, but only the first is a real disagreement.
+        "experiment_id_ambiguous": len(bucket_exp_ids) > 1,
     }
     try:
         bundle = resolve_operating_point_from_review(
@@ -1084,9 +1094,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "buckets_stamped": stamped,
         "record_digests": record_digests,
     })
-    from tcip_mcp.pipelines.resolution import resolver_train_disjointness
-
-    sealed_td = resolver_train_disjointness(bundle, "operating_point") if result["validated"] else None
     return ValidateReferenceResponse(
         validated=bool(result["validated"]),
         reference=result["reference"],
@@ -1094,7 +1101,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         conf=result["conf"],
         reason=result["reason"],
         buckets_stamped=stamped,
-        train_disjointness_checked=sealed_td["checked"] if sealed_td is not None else None,
     )
 
 

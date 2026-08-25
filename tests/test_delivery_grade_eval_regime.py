@@ -256,7 +256,8 @@ def test_resolve_operating_point_tile_size_source_not_inferred_from_truthiness()
     assert b_derived.get("tile_size")._raw == 224
 
     b_explicit = resolve_operating_point(
-        "catkin", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit")
+        "catkin", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     assert b_explicit.get("tile_size").source == "explicit"
 
 

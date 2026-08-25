@@ -39,6 +39,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "covered_buckets": {"predictions/live/2026-03-04": "7f3a1b9c2d4e5f60"},
         "dataset_root": "/data/hazelnut_valley",
         "recorded_at": "2026-03-04T12:00:00+00:00",
+        "train_disjointness": {"checked": True, "group_check": None},
     }
     body.update(overrides)
     return body

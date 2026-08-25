@@ -133,12 +133,13 @@ def _one_stage():
 def test_set_detector_operating_point_two_stage():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     m = _two_stage()
-    applied = set_detector_operating_point(m, score_thresh=0.4, nms_thresh=0.3, detections_per_img=300)
+    applied, attribute_path = set_detector_operating_point(
+        m, score_thresh=0.4, nms_thresh=0.3, detections_per_img=300)
     assert m.detector.roi_heads.score_thresh == 0.4
     assert m.detector.roi_heads.nms_thresh == 0.3
     assert m.detector.roi_heads.detections_per_img == 300
-    assert applied == {"score_thresh": 0.4, "nms_thresh": 0.3, "detections_per_img": 300,
-                       "attribute_path": "detector.roi_heads"}
+    assert applied == {"score_thresh": 0.4, "nms_thresh": 0.3, "detections_per_img": 300}
+    assert attribute_path == "detector.roi_heads"
 
 
 def test_set_detector_operating_point_one_stage():

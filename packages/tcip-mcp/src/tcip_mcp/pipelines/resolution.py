@@ -410,9 +410,15 @@ def resolve_tile_size_param(
             validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["native_ratio"],
         )
     if tile_size_source == "explicit" and tile_size is not None:
+        if tile_size_derived_from is None:
+            raise ValueError(
+                "tile_size_derived_from is required when tile_size_source is 'explicit': the "
+                "caller must compose it (see explicit_edge_provenance) before an explicit tile "
+                "edge can be stamped into the operating-point claim."
+            )
         return ResolvedParam(
             "tile_size", int(tile_size), source="explicit",
-            derived_from=tile_size_derived_from if tile_size_derived_from is not None else "",
+            derived_from=tile_size_derived_from,
             requires_validation=True, validation_kind="geometry",
             validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["explicit"],
         )
@@ -1249,12 +1255,22 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
     """Whether and how a resolver's own live result checked train-disjointness: the two facts the
     gate itself records, ``{"checked": bool, "group_check": str | None}``, never a bare ``true``
     over a check the gate's own record says did not run. ``None`` for ``resolve_scale``, whose gate
-    has no training run to check against.
+    has no training run to check against. One branch per declared document (:data:`_DOCUMENT_PARAM`)
+    rather than a generic read keyed only by ``result``'s own shape, so a document this platform does
+    not declare raises here instead of silently sealing ``null`` for a check nobody ran.
     """
     if document == "resolve_scale":
         return None
+    if document not in (
+        "operating_point", "classifier_operating_point", "ordinal_operating_point",
+        "regression_operating_point",
+    ):
+        raise ValueError(
+            f"{document!r} is not a document resolver_train_disjointness knows how to read a "
+            f"train-disjointness check from; declared documents are {sorted(_DOCUMENT_PARAM)}"
+        )
+    param_key, _ = _DOCUMENT_PARAM[document]
     if isinstance(result, ResolvedBundle):
-        param_key, _ = _DOCUMENT_PARAM[document]
         sweep = result.get(param_key).sweep
     elif isinstance(result, Mapping):
         sweep = result.get("sweep_data")

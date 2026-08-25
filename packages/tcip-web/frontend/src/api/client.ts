@@ -425,7 +425,6 @@ export const api = {
         conf: number | null;
         reason: string;
         buckets_stamped: string[];
-        train_disjointness_checked: boolean | null;
       }>(ROUTES.postReviewValidateReference, {
         method: "POST",
         body: JSON.stringify(body),

@@ -46,6 +46,26 @@ def test_describe_validated():
     assert "8 of 10" in out["reason"]
 
 
+def test_describe_validated_names_no_producing_run_when_genuinely_none():
+    b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
+                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": True,
+                       "failures": [], "holdout_bias": {"tp": 8, "fn": 2},
+                       "train_disjointness": {"checked": False, "experiment_id_ambiguous": False}})
+    out = describe_review_validation(b, reviewed_image_count=4)
+    assert "The bucket names no producing run" in out["reason"]
+    assert "more than one run" not in out["reason"]
+
+
+def test_describe_validated_names_more_than_one_run_when_buckets_disagree():
+    b = _bundle(validated=VALIDATED_REVIEW_CONFIRMED,
+                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": True,
+                       "failures": [], "holdout_bias": {"tp": 8, "fn": 2},
+                       "train_disjointness": {"checked": False, "experiment_id_ambiguous": True}})
+    out = describe_review_validation(b, reviewed_image_count=4)
+    assert "more than one run" in out["reason"]
+    assert "The bucket names no producing run" not in out["reason"]
+
+
 def test_describe_conf_censored():
     # The named-failure list (not the raw "conf_censored" key alone) drives the branch, and
     # "passed_holdout" must be present or the "too few images" branch wins first.
@@ -154,6 +174,18 @@ def test_describe_unrecognized_failure_name_is_a_loud_error():
                        "failures": ["some_future_fix_g_or_h_failure_not_yet_mapped"]})
     with pytest.raises(AssertionError, match="unrecognized"):
         describe_review_validation(b, reviewed_image_count=2)
+
+
+def test_describe_conf_floor_unstated_names_the_recognized_attribute_names():
+    """A bespoke module holding an unrecognized attribute name (score_threshold, not score_thresh)
+    learns why: the message names every attribute the holder looks for, and where."""
+    b = _bundle(validated=VALIDATED_FALSE,
+                sweep={"conf_censored": False, "disjoint": True, "passed_holdout": False,
+                       "failures": ["conf_floor_unstated"]})
+    reason = describe_review_validation(b, reviewed_image_count=4)["reason"]
+    for attr in ("score_thresh", "nms_thresh", "detections_per_img"):
+        assert attr in reason
+    assert "detector.roi_heads" in reason
 
 
 # ── route ─────────────────────────────────────────────────────────────────
@@ -332,7 +364,6 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert body["reference"] == "reviewer_confirmed_annotations"
     # _IDENTITY names no experiment_id: a foreign-checkpoint promotion, the case with no producing
     # run to check the reviewed images' train-disjointness against.
-    assert body["train_disjointness_checked"] is False
     assert "not checked against that run's training split" in body["reason"]
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
@@ -417,6 +448,47 @@ def test_route_never_upgrades_a_native_ratio_tile_size_to_persisted_geometry(cli
     restamped = sc["operating_point"]["tile_size"]
     assert restamped["validated_against"] == native_ref
     assert restamped["value"] == 128
+
+
+def test_route_refuses_an_explicit_tile_edge_with_no_derived_from_text(client, tmp_path: Path):
+    """A bucket stamped ``explicit_caller_stated_geometry`` but carrying no ``derived_from`` text
+    (an older stamp, or a stamp this route cannot resolve one text for) must not reach the
+    resolver's own bare ``ValueError``: the route refuses first, naming the bucket."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY
+
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
+        "value": 512, "source": "explicit",
+        "validated_against": VALIDATED_EXPLICIT_GEOMETRY, "requires_validation": True,
+        "validation_kind": "geometry",
+    })
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 400, resp.text
+    # The bucket path travels inside a dict's repr(), which doubles its own backslashes.
+    assert repr(pred_dir).strip("'") in resp.json()["detail"]
+
+
+def test_route_promotes_an_explicit_tile_edge_carrying_its_stamps_own_text(client, tmp_path: Path):
+    """A bucket stamped explicit with the real text the producing run composed it with is
+    promoted, and the validated row carries that same text forward, never a placeholder."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY
+
+    derived_from = "equal to the checkpoint's persisted training tile geometry"
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path, tile_size_op={
+        "value": 512, "source": "explicit", "derived_from": derived_from,
+        "validated_against": VALIDATED_EXPLICIT_GEOMETRY, "requires_validation": True,
+        "validation_kind": "geometry",
+    })
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["validated"] is True
+    sc = _read_sidecar(pred_dir)
+    restamped = sc["operating_point"]["tile_size"]
+    assert restamped["source"] == "explicit"
+    assert restamped["derived_from"] == derived_from
+    assert restamped["validated_against"] == VALIDATED_EXPLICIT_GEOMETRY
 
 
 def test_route_never_upgrades_an_edge_with_no_accepted_reference_to_a_validated_geometry(

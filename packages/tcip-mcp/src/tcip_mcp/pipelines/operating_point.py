@@ -201,51 +201,61 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
     module exposing a knob on itself, with no ``.detector`` to route through, now reaches it too,
     independently of what a given call actually sets. Returns ``(None, None)`` when no candidate
     exposes any of the three: nothing here can govern which boxes exist.
+
+    Raises ``ValueError``, naming both locations, when more than one candidate exposes a knob: the
+    module itself and its ``.detector.roi_heads`` disagreeing about where the operating point lives
+    is an ambiguous module, never a case to silently resolve by picking the first match.
     """
     det = getattr(model, "detector", None)
-    for holder, path in (
-        (model, "self"),
-        (getattr(det, "roi_heads", None), "detector.roi_heads"),
-        (det, "detector"),
-    ):
-        if holder is not None and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS):
-            return holder, path
-    return None, None
+    candidates = ((model, "self"), (getattr(det, "roi_heads", None), "detector.roi_heads"),
+                 (det, "detector"))
+    matches = [(holder, path) for holder, path in candidates
+              if holder is not None and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)]
+    if len(matches) > 1:
+        raise ValueError(
+            "this model exposes an operating-point knob at more than one location "
+            f"({', '.join(path for _, path in matches)}); the platform cannot choose between "
+            "them. Expose the knob at exactly one of self, .detector.roi_heads, or .detector."
+        )
+    return matches[0] if matches else (None, None)
 
 
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
                                  nms_thresh: float | None = None,
-                                 detections_per_img: int | None = None) -> dict:
+                                 detections_per_img: int | None = None,
+                                 ) -> tuple[dict, str | None]:
     """Set the *in-model* torchvision thresholds so the operating point governs which boxes exist.
 
     Resolves where the knobs live through :func:`detector_operating_point_holder`, so the module
     itself, its ``.detector.roi_heads`` (two-stage detectors) or its ``.detector`` (one-stage) can
-    each hold them. Returns what was applied plus ``"attribute_path"``, the holder's own path (or
-    ``None`` when nothing exposed any knob). (Without this, a post-hoc score filter can never
-    recover a box the model's internal ``score_thresh``/``detections_per_img`` had already
-    discarded.)
+    each hold them. Returns ``(applied, attribute_path)``: ``applied`` holds only the knobs actually
+    set (never a truthy dict for a model with nothing to set), and ``attribute_path`` is the
+    holder's own path, or ``None`` when nothing exposed any knob. (Without this, a post-hoc score
+    filter can never recover a box the model's internal ``score_thresh``/``detections_per_img`` had
+    already discarded.)
     """
     target, path = detector_operating_point_holder(model)
-    applied: dict = {"attribute_path": path}
+    applied: dict = {}
     if target is not None:
         for attr, val in (("score_thresh", score_thresh), ("nms_thresh", nms_thresh),
                           ("detections_per_img", detections_per_img)):
             if val is not None and hasattr(target, attr):
                 setattr(target, attr, val)
                 applied[attr] = val
-    return applied
+    return applied, path
 
 
 def _current_detections_cap(model: Any) -> int | None:
     """The in-model ``detections_per_img`` a model is currently set to, or ``None`` if unset.
 
     Read, not derived, whatever ``set_detector_operating_point`` last applied (or the framework
-    default if nothing was ever set). Used only to stamp the non-gating cap-saturation signal at
-    record-generation time, when the cap is actually known.
+    default if nothing was ever set), through the same :func:`detector_operating_point_holder` the
+    setter itself resolves through, so the two never disagree about where the knob lives. Used only
+    to stamp the non-gating cap-saturation signal at record-generation time, when the cap is
+    actually known.
     """
-    det = getattr(model, "detector", model)
-    target = getattr(det, "roi_heads", None) or det
-    return getattr(target, "detections_per_img", None)
+    target, _path = detector_operating_point_holder(model)
+    return getattr(target, "detections_per_img", None) if target is not None else None
 
 
 def records_over_loader(model: Any, loader: Any, device: Any, task: str) -> list[dict]:
@@ -372,7 +382,11 @@ def _content_overlap(cal_records: list[dict], hold_records: list[dict]) -> dict:
     image granularity, one record per image: the detection path's records already are one per
     image, and the classifier path (``resolve_classifier_operating_point``) groups its per-instance
     items back to one record per ``image_id`` before calling this, so two images sharing an
-    instance's coordinates never hash equal unless their whole classified content agrees.
+    instance's coordinates never hash equal unless their whole classified content agrees. The cost
+    of the ruling this enforces: two genuinely independent images that happen to share both
+    dimensions and identical labelled geometry read as shared content and refuse. On the classifier
+    path the grouping key is the record's ``image_id``, which the platform's classifier door
+    (``calibrate_classifier_operating_point``) sets to the label file's own stem.
     ``content_overlap_frac`` travels for provenance; ``shared`` is the boolean the gate reads.
     """
     cal_hashes = {h for h in (_record_content_hash(r) for r in cal_records) if h is not None}
@@ -1131,18 +1145,24 @@ def resolve_classifier_operating_point(
     hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
     disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
 
-    # Reuse the detection path's content-overlap primitive, grouping each image's real GT boxes
-    # into one record: a placeholder box would collapse every same-class item to one hash.
-    def _grouped_records(items: list[dict]) -> list[dict]:
+    # Each item list is grouped by image_id once and the grouping reused below (content-overlap's
+    # bbox fingerprint and the per-image bias stats), never re-grouped a second time.
+    def _group_by_image(items: list[dict]) -> dict[str | None, list[dict]]:
         by_image: dict[str | None, list[dict]] = {}
         for it in items:
-            cid = 1 if it["is_true_positive"] else 0
-            by_image.setdefault(it.get("image_id"), []).append(
-                {"category_id": cid, "bbox": it["bbox"]})
-        return [{"image_id": image_id, "width": 0, "height": 0, "gt": gt}
-                for image_id, gt in by_image.items()]
+            by_image.setdefault(it.get("image_id"), []).append(it)
+        return by_image
 
-    content = _content_overlap(_grouped_records(calibration_items), _grouped_records(holdout_items))
+    def _content_record(image_id: str | None, items: list[dict]) -> dict:
+        return {"image_id": image_id, "width": 0, "height": 0,
+                "gt": [{"category_id": 1 if it["is_true_positive"] else 0, "bbox": it["bbox"]}
+                      for it in items]}
+
+    cal_by_image = _group_by_image(calibration_items)
+    hold_by_image = _group_by_image(holdout_items)
+    content = _content_overlap(
+        [_content_record(iid, its) for iid, its in cal_by_image.items()],
+        [_content_record(iid, its) for iid, its in hold_by_image.items()])
     td = _train_disjointness(experiment_id, cal_ids, hold_ids)
 
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
@@ -1153,21 +1173,10 @@ def resolve_classifier_operating_point(
     count_bias_tolerance_frac = (
         trait.count_bias_tolerance_frac if trait.count_bias_tolerance_frac is not None
         else _PROVISIONAL_COUNT_BIAS_TOLERANCE_FRAC)
-    # Per-image mean count-bias, via the same mean+SE equivalence test the detection path gates on.
-    # A whole-holdout total gated against trait.count_bias_tolerance (a per-image mean by its own
-    # docstring) would silently get stricter as the holdout grew. Grouped by
-    # image_id since one image can carry several classified instances.
-    by_image: dict[str | None, list[dict]] = {}
-    for it in holdout_items:
-        by_image.setdefault(it.get("image_id"), []).append(it)
-    # Present-scoped, mirroring _count_stats_at_conf's own `if gt or dt` exactly (true positive or
-    # predicted positive stands in for gt or dt here): an image whose classified instances are all
-    # confirmed-negative-and-predicted-negative contributes a certain zero and says nothing about how
-    # far off the count is, so including it dilutes the measured bias by n_bias_images/n_present while
-    # typical_positive_count below is already scoped to present images only, the same population
-    # mismatch the pooled detector gate had before its own fix.
+    # Per-image mean count-bias (mean+SE equivalence, as the detection path gates on), present-
+    # scoped like typical_positive_count below: an all-negative image would dilute the measured bias.
     per_image_bias = []
-    for its in by_image.values():
+    for its in hold_by_image.values():
         n_pred_pos = sum(1 for it in its if it["is_pred_positive"])
         n_true_pos = sum(1 for it in its if it["is_true_positive"])
         if n_true_pos or n_pred_pos:
@@ -1180,11 +1189,9 @@ def resolve_classifier_operating_point(
     # supposed to bite hardest.
     count_bias_std = statistics.stdev(per_image_bias) if n_bias_images > 1 else 0.0
     # The same relative-tolerance shape the detection path uses, the positive class's own typical
-    # per-image count (true positives = real GT-positive calls, over images that carry at least
-    # one), reusing the same `by_image` grouping just built above rather than a second pass over
-    # `holdout_items`.
+    # per-image count, reusing `hold_by_image` rather than a second pass over `holdout_items`.
     typical_positive_count = mean_of_present_counts(
-        sum(1 for it in its if it["is_true_positive"]) for its in by_image.values())
+        sum(1 for it in its if it["is_true_positive"]) for its in hold_by_image.values())
     count_bias_ok = _bias_equivalence_ok(
         count_bias, count_bias_std, n_bias_images,
         tolerance_frac=count_bias_tolerance_frac, typical_count=typical_positive_count)
@@ -1306,12 +1313,8 @@ def _resolve_scalar_operating_point(
     cal_ids = {it["image_id"] for it in calibration_items if "image_id" in it}
     hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
     disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
-    # Reuses the detection/classifier paths' own train-disjointness primitive as-is (it operates on
-    # stems/groups, no bbox involved), never a second implementation. Content-overlap duplication
-    # (`_content_overlap`) is deliberately not reused here: it exists for detection-instance-
-    # granularity content fingerprinting (several instances per image needing a bbox-based hash), and
-    # at whole-image granularity the `image_id`-based `disjoint` check above already covers the
-    # equivalent risk.
+    # Reuses the shared train-disjointness primitive (stems/groups, no bbox). `_content_overlap`
+    # fingerprints bbox content, which ordinal/regression items (one scalar each) carry none of.
     td = _train_disjointness(experiment_id, cal_ids, hold_ids)
 
     import torch

@@ -491,3 +491,50 @@ def test_reconcile_operating_point_validity_still_floors_an_unbacked_trait_none_
 
     r = reconcile_operating_point_validity([str(d)], trait="catkin")
     assert r["validated"] == VALIDATED_FALSE
+
+
+# --- resolve_tile_size_param: an explicit source states its own derivation text ---
+
+def test_tile_size_explicit_with_no_derived_from_text_refuses():
+    from tcip_mcp.pipelines.resolution import resolve_tile_size_param
+
+    with pytest.raises(ValueError, match="tile_size_derived_from"):
+        resolve_tile_size_param(512, tiled=True, tile_size_source="explicit",
+                                tile_size_derived_from=None)
+
+
+def test_resolve_operating_point_explicit_tile_size_with_no_text_refuses():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    with pytest.raises(ValueError, match="tile_size_derived_from"):
+        resolve_operating_point("catkin", tiled=True, dataset_hash=None, tile_size=512,
+                                tile_size_source="explicit")
+
+
+def test_resolve_operating_point_explicit_tile_size_with_text_ships():
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    bundle = resolve_operating_point(
+        "catkin", tiled=True, dataset_hash=None, tile_size=512, tile_size_source="explicit",
+        tile_size_derived_from="stated on a checkpoint that records no tile geometry")
+    param = bundle.get("tile_size")
+    assert param.source == "explicit"
+    assert param.derived_from == "stated on a checkpoint that records no tile geometry"
+
+
+# --- resolver_train_disjointness: one branch per declared document ---
+
+def test_resolver_train_disjointness_refuses_an_undeclared_document():
+    from tcip_mcp.pipelines.resolution import resolver_train_disjointness
+
+    with pytest.raises(ValueError, match="not a document"):
+        resolver_train_disjointness({"sweep_data": {"train_disjointness": {"checked": True}}},
+                                    "made_up_document")
+
+
+def test_resolver_train_disjointness_reads_a_declared_documents_result():
+    from tcip_mcp.pipelines.resolution import resolver_train_disjointness
+
+    result = {"sweep_data": {"train_disjointness": {"checked": True, "group_check": None}}}
+    assert resolver_train_disjointness(result, "classifier_operating_point") == (
+        {"checked": True, "group_check": None})

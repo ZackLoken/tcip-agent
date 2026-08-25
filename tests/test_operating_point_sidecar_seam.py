@@ -310,8 +310,10 @@ def test_column_stamp_reports_the_cleared_reference_when_everything_cleared():
 
 @pytest.mark.parametrize("source", ["derived", "explicit"])
 def test_tile_size_source_round_trips_through_its_reference(source):
+    derived_from = (
+        "stated on a checkpoint that records no tile geometry" if source == "explicit" else None)
     param = resolve_tile_size_param(512, tiled=True, tile_size_source=source,
-                                    tile_size_derived_from=None)
+                                    tile_size_derived_from=derived_from)
 
     assert tile_size_source_of(param.validated_against, tile_size=512) == source
 

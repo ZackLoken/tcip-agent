@@ -57,22 +57,41 @@ def test_holder_is_none_when_nothing_exposes_a_knob():
     assert holder is None and path is None
 
 
+def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob():
+    """An ambiguous module, ambiguous in the same shape a real bespoke wrapper could build: a
+    torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
+    knob) plus a knob restated on the wrapper itself. The platform must not silently pick one."""
+    from tcip_mcp.pipelines.model_build import build_model
+
+    model = build_model({"model_source": {
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder_kwargs": {"num_classes": 1, "in_chans": 3, "min_size": 64, "max_size": 128},
+        "task": "detection"}})
+    assert hasattr(model.detector, "roi_heads") and hasattr(model.detector.roi_heads, "score_thresh")
+    model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
+
+    from tcip_mcp.pipelines.operating_point import detector_operating_point_holder
+
+    with pytest.raises(ValueError, match="more than one location"):
+        detector_operating_point_holder(model)
+
+
 def test_set_detector_operating_point_returns_the_attribute_path():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
     model = SimpleNamespace(score_thresh=0.5)
-    applied = set_detector_operating_point(model, score_thresh=0.2)
+    applied, attribute_path = set_detector_operating_point(model, score_thresh=0.2)
     assert applied["score_thresh"] == 0.2
-    assert applied["attribute_path"] == "self"
+    assert attribute_path == "self"
 
 
 def test_set_detector_operating_point_reports_no_path_when_nothing_matches():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
     model = SimpleNamespace(unrelated=1)
-    applied = set_detector_operating_point(model, score_thresh=0.2)
+    applied, attribute_path = set_detector_operating_point(model, score_thresh=0.2)
     assert applied.get("score_thresh") is None
-    assert applied["attribute_path"] is None
+    assert attribute_path is None
 
 
 def _checkpoint(tmp_path, builder: str) -> str:
