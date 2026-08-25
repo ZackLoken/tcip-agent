@@ -1110,15 +1110,18 @@ def _attest_regions_complete_through_the_coverage_route(
 ) -> list[str]:
     """Attest every reference-grid cell the given regions touch through the coverage route the
     CoverageMinimap posts to, one cell per request, and return the attested cell names. The grid
-    posted is the one the grid route serves, the same lattice the browser draws."""
+    posted is the one the grid route serves, the same lattice the browser draws, with the cell
+    list split off the way the browser's grid hook splits it before posting."""
     from tcip_mcp.pipelines.data.tiling import rects_overlap
 
     grid_resp = client.get("/api/coverage/grid", params={"path": image_path, "tile_size": TILE})
     assert grid_resp.status_code == 200, grid_resp.text
-    grid = grid_resp.json()
+    served = grid_resp.json()
+    cells = served["cells"]
+    grid = {key: value for key, value in served.items() if key != "cells"}
     all_rects = [tuple(r) for region in regions for r in region]
     covered = sorted(
-        c["name"] for c in grid["cells"]
+        c["name"] for c in cells
         if any(rects_overlap((c["x0"], c["y0"], c["x1"], c["y1"]), r) for r in all_rects)
     )
     for name in covered:
