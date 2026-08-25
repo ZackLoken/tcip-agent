@@ -204,6 +204,28 @@ def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Pat
     assert "leaves only" not in msg  # the feasibility message never gets a chance to fire
 
 
+def test_block_calibration_refuses_when_export_tile_size_differs_from_manifest(tmp_path: Path):
+    """The reserved-region claim and the exported bucket must be tiled at one regime: an export
+    resolved to a different tile edge than the split manifest's own tile_size refuses, naming
+    both, before completeness or feasibility even run."""
+    exp = _build_experiment(tmp_path)
+
+    from tcip_mcp.pipelines.block_calibration import (
+        BlockCalibrationRefused, resolve_block_calibration_records,
+    )
+    from tcip_mcp.pipelines.inference.predictor import build_predictor
+
+    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+                                score_threshold=0.01, nms_iou=0.3, max_dets=1000)
+    with pytest.raises(BlockCalibrationRefused) as exc_info:
+        resolve_block_calibration_records(
+            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE * 2)
+    msg = str(exc_info.value)
+    assert f"{TILE}px" in msg and f"{TILE * 2}px" in msg
+    assert "not fully attested complete" not in msg  # the tile-size check runs first
+
+
 def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
     """The rail-admits-valid-work paired test: once every reserved cell is attested complete, the
     same call that refused above resolves a real bundle with real per-band cal/hold records."""

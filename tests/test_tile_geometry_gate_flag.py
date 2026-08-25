@@ -26,8 +26,12 @@ from tcip_mcp.pipelines.resolution import (
 
 def _provenance(*, tile_size: int | None, tile_size_source: str) -> dict:
     """The operating-point mapping a tiled run stamps, built through the real resolver."""
+    derived_from = (
+        "stated on a checkpoint that records no tile geometry"
+        if tile_size_source == "explicit" else None)
     bundle = raw_operating_point(conf=0.62, cross_tile_nms=0.35, tiled=True, tile_size=tile_size,
-                                 max_dets=750, tile_size_source=tile_size_source)
+                                 max_dets=750, tile_size_source=tile_size_source,
+                                 tile_size_derived_from=derived_from)
     return bundle.to_provenance()["operating_point"]
 
 

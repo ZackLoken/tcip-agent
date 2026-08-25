@@ -131,8 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     # time DEFAULT_MAX_DETS (matching the MCP path's own initial predictor exactly) and wins, so
     # density_cap is the value that actually governs the collection pass. The applied score_thresh
     # (not a re-typed 0.01 literal) is threaded into resolve_operating_point as staged_conf_floor.
-    applied = set_detector_operating_point(predictor.model, score_thresh=0.01,
-                                           detections_per_img=density_cap)
+    applied, _applied_attribute_path = set_detector_operating_point(
+        predictor.model, score_thresh=0.01, detections_per_img=density_cap)
 
     def _records(sub):
         ds = build_dataset("detection", images_dir=args.images_dir,

@@ -39,7 +39,8 @@ class _BucketStub:
 
 
 def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
-                          tile_size_source: str = "default"):
+                          tile_size_source: str = "default",
+                          tile_size_derived_from: str | None = None):
     """The calibrated bundle plus the resolver arguments behind it, the pair a real calibration
     hands its caller so a delivery door can reopen the same gate."""
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -58,6 +59,7 @@ def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
         "tiled": tiled,
         "tile_size": tile_size,
         "tile_size_source": tile_size_source,
+        "tile_size_derived_from": tile_size_derived_from,
         "staged_conf_floor": 0.01,
     }
     return resolve_operating_point("catkin", experiment_id=None, **inputs), inputs
@@ -207,7 +209,9 @@ def test_the_tile_geometrys_basis_survives_the_round_trip_to_disk(tmp_path, monk
         VALIDATED_EXPLICIT_GEOMETRY, reconcile_tile_size_validity,
     )
 
-    calibration = _held_out_calibration(tiled=True, tile_size=64, tile_size_source="explicit")
+    calibration = _held_out_calibration(
+        tiled=True, tile_size=64, tile_size_source="explicit",
+        tile_size_derived_from="stated on a checkpoint that records no tile geometry")
     result = _export(tmp_path, monkeypatch, calibration=calibration, tile=True, tile_size=64)
     bucket = result["output_dir"]
 

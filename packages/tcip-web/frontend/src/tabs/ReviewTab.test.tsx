@@ -300,7 +300,6 @@ describe("ReviewTab validation-reference affordance", () => {
       conf: 0.42,
       reason: "Validated. Your review confirms this model's counts.",
       buckets_stamped: [PRED_DIR_A],
-      train_disjointness_checked: true,
     });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
@@ -325,7 +324,6 @@ describe("ReviewTab validation-reference affordance", () => {
       conf: 0.5,
       reason: "Not yet. Too few images have been reviewed.",
       buckets_stamped: [PRED_DIR_A],
-      train_disjointness_checked: null,
     });
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
@@ -345,7 +343,6 @@ describe("ReviewTab validation-reference affordance", () => {
       conf: 0.5,
       reason: joined,
       buckets_stamped: [PRED_DIR_A],
-      train_disjointness_checked: null,
     });
     const { container } = render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());

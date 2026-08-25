@@ -810,12 +810,12 @@ registered at HEAD.
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:654` |
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:704` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:724` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:774` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1102` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1140` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1168` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1288` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1316` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:771` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1108` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1146` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1174` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1294` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1322` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1016,7 +1016,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:926`.
 
 A prediction record's `created_by` is one spelling, `resolution.prediction_producer`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:993`, so every checkpoint-backed writer
+`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:999`, so every checkpoint-backed writer
 stamps the same `model:<checkpoint-stem>@<sha256-prefix>` producer identity rather than each door
 composing its own string.
 
@@ -1378,7 +1378,7 @@ one of the stamp filenames `SIDECAR_FILENAMES` names
 (`packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:693`) and every bucket enumeration
 excludes (format 17).
 
-Writer: `write_sidecar`, `resolution.py:896`, the one write, under the stamp's own lock;
+Writer: `write_sidecar`, `resolution.py:902`, the one write, under the stamp's own lock;
 `update_sidecar`, line 809, is the one merge into an existing stamp, reading and writing inside
 one transaction so a promotion cannot drop what the producing run recorded. Both refuse, through
 one shared check (`_check_stamp_claim`, line 768), a stamp claiming validation with no
@@ -1395,7 +1395,7 @@ deliveries (`tools/phenology_tools.py:403,572`). The raster export also records 
 the raster the bucket was produced on, `raster_content_identity`, on every run of that regime,
 and `claim_scope_validated` when a trait triggered block calibration.
 
-Reader: `read_operating_point_sidecar`, `resolution.py:1047`, which never raises: an unreadable
+Reader: `read_operating_point_sidecar`, `resolution.py:1053`, which never raises: an unreadable
 stamp floors the dimension it describes to unvalidated at every reconciler rather than taking down
 a delivery gate. A stamp claiming validation is checked against the record it names by
 `verify_stamp_binding`, line 1399, called from inside every reconciler so no delivery door can
@@ -1756,7 +1756,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 
 Must agree: the stored fingerprint and the recomputed one cover the same inputs.
 Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:254` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:719` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:725` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
 ## S27. Trained-model registry .tcip/models/registry.json
@@ -1769,8 +1769,8 @@ Phase 3 verdict: single.
 ## S28. operating_point.json prediction-bucket sidecar
 
 Must agree: every writer stamps, and every consumer finds, the same provenance keys next to a bucket's predictions.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:937` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; the stamp's whole key set is declared beside it as `STAMP_KEYS`, the constructor's own, plus `STAMP_EXTENSION_KEYS`, the producer-local additions each named for the producer that writes it; `write_sidecar`, line 790, and `update_sidecar`, line 805, are the only writers, both through `sidecar_key`, line 715, both refusing an unearned validation claim, and for this document refusing a top-level key outside that declared union: a fresh mint on its whole body, an update on the keys it introduces). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, line 1159, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, line 1265, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1047` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, line 1395, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:1044` and `tools/inference_tools.py:1380` and `packages/tcip-web/src/tcip_web/routes/inference.py:289`; the review promotion merges into the stored stamp under its lock at `routes/review.py:884`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:943` (`def operating_point_stamp(`, the one stamp constructor, every field required of every producer; the stamp's whole key set is declared beside it as `STAMP_KEYS`, the constructor's own, plus `STAMP_EXTENSION_KEYS`, the producer-local additions each named for the producer that writes it; `write_sidecar`, line 790, and `update_sidecar`, line 805, are the only writers, both through `sidecar_key`, line 715, both refusing an unearned validation claim, and for this document refusing a top-level key outside that declared union: a fresh mint on its whole body, an update on the keys it introduces). A validated claim is earned in two phases beside the resolvers it selects among: `open_validation`, line 1159, runs the document's own resolver over the evidence and refuses a result that cleared no accepted reference, and `seal_validation`, line 1265, takes the covered buckets' content identity from the files as they landed, files the row through the experiment record's validations member, and returns the stamp body with its pointer merged in.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1053` (`read_operating_point_sidecar`, the one reader, with `verify_stamp_binding`, line 1395, deciding inside every reconciler whether a claiming stamp is answered for). The producers are `tools/inference_tools.py:1044` and `tools/inference_tools.py:1380` and `packages/tcip-web/src/tcip_web/routes/inference.py:289`; the review promotion merges into the stored stamp under its lock at `routes/review.py:884`.
 Phase 3 verdict: single.
 
 ## S29. Prediction-bucket immutability
@@ -1797,7 +1797,7 @@ Phase 3 verdict: single.
 ## S32. Single operating-point resolution for all consumers
 
 Must agree: the same model and images yield the same conf/NMS/max_dets/tile whichever entry door asks for them.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:587` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:601` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:372` and `:414` (`raw_operating_point` and `block_calibrated_export_operating_point`, the two uncalibrated regimes). Every door takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
 Phase 3 verdict: single.
 
@@ -1811,7 +1811,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2487` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2503` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:529` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1932` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
