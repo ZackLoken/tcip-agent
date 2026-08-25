@@ -14,6 +14,7 @@ import type Konva from "konva";
 import { api } from "@/api/client";
 import { classesApi, subjectColor } from "@/api/classes";
 import { resultsApi, type RegisteredModel } from "@/api/inference";
+import type { ActionPayload } from "@/api/types.generated";
 import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
@@ -682,7 +683,7 @@ export function ReviewTab() {
   }, [matches]);
 
   async function recordAction(
-    action: "accepted" | "rejected" | "edited",
+    action: Exclude<ActionPayload["action"], "swept">,
     edited?: { box?: [number, number, number, number]; polygon?: number[][] },
   ): Promise<boolean> {
     if (actionPending.current) return false;

@@ -49,11 +49,11 @@ def declared_models() -> list[type[BaseModel]]:
         WorkingScaleBar,
     )
     from tcip_web.routes.coverage import CoveragePayload
-    from tcip_web.routes.review import VerdictActionField
+    from tcip_web.routes.review import ActionPayload
     from tcip_web.state import GuiVocabulary
 
     return [GridGeometry, StatsSource, WorkingScaleBar, CoverageViewing, CoverageRecord,
-            CoveragePayload, VerdictActionField, GuiVocabulary]
+            CoveragePayload, ActionPayload, GuiVocabulary]
 
 
 def render_cache_version() -> int:

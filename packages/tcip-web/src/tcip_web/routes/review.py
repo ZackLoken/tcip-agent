@@ -366,7 +366,7 @@ class Detection(BaseModel):
     pred_idx: Optional[int]
     bbox: tuple[float, float, float, float]
     reviewed: bool = False
-    reviewed_action: Optional[str] = None
+    reviewed_action: Optional[VerdictAction] = None
 
 
 class MatchesResponse(BaseModel):
@@ -438,12 +438,6 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
         ctx, matches, engine, req.image_name, bucket=_bucket_of_file(req.pred_path),
         filter_type=req.filter_type, filter_class=req.filter_class,
     )
-
-
-class VerdictActionField(BaseModel):
-    """The verdict action alone, projected into the browser's type union by the generator."""
-
-    action: VerdictAction
 
 
 class ActionPayload(BaseModel):

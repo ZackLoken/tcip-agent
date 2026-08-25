@@ -13,13 +13,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from tcip_annotation.verdicts import VERDICT_ACTIONS
+from tcip_annotation.verdicts import VerdictAction
 
-POSITIVE_ACTIONS = frozenset(a for a in VERDICT_ACTIONS if a in ("accepted", "edited"))
+POSITIVE_ACTIONS: frozenset[VerdictAction] = frozenset({"accepted", "edited"})
 """The actions by which a breeder affirms an object exists. A rejection is not among them, and
 neither is a verdict that only attests the image was swept."""
 
-REJECTED_ACTION = next(a for a in VERDICT_ACTIONS if a == "rejected")
+REJECTED_ACTION: VerdictAction = "rejected"
 
 _GT_BOX_KEY = "gt_bbox_norm"
 _PRED_BOX_KEY = "pred_bbox_norm"
