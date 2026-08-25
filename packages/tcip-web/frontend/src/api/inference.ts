@@ -61,8 +61,6 @@ export const inferenceApi = {
 
   listJobs: () => getJson<{ jobs: InferenceJob[] }>(ROUTES.getInferenceJobs),
 
-  getJob: (jobId: string) => getJson<InferenceJob>(ROUTES.getInferenceJobsByJobId(jobId)),
-
   cancel: (jobId: string) =>
     postJson<{ job_id: string; status: string; cancel_requested: boolean }>(
       ROUTES.postInferenceJobsByJobIdCancel(jobId),

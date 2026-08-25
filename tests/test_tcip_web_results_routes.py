@@ -766,6 +766,26 @@ def test_inference_list_jobs_endpoint(client: TestClient) -> None:
     assert "jobs" in resp.json()
 
 
+def test_inference_list_jobs_carries_each_jobs_warning(client: TestClient) -> None:
+    """Each row of the list route is ``_summary``'s, the one producer the stream and the persisted
+    registry use, so a job's warning reaches the poll as it reaches the stream."""
+    from tcip_web.routes import inference as inference_routes
+
+    job = inference_routes.InferenceJob(
+        job_id="inf-warn-test", checkpoint_path="", images_dir="", output_dir="",
+        conf=0.25, iou=0.5, slice_hw=(0, 0), overlap=0.0,
+        warning="3 images carried no readable capture date",
+    )
+    inference_routes._register(job)
+    try:
+        row = next(r for r in client.get("/api/inference/jobs").json()["jobs"]
+                   if r["job_id"] == "inf-warn-test")
+        assert row["warning"] == "3 images carried no readable capture date"
+    finally:
+        with inference_routes._job_lock:
+            inference_routes._jobs.pop("inf-warn-test", None)
+
+
 def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
     client: TestClient,
 ) -> None:
@@ -777,3 +797,19 @@ def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
     assert frame["error"] == "job not found"
 
 
+def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
+    """``GET /api/inference/jobs/{job_id}`` duplicated the list route over the same registry and
+    had no caller; registering a job first proves this refuses a real job, not only an absent
+    one (an unregistered id already answers 404 without this route existing at all)."""
+    from tcip_web.routes import inference as inference_routes
+
+    job = inference_routes.InferenceJob(
+        job_id="inf-retired-test", checkpoint_path="", images_dir="", output_dir="",
+        conf=0.25, iou=0.5, slice_hw=(0, 0), overlap=0.0,
+    )
+    inference_routes._register(job)
+    try:
+        assert client.get("/api/inference/jobs/inf-retired-test").status_code == 404
+    finally:
+        with inference_routes._job_lock:
+            inference_routes._jobs.pop("inf-retired-test", None)
