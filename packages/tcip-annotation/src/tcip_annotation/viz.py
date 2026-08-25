@@ -49,6 +49,12 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
     (255, 128, 255),   # pink
 ]
 
+_PLATFORM_ROOT_ENV = "TCIP_PROJECT_ROOT"
+"""Mirrors ``tcip_mcp.project_paths.ENV_VAR``. This package must not import ``tcip_mcp`` (see
+packages/tcip-annotation/CLAUDE.md), so the platform-state-root variable name is restated here
+rather than imported; a test holds the two strings equal."""
+
+
 def _viz_base() -> Path:
     """The ``.tcip`` base for viz output. Honors ``TCIP_PROJECT_ROOT`` (the platform-state root the
     MCP server / web backend pin to the active project) so renders land under the project, not the
@@ -57,7 +63,7 @@ def _viz_base() -> Path:
     for standalone ``tcip_annotation`` use."""
     import os
 
-    root = os.environ.get("TCIP_PROJECT_ROOT")
+    root = os.environ.get(_PLATFORM_ROOT_ENV)
     return (Path(root) if root else Path(".")) / ".tcip"
 
 

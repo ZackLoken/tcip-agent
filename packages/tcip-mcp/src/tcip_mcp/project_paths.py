@@ -65,6 +65,19 @@ def resolve_state(path: Path) -> Path:
     return Path(override) / path if override else path
 
 
+def resolve_state_or(path: Path, fallback: Path) -> Path:
+    """The pinned resolution of a relative platform-state path, or the caller's own fallback.
+
+    ``$TCIP_PROJECT_ROOT`` set: the same resolution :func:`resolve_state` gives. Unset: returns
+    ``fallback`` rather than ``path`` unchanged, for a caller (e.g. an unpinned render cache) that
+    needs somewhere real to write when there is no pinned project, not a path resolved against
+    whatever the process cwd happens to be.
+    """
+    if os.environ.get(ENV_VAR):
+        return resolve_state(path)
+    return fallback
+
+
 def repo_root_from_here() -> Path:
     """The repo root inferred from this file's location: the nearest ancestor holding
     ``.mcp.json``, checked across every ancestor before falling back to the nearest one holding
