@@ -35,7 +35,10 @@ early_stopping:
 
 Early stopping and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
-(defaults to the composite objective for detection/instance_seg, `val_loss` otherwise). For a
+(defaults to the composite objective for detection/instance_seg, `val_loss` otherwise), and both
+compare in whichever direction `evaluation.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
+not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, selecting on `loss`
+keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
 count trait with a center-match criterion, an explicit `selection_metric` must be one of the
 trait's own governing metrics (`objective`/`f1`/`precision`/`recall`/`loss`); the map50-family
 comparability metrics are rejected, since selecting checkpoints by a metric the trait doesn't

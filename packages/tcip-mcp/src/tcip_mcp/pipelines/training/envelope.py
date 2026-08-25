@@ -296,6 +296,13 @@ class TrainContext:
         stamped (audit/provenance are unconditional) but is not itself registered; call
         ``ctx.set_final_weights(path)`` with the path this method returns if you want a
         non-conventional tag to become the deliverable.
+
+        A ``metrics`` key in ``state`` becomes the registered entry's ``metrics``, with
+        ``metrics_source="training_source"``: the platform wrote it into the artifact but never
+        measured it, since it is whatever this loop chose to put there. Registering by
+        ``metrics_source`` this way ranks only on request (``select_best_model(...,
+        include_unverified=True)``), never by default alongside the platform's own
+        ``default_train`` runs.
         """
         from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, write_checkpoint

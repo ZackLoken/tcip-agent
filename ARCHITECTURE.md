@@ -347,6 +347,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 7 | 0 |
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 3 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
+| scripts/conform_registry_metrics_source.py | Conform a project's registry entries to carry ``metrics_source``, for an entry registered before the field existed. | 2 | 0 |
 | scripts/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
 | scripts/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 1 | 0 |
 | scripts/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 4 | 0 |
@@ -580,8 +581,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_model` | `model_tools.py:18` | yes | Register a trained model in the project model registry. |  <!-- queued: P5-23 merge-or-split -->
-| `list_registered_models` | `model_tools.py:63` | yes | List models in the project registry. |
-| `select_best_model` | `model_tools.py:88` | yes | Get the best registered model by an explicit metric, no default is assumed. |
+| `list_registered_models` | `model_tools.py:75` | yes | List models in the project registry. |
+| `select_best_model` | `model_tools.py:123` | yes | Get the best registered model by an explicit metric, no default is assumed. |
 
 ### operationalization_tools.py (1 tool)
 
@@ -1227,7 +1228,7 @@ are listed here with the rest rather than taking numbers of their own.
 - `config.json` (`config_key`, `experiments.py:114`): written by `create_experiment`,
   `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:432` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:942`, and `compare_experiments`, `experiments.py:1063`.
+  `experiments.py:942`, and `compare_experiments`, `experiments.py:1078`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (332), `update_status`
   (`experiments.py:413`), `stamp_run_identity` (`experiments.py:510`), `_touch_heartbeat`
   (`experiments.py:593`). Read by `get_experiment` (942), `reconstruct_run_status`
@@ -1235,7 +1236,7 @@ are listed here with the rest rather than taking numbers of their own.
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (332) and
   `update_lineage`, `experiments.py:908`. Read by `get_experiment` (942) and
-  `get_experiment_lineage`, `experiments.py:1107`.
+  `get_experiment_lineage`, `experiments.py:1122`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (332) and
   `record_artifact`, `experiments.py:876`. Read by `get_experiment` (942).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
@@ -1287,12 +1288,27 @@ Path: `<project_path>/.tcip/models/registry.json`.
 Writer: `ModelRegistry.register_model`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py:200`,
 which re-reads the index, replaces one entry by name and writes it back inside one storage-seam
 transaction on the key `registry_index_key` mints, same file, line 36, so a concurrent registrar's
-entries are not clobbered.
+entries are not clobbered. `register_model` takes `metrics_source` as a required keyword,
+`"trainer"` / `"training_source"` / `"caller"` / `None`, naming which path produced `metrics`
+without claiming anyone verified it; only the two production callers set it,
+`register_model_from_experiment` (`experiments.py:950`, reading whether the run's config carries
+`training_source`) and the `register_model` tool's explicit mode (`tools/model_tools.py:18`,
+`"caller"` when `metrics` is non-empty). `register_model_from_experiment` no longer falls back to
+the run's `metrics.jsonl` log for a checkpoint with no metrics dict; such a registration carries
+`metrics={}` and `metrics_source=None`, and the load failure that produced it is logged rather
+than swallowed. `scripts/conform_registry_metrics_source.py` conforms an entry that predates the
+key.
 
 Readers: `read_registry_index`, `model_registry.py:51`, the read path for anything outside the
-module (`scripts/doctor.py:111`), and the entry-by-entry accessors built on it:
-`ModelRegistry.list_models`, line 297; `get_model`, line 303; `best_model`, line 310;
-`verify_model`, line 271.
+module (`scripts/doctor.py:125`, `"metrics_source"`), and the entry-by-entry accessors built on
+it: `ModelRegistry.list_models`, line 319; `get_model`, line 325; `best_model`, line 332;
+`verify_model`, line 293. `best_model` takes `metric_key` and `higher_is_better` as required
+keywords, no default and no name heuristic, and by default ranks only entries whose
+`metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
+`select_best_model` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
+`evaluation.HIGHER_IS_BETTER_BY_METRIC` (`pipelines/training/evaluation.py:109`) when the caller
+states none, the single declared-direction mapping `resolve_selection_metric`
+(`pipelines/training/generic_trainer.py`) also reads for the trainer's own checkpoint selection.
 
 Seam S27 ("Trained-model registry .tcip/models/registry.json"), verdict `one-side-only`,
 `phase0_implementation: once, shared`: `tests/test_lifecycle_wiring.py:7`,
@@ -1725,7 +1741,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1128` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1143` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
@@ -1809,7 +1825,7 @@ Phase 3 verdict: duplicated.
 ## S42. training_source bespoke train(ctx) seam  <!-- queued: P5-321 unify -->
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:378` (`training_source = run.config.get("training_source")`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:385` (`training_source = run.config.get("training_source")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:89` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
@@ -1824,7 +1840,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the smoke batch has the same shape the trainer actually feeds model.forward for the task.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_contract.py:48` (`def _synth_batch(`, which synthesizes per-sample `(image, target)` items shaped like a dataset's `__getitem__` and hands them to the trainer's own collate).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py:453` (`def task_collate(task: str):`, the collate the DataLoader assembles the training batch with).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py:462` (`def task_collate(task: str):`, the collate the DataLoader assembles the training batch with).
 Phase 3 verdict: single.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function is defined at `model_contract.py:48` (`def _synth_batch(`).
 
