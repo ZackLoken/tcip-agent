@@ -9,6 +9,7 @@ import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { CoverageMinimap } from "@/components/Canvas/CoverageMinimap";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { useBandSelection } from "@/hooks/useBandSelection";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
 import { useImageBands } from "@/hooks/useImageBands";
@@ -17,12 +18,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionCompleteness } from "@/hooks/useRegionCompleteness";
 import { useRegionServes } from "@/hooks/useRegionServes";
-import {
-  compositeParams,
-  defaultBandSelection,
-  isPlainColourFrame,
-  type BandSelection,
-} from "@/lib/bandSelection";
+import { compositeParams } from "@/lib/bandSelection";
 import { stepUnsweptCell, type GridCell } from "@/lib/coverage";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { currentImage, labelPath } from "@/lib/paths";
@@ -348,16 +344,7 @@ export function AnnotateTab() {
   // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
   // the breeder, carried across image navigation until the dataset's own band set changes.
   const bandsInfo = useImageBands(imgPath);
-  const [bandSelection, setBandSelection] = useState<BandSelection | null>(null);
-  useEffect(() => {
-    // An ordinary RGBA frame has four bands and no band choice to make: it displays as its own
-    // pixels, so no selection is seeded and the picker stays out of the way.
-    if (bandsInfo && bandsInfo.band_count > 3 && !isPlainColourFrame(bandsInfo)) {
-      setBandSelection((prev) => prev ?? defaultBandSelection(bandsInfo.bands));
-    } else {
-      setBandSelection(null);
-    }
-  }, [bandsInfo]);
+  const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
 
   // Every request for this view (the canvas' own and the prefetcher's warm-up) carries one set
   // of band params, so the two never warm and read different renders of the same image.

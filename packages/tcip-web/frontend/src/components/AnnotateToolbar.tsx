@@ -15,7 +15,7 @@ import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageNav } from "@/hooks/useImageNav";
-import type { BandSelection } from "@/lib/bandSelection";
+import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
 import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
 
@@ -476,20 +476,23 @@ export function AnnotateToolbar({
               title="Show or hide annotation overlays"
             />
           </div>
-          {bandsInfo && bandsInfo.band_count > 3 && bandSelection && onBandSelectionChange && (
-            <>
-              <span aria-hidden className="h-5 w-px bg-tcip-border" />
-              <BandPicker
-                bandCount={bandsInfo.band_count}
-                bands={bandsInfo.bands}
-                selection={bandSelection}
-                onChange={onBandSelectionChange}
-                sampled={bandsInfo.sampled}
-                pixelFraction={bandsInfo.pixel_fraction}
-                overviewScale={bandsInfo.overview_scale}
-              />
-            </>
-          )}
+          {bandsInfo &&
+            bandSelection &&
+            onBandSelectionChange &&
+            showsBandPicker(bandsInfo, bandSelection) && (
+              <>
+                <span aria-hidden className="h-5 w-px bg-tcip-border" />
+                <BandPicker
+                  bandCount={bandsInfo.band_count}
+                  bands={bandsInfo.bands}
+                  selection={bandSelection}
+                  onChange={onBandSelectionChange}
+                  sampled={bandsInfo.sampled}
+                  pixelFraction={bandsInfo.pixel_fraction}
+                  overviewScale={bandsInfo.overview_scale}
+                />
+              </>
+            )}
           <div className="flex-1" />
           <div className="flex items-center gap-2">
             {isLocked && (

@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { subjectColor, type AttributeDef, type ImageStatus, type Registry } from "@/api/classes";
 import type { ActionPayload } from "@/api/types.generated";
+import type { BandSelection } from "@/lib/bandSelection";
 import {
   datasetKey,
   loadDatasetUi,
@@ -134,6 +135,13 @@ const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   lastFlushedKey: null,
 };
 
+interface BandSelectionState {
+  /** The breeder's chosen band composite for each distinct band set this session has seen, keyed
+   *  by bandSetSignature (the image's band names, in order). Absent means no change has been made
+   *  for that set yet; useBandSelection is the one reader/writer, never the map directly. */
+  byBandSet: Record<string, BandSelection>;
+}
+
 interface ReviewTabState {
   matches: MatchesResponse | null;
   loading: boolean;
@@ -241,6 +249,10 @@ export interface AppState {
 
   /** Review tab derived state. */
   review: ReviewTabState;
+
+  /** Band-composite selection, held per band-set signature; see useBandSelection. */
+  bandSelection: BandSelectionState;
+  setBandSelectionFor: (signature: string, selection: BandSelection) => void;
 
   /** Dataset subject registry + per-image status + annotate ui. */
   registry: RegistryState;
@@ -413,6 +425,11 @@ export const useStore = create<AppState>()((set, get) => ({
   wsVersion: 0,
   canvas: EMPTY_CANVAS,
   review: { matches: null, loading: false, focusDetectionIdx: null, refetchNonce: 0 },
+  bandSelection: { byBandSet: {} },
+  setBandSelectionFor: (signature, selection) =>
+    set((s) => ({
+      bandSelection: { byBandSet: { ...s.bandSelection.byBandSet, [signature]: selection } },
+    })),
   registry: { subjects: {}, loaded: false },
   imageStatus: { byImage: {}, activeFilter: "all" },
   reviewStatus: { byImage: {}, hasDetections: {}, activeFilter: "all" },

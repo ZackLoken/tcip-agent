@@ -30,8 +30,23 @@ export function isPlainColourFrame(bandsInfo: ImageBandsResponse): boolean {
   );
 }
 
+/** The band-set signature a selection is held per: the image's band names, in declared order,
+ *  joined. Two images share a selection only when they share this exact signature. */
+export function bandSetSignature(bands: ImageBandInfo[]): string {
+  return bands.map((b) => b.name).join(",");
+}
+
+/** Whether every one of `selection`'s three band names is actually among `bandsInfo`'s own bands.
+ *  A selection kept for one band-set signature must never be applied to different metadata, the
+ *  transient shape a fast image switch can produce while a fetch is still in flight. */
+function selectionMatchesBands(bandsInfo: ImageBandsResponse, selection: BandSelection): boolean {
+  const names = new Set(bandsInfo.bands.map((b) => b.name));
+  return names.has(selection.r) && names.has(selection.g) && names.has(selection.b);
+}
+
 /** The `bands`/`stretch` an image request carries for the current selection, or neither when the
- *  source has no band picker (a plain RGB dataset serves its own pixels).
+ *  source has no band picker (a plain RGB dataset serves its own pixels), the frame is an ordinary
+ *  colour photo, or the selection names bands this metadata doesn't actually carry.
  *
  *  One expression of that, shared by everything that requests an image for the same view: the
  *  canvas and the prefetcher would otherwise warm and read two different renders of one image. */
@@ -40,7 +55,20 @@ export function compositeParams(
   selection: BandSelection | null,
 ): { bands?: string; stretch?: Stretch } {
   if (!bandsInfo || bandsInfo.band_count <= 3 || !selection) return {};
+  if (isPlainColourFrame(bandsInfo) || !selectionMatchesBands(bandsInfo, selection)) return {};
   return { bands: `${selection.r},${selection.g},${selection.b}`, stretch: selection.stretch };
+}
+
+/** Whether a band picker may show for this frame and selection: multispectral, not a plain colour
+ *  photo, and a selection whose names this metadata actually declares. The one gate every render of
+ *  the picker (Annotate's toolbar, Review's own) shares, so neither shows one for the other's stale
+ *  metadata mid-switch. */
+export function showsBandPicker(
+  bandsInfo: ImageBandsResponse | null | undefined,
+  selection: BandSelection | null | undefined,
+): boolean {
+  if (!bandsInfo || bandsInfo.band_count <= 3 || !selection) return false;
+  return !isPlainColourFrame(bandsInfo) && selectionMatchesBands(bandsInfo, selection);
 }
 
 /** First three declared bands as the initial R/G/B assignment (falling back to the first band

@@ -19,6 +19,7 @@ import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
+import { useBandSelection } from "@/hooks/useBandSelection";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useDisclosure } from "@/hooks/useDisclosure";
 import { useImageBands } from "@/hooks/useImageBands";
@@ -45,12 +46,7 @@ import { useReviewColors, type ReviewColors } from "@/lib/reviewColors";
 import type { LoadedImage } from "@/lib/imageLoader";
 import { currentImage, labelPath, predictionPath } from "@/lib/paths";
 import { zoomToRect } from "@/lib/viewGeometry";
-import {
-  compositeParams,
-  defaultBandSelection,
-  isPlainColourFrame,
-  type BandSelection,
-} from "@/lib/bandSelection";
+import { compositeParams, showsBandPicker } from "@/lib/bandSelection";
 import { datasetKey, loadDatasetVisibility, saveDatasetVisibility } from "@/lib/datasetUiState";
 import {
   annotationGeometry,
@@ -135,16 +131,7 @@ export function ReviewTab() {
   // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
   // the breeder, carried across image navigation until the dataset's own band set changes.
   const bandsInfo = useImageBands(imgPath);
-  const [bandSelection, setBandSelection] = useState<BandSelection | null>(null);
-  useEffect(() => {
-    // An ordinary RGBA frame has four bands and no band choice to make: it displays as its own
-    // pixels, so no selection is seeded and the picker stays out of the way.
-    if (bandsInfo && bandsInfo.band_count > 3 && !isPlainColourFrame(bandsInfo)) {
-      setBandSelection((prev) => prev ?? defaultBandSelection(bandsInfo.bands));
-    } else {
-      setBandSelection(null);
-    }
-  }, [bandsInfo]);
+  const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
 
   // Every request for this view (the canvas' own and the prefetcher's warm-up) carries one set of
   // band params, so the two never warm and read different renders of the same image.
@@ -1508,7 +1495,7 @@ export function ReviewTab() {
               <span className="text-tcip-fp max-w-[280px]">{pqError}</span>
             )}
 
-            {bandsInfo && bandsInfo.band_count > 3 && bandSelection && (
+            {bandsInfo && bandSelection && showsBandPicker(bandsInfo, bandSelection) && (
               <>
                 <span aria-hidden className="mx-2 h-4 w-px bg-tcip-border" />
                 <BandPicker
