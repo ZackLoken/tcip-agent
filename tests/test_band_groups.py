@@ -430,7 +430,7 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
     src.mkdir()
     Image.new("RGB", (16, 16)).save(src / "a.jpg")
 
-    manifest = ingest_images(source=str(src), name="plain_proj")
+    manifest = ingest_images(source=str(src), name="plain_proj_default")
     assert manifest["band_groups"] == {"formed": [], "refused": [], "manifests": []}
 
 

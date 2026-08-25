@@ -22,6 +22,7 @@ def test_set_active_writes_marker(monkeypatch):
     monkeypatch.setattr(
         web_client, "post_panel_event", lambda *a, **k: {"delivered": False}
     )
+    (workspace.project_path("hazelnut_catkin_valley-farm") / ".tcip").mkdir(parents=True)
     result = set_active_project(name="hazelnut_catkin_valley-farm")
     assert "error" not in result
     assert result["name"] == "hazelnut_catkin_valley-farm"
@@ -34,6 +35,7 @@ def test_set_active_reports_gui_notified_when_delivered(monkeypatch):
     import tcip_mcp.web_client as web_client
 
     monkeypatch.setattr(web_client, "post_panel_event", lambda *a, **k: {"delivered": True})
+    (workspace.project_path("chestnut_burr_site-a") / ".tcip").mkdir(parents=True)
     result = set_active_project(name="chestnut_burr_site-a")
     assert result["gui_notified"] is True
 
@@ -60,3 +62,10 @@ def test_set_active_rejects_traversal():
     result = set_active_project(name="../escape")
     assert "error" in result
     assert workspace.read_active_project() is None
+
+
+def test_set_active_refuses_a_name_with_no_tcip_and_leaves_no_directory():
+    result = set_active_project(name="no_such_project")
+    assert "error" in result
+    assert workspace.read_active_project() is None
+    assert not workspace.project_path("no_such_project").exists()

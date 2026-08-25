@@ -65,9 +65,12 @@ beforeEach(() => {
   localStorage.removeItem("tcip.recent_projects");
   vi.mocked(api.projects.list).mockReset();
   vi.mocked(api.dataset.select).mockReset();
+  vi.mocked(api.projects.setActive).mockReset();
+  vi.mocked(api.projects.setActive).mockResolvedValue({ name: "x", path: "/x" });
   vi.mocked(api.projects.list).mockResolvedValue({
     workspace: "/w",
     active: null,
+    active_path: null,
     projects: [summary("alpha"), summary("beta")],
   });
   openOn("alpha");
@@ -124,5 +127,37 @@ describe("recent-projects menu", () => {
     fireEvent.click(await screen.findByText("beta"));
     await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.dataset.select).mock.calls[0][0].project_root).toBe("/w/beta");
+    // Opening a recent project is a human-initiated adoption: the marker gets written.
+    expect(api.projects.setActive).toHaveBeenCalledWith("beta");
+  });
+});
+
+describe("switching date", () => {
+  it("does not write the active-project marker (not an adoption)", async () => {
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: {
+        project_root: "/w/alpha",
+        dataset_root: "/w/alpha",
+        subject: "subject_a",
+        date: "2026-01-01",
+        image_list: [],
+        current_image_index: 0,
+        annotations_dir: null,
+        predictions_dir: null,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/w",
+      active: null,
+      active_path: null,
+      projects: [{ ...summary("alpha"), dates: ["2026-01-01", "2026-02-02"] }],
+    });
+    render(<ProjectBreadcrumb />);
+    fireEvent.click(screen.getByTitle("Switch date"));
+    fireEvent.click(await screen.findByText("2026-02-02"));
+    await waitFor(() => expect(api.dataset.select).toHaveBeenCalledTimes(1));
+    expect(api.projects.setActive).not.toHaveBeenCalled();
   });
 });

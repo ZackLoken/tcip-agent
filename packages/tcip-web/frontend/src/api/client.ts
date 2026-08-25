@@ -134,10 +134,12 @@ export interface ProjectSummary {
 export const api = {
   projects: {
     list: () =>
-      call<{ workspace: string; active: string | null; projects: ProjectSummary[] }>(
-        ROUTES.getProjects,
-      ),
-    getActive: () => call<{ name: string | null; path: string | null }>(ROUTES.getProjectsActive),
+      call<{
+        workspace: string;
+        active: string | null;
+        active_path: string | null;
+        projects: ProjectSummary[];
+      }>(ROUTES.getProjects),
     setActive: (name: string) =>
       call<{ name: string; path: string }>(ROUTES.postProjectsActive, {
         method: "POST",

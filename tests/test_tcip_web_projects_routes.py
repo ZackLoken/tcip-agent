@@ -127,21 +127,24 @@ def test_active_marker_round_trip(client, workspace_dir):
     _make_project(workspace_dir, "hazelnut_catkin_valley-farm", dates=["2026-02-11"])
 
     # Unset initially
-    assert client.get("/api/projects/active").json() == {"name": None, "path": None}
+    unset = client.get("/api/projects").json()
+    assert unset["active"] is None
+    assert unset["active_path"] is None
 
     # Set it
     resp = client.post("/api/projects/active", json={"name": "hazelnut_catkin_valley-farm"})
     assert resp.status_code == 200
     assert resp.json()["name"] == "hazelnut_catkin_valley-farm"
 
-    # Read it back
-    active = client.get("/api/projects/active").json()
-    assert active["name"] == "hazelnut_catkin_valley-farm"
-    assert active["path"] == str((workspace_dir / "hazelnut_catkin_valley-farm").resolve())
+    # Read it back through the list route's active/active_path fields
+    listed = client.get("/api/projects").json()
+    assert listed["active"] == "hazelnut_catkin_valley-farm"
+    assert listed["active_path"] == str((workspace_dir / "hazelnut_catkin_valley-farm").resolve())
 
     # is_active flag surfaces in the list
-    projects = client.get("/api/projects").json()["projects"]
-    assert next(p for p in projects if p["name"] == "hazelnut_catkin_valley-farm")["is_active"]
+    assert next(p for p in listed["projects"] if p["name"] == "hazelnut_catkin_valley-farm")[
+        "is_active"
+    ]
 
 
 def test_set_active_rejects_traversal(client, workspace_dir):
@@ -165,9 +168,11 @@ def test_wrong_encoding_marker_does_not_break_the_front_door(client, workspace_d
 
     resp = client.get("/api/projects")
     assert resp.status_code == 200
-    assert {p["name"] for p in resp.json()["projects"]} == {"hazelnut_catkin_valley-farm"}
+    body = resp.json()
+    assert {p["name"] for p in body["projects"]} == {"hazelnut_catkin_valley-farm"}
     # The undecodable marker is treated as unset.
-    assert client.get("/api/projects/active").json() == {"name": None, "path": None}
+    assert body["active"] is None
+    assert body["active_path"] is None
 
 
 def test_active_returns_null_when_marker_points_at_missing_project(client, workspace_dir):
@@ -180,4 +185,6 @@ def test_active_returns_null_when_marker_points_at_missing_project(client, works
 
     shutil.rmtree(workspace_dir / "temp_project_site")
 
-    assert client.get("/api/projects/active").json() == {"name": None, "path": None}
+    body = client.get("/api/projects").json()
+    assert body["active"] is None
+    assert body["active_path"] is None

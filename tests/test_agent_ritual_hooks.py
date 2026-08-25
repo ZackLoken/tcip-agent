@@ -1,9 +1,9 @@
-"""SessionStart ritual hook: fast, stdlib-only directive injection.
+"""SessionStart ritual hook: fast directive injection through the platform's own storage seam.
 
 Locks the compliant design (Anthropic guidance: SessionStart must be quick, context-loading only):
 it injects an ``additionalContext`` directive naming the active project, and it spawns no
-subprocess and imports nothing heavy (the standing check that guards against the reverted 30s
-regression).
+subprocess and never imports the MCP server's tool registration (the standing check that guards
+against the reverted 30s regression).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ def _run(monkeypatch, capsys, stdin: str) -> str:
 
 
 def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
+    """A workspace with a project active through the store, not a hand-written loose file."""
     ws = tmp_path / "ws"
     proj = ws / "hazelnut_demo"
     (proj / ".tcip" / "reports").mkdir(parents=True)
@@ -33,8 +34,11 @@ def _workspace(tmp_path: Path, monkeypatch, *, reports=0, retros=0) -> str:
         (proj / ".tcip" / "reports" / f"r{i}.json").write_text("{}\n")
     for i in range(retros):
         (proj / ".tcip" / "retrospectives" / f"s{i}.md").write_text("# retro\n")
-    (ws / ".active").write_text("hazelnut_demo\n")
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    from tcip_mcp import workspace
+
+    workspace.set_active_project("hazelnut_demo")
     return str(proj)
 
 
@@ -69,19 +73,88 @@ def test_session_start_never_raises_on_garbage_stdin(monkeypatch, capsys):
     _run(monkeypatch, capsys, "not json {{{")
 
 
-def test_session_start_is_fast_stdlib_only_no_subprocess(tmp_path, monkeypatch, capsys):
-    # Standing check for the reverted 30s regression: the hook must never spawn a subprocess or
-    # import tcip_mcp at spawn time. Parse the real imports (via AST, so docstring mentions don't
-    # count) so the fast property can't silently regress.
+def test_session_start_is_fast_no_subprocess_or_tool_registration(tmp_path, monkeypatch, capsys):
+    """Standing check for the reverted 30s regression: no subprocess, and never
+    ``tcip_mcp.tools`` (the MCP server's full tool registration, several seconds by
+    measurement). ``tcip_mcp.workspace``/``tcip_store.binding`` are fine, milliseconds by
+    measurement (see the module docstring), so only ``tcip_mcp.tools`` itself is banned.
+    Parses the real imports via AST, so a docstring mention doesn't count.
+    """
     imported: set[str] = set()
     for node in ast.walk(ast.parse(HOOK_SRC)):
         if isinstance(node, ast.Import):
-            imported.update(a.name.split(".")[0] for a in node.names)
+            imported.update(a.name for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module.split(".")[0])
-    assert "subprocess" not in imported
-    assert "tcip_mcp" not in imported
-    # And it emits its directive without touching either: a fresh interpreter would stay fast.
+            imported.add(node.module)
+    assert not any(name == "subprocess" or name.startswith("subprocess.") for name in imported)
+    assert not any(
+        name == "tcip_mcp.tools" or name.startswith("tcip_mcp.tools.") for name in imported
+    )
+    # It emits its directive without touching either: a fresh interpreter would stay fast.
     _workspace(tmp_path, monkeypatch)
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     assert "SessionStart" in out
+
+
+def test_session_start_reads_a_marker_written_through_the_store(tmp_path, monkeypatch, capsys):
+    """The marker is written through workspace.set_active_project, not a hand-written file; a
+    hook that assumed a loose file rather than reading through the seam would miss it.
+    """
+    _workspace(tmp_path, monkeypatch)
+    out = _run(monkeypatch, capsys, '{"source":"startup"}')
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "hazelnut_demo" in ctx
+    assert "No active project" not in ctx
+
+
+def test_session_start_reads_the_loose_file_when_bound_to_the_file_backend(
+    tmp_path, monkeypatch, capsys
+):
+    """Under TCIP_STORE_BACKEND=file the marker is genuinely the loose file, and the hook
+    running under that same binding must read it and succeed, not refuse.
+    """
+    ws = tmp_path / "ws"
+    proj = ws / "hazelnut_demo"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
+
+    import tcip_store
+    from tcip_mcp import workspace
+    from tcip_store.file_backend import FileBackend
+
+    tcip_store.bind(FileBackend())
+    workspace.set_active_project("hazelnut_demo")
+
+    out = _run(monkeypatch, capsys, '{"source":"startup"}')
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "hazelnut_demo" in ctx
+    assert "could not be adopted" not in ctx
+
+
+def test_session_start_names_the_store_refusal_for_a_loose_file_only_workspace(
+    tmp_path, monkeypatch, capsys
+):
+    """A workspace holding only the loose file the file backend wrote, with no database, is
+    refused by the default (sqlite) backend rather than silently read as if it were fine.
+    """
+    ws = tmp_path / "ws"
+    proj = ws / "hazelnut_demo"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    import tcip_store
+    from tcip_mcp import workspace
+    from tcip_store.file_backend import FileBackend
+
+    monkeypatch.setenv("TCIP_STORE_BACKEND", "file")
+    file_backend = FileBackend()
+    tcip_store.bind(file_backend)
+    workspace.set_active_project("hazelnut_demo")
+    file_backend.close()
+    monkeypatch.delenv("TCIP_STORE_BACKEND", raising=False)
+
+    out = _run(monkeypatch, capsys, '{"source":"startup"}')
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "could not be adopted" in ctx
+    assert "adopt_store" in ctx

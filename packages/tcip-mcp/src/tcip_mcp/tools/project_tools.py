@@ -184,11 +184,22 @@ def _scaffold_project(project_path: str) -> dict:
 def init_project(project_path: str) -> dict:
     """Initialise a TCIP project directory.
 
-    Creates ``.tcip/`` with its artifacts and models directories.
+    Creates ``.tcip/`` with its artifacts and models directories. When ``project_path`` is
+    directly under the workspace, its basename must fit ``crop_subject_phenotype``
+    (``workspace.format_project_name``/``parse_project_name``); a path outside the
+    workspace is not a workspace project and is not held to the scheme.
 
     Args:
         project_path: Root directory of the project.
     """
+    from tcip_mcp import workspace
+
+    p = Path(project_path).expanduser().resolve()
+    if p.parent == workspace.workspace_root():
+        try:
+            workspace.parse_project_name(p.name)
+        except ValueError as exc:
+            return {"error": str(exc)}
     return _scaffold_project(project_path)
 
 
@@ -199,8 +210,9 @@ def set_active_project(name: str) -> dict:
 
     Writes the workspace active-project marker (``<workspace>/.active``) and notifies a
     running GUI to open the project: the loop-closer for the breeder flow ("I structured
-    your images into ``<crop>_<trait>_valley-farm``, opening it now"). ``name`` is a
-    workspace project slug (``{crop}_{trait}_{site}``).
+    your images into ``<crop>_<subject>_<phenotype>``, opening it now"). ``name`` is an
+    existing workspace project's directory name; adoption opens what is there rather than
+    creating anything, so any safely-named project is adoptable, conforming or not.
 
     Args:
         name: The workspace project to make active.
@@ -229,6 +241,36 @@ def set_active_project(name: str) -> dict:
 def _resolve_project_path(project_path: str) -> str:
     from tcip_mcp import workspace
     return workspace.resolve_project_path(project_path)
+
+
+def _root_divergence_report() -> dict[str, str] | None:
+    """Whether this process's platform-state root disagrees with the workspace's
+    active-project marker.
+
+    Adopting a project repins the *adopting process's own* ``TCIP_PROJECT_ROOT``
+    (``workspace.set_active_project``); the web backend and the MCP server are separate
+    processes, so a GUI adoption does not repin this process, and this process's root can
+    keep naming a stale or different project until it is deliberately adopted here too.
+    ``None`` when there is no marker, the marker's name does not resolve, or the two agree.
+    """
+    from tcip_mcp import workspace
+    from tcip_mcp.project_paths import project_root
+
+    name = workspace.read_active_project()
+    if not name:
+        return None
+    try:
+        marker_project = workspace.project_path(name)
+    except ValueError:
+        return None
+    root = project_root()
+    if root == marker_project:
+        return None
+    return {
+        "platform_root": str(root),
+        "marker_project": str(marker_project),
+        "action": "set_active_project",
+    }
 
 
 @mcp.tool()
@@ -283,6 +325,11 @@ def view_gui_state() -> dict:
 def inspect_project(project_path: str = "") -> dict:
     """Get an overview of a TCIP project.
 
+    Carries ``platform_root_diverges_from_marker`` when this process's platform-state root
+    (``$TCIP_PROJECT_ROOT``) names a different project than the workspace's active-project
+    marker: adoption repins only the adopting process, so the GUI and this process can end
+    up naming different projects until both explicitly adopt.
+
     Args:
         project_path: Root directory of the project. Empty defaults to the active project.
     """
@@ -291,6 +338,9 @@ def inspect_project(project_path: str = "") -> dict:
     tcip = root / ".tcip"
 
     status: dict = {"project_path": project_path, "initialized": tcip.is_dir()}
+    divergence = _root_divergence_report()
+    if divergence:
+        status["platform_root_diverges_from_marker"] = divergence
     if not tcip.is_dir():
         return status
 
@@ -513,7 +563,11 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
 def import_project(zip_path: str, destination: str) -> dict:
     """Import an annotation project from a ZIP archive.
 
-    Extracts into the destination directory, preserving the original structure.
+    Extracts into the destination directory, preserving the original structure. When
+    ``destination`` is directly under the workspace, its basename must fit
+    ``crop_subject_phenotype`` (``workspace.format_project_name``/``parse_project_name``);
+    a destination outside the workspace is not a workspace project and is not held to the
+    scheme.
 
     Args:
         zip_path: Path to the ``.tcip.zip`` archive.
@@ -523,7 +577,14 @@ def import_project(zip_path: str, destination: str) -> dict:
     if not zp.is_file():
         return {"error": f"ZIP file not found: {zip_path}"}
 
-    dest = Path(destination)
+    dest = Path(destination).expanduser().resolve()
+    from tcip_mcp import workspace
+
+    if dest.parent == workspace.workspace_root():
+        try:
+            workspace.parse_project_name(dest.name)
+        except ValueError as exc:
+            return {"error": str(exc)}
     dest.mkdir(parents=True, exist_ok=True)
 
     files_extracted = 0

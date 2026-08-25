@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { api, type ProjectSummary } from "@/api/client";
-import { openProjectByName, openWorkspaceProject } from "@/lib/openProject";
+import { adoptProjectByName, openWorkspaceProject } from "@/lib/openProject";
 import { loadRecentProjects } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 
@@ -76,9 +76,9 @@ export function ProjectBreadcrumb() {
     setMenu(null);
     setBusy(true);
     try {
-      // openProjectByName funnels through openWorkspaceProject, which saves the outgoing UI state
-      // and restores this project's saved position/filters; no patchGui here.
-      const sel = await openProjectByName(name);
+      // adoptProjectByName saves the outgoing UI state, restores this project's saved
+      // position/filters, and writes the active-project marker; no patchGui here.
+      const sel = await adoptProjectByName(name);
       if (!sel) pushToast("That project is no longer in the workspace.");
     } catch (e) {
       pushToast(`Could not open project: ${e instanceof Error ? e.message : String(e)}`);
