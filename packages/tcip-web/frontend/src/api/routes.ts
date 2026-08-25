@@ -23,7 +23,6 @@ export const ROUTES = {
   getImagesDimensions: "/api/images/dimensions",
   getImagesOverviewsStatus: "/api/images/overviews/status",
   getInferenceJobs: "/api/inference/jobs",
-  getInferenceJobsByJobId: (jobId: string) => `/api/inference/jobs/${encodeURIComponent(jobId)}`,
   getInferenceJobsByJobIdPreview: (jobId: string) =>
     `/api/inference/jobs/${encodeURIComponent(jobId)}/preview`,
   getMetaReports: "/api/meta/reports",

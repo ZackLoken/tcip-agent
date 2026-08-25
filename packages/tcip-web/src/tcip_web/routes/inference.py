@@ -513,37 +513,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 
 @router.get("/jobs")
 def list_jobs() -> dict:
-    return {
-        "jobs": [
-            {
-                "job_id": j.job_id,
-                "status": j.status,
-                "done": j.done,
-                "total": j.total,
-                "images_dir": j.images_dir,
-                "output_dir": j.output_dir,
-                "error": j.error,
-            }
-            for j in _list_jobs()
-        ]
-    }
-
-
-@router.get("/jobs/{job_id}")
-def get_job(job_id: str) -> dict:
-    j = _get(job_id)
-    if j is None:
-        raise HTTPException(404, f"job not found: {job_id}")
-    return {
-        "job_id": j.job_id,
-        "status": j.status,
-        "done": j.done,
-        "total": j.total,
-        "images_dir": j.images_dir,
-        "output_dir": j.output_dir,
-        "error": j.error,
-        "results_tail": j.results[-50:],
-    }
+    return {"jobs": [_summary(j) for j in _list_jobs()]}
 
 
 @router.get("/jobs/{job_id}/preview")
