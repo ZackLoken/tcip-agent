@@ -43,6 +43,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `render_failure_cases` | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
+| `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a calibration experiment, a pre-created one never launched) |
 | `select_best_model` | Rank registered models by a stated metric, direction and verification status |
 
 `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion

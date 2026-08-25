@@ -1169,15 +1169,24 @@ def register_model_from_experiment(
     }
 
 
+def _distinct_epoch_count(rows: list[dict[str, Any]]) -> int:
+    """The number of distinct ``epoch`` values among ``rows``, compared as each row's own
+    canonical JSON text so an ``epoch`` of any type, including a bespoke loop's own unhashable
+    one, counts without raising."""
+    seen = {json.dumps(row.get("epoch"), sort_keys=True, default=str) for row in rows}
+    return len(seen)
+
+
 def get_experiment(
     experiment_id: str, *, metrics_limit: int | None = None, metrics_offset: int = 0,
 ) -> dict[str, Any]:
     """Read full experiment state.
 
-    ``metrics`` can be paginated for long runs: ``metrics_offset`` skips epochs and
-    ``metrics_limit`` caps how many are returned; ``n_epochs`` is always the true total.
-    Defaults return all metrics. ``validations`` is the whole claim history, unpaginated:
-    a run earns few claims where it logs many epochs.
+    ``metrics`` can be paginated for long runs: ``metrics_offset`` and ``metrics_limit`` index
+    into the row list, so ``n_rows`` (the row count) is the paging bound, not ``n_epochs`` (the
+    count of distinct ``epoch`` values; the stock loop logs one row per epoch, a bespoke one may
+    log several). Defaults return all metrics. ``validations`` is the whole claim history,
+    unpaginated: a run earns few claims where it logs many epochs.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -1193,7 +1202,8 @@ def get_experiment(
 
     rows = read_metrics(experiment_id)
     end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
-    result["n_epochs"] = len(rows)
+    result["n_epochs"] = _distinct_epoch_count(rows)
+    result["n_rows"] = len(rows)
     result["metrics"] = rows[metrics_offset:end]
     result["metrics_offset"] = metrics_offset
     result["validations"] = read_validations(experiment_id)
@@ -1202,26 +1212,78 @@ def get_experiment(
 
 
 def list_experiments() -> list[dict[str, Any]]:
-    """List all experiments with summary info.
+    """List every experiment the store holds a status record for, run or not.
 
-    The ids come from the same status-record enumeration :func:`resolve_experiment_for_run`
-    resolves against, so a record the resolver finds is a record this lists.
+    Covers a calibration experiment (id derived from a claim's content, unreconstructable any
+    other way), a review-feedback lineage, a pre-created experiment never launched, and a
+    launched one whose ``run_id`` stamp was lost, none of which :func:`list_training_runs` (a
+    launched record only) lists. The ids come from the same status-record enumeration
+    :func:`resolve_experiment_for_run` resolves against, so a record the resolver finds is a
+    record this lists. ``run_id`` is the stamp :func:`stamp_run_identity` recorded, or ``None``
+    when a launch never reached it or the record was never launched at all;
+    ``has_model_source`` is whether the config carries a ``model_source`` (a training run) versus
+    an experiment that tracks something else.
     """
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
     experiments = []
     for experiment_id in experiment_ids_with_status(None):
         status = read_member(status_key(experiment_id))
         if isinstance(status, dict):
+            config = read_member(config_key(experiment_id), {})
             experiments.append({
                 "experiment_id": experiment_id,
                 "state": status.get("state", "unknown"),
                 "created": status.get("created"),
+                "run_id": status.get("run_id"),
+                "has_model_source": bool(isinstance(config, dict) and config.get(MODEL_SOURCE_KEY)),
             })
 
     return experiments
 
 
+def _refused_mutations(eid: str) -> list[dict[str, Any]] | None:
+    """Every ``experiment_mutation_refused`` audit entry naming ``eid``, as its ``timestamp`` and
+    ``arguments``, or ``None`` when the platform audit log can't be read (told apart from an
+    empty list, which means the log read fine and holds no refusal against this experiment). Any
+    writer's refusal lands here, a watchdog's cross-terminal write after a completion included;
+    it is a record of what was refused, not a tamper signal, an outside append leaves no entry.
+    """
+    try:
+        from tcip_store import read_log
+
+        from tcip_mcp.audit import audit_log_key
+
+        page = read_log(audit_log_key())
+    except Exception:
+        return None
+    return [
+        {"timestamp": e.get("timestamp"), "arguments": e.get("arguments", {})}
+        for e in page.records
+        if e.get("tool") == "experiment_mutation_refused"
+        and e.get("arguments", {}).get("experiment_id") == eid
+    ]
+
+
 def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
-    """Side-by-side comparison of multiple experiments."""
+    """Side-by-side comparison of multiple experiments.
+
+    Per experiment: ``recorded_state`` (the stored state) and ``state`` (the same
+    heartbeat-derived state :func:`list_training_runs` reports, via :func:`derived_state`, so a
+    run whose process died compares as ``"interrupted"`` rather than ``"running"``);
+    ``log_locked``, true when ``recorded_state`` is in the mutation lock's terminal set, no
+    tamper claim, only that :func:`log_metrics` refuses further rows (a cancelled run reads
+    ``log_locked`` false: the lock admits rows there, even though no production flow appends to
+    one); ``last_logged_metrics``, the last metrics row (not ``"final"``: an unlocked log can
+    still take a row after it); ``rows_after_end``, the count of rows whose ``timestamp`` is
+    later than the record's ``ended`` (the one row an unlocked log's own append can admit after
+    the mark, or any row an outside writer appended later), ``None`` when the record has no
+    ``ended``; ``n_epochs``/``n_rows``, always present; and ``refused_mutations``, every refused
+    write the platform audit log recorded against this experiment (see
+    :func:`_refused_mutations`), absent rather than empty when that log itself can't be read.
+    Reading it costs one scan of the platform audit log per compare call, on top of one
+    :func:`get_experiment` per experiment compared.
+    """
     comparisons: list[dict[str, Any]] = []
 
     for eid in experiment_ids:
@@ -1230,16 +1292,33 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
             comparisons.append({"experiment_id": eid, "error": exp["error"]})
             continue
 
+        status_doc = exp.get("status")
+        status_doc = status_doc if isinstance(status_doc, dict) else {}
+        recorded_state = status_doc.get("state")
+        ended = status_doc.get("ended")
+
         summary: dict[str, Any] = {
             "experiment_id": eid,
-            "state": exp.get("status", {}).get("state"),
+            "recorded_state": recorded_state,
+            "state": derived_state(status_doc, 600.0),  # this module's own default window
+            "log_locked": recorded_state in _TERMINAL_STATES,
+            "n_epochs": exp["n_epochs"],
+            "n_rows": exp["n_rows"],
         }
 
-        # Get final metrics
         metrics = exp.get("metrics", [])
         if metrics:
-            summary["final_metrics"] = metrics[-1]
-            summary["n_epochs"] = len(metrics)
+            summary["last_logged_metrics"] = metrics[-1]
+        rows_after_end = None
+        if ended:
+            rows_after_end = sum(
+                1 for row in metrics if isinstance(row, dict) and row.get("timestamp", "") > ended
+            )
+        summary["rows_after_end"] = rows_after_end
+
+        refused = _refused_mutations(eid)
+        if refused is not None:
+            summary["refused_mutations"] = refused
 
         # Get config summary
         config = exp.get("config", {})

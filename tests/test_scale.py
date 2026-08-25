@@ -56,3 +56,19 @@ def test_get_experiment_metrics_pagination(tmp_path, monkeypatch):
     assert len(page["metrics"]) == 4
     assert page["metrics"][0]["epoch"] == 3
     assert page["metrics_offset"] == 3
+
+
+def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path, monkeypatch):
+    """n_epochs is the count of distinct epoch values, not the row count: a bespoke loop logging
+    train and val as separate rows under the same epoch still counts as one epoch. n_rows is the
+    row count, and is what metrics_offset/metrics_limit actually page against."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, get_experiment, log_metrics
+
+    create_experiment("exp2", {"model_source": {"builder": "x:y"}})
+    log_metrics("exp2", 3, {"loss_train": 0.5})
+    log_metrics("exp2", 3, {"loss_val": 0.4})
+
+    result = get_experiment("exp2")
+    assert result["n_rows"] == 2
+    assert result["n_epochs"] == 1

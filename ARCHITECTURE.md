@@ -546,13 +546,14 @@ Docstring is the function's docstring first line, verbatim.
 | `validate_data_quality` | `data_tools.py:161` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
 | `make_splits` | `data_tools.py:231` | yes | Compute a leakage-free, annotation-stratified train/val/test split. |
 
-### experiment_tools.py (3 tools)
+### experiment_tools.py (4 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `create_experiment` | `experiment_tools.py:11` | yes | Create a new experiment to track a training run. |
 | `get_experiment` | `experiment_tools.py:41` | yes | Read an experiment record. |
-| `compare_experiments` | `experiment_tools.py:65` | yes | Side-by-side comparison of multiple experiments. |
+| `list_experiments` | `experiment_tools.py:78` | yes | Enumerate every experiment the store holds a status record for. |
+| `compare_experiments` | `experiment_tools.py:101` | yes | Side-by-side comparison of multiple experiments. |
 
 ### feedback_tools.py (2 tools)
 
@@ -633,18 +634,24 @@ Docstring is the function's docstring first line, verbatim.
 | `archive_project` | `project_tools.py:478` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
 | `import_project` | `project_tools.py:605` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
+### scale_tools.py (1 tool)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `calibrate_physical_scale` | `scale_tools.py:84` | yes | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
+
 ### training_tools.py (8 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:43` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:392` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:610` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:664` | yes | List all training runs in this session. |  <!-- queued: P5-29 unify -->
-| `cancel_training` | `training_tools.py:690` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:719` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1089` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2040` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:48` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:397` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:615` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:753` | yes | List all training runs in this session. |  <!-- queued: P5-29 unify -->
+| `cancel_training` | `training_tools.py:767` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:796` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1163` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2114` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -657,7 +664,7 @@ Docstring is the function's docstring first line, verbatim.
 | `capture_live_canvas` | `vision_tools.py:1061` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1191` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
-8 + 3 + 3 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 8 + 1 + 6 = 57 tools across 15 modules.
+8 + 3 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 8 + 1 + 6 = 59 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 
