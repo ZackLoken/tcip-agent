@@ -62,6 +62,7 @@ function StatementRow<R extends BaseStatementRecord>({
   headerExtra,
   fieldsBody,
   supersededBlock,
+  registryProblemBlock,
   correctionSeed,
   correctionAriaLabel,
   onConfirm,
@@ -78,6 +79,7 @@ function StatementRow<R extends BaseStatementRecord>({
   headerExtra: ReactNode;
   fieldsBody: ReactNode;
   supersededBlock: ReactNode;
+  registryProblemBlock: ReactNode;
   correctionSeed: string;
   correctionAriaLabel: string;
   onConfirm: () => void;
@@ -114,6 +116,7 @@ function StatementRow<R extends BaseStatementRecord>({
       {headerExtra}
       {fieldsBody}
       {supersededBlock}
+      {registryProblemBlock}
       {auditWarning && (
         <div className="mt-2 text-[11px] text-tcip-warn">Warning: {auditWarning}</div>
       )}
@@ -182,6 +185,7 @@ export interface StatementPanelProps<R extends BaseStatementRecord> {
   headerExtraOf?: (record: R) => ReactNode;
   fieldsBodyOf: (record: R) => ReactNode;
   supersededBlockOf?: (record: R) => ReactNode;
+  registryProblemBlockOf?: (record: R) => ReactNode;
   correctionSeedOf: (record: R) => string;
   correctionAriaLabelOf: (record: R) => string;
   confirmingKey: string | null;
@@ -206,6 +210,7 @@ export function StatementPanel<R extends BaseStatementRecord>({
   headerExtraOf,
   fieldsBodyOf,
   supersededBlockOf,
+  registryProblemBlockOf,
   correctionSeedOf,
   correctionAriaLabelOf,
   confirmingKey,
@@ -241,6 +246,9 @@ export function StatementPanel<R extends BaseStatementRecord>({
                 headerExtra={headerExtraOf ? headerExtraOf(record) : null}
                 fieldsBody={fieldsBodyOf(record)}
                 supersededBlock={supersededBlockOf ? supersededBlockOf(record) : null}
+                registryProblemBlock={
+                  registryProblemBlockOf ? registryProblemBlockOf(record) : null
+                }
                 correctionSeed={correctionSeedOf(record)}
                 correctionAriaLabel={correctionAriaLabelOf(record)}
                 onConfirm={() => onConfirm(record)}

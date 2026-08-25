@@ -959,9 +959,14 @@ def compute_phenology(
     producer = _resolve_producer_identity(predictions_by_date)
 
     # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
+    # The registry is re-read too, not reused from the first check, to catch a racing registry edit.
     spec_now, record_now, _ = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
+    try:
+        registry_now = registry_for_pred_dirs(list(predictions_by_date.values()))
+    except RegistryError as e:
+        return {"error": str(e), "n_plants": len(rows)}
     still_stated = check_operationalization(
-        spec_now, record_now, STATE_CROSSING_DATES, registry=registry, basis=stated.basis)
+        spec_now, record_now, STATE_CROSSING_DATES, registry=registry_now, basis=stated.basis)
     if not still_stated.ok:
         return {"error": still_stated.message, "n_plants": len(rows)}
 

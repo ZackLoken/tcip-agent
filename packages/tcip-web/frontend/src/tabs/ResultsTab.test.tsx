@@ -425,6 +425,7 @@ describe("ResultsTab operationalization records", () => {
     identity_from_request: null,
     confirmed_current: false,
     superseded: [],
+    registry_problem: null,
     delivers: [{ name: "subject_b_count", definition: "objects counted per plant" }],
     record_seen: "hash-of-the-displayed-record",
   };
@@ -484,6 +485,24 @@ describe("ResultsTab operationalization records", () => {
 
     expect(within(row).getByText(COUNT_RECORD.statement)).toBeInTheDocument();
     expect(within(row).queryByText(COUNT_RECORD.mechanism)).not.toBeInTheDocument();
+  });
+
+  it("shows a registry mismatch under its own heading, not the superseded block", async () => {
+    const REGISTRY_PROBLEM: OperationalizationRecord = {
+      ...COUNT_RECORD,
+      registry_problem: "class 'open' is not among subject 'flower'’s attributes' values",
+    };
+    vi.spyOn(resultsApi, "operationalizations").mockResolvedValue({
+      records: [REGISTRY_PROBLEM],
+      statement_fields: LISTED.statement_fields,
+    });
+
+    render(<ResultsTab />);
+    const row = await rowFor(REGISTRY_PROBLEM);
+
+    expect(within(row).getByText(/registry mismatch/i)).toBeInTheDocument();
+    expect(within(row).getByText(REGISTRY_PROBLEM.registry_problem!)).toBeInTheDocument();
+    expect(within(row).queryByText(/changed since this was confirmed/i)).not.toBeInTheDocument();
   });
 
   it("lists a record whose delivery kind this tab computes no view for", async () => {
@@ -896,6 +915,7 @@ describe("ResultsTab audit_warning banner (A8)", () => {
     identity_from_request: null,
     confirmed_current: false,
     superseded: [],
+    registry_problem: null,
     delivers: [],
     record_seen: "hash-of-the-displayed-record",
   };
