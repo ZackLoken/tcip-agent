@@ -172,6 +172,7 @@ def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
 def ingest_images(
     source: str,
     name: str,
+    site: str,
     project_path: str = "",
     copy: bool = True,
     date_from: str = "exif",
@@ -197,6 +198,9 @@ def ingest_images(
             workspace, ``name`` (or the override's basename) must fit ``crop_subject_phenotype``
             (``workspace.format_project_name``/``parse_project_name``); ingesting another date
             into an existing project opens it by the name it already has.
+        site: The orchard or station this project's plants stand in, in the breeder's own
+            words. Ask the breeder rather than guessing it from a path or filename; refuses
+            before a byte is copied if the project already records a different site.
         project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
         date_from: ``"exif"`` (each file's own capture date → ISO date, missing →
@@ -216,6 +220,11 @@ def ingest_images(
     where ``unreadable_dates`` names each ingested file whose capture date could not be read and
     the reason.
     """
+    from tcip_store import StoreError
+
+    # Lazy import avoids a module-load import cycle (server → ingest_tools → project_tools).
+    from tcip_mcp.tools.project_tools import _scaffold_project
+
     try:
         _validate_bucket_literal(date_from)
         if project_path:
@@ -236,10 +245,12 @@ def ingest_images(
     if not sources:
         return {"error": f"No images found under {source!r}"}
 
-    # Lazy import avoids a module-load import cycle (server → ingest_tools → project_tools).
-    from tcip_mcp.tools.project_tools import _scaffold_project
-
-    scaffold = _scaffold_project(str(dest_root))
+    try:
+        # The scaffold's site write refuses before any byte is copied: a project already
+        # recording a different site, or one whose record is damaged, is a full refusal.
+        scaffold = _scaffold_project(str(dest_root), site)
+    except (ValueError, StoreError) as exc:
+        return {"error": str(exc)}
 
     buckets: dict[str, int] = {}
     undated = 0

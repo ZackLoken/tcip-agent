@@ -69,6 +69,18 @@ def _make_dataset(root: Path) -> None:
         root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
 
 
+def _export_if_database_backed(root: Path) -> None:
+    """Write a root's database-held state back out as files, the way a real archive pass would:
+    a database backend holds a project record in ``store.db``, which an archive bundles as
+    files, not as a database."""
+    from tcip_store.export import export_root
+    from tcip_store.file_backend import database_file
+
+    root_abs = str(root.absolute())
+    if database_file(root_abs).is_file():
+        export_root(root_abs)
+
+
 def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
     import json
 
@@ -121,7 +133,7 @@ def test_init_project(tmp_path: Path, monkeypatch):
     # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
     # init_project's naming rail (which only holds under the workspace) doesn't apply here.
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
-    result = init_project(str(tmp_path))
+    result = init_project(str(tmp_path), site="north orchard")
     assert (tmp_path / ".tcip").is_dir()
     assert (tmp_path / ".tcip" / "artifacts").is_dir()
     assert (tmp_path / ".tcip" / "models").is_dir()
@@ -133,7 +145,7 @@ def test_inspect_project(tmp_path: Path, monkeypatch):
     status = inspect_project(str(tmp_path))
     assert status["initialized"] is False
 
-    init_project(str(tmp_path))
+    init_project(str(tmp_path), site="north orchard")
     status = inspect_project(str(tmp_path))
     assert status["initialized"] is True
 
@@ -142,7 +154,7 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.tools.meta_tools import claude_reports
 
-    init_project(str(tmp_path))
+    init_project(str(tmp_path), site="north orchard")
     status = inspect_project(str(tmp_path))
     assert status["recent_activity"] == {}  # no history yet: genuinely empty, not corrupt
 
@@ -155,7 +167,7 @@ def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path, monkey
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.project_status import project_status_key, record_report
 
-    init_project(str(tmp_path))
+    init_project(str(tmp_path), site="north orchard")
     record_report(tmp_path)  # seed a real record so a damaged one has somewhere to overwrite
     _damage_record(project_status_key(tmp_path), b"{not valid json")
 
@@ -266,7 +278,7 @@ def test_init_project_refuses_a_non_conforming_name_under_the_workspace(tmp_path
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    result = init_project(str(ws / "two_segments"))
+    result = init_project(str(ws / "two_segments"), site="north orchard")
 
     assert "error" in result
     assert not (ws / "two_segments").exists()
@@ -276,7 +288,7 @@ def test_init_project_admits_a_conforming_name_under_the_workspace(tmp_path: Pat
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
 
-    result = init_project(str(ws / "hazelnut_catkin_elongation"))
+    result = init_project(str(ws / "hazelnut_catkin_elongation"), site="north orchard")
 
     assert "error" not in result
     assert (ws / "hazelnut_catkin_elongation" / ".tcip").is_dir()
@@ -287,7 +299,7 @@ def test_init_project_admits_a_non_conforming_name_outside_the_workspace(
 ):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
 
-    result = init_project(str(tmp_path / "two_segments"))
+    result = init_project(str(tmp_path / "two_segments"), site="north orchard")
 
     assert "error" not in result
     assert (tmp_path / "two_segments" / ".tcip").is_dir()
@@ -299,7 +311,8 @@ def test_import_project_refuses_a_non_conforming_destination_under_the_workspace
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     src = tmp_path / "src_project"
-    init_project(str(src))
+    init_project(str(src), site="north orchard")
+    _export_if_database_backed(src)
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -317,7 +330,8 @@ def test_import_project_admits_a_conforming_destination_under_the_workspace(
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     src = tmp_path / "src_project"
-    init_project(str(src))
+    init_project(str(src), site="north orchard")
+    _export_if_database_backed(src)
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -339,7 +353,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     labels = src / "annotations" / date
     for d in (images, labels):
         d.mkdir(parents=True)
-    init_project(str(src))
+    init_project(str(src), site="north orchard")
 
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -440,13 +454,14 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     travel with the archive, or a published/archived project bundles the provenance manifest
     without the code it describes and can't rerun its own pipeline from the archive alone."""
     src = tmp_path / "src_project"
-    init_project(str(src))
+    init_project(str(src), site="north orchard")
 
     model_src = src / ".tcip" / "experiments" / "exp_001" / "model_src" / "abcd1234"
     model_src.mkdir(parents=True)
     (model_src / "my_model.py").write_text("def build(): ...\n", encoding="utf-8")
     manifest_dir = src / ".tcip" / "experiments" / "exp_001" / "model_src"
     (manifest_dir / "manifest.json").write_text("{}", encoding="utf-8")
+    _export_if_database_backed(src)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path), include_models=True)
@@ -579,11 +594,155 @@ def test_scaffolding_twice_leaves_what_the_first_run_created(tmp_path: Path):
     """Scaffolding is idempotent: a second run re-creates the directories and touches nothing."""
     from tcip_mcp.tools.project_tools import _scaffold_project
 
-    _scaffold_project(str(tmp_path))
+    _scaffold_project(str(tmp_path), "north orchard")
     (tmp_path / ".tcip" / "artifacts" / "kept.txt").write_text("kept", encoding="utf-8")
 
-    _scaffold_project(str(tmp_path))
+    _scaffold_project(str(tmp_path), "north orchard")
 
     assert (tmp_path / ".tcip" / "artifacts").is_dir()
     assert (tmp_path / ".tcip" / "models").is_dir()
     assert (tmp_path / ".tcip" / "artifacts" / "kept.txt").read_text(encoding="utf-8") == "kept"
+
+
+# ── the project record's authored site ────────────────────────────────────────
+
+
+def test_init_project_records_the_site(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    result = init_project(str(tmp_path), site="north orchard")
+
+    assert result["site"] == "north orchard"
+    from tcip_mcp.project_record import read_record
+
+    assert read_record(str(tmp_path)) == {"site": "north orchard"}
+
+
+def test_init_project_run_twice_with_the_same_site_is_idempotent(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    init_project(str(tmp_path), site="north orchard")
+
+    result = init_project(str(tmp_path), site="north orchard")
+
+    assert "error" not in result
+    assert result["site"] == "north orchard"
+
+
+def test_init_project_refuses_a_different_site_than_the_one_already_recorded(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    init_project(str(tmp_path), site="north orchard")
+
+    result = init_project(str(tmp_path), site="south orchard")
+
+    assert "error" in result
+    assert "north orchard" in result["error"]
+    assert "south orchard" in result["error"]
+    from tcip_mcp.project_record import read_record
+
+    assert read_record(str(tmp_path))["site"] == "north orchard"
+
+
+def test_init_project_refuses_an_empty_site(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+
+    result = init_project(str(tmp_path), site="   ")
+
+    assert "error" in result
+    from tcip_mcp.project_record import site_fields
+
+    assert site_fields(str(tmp_path))["site"] is None
+
+
+def test_init_project_records_the_site_on_a_directory_that_gained_tcip_with_no_creating_door(
+    tmp_path: Path, monkeypatch
+):
+    """The reachable state a store write with no door leaves (``claude_reports`` on a bare
+    directory): ``init_project`` on it afterward records the site the same way it would on a
+    truly fresh directory, since the writer's create-only write does not distinguish the two."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    from tcip_mcp.tools.meta_tools import claude_reports
+
+    claude_reports(str(tmp_path), category="missing_tool", detail="a")
+    assert (tmp_path / ".tcip").is_dir()
+
+    result = init_project(str(tmp_path), site="north orchard")
+
+    assert "error" not in result
+    assert result["site"] == "north orchard"
+
+
+def test_inspect_project_reports_site_fields_across_project_states(tmp_path: Path, monkeypatch):
+    """A path with no ``.tcip`` carries neither key; a project with a record carries the site; a
+    project with ``.tcip`` and no record carries the absent-record problem text."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    from tcip_mcp.tools.meta_tools import claude_reports
+
+    bare = tmp_path / "no_tcip"
+    bare.mkdir()
+    status = inspect_project(str(bare))
+    assert "site" not in status
+    assert "site_problem" not in status
+
+    recordless = tmp_path / "recordless"
+    recordless.mkdir()
+    claude_reports(str(recordless), category="missing_tool", detail="a")
+    status = inspect_project(str(recordless))
+    assert status["site"] is None
+    assert "init_project" in status["site_problem"]
+
+    recorded = tmp_path / "recorded"
+    recorded.mkdir()
+    init_project(str(recorded), site="north orchard")
+    status = inspect_project(str(recorded))
+    assert status["site"] == "north orchard"
+    assert status["site_problem"] is None
+
+
+def test_inspect_project_reports_an_invalid_record(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    from tcip_mcp.project_record import project_record_key
+
+    init_project(str(tmp_path), site="north orchard")
+    key = project_record_key(str(tmp_path))
+    current = tcip_store.read_versioned(key).version
+    tcip_store.replace(key, {"not_site": "x"}, expect=current)
+
+    status = inspect_project(str(tmp_path))
+
+    assert status["site"] is None
+    assert "does not hold a site" in status["site_problem"]
+
+
+def test_archive_and_import_carry_the_project_record(tmp_path: Path, monkeypatch):
+    """The record travels with the project like every other ``.tcip`` document: the archive
+    carries the exported ``project.json`` and a restored copy reads the same site back."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    _export_if_database_backed(src)
+
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path))
+    assert "error" not in exported
+
+    import zipfile
+
+    with zipfile.ZipFile(str(zip_path)) as zf:
+        assert ".tcip/project.json" in zf.namelist()
+
+    dest = tmp_path / "restored"
+    imported = import_project(str(zip_path), str(dest))
+    assert "error" not in imported
+
+    from tcip_store.adoption import adopt_root
+    from tcip_store.file_backend import database_file
+    from tcip_store.layout_claims import ROOT
+
+    dest_abs = str(Path(dest).absolute())
+    if not database_file(dest_abs).is_file():
+        adopt_root(dest_abs, ROOT, report=lambda line: None)
+
+    from tcip_mcp.project_record import read_record
+
+    assert read_record(str(dest))["site"] == "north orchard"

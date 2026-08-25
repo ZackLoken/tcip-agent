@@ -294,6 +294,38 @@ def check_trait_spec_statements(root: Path, findings: list) -> None:
                             "something to confirm"))
 
 
+def check_project_record(root: Path, findings: list) -> None:
+    """A project's own site, from ``tcip_mcp.project_record``: an absent record is the accepted
+    standing state of a project that predates the field, so it warns; a damaged record or a root
+    the store refuses to read is a check that could not run, the same line ``check_registry``
+    draws between could-not-be-checked and clean, so it errors.
+
+    Deliberately absent from ``gated_stores()`` for the same reason as ``check_trait_specs``: it
+    reads entirely through the storage seam, so it cannot be stale relative to the backend it
+    reads from and needs no export to be valid.
+    """
+    from tcip_store import StoreError
+
+    from tcip_mcp.project_record import (
+        ProjectRecordInvalid,
+        ProjectRecordMissing,
+        read_record,
+        site_fields,
+    )
+
+    try:
+        read_record(root)
+    except ProjectRecordMissing:
+        level = "warn"
+    except (ProjectRecordInvalid, StoreError, OSError):
+        level = "error"
+    else:
+        return
+    problem = site_fields(root)["site_problem"]
+    if problem:
+        findings.append((level, problem))
+
+
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
     """Which database-held store each file-reading check depends on, and under which root.
 
@@ -365,7 +397,7 @@ def main() -> int:
     invalid = staleness_findings(root)
     for check in (check_negatives, check_status_tokens, check_registry, check_provenance,
                  check_state, check_region_completeness, check_trait_specs,
-                 check_trait_spec_statements):
+                 check_trait_spec_statements, check_project_record):
         reason = invalid.get(check.__name__)
         if reason:
             findings.append(("error", f"{check.__name__} reads state as files and those files "

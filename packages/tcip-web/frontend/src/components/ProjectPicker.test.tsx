@@ -37,6 +37,8 @@ const PROJECTS: ProjectSummary[] = [
     models_by_date: { "2026-02-11": ["baseline"], "2026-03-01": [] },
     image_count: 42,
     is_active: false,
+    site: "north orchard",
+    site_problem: null,
   },
   {
     name: "crop_b_burr_site-b",
@@ -50,6 +52,8 @@ const PROJECTS: ProjectSummary[] = [
     models_by_date: { "2026-03-05": [] },
     image_count: 7,
     is_active: false,
+    site: null,
+    site_problem: "no project record yet; site it with init_project",
   },
 ];
 
@@ -94,6 +98,32 @@ describe("ProjectPicker", () => {
     expect(screen.getByText("1 date")).toBeInTheDocument();
     expect(screen.getByText("0 subjects")).toBeInTheDocument();
     expect(screen.getByText("0 models")).toBeInTheDocument();
+  });
+
+  it("renders each card's site under its name", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+
+    expect(await screen.findByText("north orchard")).toBeInTheDocument();
+  });
+
+  it("renders the site problem text in place of a site the project has none of", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    render(<ProjectPicker />);
+
+    expect(
+      await screen.findByText("no project record yet; site it with init_project"),
+    ).toBeInTheDocument();
   });
 
   it("shows an empty state when there are no projects", async () => {

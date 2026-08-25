@@ -25,6 +25,8 @@ function project(overrides: Partial<ProjectSummary> & { name: string }): Project
     models_by_date: {},
     image_count: 0,
     is_active: false,
+    site: "north orchard",
+    site_problem: null,
     ...overrides,
   };
 }

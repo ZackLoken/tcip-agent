@@ -273,6 +273,7 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     ),
     "model_registry": Claim(ROOT, (_named(".tcip", "models", name="registry", suffix=".json"),)),
     "dataset_registry": Claim(ROOT, (_named(".tcip", name="datasets", suffix=".json"),)),
+    "project_record": Claim(ROOT, (_named(".tcip", name="project", suffix=".json"),)),
     "audit_log": Claim(ROOT, (_named(".tcip", name="audit", suffix=".jsonl"),)),
     "learning_capture": Claim(ROOT, (_named(".tcip", name="learning_capture", suffix=".jsonl"),)),
     "friction_reports": Claim(ROOT, (_rooted(".tcip", "reports", suffix=".json"),)),

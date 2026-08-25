@@ -135,6 +135,10 @@ export interface ProjectSummary {
   models_by_date: Record<string, string[]>;
   image_count: number;
   is_active: boolean;
+  // Exactly one is set (the backend's site_fields never raises), so a recordless or damaged
+  // project still lists.
+  site: string | null;
+  site_problem: string | null;
 }
 
 export const api = {

@@ -91,7 +91,7 @@ class TestE2EPipeline:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
-        init_project(root)
+        init_project(root, site="north orchard")
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()
 

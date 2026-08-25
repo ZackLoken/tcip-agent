@@ -170,6 +170,8 @@ def test_doctor_flags_incomplete_source_snapshot(tmp_path):
 
 
 def test_doctor_clean_project_exits_zero(tmp_path):
+    from tcip_mcp.project_record import record_site
+
     root = tmp_path / "clean"
     (root / "images" / "d").mkdir(parents=True)
     ann = root / "annotations" / "d"
@@ -180,6 +182,7 @@ def test_doctor_clean_project_exits_zero(tmp_path):
     json_io.write_annotations(
         ann / "IMG_A.json",
         [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9), created_by="user:breeder")], 32, 32)
+    record_site(str(root), "north orchard")  # a clean project also carries a site record
     res = _run(root)
     assert res.returncode == 0, res.stdout
 
@@ -425,6 +428,53 @@ def test_trait_specs_are_read_from_the_registrys_own_directory(tmp_path):
     assert "bloom_length.json" not in res.stdout
 
 
+def test_doctor_warns_on_a_project_with_no_record(tmp_path):
+    """A recordless project is the accepted standing state of one that predates the field: a
+    warning, not an error, and the exit code says so."""
+    root = _layout_project(tmp_path, "2026-03-04")
+
+    res = _run(root)
+
+    assert res.returncode == 1, res.stdout
+    assert "init_project" in res.stdout
+
+
+def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
+    """A damaged record is a check that could not run, not a clean project: an error, and exit 2."""
+    import os
+    import sqlite3
+
+    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
+    from tcip_store.sqlite_backend import database_path, encode_parts
+
+    from tcip_mcp.project_record import project_record_key, record_site
+
+    root = _layout_project(tmp_path, "2026-03-04")
+    record_site(str(root), "north orchard")
+    key = project_record_key(str(root))
+    # A genuinely undecodable byte string, written under the record's own key, so the finding
+    # is the store's own decode error rather than "not a site record".
+
+    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
+        from tcip_store.store import _backend
+
+        _backend().path_for(key).write_bytes(b"{not valid json")
+    else:
+        conn = sqlite3.connect(str(database_path(str(root))), isolation_level=None)
+        try:
+            conn.execute(
+                "update records set value = ? where store = ? and parts = ?",
+                (b"{not valid json", key.store, encode_parts(key.parts)),
+            )
+        finally:
+            conn.close()
+
+    res = _run(root)
+
+    assert res.returncode == 2, res.stdout
+    assert "does not decode" in res.stdout
+
+
 def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     """The pre-review snapshots under an annotations dir's .original are copies, not labels:
     an image whose only file there is a snapshot still has no label record and trains on
@@ -445,6 +495,9 @@ def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     baselines.mkdir()
     json_io.write_annotations(baselines / "IMG_B.json", [], 48, 32, keep_empty=True)
     json_io.write_annotations(baselines / "IMG_D.json", [], 48, 32, keep_empty=True)
+    from tcip_mcp.project_record import record_site
+
+    record_site(str(root), "north orchard")  # a clean project also carries a site record
 
     res = _run(root)
     assert res.returncode == 0, res.stdout
