@@ -252,6 +252,7 @@ def test_stage_proposals_stages_boxes_and_polygons_together(tmp_path: Path) -> N
 def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
+    _image(root, date, "IMG_0001")
     # Fewer than 3 points is not a polygon.
     res = stage_proposals(
         str(root), "sam", date, "IMG_0001",
@@ -277,11 +278,21 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 
 
 class _FakeMultiRingEngine:
-    """A segmentation engine whose one mask always splits into the same two disjoint pixel rings."""
+    """An engine whose one object always splits into the same two disjoint pixel rings, for both
+    the prompted-segment seam (``segment_prompt``) and the whole-image proposal seam
+    (``propose_annotations``/``accept_proposals``)."""
+
+    _RINGS = [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
+              [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)]]
 
     def segment(self, image_path, *, points=None, box=None, **params):
-        return [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
-                [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)]]
+        return self._RINGS
+
+    def propose(self, image_path, **params):
+        xs = [x for ring in self._RINGS for x, _ in ring]
+        ys = [y for ring in self._RINGS for _, y in ring]
+        return [{"candidate_id": 1, "bbox": [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)],
+                "area": 1900.0, "rings": self._RINGS, "score": 0.9}]
 
 
 def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp_path: Path) -> None:
@@ -308,7 +319,8 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
 ) -> None:
     """The admit case is the platform's own segmenter's actual return, not a hand-built shape."""
     from tcip_mcp.pipelines import proposal
-    from tcip_mcp.tools.annotation_tools import segment_prompt
+    from tcip_mcp.tools.annotation_tools import read_annotations, segment_prompt
+    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
 
     monkeypatch.setitem(proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine())
 
@@ -336,6 +348,20 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
         {"subject": "leaf", "rings": prompted["rings"]}, author="breeder", now="2026-02-11T00:00:00+00:00",
     )
     assert [len(r) for r in gt.geometry.rings] == [4, 3]
+
+    # The same multi-ring shape also round-trips through the propose/accept flow: staged as
+    # review candidates, accepted with a class, and read back with both rings intact.
+    _image(root, date, "IMG_0201_b", size=(640, 480))
+    accept_image_path = str(Path(image_dir(root, date)) / "IMG_0201_b.jpg")
+    proposed = propose_annotations(accept_image_path, engine="fake_multi_ring")
+    assert proposed["staged"] is True and proposed["candidate_count"] == 1
+
+    accepted = accept_proposals(accept_image_path, [{"candidate_id": 1, "subject": "leaf"}])
+    assert "error" not in accepted
+
+    read_back = read_annotations(accept_image_path)
+    accepted_preds = read_back["predictions"]["annotations"]
+    assert sorted(len(ring) for pred in accepted_preds for ring in pred["rings"]) == [3, 4]
 
 
 def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
@@ -393,18 +419,35 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(tmp_pat
 
 
 def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(tmp_path: Path) -> None:
-    """The pixel-frame counterpart of the normalized-range check: an out-of-range coordinate keeps
-    its refusal, whichever key it arrives under, once it is checked in that key's own frame."""
+    """The pixel-frame counterpart of the normalized-range check: a pixel vertex outside the image
+    keeps its refusal at the module's own default image size, not only a specially tiny one."""
     root = tmp_path / "proj"
     date = "2026-02-11"
-    _image(root, date, "IMG_0206", size=(10, 10))
+    _image(root, date, "IMG_0206")
 
     res = stage_proposals(str(root), "sam", date, "IMG_0206", polygons=[{
         "subject": "leaf", "conf": 0.9,
-        "rings": [[[-0.5, -0.5], [0.3, -0.5], [0.3, 0.4]]],
+        "rings": [[[-50.0, -50.0], [50.0, -50.0], [50.0, 40.0]]],
     }])
 
     assert "error" in res and "pixel bounds" in res["error"]
+    assert not (root / "predictions").exists()
+
+
+def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(tmp_path: Path) -> None:
+    """A ring of normalized [0,1] coordinates handed under the pixel-frame key must refuse at the
+    module's own default image size: it never spans a real pixel, unlike a mask contour."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0207")
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0207", polygons=[{
+        "subject": "leaf", "conf": 0.9,
+        "rings": [[[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]]],
+    }])
+
+    assert "error" in res and "span under a pixel" in res["error"]
+    assert not (root / "predictions").exists()
 
 
 # ── Prediction-bucket immutability ──────────────────────────────────────────

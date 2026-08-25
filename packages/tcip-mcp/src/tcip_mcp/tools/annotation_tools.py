@@ -854,8 +854,32 @@ def stage_proposals(
             return {"error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be in [0,1]"}
         norm_boxes.append((subject, conf, cx, cy, w, h))
 
-    # Each polygon carries exactly one of two keys; the pixel-frame bounds check needs img_w/img_h.
-    norm_polys: list[tuple[str, float, str, list, list]] = []
+    img_source = None
+    for idir in (image_dir(dataset_root, date), image_dir(dataset_root, None)):
+        try:
+            img_source = resolve_image_source(idir, stem)
+            break
+        except (FileNotFoundError, BandGroupIncomplete):
+            continue
+    if img_source is None:
+        return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
+    img_w, img_h = image_dimensions(img_source)
+
+    # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin
+    # admits a normalized [0,1] ring at every real image size, the bug this check exists to refuse.
+    _PIXEL_MARGIN = 1.0
+
+    def _spans_a_pixel(ring: list[tuple[float, float]]) -> bool:
+        xs, ys = [x for x, _ in ring], [y for _, y in ring]
+        return (max(xs) - min(xs)) >= 1.0 and (max(ys) - min(ys)) >= 1.0
+
+    def _out_of_pixel_bounds(ring: list[tuple[float, float]]) -> bool:
+        return (any(x < -_PIXEL_MARGIN or x > img_w + _PIXEL_MARGIN for x, _ in ring)
+                or any(y < -_PIXEL_MARGIN or y > img_h + _PIXEL_MARGIN for _, y in ring))
+
+    # Each polygon carries exactly one of two keys, folded into pixel-space rings as it is parsed;
+    # the fold needs img_w/img_h, resolved above.
+    resolved_polys: list[tuple[str, float, list[list[tuple[float, float]]]]] = []
     for i, p in enumerate(polygons):
         has_points = "points" in p
         has_rings = "rings" in p
@@ -880,7 +904,7 @@ def stage_proposals(
                 return {"error": f"polygon {i} needs at least 3 points, got {len(pts)}"}
             if _unnormalized([v for xy in pts for v in xy]):
                 return {"error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"}
-            norm_polys.append((subject, conf, "points", pts, []))
+            rings_px = [[(x * img_w, y * img_h) for x, y in pts]]
         else:
             try:
                 rings = [[ring_vertex(v) for v in ring] for ring in p["rings"]]
@@ -890,30 +914,10 @@ def stage_proposals(
             short = [j for j, ring in enumerate(rings) if len(ring) < 3]
             if short:
                 return {"error": f"polygon {i} ring(s) {short} need at least 3 points"}
-            norm_polys.append((subject, conf, "rings", [], rings))
-
-    img_source = None
-    for idir in (image_dir(dataset_root, date), image_dir(dataset_root, None)):
-        try:
-            img_source = resolve_image_source(idir, stem)
-            break
-        except (FileNotFoundError, BandGroupIncomplete):
-            continue
-    if img_source is None:
-        return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
-    img_w, img_h = image_dimensions(img_source)
-
-    # The pixel-frame counterpart of _unnormalized, the same fractional tolerance, scaled per axis.
-    def _out_of_pixel_bounds(ring: list[tuple[float, float]]) -> bool:
-        return (any(x < -0.01 * img_w or x > 1.5 * img_w for x, _ in ring)
-                or any(y < -0.01 * img_h or y > 1.5 * img_h for _, y in ring))
-
-    # Fold each polygon's own frame into pixel-space rings, now that img_w/img_h are known.
-    resolved_polys: list[tuple[str, float, list[list[tuple[float, float]]]]] = []
-    for i, (subject, conf, frame, pts, rings) in enumerate(norm_polys):
-        if frame == "points":
-            rings_px = [[(x * img_w, y * img_h) for x, y in pts]]
-        else:
+            sub_pixel = [j for j, ring in enumerate(rings) if not _spans_a_pixel(ring)]
+            if sub_pixel:
+                return {"error": f"polygon {i} ring(s) {sub_pixel} span under a pixel in an axis; "
+                                 f"rings are pixel coordinates, not normalized ones: {p!r}"}
             if any(_out_of_pixel_bounds(ring) for ring in rings):
                 return {"error": f"polygon {i} rings look out of the image's pixel bounds "
                                  f"({img_w}x{img_h}): {rings!r}"}
@@ -959,8 +963,8 @@ def stage_proposals(
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
 
     return {
-        "staged": len(box_proposals) + len(norm_polys),
-        "n_detect": len(box_proposals), "n_segment": len(norm_polys),
+        "staged": len(box_proposals) + len(resolved_polys),
+        "n_detect": len(box_proposals), "n_segment": len(resolved_polys),
         "dropped_nonpositive_boxes": dropped_boxes,
         "path": staged["path"],
         "model_name": model_name, "bucket": bucket, "bucket_redirected": staged["redirected"],
