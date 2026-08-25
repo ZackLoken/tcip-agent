@@ -178,7 +178,7 @@ def test_block_calibration_refuses_when_regions_unattested(tmp_path: Path):
     with pytest.raises(BlockCalibrationRefused, match="not fully attested complete"):
         resolve_block_calibration_records(
             predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
 def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Path):
@@ -198,7 +198,7 @@ def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Pat
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
             predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3, k_cal=40, k_test=40)
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3, k_cal=40, k_test=40, export_tile_size=TILE)
     msg = str(exc_info.value)
     assert "not fully attested complete" in msg
     assert "leaves only" not in msg  # the feasibility message never gets a chance to fire
@@ -219,7 +219,7 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
     assert conf.sweep is not None
@@ -255,7 +255,7 @@ def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(t
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     _bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert prov["block_scale_source"].startswith("plant grid pitch"), prov["block_scale_source"]
 
@@ -275,7 +275,7 @@ def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     _bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert prov["block_scale_source"].startswith("GT object-spacing"), prov["block_scale_source"]
 
@@ -308,7 +308,7 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
     assert conf.sweep is not None
@@ -354,7 +354,7 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_ra
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
             predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
 def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_the_real_raster(
@@ -381,7 +381,7 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_t
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
             predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
 def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: Path):
@@ -411,7 +411,7 @@ def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: P
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     density_cap = derive_max_dets_from_counts(
         list(prov["cal_gt_counts"].values()) + list(prov["test_gt_counts"].values()))
@@ -892,7 +892,7 @@ def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path
                                 max_dets=constructed_max_dets)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     stamped = bundle.get("max_dets")._raw
     assert len(caps) == prov["k_cal"] + prov["k_test"]
@@ -932,7 +932,7 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
                                 score_threshold=constructed_threshold, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     recorded_floor = bundle.get("conf").sweep["staged_conf_floor"]
     assert len(floors) == prov["k_cal"] + prov["k_test"]
@@ -1036,7 +1036,7 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, _prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     per_class = bundle.get("conf").sweep["holdout_bias"]["per_class"]
     recorded_entry = per_class.get(str(recorded_category))
@@ -1076,7 +1076,7 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
     with pytest.raises(BlockCalibrationRefused, match="records no name->id map"):
         resolve_block_calibration_records(
             predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-            experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+            experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
 def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tmp_path: Path):
@@ -1098,7 +1098,7 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0
     assert bundle.get("conf").sweep["calibration_image_ids"]
@@ -1160,7 +1160,7 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
         predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
-        experiment_id=exp["experiment_id"], global_nms_iou=0.3)
+        experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0
     assert bundle.get("conf").sweep["calibration_image_ids"]

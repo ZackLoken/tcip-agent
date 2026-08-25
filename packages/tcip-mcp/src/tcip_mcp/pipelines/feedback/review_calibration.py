@@ -60,6 +60,11 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "lower it and re-review the newly-visible detections first, that's usually the faster fix. If "
      "the filter is already at 0, re-run the predictions at a lower confidence, review those, then "
      "try again."),
+    (("conf_floor_unstated",),
+     "Not yet. Nothing states the confidence floor these predictions were actually generated or "
+     "filtered at, so the check has nothing to reconcile the picked confidence against, whether "
+     "that is a generation cutoff or review filter this route could not read, or a bespoke model "
+     "with no confidence knob the platform can set. Review a bucket whose staging floor is known."),
     (("insufficient_adjudication_coverage",),
      'Not yet. At least one of these reviewed images shows no evidence that missed objects were '
      'checked for. For images that had no ground truth before this review: uncheck "Reviewed" on '
@@ -101,14 +106,18 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "Not yet. Some of the reviewed images (or images from the same source, e.g. tiles of one "
      "photo) were also used to train this model, so they can't function as an independent check. "
      "Review a different set of images this model never trained on."),
-    (("content_duplicated",),
-     "Not yet. The held-back images you reviewed duplicate the calibration images' content, so they "
-     "can't function as an independent check. Review a genuinely distinct set of images, then try "
-     "again."),
+    (("content_shared_with_calibration",),
+     "Not yet. One or more of the held-back images you reviewed share content with the calibration "
+     "images, so they can't function as an independent check. Review a genuinely distinct set of "
+     "images, then try again."),
     (("localization_quality_floor_failed",),
-     "Not yet. On the held-back images, the model's predictions don't actually line up with what "
-     "you confirmed, even where the counts agree, that agreement can be coincidental rather than "
-     "real matching. Review more images, or improve the model."),
+     "Not yet. On the held-back images, the model's predictions don't clear the held-out "
+     "match-quality bar authored for this trait, even where the counts agree, that agreement can "
+     "be coincidental rather than real matching. Review more images, or improve the model."),
+    (("holdout_match_quality_floor_unauthored",),
+     "Not yet. No held-out match-quality floor has been authored for this trait yet, so this check "
+     "has nothing to hold the model's predictions to. This is for the agent: author one with "
+     "author_trait_spec's holdout_match_quality_floor, with the breeder's confirmation."),
     (("count_error_dispersion_too_high",),
      "Not yet. Individual held-back images can be far off in opposite directions that cancel out "
      "in the total, the count isn't reliable image-to-image, whatever the total shows. Review "
@@ -381,6 +390,7 @@ def resolve_operating_point_from_review(
     only_completed: bool = True,
     tile_size: int | None = None,
     tile_size_source: str = "default",
+    tile_size_derived_from: str | None = None,
     tiled: bool | None = None,
     tiled_source: str = "default",
     cross_tile_nms: float | None = None,
@@ -424,6 +434,11 @@ def resolve_operating_point_from_review(
     ``review_conf_threshold``'s recorded-verdict computation) and passed straight through to
     ``resolve_operating_point``. This function does not derive it.
 
+    ``tile_size_derived_from`` is likewise the caller's own fact, never derived here: this path
+    holds no predictor to check a stated edge against, so the caller reads it off the sidecar's own
+    stamp (the text the run that actually produced the predictions already composed) and forwards
+    it unchanged.
+
     ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
     longer among the reviewed images, or when its lock file is corrupt, this
     propagates to the caller rather than crashing later on a missing dict lookup.
@@ -450,6 +465,7 @@ def resolve_operating_point_from_review(
         calibration_records=cal_records or None,
         holdout_records=hold_records or None,
         tile_size=tile_size, tile_size_source=tile_size_source,
+        tile_size_derived_from=tile_size_derived_from,
         tiled=tiled, tiled_source=tiled_source, cross_tile_nms=cross_tile_nms, max_dets=max_dets,
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
         experiment_id=experiment_id, staged_conf_floor=staged_conf_floor,
@@ -502,8 +518,14 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
         if tp is not None and fn is not None and (tp + fn) > 0:
             miss_note = (f" On the held-back images, it found {tp} of {tp + fn} objects you "
                         f"confirmed ({100 * tp / (tp + fn):.0f}% recall).")
+        td = sweep.get("train_disjointness") or {}
+        run_note = ""
+        if not td.get("checked"):
+            run_note = (" The bucket names no producing run, so the reviewed images were not "
+                        "checked against that run's training split.")
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
-                  f"model's counts closely enough to use as a validation reference for results.{miss_note}")
+                  f"model's counts closely enough to use as a validation reference for "
+                  f"results.{miss_note}{run_note}")
     elif "passed_holdout" not in sweep:
         # This branch must come before the _FAILURE_MESSAGES lookup. conf_censored is also present,
         # often truthy, in the no-holdout branch's sweep_data, which has no "failures" list at all,

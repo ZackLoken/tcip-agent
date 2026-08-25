@@ -186,7 +186,8 @@ def test_tile_size_untiled_is_never_gating():
     # (mirrors in_chans), never manufacturing a refusal over a dimension that was never operative.
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
-    p = resolve_tile_size_param(640, tiled=False, tile_size_source="default")
+    p = resolve_tile_size_param(640, tiled=False, tile_size_source="default",
+                                tile_size_derived_from=None)
     assert p.requires_validation is False
     assert p.validation_kind is None
     assert p._raw is None
@@ -196,7 +197,8 @@ def test_tile_size_untiled_is_never_gating():
 def test_tile_size_derived_from_checkpoint_geometry_is_shippable():
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY, resolve_tile_size_param
 
-    p = resolve_tile_size_param(224, tiled=True, tile_size_source="derived")
+    p = resolve_tile_size_param(224, tiled=True, tile_size_source="derived",
+                                tile_size_derived_from=None)
     assert p.requires_validation is True and p.validation_kind == "geometry"
     assert p.validated_against == VALIDATED_PERSISTED_GEOMETRY
     assert p.is_shippable is True
@@ -204,15 +206,18 @@ def test_tile_size_derived_from_checkpoint_geometry_is_shippable():
 
 
 def test_tile_size_explicit_caller_override_is_shippable():
-    # Accepted on the same terms run_full_frame_evaluation already accepts an explicit value on: not
-    # cross-checked against the checkpoint's real training scale, but a stated decision, not a guess.
+    # Accepted on the same terms run_full_frame_evaluation already accepts an explicit value on: a
+    # stated decision, checked for contradiction against the checkpoint upstream of this function.
     from tcip_mcp.pipelines.resolution import VALIDATED_EXPLICIT_GEOMETRY, resolve_tile_size_param
 
-    p = resolve_tile_size_param(512, tiled=True, tile_size_source="explicit")
+    p = resolve_tile_size_param(512, tiled=True, tile_size_source="explicit",
+                                tile_size_derived_from="stated on a checkpoint that records no "
+                                                       "tile geometry")
     assert p.requires_validation is True and p.validation_kind == "geometry"
     assert p.validated_against == VALIDATED_EXPLICIT_GEOMETRY
     assert p.is_shippable is True
     assert p.value == 512
+    assert p.derived_from == "stated on a checkpoint that records no tile geometry"
 
 
 def test_tile_size_no_basis_is_not_shippable():
@@ -220,7 +225,8 @@ def test_tile_size_no_basis_is_not_shippable():
     # scale at all: no fallback number is fabricated, and the dimension is firewalled like conf is.
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
-    p = resolve_tile_size_param(None, tiled=True, tile_size_source="unavailable")
+    p = resolve_tile_size_param(None, tiled=True, tile_size_source="unavailable",
+                                tile_size_derived_from=None)
     assert p.requires_validation is True and p.validation_kind == "geometry"
     assert p.validated_against == VALIDATED_FALSE
     assert p.is_shippable is False
@@ -236,7 +242,8 @@ def test_tile_size_native_ratio_is_a_real_basis_and_shippable_under_its_own_refe
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY, resolve_tile_size_param
 
     native_ref = getattr(resolution_mod, "VALIDATED_NATIVE_FRAME_GEOMETRY", None)
-    p = resolve_tile_size_param(300, tiled=True, tile_size_source="native_ratio")
+    p = resolve_tile_size_param(300, tiled=True, tile_size_source="native_ratio",
+                                tile_size_derived_from=None)
     assert p.requires_validation is True and p.validation_kind == "geometry"
     assert p.validated_against == native_ref
     assert p.validated_against != VALIDATED_PERSISTED_GEOMETRY

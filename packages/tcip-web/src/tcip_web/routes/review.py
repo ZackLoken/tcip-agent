@@ -762,6 +762,9 @@ class ValidateReferenceResponse(BaseModel):
     conf: Optional[float]  # the derived count operating point (for transparency)
     reason: str  # plain-language, breeder-facing, always present
     buckets_stamped: list[str]
+    # Whether the sealed (or already-sealed) row's train-disjointness check actually ran; null on
+    # every refusal site, where no row was sealed and none was read to answer for.
+    train_disjointness_checked: Optional[bool] = None
 
 
 @router.post("/validate_reference")
@@ -822,10 +825,14 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     if all(b.claimed and b.ok for b in bindings.values()):
         ref = next((((sc.get("operating_point") or {}).get("conf") or {}).get("validated_against")
                     for sc in sidecars.values()), None)
+        existing_td = next((b.train_disjointness for b in bindings.values()
+                            if b.train_disjointness is not None), None)
         return ValidateReferenceResponse(
             validated=True, reference=ref, reviewed_image_count=n, conf=None,
             reason="These predictions are already validated, so a review reference isn't needed here.",
-            buckets_stamped=[])
+            buckets_stamped=[],
+            train_disjointness_checked=(
+                existing_td.get("checked") if existing_td is not None else None))
 
     if n == 0:
         return ValidateReferenceResponse(
@@ -912,12 +919,20 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                  for sc in sidecars.values()}
     tiled_sources = {((sc.get("operating_point") or {}).get("tiled") or {}).get("source")
                      for sc in sidecars.values()}
+    tile_size_derived_froms = {
+        ((sc.get("operating_point") or {}).get("tile_size") or {}).get("derived_from")
+        for sc in sidecars.values()}
     review_tile_size = next(iter(tile_sizes)) if len(tile_sizes) == 1 else None
     review_tile_size_valid_ref = (
         next(iter(tile_size_valid_refs)) if len(tile_size_valid_refs) == 1
         and review_tile_size is not None else None)
     review_tile_size_source = tile_size_source_of(
         review_tile_size_valid_ref, tile_size=review_tile_size)
+    # The stamp's own derived_from text, carried forward unchanged: this route holds no predictor
+    # to compose one from, only the record the producing run already wrote.
+    review_tile_size_derived_from = (
+        next(iter(tile_size_derived_froms)) if len(tile_size_derived_froms) == 1
+        and review_tile_size is not None else None)
     review_tiled = next(iter(tiled_vals)) if len(tiled_vals) == 1 else None
     review_tiled_source = (next(iter(tiled_sources)) if len(tiled_sources) == 1
                            and review_tiled is not None else "default")
@@ -930,6 +945,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "staged_conf_floor": staged_conf_floor,
         "tile_size": review_tile_size,
         "tile_size_source": review_tile_size_source,
+        "tile_size_derived_from": review_tile_size_derived_from,
         "tiled": review_tiled,
         "tiled_source": review_tiled_source,
         # The root the verdict store was opened on, so the split lock travels with the verdicts.
@@ -1065,6 +1081,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "buckets_stamped": stamped,
         "record_digests": record_digests,
     })
+    from tcip_mcp.pipelines.resolution import resolver_train_disjointness
+
+    sealed_td = resolver_train_disjointness(bundle, "operating_point") if result["validated"] else None
     return ValidateReferenceResponse(
         validated=bool(result["validated"]),
         reference=result["reference"],
@@ -1072,6 +1091,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         conf=result["conf"],
         reason=result["reason"],
         buckets_stamped=stamped,
+        train_disjointness_checked=sealed_td["checked"] if sealed_td is not None else None,
     )
 
 

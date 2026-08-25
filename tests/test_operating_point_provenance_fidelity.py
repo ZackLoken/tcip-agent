@@ -169,11 +169,10 @@ def test_a_floor_mismatch_on_either_side_of_the_reference_is_surfaced():
 
 # -- what counts as a cloned holdout -----------------------------------------------------------
 
-def test_a_holdout_sharing_one_image_of_content_with_calibration_is_not_a_clone():
-    """The content gate refuses a holdout whose content is wholly contained in calibration's,
-    because such a holdout cannot function as an independent check. A holdout that merely shares
-    some content still carries independent evidence and has to be admitted, with the overlap
-    reported rather than acted on.
+def test_a_holdout_sharing_one_image_of_content_with_calibration_refuses():
+    """A holdout sharing even one image's content with calibration is not independent for that
+    image, so the gate refuses rather than merely reporting the overlap; a holdout sharing no
+    image's content still passes, with the overlap (zero) reported.
     """
     cal = _records("c", 0.0, n_images=3)
     hold = _records("h", 100000.0, n_images=3)
@@ -185,10 +184,9 @@ def test_a_holdout_sharing_one_image_of_content_with_calibration_is_not_a_clone(
     sweep = b.params["conf"].sweep
 
     assert sweep["content_overlap_frac"] == pytest.approx(1.0 / 3.0)  # the overlap is real
-    assert sweep["content_duplicated"] is False
-    assert "content_duplicated" not in sweep["failures"]
-    assert sweep["failures"] == []
-    assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
+    assert sweep["content_shared_with_calibration"] is True
+    assert "content_shared_with_calibration" in sweep["failures"]
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
 
 
 # -- which floor a scalar calibration gate was held to -----------------------------------------

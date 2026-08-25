@@ -555,3 +555,145 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     assert "error" not in r
     assert captured.get("tile_resize") == (TILE * 2, TILE * 2)
+
+
+# --- the contradiction refusal -------------------------------------------
+
+
+def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
+    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_regime
+
+    stub = _GeometryStub(train_tile_size=128)
+
+    with pytest.raises(TileEdgeContradiction) as exc_info:
+        resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)
+    assert "64" in str(exc_info.value) and "128" in str(exc_info.value)
+
+
+def test_an_explicit_edge_contradicting_the_native_frame_refuses():
+    from tcip_mcp.pipelines.inference.predictor import TileEdgeContradiction, resolve_tile_regime
+
+    stub = _GeometryStub(train_native_size=[512, 512])
+
+    with pytest.raises(TileEdgeContradiction) as exc_info:
+        resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)
+    assert "64" in str(exc_info.value) and "512" in str(exc_info.value)
+
+
+def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
+    """The edge never governs a count when the run doesn't tile, so it is never checked."""
+    from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
+
+    stub = _GeometryStub(train_tile_size=128)
+
+    edge, source = resolve_tile_regime(stub, tiled=False, tile_size=64, overlap=None)[:2]
+
+    assert (edge, source) == (64, "explicit")
+
+
+def test_an_explicit_edge_equal_to_persisted_geometry_clears():
+    from tcip_mcp.pipelines.inference.predictor import explicit_edge_provenance, resolve_tile_regime
+
+    stub = _GeometryStub(train_tile_size=128)
+
+    edge, source = resolve_tile_regime(stub, tiled=True, tile_size=128, overlap=None)[:2]
+
+    assert (edge, source) == (128, "explicit")
+    assert explicit_edge_provenance(stub, 128) == (
+        "equal to the checkpoint's persisted training tile geometry")
+
+
+def test_an_explicit_edge_equal_to_the_native_frame_clears():
+    from tcip_mcp.pipelines.inference.predictor import explicit_edge_provenance, resolve_tile_regime
+
+    stub = _GeometryStub(train_native_size=[512, 512])
+
+    edge, source = resolve_tile_regime(stub, tiled=True, tile_size=512, overlap=None)[:2]
+
+    assert (edge, source) == (512, "explicit")
+    assert "recorded untiled training frame" in explicit_edge_provenance(stub, 512)
+
+
+def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
+    """The foreign-checkpoint case: nothing to contradict, so any stated edge stands."""
+    from tcip_mcp.pipelines.inference.predictor import explicit_edge_provenance, resolve_tile_regime
+
+    stub = _GeometryStub()
+
+    edge, source = resolve_tile_regime(stub, tiled=True, tile_size=64, overlap=None)[:2]
+
+    assert (edge, source) == (64, "explicit")
+    assert explicit_edge_provenance(stub, 64) == "stated on a checkpoint that records no tile geometry"
+
+
+def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
+    from tcip_mcp.pipelines.model_build import build_model
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": tile_size,
+                                       "max_size": tile_size * 2},
+                    "task": "detection"}
+    config = {"data": {"tiling": {"tile_size": tile_size, "overlap": 0.2}}}
+    ckpt = tmp_path / "model_tiled.pt"
+    torch.save({"model_source": model_source,
+                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
+                "config": config}, str(ckpt))
+    return str(ckpt)
+
+
+def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
+    from tcip_mcp.pipelines.model_build import build_model
+
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": size, "max_size": size * 2},
+                    "task": "detection"}
+    config = {"data": {"tiling": {"enabled": False}, "train_native_size": [size, size]}}
+    ckpt = tmp_path / "model_native.pt"
+    torch.save({"model_source": model_source,
+                "model_state_dict": build_model({"model_source": model_source}).state_dict(),
+                "config": config}, str(ckpt))
+    return str(ckpt)
+
+
+def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry(tmp_path):
+    """A caller-typed tile edge that differs from the checkpoint's own persisted training geometry
+    is a real contradiction, never a caller override to trust blindly."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    ckpt = _tiled_checkpoint(tmp_path, 128)
+
+    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                      tile_size=64, conf_threshold=0.0)
+
+    assert "error" in r
+    assert "64" in r["error"] and "128" in r["error"]
+
+
+def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(tmp_path):
+    """The same contradiction, checked against the checkpoint's own recorded untiled training frame
+    when it persists no tiled geometry."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    ckpt = _native_frame_checkpoint_of_size(tmp_path, 512)
+
+    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                      tile_size=64, conf_threshold=0.0)
+
+    assert "error" in r
+    assert "64" in r["error"] and "512" in r["error"]
+
+
+def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_path):
+    """The rail refuses a contradiction, not an explicit edge that simply agrees."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    ckpt = _tiled_checkpoint(tmp_path, TILE)
+
+    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                      tile_size=TILE, conf_threshold=0.0)
+
+    assert "error" not in r
+    tile_param = r["operating_point"]["tile_size"]
+    assert tile_param["value"] == TILE and tile_param["source"] == "explicit"
+    assert tile_param["derived_from"] == (
+        "equal to the checkpoint's persisted training tile geometry")

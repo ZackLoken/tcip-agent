@@ -137,7 +137,8 @@ def test_set_detector_operating_point_two_stage():
     assert m.detector.roi_heads.score_thresh == 0.4
     assert m.detector.roi_heads.nms_thresh == 0.3
     assert m.detector.roi_heads.detections_per_img == 300
-    assert applied == {"score_thresh": 0.4, "nms_thresh": 0.3, "detections_per_img": 300}
+    assert applied == {"score_thresh": 0.4, "nms_thresh": 0.3, "detections_per_img": 300,
+                       "attribute_path": "detector.roi_heads"}
 
 
 def test_set_detector_operating_point_one_stage():
@@ -249,7 +250,7 @@ def test_resolve_operating_point_calibrated_but_no_holdout_is_unshippable():
 
 # --- Content-overlap and train-disjointness gates ---
 
-def test_resolve_operating_point_content_clone_holdout_is_false():
+def test_resolve_operating_point_content_shared_holdout_is_false():
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
     # Same GT content as calibration (only image_id differs, no shift) -> disjoint by image_id but
     # the holdout can't function as an independent check; the content-overlap gate must refuse it.
@@ -259,6 +260,7 @@ def test_resolve_operating_point_content_clone_holdout_is_false():
     assert conf.validated_against == "false"
     assert not b.is_shippable
     assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
+    assert "content_shared_with_calibration" in conf.sweep["failures"]
 
 
 def test_resolve_operating_point_train_disjointness_fires(tmp_path, monkeypatch):

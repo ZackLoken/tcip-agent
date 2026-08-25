@@ -53,7 +53,7 @@ VALIDATED_HELD_OUT = "held_out_annotations"          # a disjoint held-out split
 VALIDATED_REVIEW_CONFIRMED = "reviewer_confirmed_annotations"  # a breeder-confirmed output sample
 VALIDATED_PHYSICAL_MEASUREMENT = "physical_measurement"  # checked against a known physical dimension
 # A tile scale's own real basis for trust: persisted tiled training geometry, a checkpoint's own
-# recorded uniform untiled frame (native-ratio, inferred mechanically), or a caller's stated override.
+# recorded uniform untiled frame (native-ratio), or a caller's override the checkpoint doesn't contradict.
 VALIDATED_PERSISTED_GEOMETRY = "persisted_training_geometry"
 VALIDATED_NATIVE_FRAME_GEOMETRY = "persisted_native_frame_geometry"
 VALIDATED_EXPLICIT_GEOMETRY = "explicit_caller_stated_geometry"
@@ -96,7 +96,9 @@ GEOMETRY_REFERENCE_STRENGTH: tuple[str, ...] = (
 )
 """The three geometry references, strongest first: ``derived`` is the exact regime the model
 trained under, the native-frame tier a regime mechanically inferred from the checkpoint's own
-recorded frame, and ``explicit`` a caller's statement never cross-checked against the checkpoint.
+recorded frame, and ``explicit`` a caller's statement checked against the checkpoint's own recorded
+geometry for contradiction only (:func:`~tcip_mcp.pipelines.inference.predictor.resolve_tile_regime`
+refuses one that contradicts), never elevated to the strength of a value the checkpoint produced.
 A mixed delivery travels under the weakest member present (:func:`reconcile_tile_size_validity`),
 never the strongest; not a floor rank (:func:`_validity_rank` already means that binary check)."""
 _ACCEPTED_REFERENCES: dict[str, tuple[str, ...]] = {
@@ -363,11 +365,18 @@ class ResolvedBundle:
 
 def resolve_tile_size_param(
     tile_size: int | None, *, tiled: bool, tile_size_source: str,
+    tile_size_derived_from: str | None,
 ) -> ResolvedParam:
     """The ``tile_size`` dimension, gated the same shape ``conf`` already is, the shared
     construction site both :func:`raw_operating_point` (here) and
     :func:`tcip_mcp.pipelines.operating_point.resolve_operating_point` (the calibrated path) call,
     so the two doors can't drift into disagreeing about when a tile scale is trustworthy.
+
+    ``tile_size_derived_from`` is required (no default) so every caller states it explicitly; it is
+    read only for ``tile_size_source == "explicit"``, where it becomes the stamped ``derived_from``
+    (see :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`, which composes it
+    from what the checkpoint's own recorded geometry says about the stated edge), never a placeholder
+    like "caller override" doing double duty inside the stamped claim.
 
     Only meaningful when ``tiled``: an untiled run's count never depends on tile_size, so it stays a
     plain non-gating fact there (mirrors ``in_chans``), gating it anyway would refuse legitimate
@@ -376,8 +385,9 @@ def resolve_tile_size_param(
     :data:`GEOMETRY_REFERENCE_STRENGTH`): the checkpoint's own persisted training geometry
     (``"derived"``); a tile edge mechanically derived from a checkpoint's own uniform untiled
     training frame (``"native_ratio"``), never stated by a caller; or a caller's deliberate explicit
-    override (``"explicit"``, not cross-checked against the checkpoint's real training scale, but a
-    stated decision, not a guess). ``"recorded"`` (:func:`tile_size_source_of`'s own fallback, a
+    override (``"explicit"``, already checked for contradiction against the checkpoint's own
+    recorded geometry by the caller before this function ever sees it, but a stated decision, not a
+    guess). ``"recorded"`` (:func:`tile_size_source_of`'s own fallback, a
     real edge read back off a persisted stamp whose reference the current vocabulary does not
     accept) keeps the edge, floored to unvalidated. Any other source (``"unavailable"``, no
     persisted geometry and nothing explicit) means nothing justifies a scale at all, so ``tile_size``
@@ -401,7 +411,8 @@ def resolve_tile_size_param(
         )
     if tile_size_source == "explicit" and tile_size is not None:
         return ResolvedParam(
-            "tile_size", int(tile_size), source="explicit", derived_from="caller override",
+            "tile_size", int(tile_size), source="explicit",
+            derived_from=tile_size_derived_from if tile_size_derived_from is not None else "",
             requires_validation=True, validation_kind="geometry",
             validated_against=_GEOMETRY_REFERENCE_BY_SOURCE["explicit"],
         )
@@ -424,8 +435,8 @@ def resolve_tile_size_param(
 
 def raw_operating_point(
     *, conf: float, cross_tile_nms: float | None, tiled: bool, tile_size: int | None,
-    max_dets: int | None, tile_size_source: str = "default", tiled_source: str = "default",
-    conf_stated: bool = False, max_dets_stated: bool = False,
+    max_dets: int | None, tile_size_source: str = "default", tile_size_derived_from: str | None = None,
+    tiled_source: str = "default", conf_stated: bool = False, max_dets_stated: bool = False,
 ) -> ResolvedBundle:
     """The operating point for raw (uncalibrated) inference, the one both doors resolve through.
 
@@ -456,8 +467,16 @@ def raw_operating_point(
     explicitly chose to tile (or not) stamps ``"explicit"``; a caller who passed nothing gets
     ``"default"``. Both callers of this function derive their own concrete ``tiled`` bool (no shared
     fallback constant) before reaching here, so ``tiled`` itself is always a real bool, never ``None``.
+
+    ``tile_size_derived_from`` is forwarded to :func:`resolve_tile_size_param` unchanged; it matters
+    only for ``tile_size_source == "explicit"``, where the caller composed it through
+    :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance` against the checkpoint
+    it already checked the stated edge with :func:`~tcip_mcp.pipelines.inference.predictor.
+    resolve_tile_regime`.
     """
-    tile_param = resolve_tile_size_param(tile_size, tiled=tiled, tile_size_source=tile_size_source)
+    tile_param = resolve_tile_size_param(
+        tile_size, tiled=tiled, tile_size_source=tile_size_source,
+        tile_size_derived_from=tile_size_derived_from)
     if tiled_source == "explicit":
         tiled_param = ResolvedParam("tiled", tiled, source="explicit", derived_from="caller override")
     else:
@@ -488,6 +507,7 @@ def raw_operating_point(
 
 def block_calibrated_export_operating_point(
     block_bundle: ResolvedBundle, *, trait: str, tile_size: int | None, tile_size_source: str,
+    tile_size_derived_from: str | None = None,
 ) -> ResolvedBundle:
     """The whole-mosaic export operating point a block-calibrated bundle ships at.
 
@@ -507,7 +527,8 @@ def block_calibrated_export_operating_point(
         "cross_tile_nms": block_bundle.get("cross_tile_nms"),
         "tiled": default("tiled", True),
         "tile_size": resolve_tile_size_param(
-            tile_size, tiled=True, tile_size_source=tile_size_source),
+            tile_size, tiled=True, tile_size_source=tile_size_source,
+            tile_size_derived_from=tile_size_derived_from),
         "max_dets": default(
             "max_dets", None,
             derived_from="block calibration: not transferred, uncapped for the whole-mosaic pass"),
@@ -1216,6 +1237,27 @@ def _resolver_value(result: Any, param_key: str) -> Any:
     return _UNCOMPARED
 
 
+def resolver_train_disjointness(result: Any, document: str) -> dict | None:
+    """Whether and how a resolver's own live result checked train-disjointness: the two facts the
+    gate itself records, ``{"checked": bool, "group_check": str | None}``, never a bare ``true``
+    over a check the gate's own record says did not run. ``None`` for ``resolve_scale``, whose gate
+    has no training run to check against.
+    """
+    if document == "resolve_scale":
+        return None
+    if isinstance(result, ResolvedBundle):
+        param_key, _ = _DOCUMENT_PARAM[document]
+        sweep = result.get(param_key).sweep
+    elif isinstance(result, Mapping):
+        sweep = result.get("sweep_data")
+    else:
+        sweep = None
+    td = (sweep or {}).get("train_disjointness")
+    if not isinstance(td, dict):
+        return None
+    return {"checked": bool(td.get("checked")), "group_check": td.get("group_check")}
+
+
 def _relative_location(path: str | Path, dataset_root: Path) -> str:
     """Where an input sits, expressed against the dataset root the record hangs off.
 
@@ -1537,6 +1579,7 @@ def seal_validation(
         "covered_buckets": covered,
         "dataset_root": str(root),
         "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "train_disjointness": resolver_train_disjointness(draft.result, draft.document),
     }
     appended = _append_validation(experiment_id, body)
     if "error" in appended:
@@ -1564,6 +1607,7 @@ class StampBinding:
     producing_experiment_id: str | None = None
     checkpoint_sha256: str | None = None
     record_digest: str | None = None
+    train_disjointness: dict | None = None
     note: str = ""
 
 
@@ -1639,7 +1683,8 @@ def verify_stamp_binding(
 
     known = {"experiment_id": experiment_id, "record_digest": record_digest,
              "producing_experiment_id": row.get("producing_experiment_id"),
-             "checkpoint_sha256": row.get("checkpoint_sha256")}
+             "checkpoint_sha256": row.get("checkpoint_sha256"),
+             "train_disjointness": row.get("train_disjointness")}
 
     if row.get("document") != document:
         return floored(

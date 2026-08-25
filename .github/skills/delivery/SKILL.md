@@ -126,7 +126,9 @@ measurement, and no kind stands in for another), read from the predictions' own
   untiled on frames of one square size (that frame's own size, each tile run through the resize its
   recorded augmentation config applied), a real basis mechanically inferred from the checkpoint's
   own recorded frame, never stated by a caller, and sufficient on its own to clear the gate; or an
-  explicit caller `tile_size`. A delivery that mixes buckets across tiers travels under the weakest
+  explicit caller `tile_size` that the checkpoint's own recorded geometry (persisted, or absent
+  one, the native frame) does not contradict, every tiling door refuses outright when it does,
+  naming both edges. A delivery that mixes buckets across tiers travels under the weakest
   tier present. An untiled run is never gated on it.
 - To ship a provisional result, pass `acknowledge_unvalidated=True`: the door writes but stamps
   `measurement_validated=false` so the un-trustworthiness travels with the CSV. This is for an honest

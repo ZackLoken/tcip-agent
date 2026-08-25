@@ -335,7 +335,7 @@ def test_golden_validated_flag_path_calibrated_no_holdout_is_false():
     assert b.is_shippable is False
 
 
-def test_golden_duplicate_content_holdout_is_false():
+def test_golden_content_shared_holdout_is_false():
     """A byte-identical-content holdout can't function as an
     independent check: the same fixture pair the two goldens above use (identical GT content,
     differing only by ``image_id`` prefix, ``_sweep_records("c")``/``_sweep_records("h")`` with no
@@ -350,6 +350,7 @@ def test_golden_duplicate_content_holdout_is_false():
     assert conf.validated_against == "false"
     assert b.is_shippable is False
     assert conf.sweep["content_overlap_frac"] == pytest.approx(1.0)
+    assert "content_shared_with_calibration" in conf.sweep["failures"]
 
 
 # ══════════════════════════════════════════════════════════════════════════

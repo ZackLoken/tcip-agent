@@ -730,12 +730,17 @@ _VALIDATION_FIELDS = (
     "covered_buckets",
     "dataset_root",
     "recorded_at",
+    "train_disjointness",
 )
 """Every field a validation row carries. All required, none defaulted.
 
 A claim reads as provenance only when all of it is there: what was claimed, for which trait,
 against which reference, produced by which checkpoint and run, over which content, and when.
 A field a writer could omit would be a field a reader could not compare.
+
+``train_disjointness`` is ``{"checked": bool, "group_check": str | None}`` for the four documents
+whose gate runs the check (never a bare ``true`` over a check the gate's own record says did not
+run), or ``null`` for ``resolve_scale``, whose gate has no training run to check against.
 """
 
 

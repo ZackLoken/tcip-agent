@@ -330,6 +330,10 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     body = resp.json()
     assert body["validated"] is True
     assert body["reference"] == "reviewer_confirmed_annotations"
+    # _IDENTITY names no experiment_id: a foreign-checkpoint promotion, the case with no producing
+    # run to check the reviewed images' train-disjointness against.
+    assert body["train_disjointness_checked"] is False
+    assert "not checked against that run's training split" in body["reason"]
     sc = _read_sidecar(pred_dir)
     assert sc["validated"] is True
     assert sc["validated_reference"] == "reviewer_confirmed_annotations"
@@ -343,7 +347,10 @@ def test_route_validates_and_stamps_review_confirmed(client, tmp_path: Path):
     assert row is not None
     assert row["trait"] == "catkin"
     assert row["reference_identity"]["stated_values"]["review_image_count"] == 6
-    assert verify_stamp_binding(sc, pred_dir, document="operating_point").ok is True
+    assert row["train_disjointness"] == {"checked": False, "group_check": None}
+    binding = verify_stamp_binding(sc, pred_dir, document="operating_point")
+    assert binding.ok is True
+    assert binding.train_disjointness == {"checked": False, "group_check": None}
 
 
 def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp_path: Path):

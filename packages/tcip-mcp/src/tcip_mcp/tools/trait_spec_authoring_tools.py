@@ -34,6 +34,7 @@ def author_trait_spec(
     ordinal_agreement_floor: float | None = None,
     regression_skill_floor: float | None = None,
     scale_tolerance_frac: float | None = None,
+    holdout_match_quality_floor: float | None = None,
     notes: str = "",
     relayed_note: str = "",
 ) -> dict:
@@ -78,6 +79,9 @@ def author_trait_spec(
         scale_tolerance_frac: Max acceptable relative disagreement a physical-scale calibration's
             held-out reference half may show, a breeder-authored measurement decision with no
             platform-derived value.
+        holdout_match_quality_floor: Min acceptable held-out precision and recall of the detection
+            gate's governing localization criterion, both required, a breeder-authored measurement
+            decision with no platform-derived value.
         notes: Free-text notes on the trait's measurement.
         relayed_note: What the breeder said away from the GUI, recorded as a relay attributed to
             the agent. It is surfaced in a delivery refusal and never clears it.
@@ -104,6 +108,7 @@ def author_trait_spec(
             ordinal_agreement_floor=ordinal_agreement_floor,
             regression_skill_floor=regression_skill_floor,
             scale_tolerance_frac=scale_tolerance_frac,
+            holdout_match_quality_floor=holdout_match_quality_floor,
             notes=notes,
             rationale=rationale,
             relayed_note=relayed_note,

@@ -204,9 +204,11 @@ class TrainContext:
         ``holdout_records``, e.g. whatever ``score_thresh``/``score_threshold`` you set on the model
         before running it (``set_detector_operating_point``'s own return value, if you used it, is
         this fact, thread it straight through, never re-type the number). Omitting it fails the
-        reference closed as censored (``resolve_operating_point``'s own docstring explains why: an
-        unstated floor can't be reconciled against the picked conf). This is a real, caller-supplied
-        fact about how your records were produced, not a default this method can derive for you."""
+        reference closed as unstated, never as censored (``resolve_operating_point``'s own
+        docstring explains why: an unstated floor can't be reconciled against the picked conf, a
+        different failure from a stated floor the pick doesn't clear). This is a real,
+        caller-supplied fact about how your records were produced, not a default this method can
+        derive for you."""
         from tcip_mcp.pipelines.operating_point import resolve_operating_point
 
         kwargs.setdefault("experiment_id", self.experiment_id)

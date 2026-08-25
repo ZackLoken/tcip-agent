@@ -95,3 +95,41 @@ def test_the_same_displacement_validates_when_both_sides_carry_the_same_object_s
     assert hb["fp"] == 0 and hb["fn"] == 0
     assert sweep["failures"] == []
     assert b.params["conf"].validated_against == VALIDATED_HELD_OUT
+
+
+def test_a_trait_with_no_authored_floor_refuses_to_validate(tmp_path):
+    """None means not yet authored: the gate refuses rather than substituting a floor of its own,
+    even over a reference whose matches are otherwise perfect."""
+    import dataclasses
+
+    from tests._operationalization_fixtures import write_spec
+    from tests._trait_fixtures import CATKIN
+
+    write_spec(tmp_path, dataclasses.replace(
+        CATKIN, name="no_floor_trait", holdout_match_quality_floor=None))
+    cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
+    hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)
+
+    b = resolve_operating_point("no_floor_trait", tiled=True, dataset_hash="h",
+                                staged_conf_floor=0.05, calibration_records=cal,
+                                holdout_records=hold)
+    sweep = b.params["conf"].sweep
+
+    assert sweep["holdout_match_quality_floor"] is None
+    assert "holdout_match_quality_floor_unauthored" in sweep["failures"]
+    assert b.params["conf"].validated_against == VALIDATED_FALSE
+
+
+def test_an_authored_floor_the_holdout_does_not_clear_refuses():
+    """A floor stricter than what the reference's own precision/recall reach refuses by name,
+    distinct from the unauthored case."""
+    cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
+    hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)
+
+    b = resolve_operating_point("catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
+                                calibration_records=cal, holdout_records=hold)
+    sweep = b.params["conf"].sweep
+
+    assert sweep["holdout_match_quality_floor"] == 0.5
+    assert "localization_quality_floor_failed" in sweep["failures"]
+    assert "holdout_match_quality_floor_unauthored" not in sweep["failures"]

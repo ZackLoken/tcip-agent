@@ -226,8 +226,10 @@ def _worker(job: InferenceJob) -> None:
         )
 
         # Derive tile_size/overlap/resize the same way run_inference does; job.slice_source ==
-        # "explicit" still wins. resolve_tile_regime resolves the resize only when tiled.
-        from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
+        # "explicit" still wins. A contradicting edge raises, caught by this worker's own try/except.
+        from tcip_mcp.pipelines.inference.predictor import (
+            explicit_edge_provenance, resolve_tile_regime,
+        )
 
         resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
             resolve_tile_regime(
@@ -236,13 +238,17 @@ def _worker(job: InferenceJob) -> None:
                 overlap=job.overlap if job.slice_source == "explicit" else None,
             )
         )
+        tile_size_derived_from = (
+            explicit_edge_provenance(predictor, resolved_tile)
+            if tile_size_source == "explicit" and resolved_tile is not None else None)
 
         # Resolve the operating point through the same firewalled bundle as the MCP door: conf is a
         # documented default with no per-dataset GT, so it is unvalidated and stamped validated=false.
         op_bundle = raw_operating_point(
             conf=job.conf, cross_tile_nms=job.iou, tiled=resolved_tile_bool,
             tiled_source=job.tile_source, tile_size=resolved_tile,
-            tile_size_source=tile_size_source, max_dets=job.max_dets,
+            tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from,
+            max_dets=job.max_dets,
             conf_stated=job.conf_stated, max_dets_stated=job.max_dets_stated,
         )
 

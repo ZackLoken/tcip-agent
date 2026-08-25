@@ -316,3 +316,57 @@ def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3, detector
                             min_size: int = 800, max_size: int = 1333, **det_kwargs):
     return BespokeDetection(num_classes, in_chans=in_chans, detector=detector,
                             min_size=min_size, max_size=max_size, **det_kwargs)
+
+
+# A non-torchvision detector, no .detector to route through.
+class BareScoreThreshDetector(nn.Module):
+    """A hand-rolled detector with no ``.detector``: exposes ``score_thresh`` on itself, and
+    honors it in its own eval-mode forward, one fixed box per image kept only when it clears the
+    threshold. The proof that the operating-point holder resolves to the module itself when it is
+    the only thing exposing a knob.
+    """
+
+    def __init__(self, in_chans: int = 3) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(in_chans, 1, 1)
+        self.score_thresh = 0.0
+
+    def forward(self, images):
+        if self.training:
+            return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+        results = []
+        for im in images:
+            h, w = int(im.shape[-2]), int(im.shape[-1])
+            boxes = torch.tensor([[w * 0.25, h * 0.25, w * 0.75, h * 0.75]], dtype=torch.float32)
+            scores = torch.tensor([0.9])
+            labels = torch.tensor([1])
+            keep = scores >= self.score_thresh
+            results.append({"boxes": boxes[keep], "scores": scores[keep], "labels": labels[keep]})
+        return results
+
+
+# The same shape with no operating-point knob under any recognized name anywhere: the case the
+# row demonstrates, where the platform genuinely has nothing it can set.
+class BareNoKnobDetector(nn.Module):
+    def __init__(self, in_chans: int = 3) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(in_chans, 1, 1)
+
+    def forward(self, images):
+        if self.training:
+            return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+        results = []
+        for im in images:
+            h, w = int(im.shape[-2]), int(im.shape[-1])
+            boxes = torch.tensor([[w * 0.25, h * 0.25, w * 0.75, h * 0.75]], dtype=torch.float32)
+            results.append(
+                {"boxes": boxes, "scores": torch.tensor([0.9]), "labels": torch.tensor([1])})
+        return results
+
+
+def build_bare_score_thresh_detector(*, in_chans: int = 3):
+    return BareScoreThreshDetector(in_chans=in_chans)
+
+
+def build_bare_no_knob_detector(*, in_chans: int = 3):
+    return BareNoKnobDetector(in_chans=in_chans)
