@@ -89,9 +89,11 @@ npm run dev        # http://127.0.0.1:5173
 npm run build      # rebuild production bundle → ../static/
 
 # Tests
-pytest tests/ -n 4 --tb=short
+pytest tests/ -n 4 --tb=short -q
 mypy               # type gate; roots come from mypy.ini's files list, run from the repo root
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
+# CI-parity gate: runs the steps .github/workflows/ci.yml declares (see CLAUDE.md's Commands block)
+python scripts/gate_baseline.py --out <dir>
 
 # End-to-end smokes (scripts/smoke_*_e2e.py)
 python scripts/smoke_phenology_e2e.py   # phenology pipeline: mapping -> milestones (offline)

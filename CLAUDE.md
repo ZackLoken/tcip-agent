@@ -286,12 +286,13 @@ shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
 ```bash
 conda activate tcip-agent          # Python 3.12; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
-pytest tests/ -n 4 --tb=short      # bounded locally; CI's 4-core runners run -n auto
+pytest tests/ -n 4 --tb=short -q   # bounded locally; CI's 4-core runners run -n auto
 ruff check .
 mypy                               # type gate; roots come from mypy.ini's files list, run from the repo root
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)
 # the full frontend gate, in CI order (.github/workflows/ci.yml): a partial run misses format:check/lint
 cd packages/tcip-web/frontend && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build   # build → ../static/
+python scripts/gate_baseline.py --out <dir>   # runs the steps ci.yml declares, Git Bash on Windows: the CI-parity gate
 python -m tcip_web                 # backend + built UI → http://127.0.0.1:8765
 python scripts/export_store.py <root>   # write a root's database-held records and logs back out as files
 python scripts/adopt_store.py <root>    # move a root's loose record/log files into its database

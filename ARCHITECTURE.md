@@ -360,7 +360,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 4 | 0 |
 | scripts/drop_trait_spec_provenance.py | Conform a project's trait-spec records to drop the retired free-text ``provenance`` field, and remove the stale copies an earlier YAML-to-record conform step left behind. | 1 | 0 |
 | scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 1 | 0 |
-| scripts/gate_baseline.py | Run the full quality gate and record per-stage duration and output. | 0 | 0 |
+| scripts/gate_baseline.py | Parse ci.yml's jobs and run the steps it declares, so a local pass means CI would pass too. | 0 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 4 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
