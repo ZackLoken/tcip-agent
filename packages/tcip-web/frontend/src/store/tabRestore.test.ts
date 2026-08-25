@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { TAB_NAMES } from "@/api/types.generated";
 import { datasetKey, loadLastTab, recordLastTab, saveDatasetUi } from "@/lib/datasetUiState";
 import { useStore } from "@/store";
 import type { DatasetSelection, ReviewFilters, TabName } from "@/store/types";
@@ -65,17 +66,8 @@ describe("per-project last-used tab", () => {
   });
 
   it("restores each of the app's tabs, not just some of them", () => {
-    const tabs: TabName[] = [
-      "annotate",
-      "review",
-      "training",
-      "tuning",
-      "inference",
-      "results",
-      "meta",
-    ];
-    expect(tabs).toHaveLength(7);
-    for (const tab of tabs) {
+    expect(TAB_NAMES).toHaveLength(7);
+    for (const tab of TAB_NAMES) {
       const other: TabName = tab === "annotate" ? "review" : "annotate";
       recordLastTab(ROOT, tab);
       useStore.setState((st) => ({ gui: { ...st.gui, active_tab: other } }));

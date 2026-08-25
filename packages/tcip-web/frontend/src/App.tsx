@@ -1,8 +1,9 @@
-import { Suspense, lazy, useEffect, useRef } from "react";
+import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 
 import { classesApi } from "@/api/classes";
 import type { ImageStatus } from "@/api/classes";
 import { ROUTES } from "@/api/routes";
+import { TAB_NAMES } from "@/api/types.generated";
 import { sessionsApi } from "@/api/sessions";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { TerminalRail } from "@/components/TerminalRail";
@@ -27,15 +28,7 @@ import { ReviewTab } from "@/tabs/ReviewTab";
 
 // Every tab has an agent panel of the same name (the backend's own panel set also carries
 // "app", handled by its own subscription below).
-const TAB_PANELS: TabName[] = [
-  "annotate",
-  "review",
-  "training",
-  "tuning",
-  "inference",
-  "results",
-  "meta",
-];
+const TAB_PANELS: readonly TabName[] = TAB_NAMES;
 
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
 // here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
@@ -309,28 +302,28 @@ function App() {
     setImageStatuses,
   ]);
 
+  // Only Annotate / Review / Results need an imagery dataset+date and show the picker until
+  // one is set. Keyed by TabName, so an added tab with no entry here fails the typecheck.
+  const tabPanels: Record<TabName, ReactNode> = {
+    annotate: datasetReady ? <AnnotateTab /> : <ProjectPicker />,
+    review: datasetReady ? <ReviewTab /> : <ProjectPicker />,
+    results: datasetReady ? <ResultsTab /> : <ProjectPicker />,
+    training: <TrainingTab />,
+    tuning: <TuningTab />,
+    inference: <InferenceTab />,
+    meta: <MetaTab />,
+  };
+
   return (
     <div ref={rootRef} className="h-full flex flex-col bg-tcip-bg text-tcip-fg">
       <TopBar />
-      {/* Only Annotate / Review / Results need an imagery dataset+date; the rest
-          (Training / Tuning / Inference / Meta) are reachable without one; being
-          forced to pick a dataset just to read agent reports or watch a run was a
-          usability trap. Dataset-dependent tabs show the picker until one is set.
-          The agent rail (the real Claude Code in a PTY) docks to the right; the tabs
-          are its canvas: it drives them through the MCP panel channel. */}
+      {/* The agent rail docks to the right; the tabs are its canvas, driven through the
+          MCP panel channel. */}
       <div className="flex-1 flex min-h-0">
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <TabBanner />
           <ErrorBoundary resetKey={activeTab}>
-            <Suspense fallback={<TabFallback />}>
-              {activeTab === "annotate" && (datasetReady ? <AnnotateTab /> : <ProjectPicker />)}
-              {activeTab === "review" && (datasetReady ? <ReviewTab /> : <ProjectPicker />)}
-              {activeTab === "results" && (datasetReady ? <ResultsTab /> : <ProjectPicker />)}
-              {activeTab === "training" && <TrainingTab />}
-              {activeTab === "tuning" && <TuningTab />}
-              {activeTab === "inference" && <InferenceTab />}
-              {activeTab === "meta" && <MetaTab />}
-            </Suspense>
+            <Suspense fallback={<TabFallback />}>{tabPanels[activeTab]}</Suspense>
           </ErrorBoundary>
         </div>
         <TerminalRail />

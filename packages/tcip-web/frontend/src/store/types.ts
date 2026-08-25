@@ -5,8 +5,7 @@
 
 import type { ActionPayload, GuiVocabulary } from "@/api/types.generated";
 
-export type TabName =
-  "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
+export type TabName = GuiVocabulary["active_tab"];
 
 export type Mode = GuiVocabulary["mode"];
 

@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 
+import { TAB_NAMES } from "@/api/types.generated";
 import { useStore } from "@/store";
 import type { TabName } from "@/store/types";
 
-const TABS: { id: TabName; label: string }[] = [
-  { id: "annotate", label: "Annotate" },
-  { id: "review", label: "Review" },
-  { id: "training", label: "Training" },
-  { id: "tuning", label: "Tuning" },
-  { id: "inference", label: "Inference" },
-  { id: "results", label: "Results" },
-  { id: "meta", label: "Meta" },
-];
+const TAB_LABELS: Record<TabName, string> = {
+  annotate: "Annotate",
+  review: "Review",
+  training: "Training",
+  tuning: "Tuning",
+  inference: "Inference",
+  results: "Results",
+  meta: "Meta",
+};
 
 /**
  * Global app bar: logo, centered tab navigation, agent-rail toggle, and a connection
@@ -47,17 +48,17 @@ export function TopBar() {
 
       {/* Tabs: the grid's auto track keeps them truly centered */}
       <div className="flex items-center gap-1 justify-self-center">
-        {TABS.map((t) => (
+        {TAB_NAMES.map((id) => (
           <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
+            key={id}
+            onClick={() => setActiveTab(id)}
             className={`px-3 h-7 rounded text-[12px] font-medium transition-colors ${
-              activeTab === t.id
+              activeTab === id
                 ? "bg-tcip-accent text-white"
                 : "bg-transparent text-tcip-muted hover:text-tcip-fg hover:bg-tcip-hover"
             }`}
           >
-            {t.label}
+            {TAB_LABELS[id]}
           </button>
         ))}
       </div>

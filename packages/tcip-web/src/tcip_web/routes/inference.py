@@ -39,6 +39,7 @@ from tcip_web.routes._body_common import EmptyBodyPayload
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_web.jobstore import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class InferenceJob:
     slice_source: str = "default"
     total: int = 0
     done: int = 0
-    status: str = "pending"  # pending | running | completed | failed | cancelled
+    status: JobStatus = "pending"
     error: Optional[str] = None
     warning: Optional[str] = None
     results: list[dict] = field(default_factory=list)  # [{image, n_detections}]
