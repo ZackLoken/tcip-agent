@@ -128,8 +128,8 @@ def test_both_guards_classify_targets_through_the_shared_fence_declaration():
         sample = target[: -len("/**")] + "/sample.txt" if target.endswith("/**") else target
         kind = agent_fence_rules.classify(sample, root=root, mode="dev")
         assert kind in ("protected", "breeder"), f"the declared path {target} is not fenced"
-    # A breeder's own project file that happens to share a repo-root basename is not platform code:
-    # anchoring the single-file rules to the repo root admits it, the P6-06 over-deny fix.
+    # A breeder's own project file sharing a repo-root basename is not platform code: anchoring
+    # the single-file rules to the repo root admits it.
     own = "/c/Users/breeder/tcip-projects/hazelnut/README.md"
     assert agent_fence_rules.classify(own, root=root, mode="dev") is None
 
@@ -260,13 +260,53 @@ def test_guard_denies_shell_writes_to_internals(cmd):
     assert "deny" in r.stdout
 
 
-def test_both_guards_deny_a_write_to_the_same_protected_path():
-    # Cross-shell parity: the same mutation intent (write into packages/) is blocked in both
-    # shells: the "switch to the other shell" bypass class must not exist.
-    assert _run_guard("echo x > packages/tcip-mcp/y.py").returncode == 2
-    assert _run_ps_guard('Set-Content packages\\tcip-mcp\\y.py "x"').returncode == 2
-    assert _run_guard("cp a.py packages/tcip-mcp/y.py").returncode == 2
-    assert _run_ps_guard("cp a.py packages\\tcip-mcp\\y.py").returncode == 2
+# Shapes both shells express: a redirect, a copy, a move, a write cmdlet against an in-place
+# edit. Each builder takes the target path and returns the command for its own shell.
+_PARITY_SHAPES = {
+    "redirect": (lambda t: f"echo x > {t}", lambda t: f"'{{}}' > {t}"),
+    "copy": (lambda t: f"cp evil.py {t}", lambda t: f"Copy-Item evil.py -Destination {t}"),
+    "move": (lambda t: f"mv evil.py {t}", lambda t: f"Move-Item evil.py -Destination {t}"),
+    "write": (lambda t: f"sed -i 's/a/b/' {t}", lambda t: f"Set-Content {t} 'x'"),
+}
+
+# (bash target, PowerShell target, expected verdict) per path kind.
+_PARITY_PATHS = {
+    "protected": ("packages/tcip-mcp/server.py", "packages\\tcip-mcp\\server.py", "deny"),
+    "breeder": ("/c/proj/labels/a.json", "C:\\proj\\labels\\a.json", "deny"),
+    "scratch": ("/tmp/scratch.txt", "C:\\tmp\\scratch.txt", "allow"),
+}
+
+
+@pytest.mark.parametrize("path_kind", sorted(_PARITY_PATHS))
+@pytest.mark.parametrize("shape", sorted(_PARITY_SHAPES))
+def test_both_guards_agree_on_the_expected_verdict_per_shape_and_path(shape, path_kind):
+    """Both guards feed one classifier (the same-object assertion above), so equal verdicts
+    follow once each shell's extractor finds a token; asserting the expected verdict rather than
+    equality alone means a pair that both fail to extract a target cannot pass. The extractors
+    barely intersect (bash's sed -i/patch/dd of=/ln/install/rsync/find -fprint and the line
+    editors; PowerShell's .NET/stream-writer forms and the item-property cmdlets); those are
+    outside parity by construction, each covered by its own shell's tests. Iterating the fence
+    declaration's paths is not claimed as coverage here: the classifier is one object, checked
+    elsewhere, and these three path kinds exercise the extractors, not the declaration.
+    """
+    bash_build, ps_build = _PARITY_SHAPES[shape]
+    bash_target, ps_target, verdict = _PARITY_PATHS[path_kind]
+    deny = verdict == "deny"
+    assert (_run_guard(bash_build(bash_target)).returncode == 2) is deny
+    assert (_run_ps_guard(ps_build(ps_target)).returncode == 2) is deny
+
+
+@pytest.mark.parametrize("path_kind", sorted(_PARITY_PATHS))
+def test_both_guards_deny_delete_on_every_path_kind(path_kind):
+    """Delete is path-independent on both sides: the verb alone is denied, even against the
+    scratch path every write shape above admits. Truncate and git push are not parity shapes:
+    bash denies truncate unconditionally too, but PowerShell's Clear-Content is target-classified,
+    and git push is settings-only in bash but guard-level in PowerShell; both are deliberate
+    asymmetries, named here rather than asserted away.
+    """
+    bash_target, ps_target, _ = _PARITY_PATHS[path_kind]
+    assert _run_guard(f"rm {bash_target}").returncode == 2
+    assert _run_ps_guard(f"Remove-Item {ps_target}").returncode == 2
 
 
 @pytest.mark.parametrize(
@@ -440,27 +480,6 @@ def test_guard_allows_a_redirect_into_an_unrelated_path():
     r = _run_guard("echo done > /tmp/scratch.txt")
     assert r.returncode == 0, r.stdout
 
-
-def test_bash_and_powershell_guards_deny_the_same_breeder_data_operations():
-    # Parity test: both shells must deny the same breeder-data delete/truncate/write
-    # operations, the drift the platform-path-only comparison above
-    # (test_bash_and_powershell_guards_protect_the_same_roots) cannot catch, since platform paths
-    # and breeder data are orthogonal invariants. Covers all three harm classes (delete, truncate,
-    # overwrite-via-redirect-or-cmdlet), not delete alone.
-    pairs = [
-        ("rm C:/Users/breeder/tcip-projects/proj/labels/a.txt",
-         'rm C:\\Users\\breeder\\tcip-projects\\proj\\labels\\a.txt'),
-        ("find /c/proj/annotations -name '*.json' -delete", None),  # Bash-only construct
-        ("truncate -s 0 /c/proj/annotations/a.json",
-         "Clear-Content C:\\proj\\annotations\\a.json"),
-        ("echo '{}' > /c/proj/labels/a.json",
-         'Set-Content C:\\proj\\labels\\a.json \'{}\''),
-        ("> /c/proj/labels/a.json", "'{}' > C:\\proj\\labels\\a.json"),
-    ]
-    for bash_cmd, ps_cmd in pairs:
-        assert _run_guard(bash_cmd).returncode == 2, bash_cmd
-        if ps_cmd is not None:
-            assert _run_ps_guard(ps_cmd).returncode == 2, ps_cmd
 
 
 # ── the PowerShell guard hook (the closed bypass) ────────────────────────
@@ -642,7 +661,7 @@ def test_ps_guard_fails_open_on_garbage_stdin():
     assert r.returncode == 0
 
 
-# ── the Batch 4 redesign: bypasses closed, admit-valid-work preserved ────────
+# ── redirect grammar and target normalization: bypasses closed, admit-valid-work preserved ──
 
 
 @pytest.mark.parametrize(
@@ -679,7 +698,7 @@ def test_ps_guard_fails_open_on_garbage_stdin():
         "python -X utf8 -c \"open('packages/x','w').write('x')\"",
     ],
 )
-def test_bash_guard_denies_the_batch4_bypasses(cmd):
+def test_bash_guard_denies_redirect_and_in_place_writer_bypasses(cmd):
     r = _run_guard(cmd)
     assert r.returncode == 2, r.stdout
     assert "deny" in r.stdout
@@ -708,7 +727,8 @@ def test_bash_guard_fails_closed_on_an_opaque_target_off_an_allow_listed_prefix(
         "ln -s packages/tcip-mcp/server.py /tmp/server.py",
         "cp packages/tcip-mcp/server.py /tmp/x.py",
         "cat packages/tcip-mcp/server.py > /tmp/out.txt",  # allow-listed prefix, but a concrete free target
-        # A breeder editing their own project file that shares a repo-root basename (P6-06 fix).
+        # A breeder editing their own project file that shares a repo-root basename is not
+        # platform code: anchoring the single-file rules to the repo root admits it.
         "echo x > /c/Users/breeder/tcip-projects/hazelnut/README.md",
         "echo x > /c/Users/breeder/tcip-projects/hazelnut/pyproject.toml",
         # The interpreter option scan ends at -m / the script, so pytest's own -c is not inline exec.
@@ -717,7 +737,7 @@ def test_bash_guard_fails_closed_on_an_opaque_target_off_an_allow_listed_prefix(
         "LOG=/tmp/x.log; echo hi > $LOG",
     ],
 )
-def test_bash_guard_admits_valid_work_after_the_redesign(cmd):
+def test_bash_guard_admits_valid_work_past_the_redirect_grammar(cmd):
     r = _run_guard(cmd)
     assert r.returncode == 0, r.stdout
     assert r.stdout.strip() == ""
@@ -730,7 +750,7 @@ def test_bash_guard_admits_valid_work_after_the_redesign(cmd):
         'Set-Content C:\\proj\\la"bel"s\\a.json "x"',  # quote insertion into breeder data
     ],
 )
-def test_ps_guard_denies_the_batch4_bypasses(cmd):
+def test_ps_guard_denies_redirect_and_quote_insertion_bypasses(cmd):
     r = _run_ps_guard(cmd)
     assert r.returncode == 2, r.stdout
     assert "deny" in r.stdout
@@ -739,22 +759,23 @@ def test_ps_guard_denies_the_batch4_bypasses(cmd):
 @pytest.mark.parametrize(
     "cmd",
     [
-        # A breeder editing their own project file that shares a repo-root basename (P6-06 fix).
+        # A breeder editing their own project file sharing a repo-root basename is not platform
+        # code: anchoring the single-file rules to the repo root admits it.
         'Set-Content C:\\Users\\breeder\\tcip-projects\\hazelnut\\README.md "x"',
         'Set-Content C:\\Users\\breeder\\tcip-projects\\hazelnut\\pyproject.toml "x"',
         # Copying a protected source to a free destination is a read, not a platform mutation.
         "Copy-Item packages\\tcip-mcp\\server.py -Destination C:\\tmp\\x.py",
     ],
 )
-def test_ps_guard_admits_valid_work_after_the_redesign(cmd):
+def test_ps_guard_admits_valid_work_past_the_redirect_grammar(cmd):
     r = _run_ps_guard(cmd)
     assert r.returncode == 0, r.stdout
     assert r.stdout.strip() == ""
 
 
 def test_materialized_fence_is_written_to_a_private_directory_not_a_fixed_shared_path():
-    # P6-11: the live permission fence must not be a fixed, pre-createable name in the shared temp
-    # root. Each spawn materializes it into its own process-private directory instead.
+    # The live permission fence must not be a fixed, pre-createable name in the shared temp root;
+    # each spawn materializes it into its own process-private directory instead.
     import tempfile
 
     p1 = pty_host._materialize_fence_settings()
@@ -777,8 +798,8 @@ def test_guards_resolve_variable_indirection_into_in_place_writers():
 
 
 def test_classify_drops_repo_rules_in_production_mode_keeping_breeder_data():
-    # B2-10: in production the platform is installed with no repo tree, so the repo rules fall away
-    # (a breeder's own README is theirs to edit) while breeder data and trait-state stay protected.
+    # In production the platform is installed with no repo tree, so the repo rules fall away (a
+    # breeder's own README is theirs to edit) while breeder data and trait-state stay protected.
     from tcip_web import agent_fence_rules as fr
 
     root = fr.repo_root()
