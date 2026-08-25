@@ -326,7 +326,7 @@ class TestExperiments:
         assert result["count"] == 2
         exps = {e["experiment_id"]: e for e in result["experiments"]}
         assert exps["exp-x"]["model"] == "my_models:resnet50_det"
-        assert exps["exp-y"]["final_metrics"]["mAP50"] == 0.7
+        assert exps["exp-y"]["last_logged_metrics"]["mAP50"] == 0.7
 
         exp.EXPERIMENTS_DIR = original
 
