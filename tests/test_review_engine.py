@@ -378,11 +378,36 @@ def test_check_image_review_complete(engine: ReviewEngine, ctx: ReviewContext) -
     # Accept each detection one at a time
     for det in dets[:-1]:
         engine.record_detection_action(BUCKET, det, ctx, action="accepted")
-    assert engine.check_image_review_complete(BUCKET, ctx.img_name, ctx, matches) is False
+    assert engine.check_image_review_complete(BUCKET, ctx, matches) is False
 
     engine.record_detection_action(BUCKET, dets[-1], ctx, action="accepted")
-    assert engine.check_image_review_complete(BUCKET, ctx.img_name, ctx, matches) is True
+    assert engine.check_image_review_complete(BUCKET, ctx, matches) is True
     assert engine.is_image_reviewed(BUCKET, ctx.img_name)
+
+
+def test_review_progress_counts_an_aliased_pair_as_one_reviewed_of_two(
+    engine: ReviewEngine, ctx: ReviewContext
+) -> None:
+    """Two current FP detections at the same predicted centre both alias to the one stored entry
+    the centre-only lookup finds: recording a verdict against each writes the same entry twice, so
+    the pair reads as one reviewed of two, and the image does not complete while it is the last
+    detection left."""
+    aliased_ctx = replace(ctx, preds=[
+        *ctx.preds,
+        Annotation(subject="catkin", geometry=BBox(700, 700, 800, 800), score=0.7),  # aliases the FP
+    ])
+    matches = compute_matches(aliased_ctx.gt, aliased_ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
+    dets = engine.build_detection_list(aliased_ctx, matches)
+    fp_dets = [d for d in dets if d.det_type == "fp"]
+    assert len(fp_dets) == 2
+
+    for det in dets:
+        engine.record_detection_action(BUCKET, det, aliased_ctx, action="accepted")
+
+    reviewed, total = engine.review_progress(BUCKET, aliased_ctx, dets)
+    assert total == len(dets)
+    assert reviewed == total - 1
+    assert engine.check_image_review_complete(BUCKET, aliased_ctx, matches) is False
 
 
 def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -> None:
@@ -476,12 +501,12 @@ def test_check_image_review_complete_ignores_a_coverage_only_sweep_entry(
     sweep_det = ReviewDetection(det_type="sweep", class_name="", conf=None, iou=None,
                                 gt_idx=None, pred_idx=None, bbox=(0, 0, ctx.img_width, ctx.img_height))
     engine.record_detection_action(BUCKET, sweep_det, ctx, action="swept")
-    assert engine.check_image_review_complete(BUCKET, ctx.img_name, ctx, matches) is False
+    assert engine.check_image_review_complete(BUCKET, ctx, matches) is False
 
     dets = engine.build_detection_list(ctx, matches)
     for det in dets:
         engine.record_detection_action(BUCKET, det, ctx, action="accepted")
-    assert engine.check_image_review_complete(BUCKET, ctx.img_name, ctx, matches) is True
+    assert engine.check_image_review_complete(BUCKET, ctx, matches) is True
 
 
 def test_save_gt_writes_merged_file(engine: ReviewEngine, ctx: ReviewContext, tmp_path: Path) -> None:
@@ -626,16 +651,16 @@ def test_completion_gate_counts_every_detection_not_only_the_filtered_ones(
     assert len(tp_only) == 2
     for det in tp_only:
         engine.record_detection_action(BUCKET, det, unordered_ctx, action="accepted")
-    assert engine.check_image_review_complete(BUCKET, unordered_ctx.img_name, unordered_ctx, matches) is False
+    assert engine.check_image_review_complete(BUCKET, unordered_ctx, matches) is False
     assert engine.get_image_review_status(BUCKET, unordered_ctx.img_name) == "started"
 
     for det in engine.build_detection_list(unordered_ctx, matches, filter_type="fp"):
         engine.record_detection_action(BUCKET, det, unordered_ctx, action="rejected")
-    assert engine.check_image_review_complete(BUCKET, unordered_ctx.img_name, unordered_ctx, matches) is False
+    assert engine.check_image_review_complete(BUCKET, unordered_ctx, matches) is False
 
     for det in engine.build_detection_list(unordered_ctx, matches, filter_type="fn"):
         engine.record_detection_action(BUCKET, det, unordered_ctx, action="accepted")
-    assert engine.check_image_review_complete(BUCKET, unordered_ctx.img_name, unordered_ctx, matches) is True
+    assert engine.check_image_review_complete(BUCKET, unordered_ctx, matches) is True
 
 
 def test_an_attested_miss_stays_attested_when_keyed_to_the_authored_geometry(
