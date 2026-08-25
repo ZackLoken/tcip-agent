@@ -2,7 +2,7 @@
 
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import { createReconnectingSocket } from "@/lib/reconnectingSocket";
+import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
 export interface TrainingRunSummary {
   run_id: string;
@@ -84,14 +84,6 @@ export interface TrainingStreamMsg {
  * dedupe by epoch/step. A ``status`` (terminal) or ``error`` (unknown run) frame ends
  * the stream; once seen we stop reconnecting.
  */
-function frameType(data: string): string | undefined {
-  try {
-    return (JSON.parse(data) as TrainingStreamMsg).type;
-  } catch {
-    return undefined;
-  }
-}
-
 export function openTrainingStream(
   project_root: string,
   run_id: string,
@@ -102,19 +94,10 @@ export function openTrainingStream(
   );
   const socket = createReconnectingSocket({
     url,
-    isTerminal: (data) => {
-      const t = frameType(data);
-      return t === "status" || t === "error";
-    },
-    onMessage: (data) => {
-      let m: TrainingStreamMsg;
-      try {
-        m = JSON.parse(data);
-      } catch {
-        return;
-      }
-      onMessage(m);
-    },
+    ...jsonFrameHandlers<TrainingStreamMsg>(
+      onMessage,
+      (frame) => frame.type === "status" || frame.type === "error",
+    ),
   });
   socket.start();
   return () => socket.stop();

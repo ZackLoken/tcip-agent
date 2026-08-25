@@ -33,6 +33,42 @@ export interface ReconnectingSocket {
   send(data: string): void;
 }
 
+/**
+ * Builds the `isTerminal`/`onMessage` pair for a caller whose frames are JSON and whose
+ * terminal check reads the same parsed frame the handler does, so a frame is parsed once
+ * instead of once per hook.
+ */
+export function jsonFrameHandlers<T>(
+  onMessage: (frame: T) => void,
+  isTerminal?: (frame: T) => boolean,
+): Pick<ReconnectingSocketOptions, "onMessage" | "isTerminal"> {
+  let parsedFor: string | undefined;
+  let parsed: T | undefined;
+  const parse = (data: string): T | undefined => {
+    if (data !== parsedFor) {
+      parsedFor = data;
+      try {
+        parsed = JSON.parse(data) as T;
+      } catch {
+        parsed = undefined;
+      }
+    }
+    return parsed;
+  };
+  return {
+    onMessage: (data: string) => {
+      const frame = parse(data);
+      if (frame !== undefined) onMessage(frame);
+    },
+    isTerminal: isTerminal
+      ? (data: string) => {
+          const frame = parse(data);
+          return frame !== undefined && isTerminal(frame);
+        }
+      : undefined,
+  };
+}
+
 export function createReconnectingSocket(opts: ReconnectingSocketOptions): ReconnectingSocket {
   const maxBackoff = opts.maxBackoffMs ?? MAX_BACKOFF_MS;
   let ws: WebSocket | null = null;
@@ -56,10 +92,13 @@ export function createReconnectingSocket(opts: ReconnectingSocketOptions): Recon
     opts.onConnecting?.();
     let url: string;
     try {
-      url = typeof opts.url === "function" ? await opts.url() : opts.url;
+      // Only a provider that returns a promise costs an await; a synchronous one must not pick
+      // up a microtask tick the equivalent fixed string never had.
+      const resolved = typeof opts.url === "function" ? opts.url() : opts.url;
+      url = resolved instanceof Promise ? await resolved : resolved;
     } catch {
       // A throwing provider ends the loop rather than scheduling a retry: the caller's own
-      // onError decides whether/how to recover (this is the terminal rail's behavior today).
+      // onError decides whether/how to recover.
       connecting = false;
       opts.onError?.();
       return;
@@ -110,6 +149,9 @@ export function createReconnectingSocket(opts: ReconnectingSocketOptions): Recon
     stop() {
       stopped = true;
       clearReconnectTimer();
+      // Cleared here too, not just on open/close: a stop() while still CONNECTING must not
+      // leave the guard set, or the start() that follows returns at it forever.
+      connecting = false;
       const socket = ws;
       ws = null; // supersede: the closing socket's own handlers become no-ops
       socket?.close();

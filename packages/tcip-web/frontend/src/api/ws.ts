@@ -18,7 +18,7 @@ export class StateSocket {
 
   constructor(private path: string = ROUTES.socketWsState) {
     this.socket = createReconnectingSocket({
-      url: wsUrl(this.path),
+      url: () => wsUrl(this.path),
       onConnecting: () => useStore.getState().setWsStatus("connecting"),
       onOpen: () => useStore.getState().setWsStatus("connected"),
       onError: () => useStore.getState().setWsStatus("error"),
