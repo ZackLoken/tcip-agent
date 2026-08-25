@@ -670,18 +670,55 @@ def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
     return sorted(key.parts[0] for key in found if key.parts[1] == STATUS_DOCUMENT)
 
 
+def derived_state(status: dict[str, Any], stale_seconds: float) -> str:
+    """The state a status record reads as once heartbeat freshness applies: a state already
+    recorded as done (:data:`_RECORDED_AS_DONE`) is trusted as-is; any other state derives to
+    ``"running"`` while the heartbeat is fresh, else ``"interrupted"``. The one implementation
+    :func:`reconstruct_from_status` and :func:`compare_experiments` both read through, so a run
+    whose process died reads the same way everywhere rather than as ``"running"`` in one place.
+    """
+    state = status.get("state", "unknown") if isinstance(status, dict) else "unknown"
+    heartbeat = status.get("heartbeat") if isinstance(status, dict) else None
+    if state not in _RECORDED_AS_DONE:
+        state = "running" if _heartbeat_fresh(heartbeat, stale_seconds) else "interrupted"
+    return state
+
+
+def reconstruct_from_status(
+    experiment_id: str, status: dict[str, Any], *, stale_seconds: float, read_progress: bool,
+) -> dict[str, Any]:
+    """One record's run row, reconstructed from a status document the caller already read: the
+    shape :func:`reconstruct_run_status` returns for the one record it resolved a ``run_id`` to,
+    and the shape the run enumeration in ``training_tools.py`` builds per record without a
+    separate resolver round-trip. ``current_epoch`` costs one metrics-log read and is included
+    only when ``read_progress`` is true; ``best_metric`` is left ``None``, a running best isn't
+    recoverable from the metrics log alone without re-deriving the selection policy.
+    """
+    current_epoch = None
+    if read_progress:
+        rows = read_metrics(experiment_id)
+        current_epoch = rows[-1].get("epoch") if rows else None
+    return {
+        "run_id": status.get("run_id", experiment_id),
+        "experiment_id": experiment_id,
+        "status": derived_state(status, stale_seconds),
+        "current_epoch": current_epoch,
+        "best_metric": None,
+        "output_dir": status.get("output_dir"),
+        "error": status.get("error"),
+    }
+
+
 def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict[str, Any] | None:
     """Reconstruct a run's status from disk for a caller whose in-memory registry doesn't
     have it, either it was never in this process (a different process launched it) or it was
     subprocess-delegated and the in-memory record is stale by design.
 
     Returns ``None`` when the run can't be resolved on disk at all (an honestly unknown run, not a
-    guess). ``current_epoch`` comes from the last ``metrics.jsonl`` row when present; ``best_metric``
-    is left ``None``, a running best isn't recoverable from the metrics log alone without
-    re-deriving the selection policy, and a fabricated approximation would be worse than an honest
-    gap (matches the pre-existing convention this function replaces, which also reported ``None``).
-    ``stale_seconds`` lets a caller (``routes/training.py``) keep its own configurable heartbeat
-    window rather than being pinned to this module's default.
+    guess). ``stale_seconds`` lets a caller (``routes/training.py``, ``training_tools.py``) keep
+    its own configurable heartbeat window rather than being pinned to this module's default. The
+    reconstruction itself is :func:`reconstruct_from_status`, over the one record this function
+    resolves ``run_id`` to.
     """
     experiment_id = resolve_experiment_for_run(run_id)
     if experiment_id is None:
@@ -689,24 +726,8 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
     status = read_member(status_key(experiment_id))
     if not isinstance(status, dict):
         return None
-
-    state = status.get("state", "unknown")
-    heartbeat = status.get("heartbeat")
-    if state not in _RECORDED_AS_DONE:
-        state = "running" if _heartbeat_fresh(heartbeat, stale_seconds) else "interrupted"
-
-    rows = read_metrics(experiment_id)
-    current_epoch = rows[-1].get("epoch") if rows else None
-
-    return {
-        "run_id": status.get("run_id", experiment_id),
-        "experiment_id": experiment_id,
-        "status": state,
-        "current_epoch": current_epoch,
-        "best_metric": None,
-        "output_dir": status.get("output_dir"),
-        "error": status.get("error"),
-    }
+    return reconstruct_from_status(experiment_id, status, stale_seconds=stale_seconds,
+                                   read_progress=True)
 
 
 def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
