@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-store" 
 import tcip_store as ts  # noqa: E402
 from tcip_mcp import traits  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
+from tcip_store.file_backend import lock_file_for  # noqa: E402
 from tcip_store.sqlite_backend import database_path  # noqa: E402
 
 
@@ -100,8 +101,9 @@ def remove_stray_database(root: Path, *, plan: bool) -> str | None:
     if plan:
         return f"would remove stray database at {db}"
     removed = [db]
-    for suffix in ("-wal", "-shm"):
-        sidecar = db.with_name(db.name + suffix)
+    sidecars = [db.with_name(db.name + suffix) for suffix in ("-wal", "-shm")]
+    sidecars.append(lock_file_for(db))
+    for sidecar in sidecars:
         if sidecar.is_file():
             sidecar.unlink()
             removed.append(sidecar)

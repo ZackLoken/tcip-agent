@@ -191,6 +191,16 @@ def _locks_for(canonical: str, lock_path: str) -> tuple[threading.RLock, Any]:
         return thread_lock, file_lock
 
 
+def lock_file_for(path: Path | str) -> Path:
+    """The lock file :func:`path_lock` holds beside the data file at ``path``.
+
+    ``filelock`` deletes it on release under Windows and keeps it under Unix, so whatever removes
+    a data file this backend guarded removes this file through here as well, or the directory it
+    sits in never empties on Unix.
+    """
+    return Path(str(path) + _LOCK_SUFFIX)
+
+
 @contextmanager
 def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
     """Hold this process's one lock pair for a filesystem path, across threads and processes.
@@ -205,7 +215,7 @@ def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) ->
     """
     _, timeout_error = _filelock_classes()
     target = Path(path)
-    lock_file = str(target) + _LOCK_SUFFIX
+    lock_file = str(lock_file_for(target))
     thread_lock, file_lock = _locks_for(canonical_path(target), lock_file)
     if not thread_lock.acquire(timeout=max(0.0, timeout_s)):
         raise timeout_error(lock_file)
