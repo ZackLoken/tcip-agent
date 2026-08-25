@@ -157,6 +157,12 @@ def test_a_record_invalid_once_provenance_is_dropped_is_refused_and_left_on_file
 
 
 def test_removes_the_stray_self_rooted_database(tmp_path: Path):
+    """The database, its journal sidecars and the lock file beside it all go, and so does the
+    directory that held them. The lock file is seeded explicitly because ``filelock`` keeps it
+    after release under Unix and deletes it under Windows: without seeding, a Windows run never
+    sees the file a Unix run leaves, and the directory it keeps alive. The file is named here
+    the way ``filelock`` names it beside a data file, rather than through the backend's helper,
+    so the test collects on a tree that has no helper yet."""
     backend = _bind_sqlite()
     module = _load_script()
     db = _seed_stray_database(
@@ -164,11 +170,15 @@ def test_removes_the_stray_self_rooted_database(tmp_path: Path):
     )
     assert db.is_file()
     backend.close()  # release the file handle before the script deletes the file, Windows-safe
+    lock = db.with_name(db.name + ".lock")
+    lock.touch()
 
     outcome = module.remove_stray_database(tmp_path, plan=False)
 
     assert outcome is not None and outcome.startswith("removed stray database")
+    assert str(lock) in outcome
     assert not db.is_file()
+    assert not lock.is_file()
     assert not db.parent.is_dir()
 
 
