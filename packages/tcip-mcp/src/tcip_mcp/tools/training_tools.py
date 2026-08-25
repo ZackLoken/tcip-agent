@@ -1366,7 +1366,8 @@ def _ensure_experiment(
     # says pristine, so a non-pristine id mints its fresh id below with no refusal audited.
     status = read_member(status_key(experiment_id), {})
     state = status.get("state") if isinstance(status, dict) else None
-    if is_pristine(state, bool(read_metrics(experiment_id))):
+    metrics_logged = bool(status.get("metrics_logged")) if isinstance(status, dict) else False
+    if is_pristine(state, metrics_logged):
         overwritten = overwrite_config_if_pristine(experiment_id, config)
         if "error" not in overwritten:
             stamp_run_identity(experiment_id, run_id, output_dir)

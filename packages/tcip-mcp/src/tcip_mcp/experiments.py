@@ -416,17 +416,18 @@ def create_experiment(
     }
 
 
-def is_pristine(state: str | None, has_metrics: bool) -> bool:
-    """Whether an experiment record with this ``state`` and ``has_metrics`` may still take a full
-    ``config.json`` rewrite: ``state == "created"`` and no metrics logged yet.
+def is_pristine(state: str | None, metrics_logged: bool) -> bool:
+    """Whether an experiment record with this ``state`` and ``metrics_logged`` may still take a
+    full ``config.json`` rewrite: ``state == "created"`` and no metrics logged yet.
 
-    The one implementation of the pristine predicate. :func:`overwrite_config_if_pristine` calls
-    it from inside the transaction that reads ``state``; ``_ensure_experiment`` calls it first, on
-    its own untransacted read, to decide whether to attempt that overwrite at all, so a relaunch
-    under a non-pristine id mints its fresh id straight away instead of provoking (and auditing) a
-    refusal nothing needed.
+    The one implementation of the pristine predicate. ``metrics_logged`` is the status record's
+    own field (see :func:`log_metrics`), read by both callers: :func:`overwrite_config_if_pristine`
+    reads it from inside the transaction that also reads ``state``; ``_ensure_experiment`` reads it
+    first, on its own outside read, to decide whether to attempt that overwrite at all, so a
+    relaunch under a non-pristine id mints its fresh id straight away instead of provoking (and
+    auditing) a refusal nothing needed.
     """
-    return state == "created" and not has_metrics
+    return state == "created" and not metrics_logged
 
 
 def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -441,28 +442,28 @@ def overwrite_config_if_pristine(experiment_id: str, config: dict[str, Any]) -> 
     longer pristine, a "created" record that already has metrics rows must stay protected too, not
     just the terminal-state lock alone.
 
-    The state read and the write are one transaction (closing the race where a concurrent
-    ``update_status``/patch flips the record between the check and the write); the metrics-log
-    read is not, a log key cannot join a record transaction (``tcip_store.transaction`` requires
-    ``kind="record"``), so a metric logged in that narrow window is the one residual this cannot
-    close, it can only ever make the record look non-pristine, never the reverse.
+    Both of :func:`is_pristine`'s inputs, ``state`` and ``metrics_logged``, are read from the
+    same status record this opens one transaction over, closing the race a log-key read outside
+    the transaction could not: a ``log_metrics`` call now decides pristineness by writing to that
+    same record, under the same lock, rather than a key no record transaction can name.
     """
     check_json_value(config, path="config")
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
-    has_metrics = bool(read_metrics(experiment_id))
     cfg_key, st_key = config_key(experiment_id), status_key(experiment_id)
     state: str | None = None
+    metrics_logged = False
     refused = False
     with store.transaction(cfg_key, st_key) as txn:
         status = txn.read(st_key, default={})
         state = status.get("state") if isinstance(status, dict) else None
-        refused = not is_pristine(state, has_metrics)
+        metrics_logged = bool(status.get("metrics_logged")) if isinstance(status, dict) else False
+        refused = not is_pristine(state, metrics_logged)
         if not refused:
             txn.write(cfg_key, config)
     if refused:
         _audit_refused(experiment_id, "overwrite_config_if_pristine",
-                       {"state": state, "has_metrics": has_metrics})
+                       {"state": state, "metrics_logged": metrics_logged})
         return {"error": f"Experiment {experiment_id} is no longer pristine; refusing to "
                          f"overwrite its config.json."}
     return {"experiment_id": experiment_id, "overwritten": True}
@@ -696,6 +697,11 @@ def log_metrics(
 
     A bespoke loop's row is its own dict, so it is checked field by field first: a tensor or
     a non-finite loss is named here, where the caller can see which metric it was.
+
+    Stamps ``status.json["metrics_logged"] = True`` before appending, the record
+    :func:`is_pristine` reads instead of a log key no record transaction can name. The marker
+    goes before the append, not after, so a marker written but then an append that fails still
+    reads non-pristine, never the reverse.
     """
     check_json_value(metrics, path="metrics")
     if not experiment_exists(experiment_id):
@@ -707,6 +713,12 @@ def log_metrics(
     except ExperimentTerminal as exc:
         _audit_refused(experiment_id, "log_metrics", {"epoch": epoch})
         return {"error": str(exc)}
+
+    key = status_key(experiment_id)
+    with store.transaction(key) as txn:
+        status = txn.read(key, default={})
+        status["metrics_logged"] = True
+        txn.write(key, status)
 
     entry = {
         "epoch": epoch,

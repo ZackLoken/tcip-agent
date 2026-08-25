@@ -374,6 +374,43 @@ class TestExperiments:
 
         exp.EXPERIMENTS_DIR = original
 
+    def test_log_metrics_stamps_the_status_record_before_its_append(self):
+        import tcip_mcp.experiments as exp
+        original = exp.EXPERIMENTS_DIR
+        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
+
+        exp.create_experiment("exp-009", {"a": 1})
+        assert "metrics_logged" not in ts.read(exp.status_key("exp-009"))
+
+        exp.log_metrics("exp-009", 0, {"loss": 1.0})
+        assert ts.read(exp.status_key("exp-009"))["metrics_logged"] is True
+
+        exp.EXPERIMENTS_DIR = original
+
+    def test_overwrite_config_if_pristine_reads_the_marker_not_the_log(self):
+        """The predicate now decides pristineness from the status record's own field, not by
+        re-scanning the log: an experiment whose marker is set (with no rows at all, a state the
+        real log_metrics can never produce alone, manufactured here to isolate what the
+        predicate actually reads) still refuses."""
+        import tcip_mcp.experiments as exp
+        original = exp.EXPERIMENTS_DIR
+        exp.EXPERIMENTS_DIR = self.tmpdir / "experiments"
+
+        exp.create_experiment("exp-010", {"a": 1})
+        assert exp.read_metrics("exp-010") == []
+        key = exp.status_key("exp-010")
+        with ts.transaction(key) as txn:
+            status = txn.read(key, default={})
+            status["metrics_logged"] = True
+            txn.write(key, status)
+
+        result = exp.overwrite_config_if_pristine("exp-010", {"a": 2})
+        assert "error" in result
+        config = ts.read(exp.config_key("exp-010"))
+        assert config == {"a": 1}
+
+        exp.EXPERIMENTS_DIR = original
+
     def test_get_experiment_lineage(self):
         import tcip_mcp.experiments as exp
         original = exp.EXPERIMENTS_DIR
