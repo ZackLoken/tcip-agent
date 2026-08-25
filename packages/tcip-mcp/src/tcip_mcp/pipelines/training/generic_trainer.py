@@ -283,6 +283,7 @@ class TrainRun:
             "origin": self.origin,
             "elapsed_seconds": (self.end_time or time.time()) - self.start_time if self.start_time else 0,
             "pid": self.pid,
+            "experiment_id": self.config.get("experiment_id") if isinstance(self.config, dict) else None,
         }
 
 

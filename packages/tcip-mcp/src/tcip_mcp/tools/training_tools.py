@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -34,6 +35,10 @@ _gpu_round_robin = itertools.count()
 
 # Serializes the overfit diagnostic's reseed-run-restore, since the RNG streams are process-global.
 _OVERFIT_CHECK_LOCK = threading.Lock()
+
+# A reconstructed non-terminal run reads "running" only while its heartbeat is within this
+# window, past it a live process is presumed dead and it reads "interrupted".
+TCIP_HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600"))
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
@@ -659,30 +664,102 @@ def check_training_status(run_id: str) -> dict:
     return result
 
 
+def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
+    """Every launched training run this store holds a record for, reconstructed from disk.
+
+    A record is a launched run when its config carries ``model_source`` and it shows one of
+    three launch signs: a stamped ``run_id``, a state other than ``"created"``, or the
+    ``metrics_logged`` marker, so a launch whose best-effort stamp or status write was lost still
+    lists, and a pre-created experiment that never launched does not. Rows come back sorted by
+    experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``.
+    ``read_progress`` governs whether ``current_epoch`` costs a metrics-log read per record.
+    Cost: one status read and one config read per experiment record on disk, plus, when
+    ``read_progress`` is true, one metrics-log read per launched record.
+    """
+    from tcip_store import DecodeError
+
+    from tcip_mcp.experiments import (
+        config_key, experiment_ids_with_status, reconstruct_from_status, status_key,
+    )
+    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
+
+    rows: list[dict[str, Any]] = []
+    for experiment_id in experiment_ids_with_status():
+        try:
+            config = store.read(config_key(experiment_id), default={})
+            status = store.read(status_key(experiment_id), default={})
+        except DecodeError:
+            # One unreadable record must not cost the caller the whole run listing.
+            logger.warning("experiment %s has a member that does not decode", experiment_id,
+                           exc_info=True)
+            continue
+        if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
+            continue  # not a training experiment (e.g. review-feedback lineage)
+        if not isinstance(status, dict):
+            continue
+        launched = (bool(status.get("run_id")) or status.get("state") != "created"
+                   or bool(status.get("metrics_logged")))
+        if not launched:
+            continue
+        row = reconstruct_from_status(experiment_id, status, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
+                                      read_progress=read_progress)
+        row["external"] = True
+        rows.append(row)
+    return rows
+
+
+def _all_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
+    """This process's in-memory registry merged with every launched run's own disk record: the
+    one implementation :func:`list_training_runs` and :func:`inspect_compute_resources` both
+    build on, so a subprocess-delegated run's real status is visible to both and neither
+    reimplements the merge.
+
+    A live in-memory entry (HPO trials excluded) wins by ``run_id`` over its own disk row: a
+    ``pid``-bearing one takes the disk overlay for ``status``/``current_epoch``/``error``/
+    ``experiment_id`` (a subprocess-delegated run mutates its own separate copy on disk, so the
+    parent-side in-memory record is a stale launch-time placeholder past that point); a
+    ``pid``-less one (every synchronous run) is reported from its own in-memory record,
+    untouched. Both carry ``external: False`` and an ``experiment_id`` (from the disk overlay
+    where there is one, else the run's own config, else ``None``). Rows: this process's own, in
+    registry order, then the disk-only rows, sorted by experiment id.
+    """
+    from tcip_mcp.pipelines.training.generic_trainer import list_runs
+
+    live = list_runs()
+    disk = _launched_training_runs(read_progress=read_progress)
+    disk_by_run_id = {r["run_id"]: r for r in disk}
+
+    merged: list[dict[str, Any]] = []
+    for r in live:
+        row = dict(r)
+        row["external"] = False
+        overlay = disk_by_run_id.get(row["run_id"]) if row.get("pid") is not None else None
+        if overlay is not None:
+            row["status"] = overlay["status"]
+            if overlay["current_epoch"] is not None:
+                row["current_epoch"] = overlay["current_epoch"]
+            if overlay.get("error"):
+                row["error"] = overlay["error"]
+            row["experiment_id"] = overlay["experiment_id"]
+        merged.append(row)
+
+    live_run_ids = {r["run_id"] for r in live}
+    disk_only = [r for r in disk if r["run_id"] not in live_run_ids]
+    return merged + disk_only
+
+
 @mcp.tool()
 @audited
 def list_training_runs() -> dict:
-    """List all training runs in this session.
+    """List every training run this platform can currently account for.
 
-    Overlays disk-reconstructed status onto any subprocess-delegated run (``pid`` set) whose
-    in-memory record is a stale launch-time placeholder; a run whose training body never left this
-    process (every existing synchronous test, and any future non-subprocess caller) is reported
-    from the live in-memory record exactly as before, untouched.
+    Merges this process's own in-memory registry with every launched run's own record on disk
+    (a run this session launched, another process launched, or one that survived a restart); see
+    :func:`_all_training_runs` for the merge rule. HPO trials are excluded (they belong to the
+    Tuning view). Cost: one status read and one config read per experiment record on disk, plus
+    one metrics-log read per launched record for its current epoch.
     """
-    from tcip_mcp.pipelines.training.generic_trainer import list_runs
-    from tcip_mcp.experiments import reconstruct_run_status
-
-    runs = list_runs()
-    for r in runs:
-        if r.get("pid") is not None:
-            disk = reconstruct_run_status(r["run_id"])
-            if disk is not None:
-                r["status"] = disk["status"]
-                if disk["current_epoch"] is not None:
-                    r["current_epoch"] = disk["current_epoch"]
-                if disk.get("error"):
-                    r["error"] = disk["error"]
-    return {"runs": runs}
+    return {"runs": _all_training_runs(read_progress=True)}
 
 
 @mcp.tool()
@@ -729,12 +806,12 @@ def inspect_compute_resources() -> dict:
         ``memory``: ``{total_bytes, available_bytes}``, both ``None`` without ``psutil``.
         ``gpus``: ``[{index, free_bytes, total_bytes}, ...]``, always populated when CUDA is
             available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
-        ``active_training_runs``: count of runs currently reporting ``"running"``, reads through
-            ``list_training_runs``'s own disk overlay, since a subprocess-delegated run's parent-
-            side in-memory record never mutates past its launch-time placeholder.
+        ``active_training_runs``: count of every record on this machine whose derived state is
+            ``"running"``, a heartbeat fresher than ``TCIP_HEARTBEAT_STALE_SECONDS`` (600s by
+            default, so a live run whose epoch outlasts the window reads ``"interrupted"`` and is
+            not counted), through :func:`_all_training_runs` with progress reads off: one status
+            read and one config read per experiment record, no metrics-log read.
     """
-    import os
-
     cpu: dict[str, Any] = {"logical_count": os.cpu_count(), "percent_used": None}
     memory: dict[str, Any] = {"total_bytes": None, "available_bytes": None}
     try:
@@ -757,10 +834,7 @@ def inspect_compute_resources() -> dict:
     except Exception:
         logger.info("GPU visibility unavailable", exc_info=True)
 
-    # list_training_runs (not the raw generic_trainer.list_runs), its disk overlay is what makes
-    # a subprocess-delegated run's real status visible; the parent's own in-memory copy never
-    # leaves its launch-time placeholder once the child starts mutating its own separate copy.
-    active = sum(1 for r in list_training_runs()["runs"] if r.get("status") == "running")
+    active = sum(1 for r in _all_training_runs(read_progress=False) if r.get("status") == "running")
 
     return {"cpu": cpu, "memory": memory, "gpus": gpus, "active_training_runs": active}
 
