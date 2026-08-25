@@ -124,6 +124,8 @@ function matchesRes(
     gt: extra.gt ?? [],
     preds: extra.preds ?? [],
     image_status: "not_started",
+    n_reviewed: detections.filter((d) => d.reviewed).length,
+    n_total: detections.length,
   };
 }
 

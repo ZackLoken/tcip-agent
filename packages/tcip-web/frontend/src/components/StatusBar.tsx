@@ -86,11 +86,8 @@ export function StatusBar() {
           <span style={{ color: reviewColors.fn }}>FN {matches.n_fn}</span>
         </span>
       )}
-      {activeTab === "review" && matches && matches.detections.length > 0 && (
-        <ReviewProgress
-          reviewed={matches.detections.filter((d) => d.reviewed).length}
-          total={matches.detections.length}
-        />
+      {activeTab === "review" && matches && matches.n_total > 0 && (
+        <ReviewProgress reviewed={matches.n_reviewed} total={matches.n_total} />
       )}
       <div className="flex-1" />
       {showAgent && agentActivity && (

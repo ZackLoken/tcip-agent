@@ -172,6 +172,10 @@ export interface MatchesResponse {
   gt: Annotation[];
   preds: Annotation[];
   image_status: "not_started" | "started" | "completed";
+  // Current detections with a stored verdict, and the current total, from review_progress;
+  // n_total counts the whole image regardless of the active detection filter.
+  n_reviewed: number;
+  n_total: number;
 }
 
 /** The Annotate canvas' load payload, split from the unified annotation list by geometry kind. */

@@ -70,7 +70,7 @@ def _review_a_whole_image(engine: ReviewEngine, ctx: ReviewContext, *, class_id:
             conf_threshold=0.25,
             class_id=class_id,
         )
-    assert engine.check_image_review_complete(BUCKET, ctx.img_name, matches) is True
+    assert engine.check_image_review_complete(BUCKET, ctx.img_name, ctx, matches) is True
 
 
 def test_reference_boxes_come_back_at_the_pixel_sizes_they_were_reviewed_at(

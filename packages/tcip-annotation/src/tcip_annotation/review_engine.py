@@ -735,36 +735,46 @@ class ReviewEngine:
 
         self._save_image(bucket, ctx.img_name)
 
-    def check_image_review_complete(self, bucket: str, img_name: str, matches: dict) -> bool:
-        """If every detection on the image has been reviewed, mark it complete.
+    def review_progress(
+        self, bucket: str, img_name: str, ctx: ReviewContext, matches: dict
+    ) -> tuple[int, int]:
+        """``(reviewed, total)`` over the current detections: how many of ``matches``' own tp/fp/fn
+        entries have a stored verdict, by the same lookup the per-detection ticks use
+        (:meth:`find_reviewed_entry`), and how many current detections there are in total.
 
-        Returns ``True`` if the image is now in the completed state.
+        One rule shared by the ticks, the status-bar wheel and :meth:`check_image_review_complete`:
+        reviewed never means "a stored entry exists somewhere in the shard", only "a stored entry
+        exists for a detection still in this current match set". A confidence threshold raised since
+        an entry was recorded drops that prediction out of ``matches``, so it stops being counted
+        here even though the shard still holds its entry, and the completion gate and the wheel read
+        that one count rather than each keeping their own. Two current detections whose centres
+        alias to the same stored entry both count, a property of the centre-only lookup, not of this
+        method.
         """
-        total = (
-            len(matches.get("tp", []))
-            + len(matches.get("fp", []))
-            + len(matches.get("fn", []))
-        )
-        if total == 0:
+        dets = self.build_detection_list(ctx, matches)
+        reviewed = sum(1 for d in dets if self.find_reviewed_entry(bucket, d, ctx) is not None)
+        return reviewed, len(dets)
+
+    def check_image_review_complete(
+        self, bucket: str, img_name: str, ctx: ReviewContext, matches: dict
+    ) -> bool:
+        """If every current detection on the image has a stored verdict, mark it complete.
+
+        Completion means every detection :meth:`review_progress` currently counts has an entry,
+        never that stored entries outnumber that set: entries recorded for predictions a later,
+        higher confidence threshold excludes do not complete an image early. Returns ``True`` if
+        the image is in the completed state after this call.
+        """
+        reviewed, total = self.review_progress(bucket, img_name, ctx, matches)
+        if total == 0 or reviewed < total:
             return False
 
         img_data = self._verdicts().get((bucket, img_name))
         if not img_data:
             return False
-
-        # A coverage-only attestation ("swept this image, found nothing more": neither gt_bbox_norm
-        # nor pred_bbox_norm set, see record_detection_action) doesn't walk any of `matches`' TP/FP/FN
-        # entries, so it must not count toward "every detection reviewed" -- counting it would let a
-        # sweep on an image with real, still-unreviewed detections flip img_status to completed early.
-        reviewed_count = sum(
-            1 for d in img_data.get("detections", [])
-            if d.get("gt_bbox_norm") is not None or d.get("pred_bbox_norm") is not None
-        )
-        if reviewed_count >= total:
-            img_data["img_status"] = "completed"
-            self._save_image(bucket, img_name)
-            return True
-        return False
+        img_data["img_status"] = "completed"
+        self._save_image(bucket, img_name)
+        return True
 
     # ── Label backup / save ───────────────────────────────────────────────
 

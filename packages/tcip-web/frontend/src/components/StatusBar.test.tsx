@@ -33,6 +33,8 @@ function matchesRes(over: Partial<MatchesResponse> = {}): MatchesResponse {
     gt: [],
     preds: [],
     image_status: "started",
+    n_reviewed: 0,
+    n_total: 0,
     ...over,
   };
 }
@@ -63,14 +65,16 @@ describe("StatusBar review readout", () => {
     expect(screen.getByText("FN 4")).toBeInTheDocument();
   });
 
-  it("counts the detections already reviewed, and fills the wheel to the same share", () => {
+  it("reports the route's own reviewed/total, not a recount of the filtered detections on screen", () => {
+    // n_reviewed/n_total come from review_progress over the whole image; a type filter (here
+    // narrowing detections to the two fp's) must never be recounted as the wheel's own numbers.
     useStore.getState().setMatches(
       matchesRes({
         n_tp: 2,
         n_fp: 2,
+        n_reviewed: 1,
+        n_total: 4,
         detections: [
-          det({ reviewed: true, reviewed_action: "rejected" }),
-          det(),
           det({ det_type: "fp", gt_idx: null, pred_idx: 0 }),
           det({ det_type: "fp", gt_idx: null, pred_idx: 1 }),
         ],
@@ -85,8 +89,24 @@ describe("StatusBar review readout", () => {
     expect(arc.getAttribute("stroke-dasharray")).toBe("11 44");
   });
 
+  it("stays visible when a filter matches nothing, since n_total still counts the whole image", () => {
+    useStore
+      .getState()
+      .setMatches(matchesRes({ n_tp: 2, n_fp: 2, n_reviewed: 0, n_total: 4, detections: [] }));
+    render(<StatusBar />);
+
+    expect(screen.getByText("0 / 4 reviewed")).toBeInTheDocument();
+  });
+
+  it("hides the wheel only when the image itself carries no detections at all", () => {
+    useStore.getState().setMatches(matchesRes({ n_reviewed: 0, n_total: 0, detections: [] }));
+    render(<StatusBar />);
+
+    expect(screen.queryByText(/reviewed$/)).not.toBeInTheDocument();
+  });
+
   it("keeps the review readout off the annotate tab", () => {
-    useStore.getState().setMatches(matchesRes({ n_tp: 5, detections: [det()] }));
+    useStore.getState().setMatches(matchesRes({ n_tp: 5, n_total: 1, detections: [det()] }));
     useStore.getState().setActiveTab("annotate");
     render(<StatusBar />);
 

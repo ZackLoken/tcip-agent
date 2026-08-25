@@ -379,6 +379,8 @@ class MatchesResponse(BaseModel):
     gt: list[dict]      # every GT annotation (subject + geometry + attributes + provenance)
     preds: list[dict]   # every prediction annotation (carries score)
     image_status: str   # "not_started" | "started" | "completed"
+    n_reviewed: int      # current detections with a stored verdict, review_progress's own count
+    n_total: int         # current detections, the same count's denominator
 
 
 def _matches_response(
@@ -393,7 +395,12 @@ def _matches_response(
 ) -> MatchesResponse:
     """Build the canvas payload (filtered + review-decorated detections, GT/pred annotations, status)
     from an already-computed match set. Shared by /matches and /action so both surfaces return the
-    identical shape, letting a verdict return its fresh matches instead of forcing a second fetch."""
+    identical shape, letting a verdict return its fresh matches instead of forcing a second fetch.
+
+    ``n_reviewed``/``n_total`` come from :meth:`ReviewEngine.review_progress` over the unfiltered
+    ``matches``, before ``filter_type``/``filter_class`` narrow ``detections`` to what is rendered:
+    the status-bar wheel reports the whole image's progress regardless of the active filter.
+    """
     dets = engine.build_detection_list(
         ctx, matches, filter_type=filter_type, filter_class=filter_class
     )
@@ -412,6 +419,7 @@ def _matches_response(
             reviewed_action=entry.get("action") if entry else None,
         ))
 
+    n_reviewed, n_total = engine.review_progress(bucket, image_name, ctx, matches)
     return MatchesResponse(
         img_width=ctx.img_width,
         img_height=ctx.img_height,
@@ -422,6 +430,8 @@ def _matches_response(
         gt=[_ann_dict(a) for a in ctx.gt],
         preds=[_ann_dict(a) for a in ctx.preds],
         image_status=engine.get_image_review_status(bucket, image_name),
+        n_reviewed=n_reviewed,
+        n_total=n_total,
     )
 
 
@@ -615,7 +625,7 @@ def record_action(payload: ActionPayload) -> dict:
         iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
         subject=payload.subject, attribute=payload.attribute,
     )
-    engine.check_image_review_complete(bucket, payload.image_name, matches)
+    engine.check_image_review_complete(bucket, payload.image_name, work, matches)
     _audit(payload.dataset_root, "gui_review_action", {
         "image_name": payload.image_name,
         "det_type": payload.det_type,
