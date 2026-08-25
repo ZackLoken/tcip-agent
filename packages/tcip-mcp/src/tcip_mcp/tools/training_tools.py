@@ -629,7 +629,7 @@ def check_training_status(run_id: str) -> dict:
     result: dict[str, Any] | None = None
     if run is None or run.pid is not None:
         from tcip_mcp.experiments import reconstruct_run_status
-        disk = reconstruct_run_status(run_id)
+        disk = reconstruct_run_status(run_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
         if disk is not None:
             result = {
                 "run_id": disk["run_id"],
@@ -667,10 +667,12 @@ def check_training_status(run_id: str) -> dict:
 def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     """Every launched training run this store holds a record for, reconstructed from disk.
 
-    A record is a launched run when its config carries ``model_source`` and it shows one of
-    three launch signs: a stamped ``run_id``, a state other than ``"created"``, or the
-    ``metrics_logged`` marker, so a launch whose best-effort stamp or status write was lost still
-    lists, and a pre-created experiment that never launched does not. Rows come back sorted by
+    A record is a launched run when its config carries ``model_source`` and
+    :func:`~tcip_mcp.experiments.is_launched` says so: a stamped ``run_id``, a state other than
+    ``"created"``, or the ``metrics_logged`` marker, so a launch whose best-effort stamp or status
+    write was lost still lists, and a pre-created experiment that never launched does not; the
+    same predicate :func:`~tcip_mcp.experiments.compare_experiments` consults before deriving a
+    heartbeat state at all. Rows come back sorted by
     experiment id (``experiment_ids_with_status``'s own order), each carrying ``external: True``.
     ``read_progress`` governs whether ``current_epoch`` costs a metrics-log read per record.
     Cost: one status read and one config read per experiment record on disk, plus, when
@@ -679,7 +681,7 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
     from tcip_store import DecodeError
 
     from tcip_mcp.experiments import (
-        config_key, experiment_ids_with_status, reconstruct_from_status, status_key,
+        config_key, experiment_ids_with_status, is_launched, reconstruct_from_status, status_key,
     )
     from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
 
@@ -695,11 +697,7 @@ def _launched_training_runs(*, read_progress: bool) -> list[dict[str, Any]]:
             continue
         if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
             continue  # not a training experiment (e.g. review-feedback lineage)
-        if not isinstance(status, dict):
-            continue
-        launched = (bool(status.get("run_id")) or status.get("state") != "created"
-                   or bool(status.get("metrics_logged")))
-        if not launched:
+        if not is_launched(status):
             continue
         row = reconstruct_from_status(experiment_id, status, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS,
                                       read_progress=read_progress)
@@ -786,7 +784,7 @@ def cancel_training(run_id: str) -> dict:
         # there's no in-memory status to read; reflect the same disk record cancel_run itself
         # resolved to write the sentinel, if it's still discoverable.
         from tcip_mcp.experiments import reconstruct_run_status
-        disk = reconstruct_run_status(run_id)
+        disk = reconstruct_run_status(run_id, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)
         status = disk["status"] if disk is not None else "running"
     return {"run_id": run_id, "status": status, "cancel_requested": True}
 
@@ -806,11 +804,13 @@ def inspect_compute_resources() -> dict:
         ``memory``: ``{total_bytes, available_bytes}``, both ``None`` without ``psutil``.
         ``gpus``: ``[{index, free_bytes, total_bytes}, ...]``, always populated when CUDA is
             available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
-        ``active_training_runs``: count of every record on this machine whose derived state is
-            ``"running"``, a heartbeat fresher than ``TCIP_HEARTBEAT_STALE_SECONDS`` (600s by
-            default, so a live run whose epoch outlasts the window reads ``"interrupted"`` and is
-            not counted), through :func:`_all_training_runs` with progress reads off: one status
-            read and one config read per experiment record, no metrics-log read.
+        ``active_training_runs``: count of every run whose derived state is ``"running"``, a
+            heartbeat fresher than ``TCIP_HEARTBEAT_STALE_SECONDS`` (600s by default, so a live
+            run whose epoch outlasts the window reads ``"interrupted"`` and is not counted),
+            through :func:`_all_training_runs` with progress reads off: this process's own
+            in-memory registry (no live process ever reads as stale) merged with every launched
+            record on disk, one status read and one config read per disk record, no metrics-log
+            read.
     """
     cpu: dict[str, Any] = {"logical_count": os.cpu_count(), "percent_used": None}
     memory: dict[str, Any] = {"total_bytes": None, "available_bytes": None}

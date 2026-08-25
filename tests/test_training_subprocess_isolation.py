@@ -460,8 +460,9 @@ def test_list_training_runs_lists_a_launched_experiment_this_process_never_held(
 def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, monkeypatch):
     """A pid-bearing in-memory entry (subprocess-delegated) takes the disk overlay for its
     status/current_epoch: its own in-memory copy is a stale launch-time placeholder once the
-    child starts mutating its own separate copy on disk. It still carries external=False, unlike
-    a run this process never held at all."""
+    child starts mutating its own separate copy on disk. The status/current_epoch overlay is
+    pre-existing coverage; the new assertion this test adds is external=False, unlike a run this
+    process never held at all."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
@@ -659,7 +660,8 @@ def test_inspect_compute_resources_reports_gpu_free_memory(monkeypatch):
 
 
 def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_path, monkeypatch):
-    """active_training_runs must count from the disk-aware list_training_runs(), not the raw
+    """active_training_runs must count from the disk-aware _all_training_runs() (the internal
+    function list_training_runs() and inspect_compute_resources() both build on), not the raw
     in-memory generic_trainer.list_runs(): a subprocess-delegated run's parent-side
     TrainRun.status never leaves its create_run-time "created" default once the child starts
     mutating its own separate copy, so the raw call always reports 0 for it. This is the common
@@ -681,6 +683,22 @@ def test_inspect_compute_resources_counts_subprocess_delegated_running_runs(tmp_
     create_experiment("run_active", {"model_source": {"builder": "x:y"}})
     stamp_run_identity("run_active", "run_active", str(tmp_path))
     update_status("run_active", "running")  # only the child's disk write reflects reality
+
+    assert inspect_compute_resources()["active_training_runs"] == baseline + 1
+
+
+def test_inspect_compute_resources_counts_a_run_another_process_recorded(tmp_path, monkeypatch):
+    """A run this process never held in memory at all, one another process launched and is
+    still updating on disk with a fresh heartbeat, still counts: the disk record alone, with no
+    in-memory _RUNS entry, is enough."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.tools.training_tools import inspect_compute_resources
+
+    baseline = inspect_compute_resources()["active_training_runs"]
+
+    create_experiment("run_other_process", {"model_source": {"builder": "x:y"}})
+    update_status("run_other_process", "running")  # fresh heartbeat, no in-memory entry anywhere
 
     assert inspect_compute_resources()["active_training_runs"] == baseline + 1
 

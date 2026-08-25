@@ -70,5 +70,5 @@ def test_get_experiment_n_epochs_counts_distinct_values_not_rows(tmp_path, monke
     log_metrics("exp2", 3, {"loss_val": 0.4})
 
     result = get_experiment("exp2")
-    assert result["n_rows"] == 2
     assert result["n_epochs"] == 1
+    assert result["n_rows"] == 2
