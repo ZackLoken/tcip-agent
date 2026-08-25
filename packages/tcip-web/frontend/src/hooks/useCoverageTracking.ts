@@ -3,6 +3,11 @@
  * dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the
  * viewing context, and exposes the swept set for the minimap plus the Complete warning facts.
  * No active subject means no accumulation and no POST.
+ *
+ * Only the Annotate tab calls this hook, but the band selection its `viewing.bands`/`stretch`
+ * carries is held per band-set signature across both tabs (`useBandSelection`), so a composite
+ * chosen in the Review tab is the one this tab's coverage record carries too, once the two tabs
+ * share the same band set.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";

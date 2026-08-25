@@ -92,4 +92,19 @@ describe("useBandSelection", () => {
     hook.rerender({ bandsInfo: bandsResponse(SET_A) });
     expect(hook.result.current[0]).toEqual({ r: "NIR", g: "Red", b: "Green", stretch: "minmax" });
   });
+
+  it("keeps the same setter and default-selection identity across a render with no signature change", () => {
+    const hook = renderHook(({ bandsInfo }) => useBandSelection(bandsInfo), {
+      initialProps: { bandsInfo: bandsResponse(SET_A) },
+    });
+    const [firstSelection, firstSetter] = hook.result.current;
+
+    // A fresh bandsInfo object, but the same band-set signature: a dependency array keyed off
+    // either the selection or the setter must not see a new identity here.
+    hook.rerender({ bandsInfo: bandsResponse(SET_A) });
+    const [secondSelection, secondSetter] = hook.result.current;
+
+    expect(secondSetter).toBe(firstSetter);
+    expect(secondSelection).toBe(firstSelection);
+  });
 });

@@ -340,9 +340,6 @@ export function AnnotateTab() {
   const isLocked = currentStatus === "complete" || currentStatus === "negative";
   const saveDisabled = !imgPath || isLocked || saveBlocked;
 
-  // Band-composite picker (multispectral only). bandsInfo drives conditional visibility
-  // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
-  // the breeder, carried across image navigation until the dataset's own band set changes.
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
 

@@ -1,3 +1,5 @@
+import { useCallback, useMemo } from "react";
+
 import type { ImageBandsResponse } from "@/api/client";
 import {
   bandSetSignature,
@@ -6,6 +8,10 @@ import {
   type BandSelection,
 } from "@/lib/bandSelection";
 import { useStore } from "@/store";
+
+/** A stable no-op setter for the non-applicable case, so a consumer that puts the returned setter
+ *  in a dependency array never sees a new function identity on a render that changes nothing. */
+function noopSetter(): void {}
 
 /**
  * The breeder's band selection for the image `bandsInfo` describes, held once per band-set
@@ -26,10 +32,22 @@ export function useBandSelection(
   const byBandSet = useStore((s) => s.bandSelection.byBandSet);
   const setBandSelectionFor = useStore((s) => s.setBandSelectionFor);
 
-  if (!bandsInfo || bandsInfo.band_count <= 3 || isPlainColourFrame(bandsInfo)) {
-    return [null, () => {}];
+  const applicable = !!bandsInfo && bandsInfo.band_count > 3 && !isPlainColourFrame(bandsInfo);
+  const signature = applicable ? bandSetSignature(bandsInfo.bands) : "";
+
+  // Memoized so a consumer that keys a dependency array off the returned selection or setter
+  // does not see a new object/function identity on every render that changes nothing.
+  const defaultSelection = useMemo(
+    () => (applicable && bandsInfo ? defaultBandSelection(bandsInfo.bands) : null),
+    [applicable, signature], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const setSelection = useCallback(
+    (next: BandSelection) => setBandSelectionFor(signature, next),
+    [setBandSelectionFor, signature],
+  );
+
+  if (!applicable) {
+    return [null, noopSetter];
   }
-  const signature = bandSetSignature(bandsInfo.bands);
-  const selection = byBandSet[signature] ?? defaultBandSelection(bandsInfo.bands);
-  return [selection, (next) => setBandSelectionFor(signature, next)];
+  return [byBandSet[signature] ?? defaultSelection, setSelection];
 }
