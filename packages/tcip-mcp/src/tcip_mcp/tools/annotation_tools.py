@@ -811,9 +811,16 @@ def stage_proposals(
         date: Capture-date bucket (e.g. "2026-02-11").
         stem: Image stem (filename without extension).
         boxes: ``[{subject, conf, cx, cy, w, h}]`` with cx/cy/w/h normalized to [0, 1].
-        polygons: ``[{subject, conf, points: [[x, y], ...]}]`` with points normalized to [0, 1].
+        polygons: ``[{subject, conf, points|rings}]``, exactly one of two frames per proposal:
+            ``points``, one ring of ``[x, y]`` pairs normalized to [0, 1], the frame a proposer
+            reasoning over the rendered image works in; or ``rings``, a list of rings in pixel
+            coordinates, each vertex an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping, the frame
+            the platform's own segmenter (``segment_prompt``) returns. Both build the same
+            ``Polygon`` through the ground-truth door's own vertex parser.
         overwrite: Write in place even into an existing bucket. Refused if the bucket has verdicts.
     """
+    from tcip_annotation.json_io import ring_vertex
+
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
     from tcip_mcp.workspace import is_valid_name
@@ -844,21 +851,43 @@ def stage_proposals(
             return {"error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be in [0,1]"}
         norm_boxes.append((subject, conf, cx, cy, w, h))
 
-    norm_polys: list[tuple[str, float, list[tuple[float, float]]]] = []
+    # Each polygon carries exactly one of two keys; the pixel-frame bounds check needs img_w/img_h.
+    norm_polys: list[tuple[str, float, str, list, list]] = []
     for i, p in enumerate(polygons):
+        has_points = "points" in p
+        has_rings = "rings" in p
+        if has_points == has_rings:
+            offered = sorted(k for k in ("points", "rings") if k in p)
+            return {"error": f"polygon {i} must carry exactly one of 'points' or 'rings', got "
+                             f"{offered}: {p!r}"}
         try:
             conf = float(p.get("conf", 1.0))
             subject = str(p["subject"])
-            pts = [(float(x), float(y)) for x, y in p["points"]]
         except (KeyError, TypeError, ValueError):
-            return {"error": f"polygon {i} needs a subject, conf, points [[x,y],...] (normalized): {p!r}"}
+            return {"error": f"polygon {i} needs a subject and numeric conf: {p!r}"}
         if not subject:
             return {"error": f"polygon {i} needs a non-empty subject"}
-        if len(pts) < 3:
-            return {"error": f"polygon {i} needs at least 3 points, got {len(pts)}"}
-        if _unnormalized([v for xy in pts for v in xy]):
-            return {"error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"}
-        norm_polys.append((subject, conf, pts))
+
+        if has_points:
+            try:
+                pts = [(float(x), float(y)) for x, y in p["points"]]
+            except (TypeError, ValueError):
+                return {"error": f"polygon {i} points must be [x, y] pairs (normalized): {p!r}"}
+            if len(pts) < 3:
+                return {"error": f"polygon {i} needs at least 3 points, got {len(pts)}"}
+            if _unnormalized([v for xy in pts for v in xy]):
+                return {"error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"}
+            norm_polys.append((subject, conf, "points", pts, []))
+        else:
+            try:
+                rings = [[ring_vertex(v) for v in ring] for ring in p["rings"]]
+            except (TypeError, ValueError, KeyError):
+                return {"error": f"polygon {i} rings must be a list of rings of [x, y] pairs or "
+                                 f"{{'x':, 'y':}} mappings (pixel coordinates): {p!r}"}
+            short = [j for j, ring in enumerate(rings) if len(ring) < 3]
+            if short:
+                return {"error": f"polygon {i} ring(s) {short} need at least 3 points"}
+            norm_polys.append((subject, conf, "rings", [], rings))
 
     img_source = None
     for idir in (image_dir(dataset_root, date), image_dir(dataset_root, None)):
@@ -871,6 +900,23 @@ def stage_proposals(
         return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
     img_w, img_h = image_dimensions(img_source)
 
+    # The pixel-frame counterpart of _unnormalized, the same fractional tolerance, scaled per axis.
+    def _out_of_pixel_bounds(ring: list[tuple[float, float]]) -> bool:
+        return (any(x < -0.01 * img_w or x > 1.5 * img_w for x, _ in ring)
+                or any(y < -0.01 * img_h or y > 1.5 * img_h for _, y in ring))
+
+    # Fold each polygon's own frame into pixel-space rings, now that img_w/img_h are known.
+    resolved_polys: list[tuple[str, float, list[list[tuple[float, float]]]]] = []
+    for i, (subject, conf, frame, pts, rings) in enumerate(norm_polys):
+        if frame == "points":
+            rings_px = [[(x * img_w, y * img_h) for x, y in pts]]
+        else:
+            if any(_out_of_pixel_bounds(ring) for ring in rings):
+                return {"error": f"polygon {i} rings look out of the image's pixel bounds "
+                                 f"({img_w}x{img_h}): {rings!r}"}
+            rings_px = rings
+        resolved_polys.append((subject, conf, rings_px))
+
     from datetime import datetime, timezone
     created_at = datetime.now(timezone.utc).isoformat()
 
@@ -882,9 +928,9 @@ def stage_proposals(
         for (subject, conf, cx, cy, w, h) in norm_boxes
     ] + [
         Annotation(subject=subject,
-                   geometry=Polygon(rings=[[(x * img_w, y * img_h) for x, y in pts]]),
+                   geometry=Polygon(rings=rings_px),
                    score=conf, created_by=model_name, created_at=created_at)
-        for (subject, conf, pts) in norm_polys
+        for (subject, conf, rings_px) in resolved_polys
     ]
 
     try:

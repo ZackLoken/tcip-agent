@@ -273,6 +273,140 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     assert "error" in res and "at least one" in res["error"]
 
 
+# ── Rings: the pixel-frame counterpart of points ─────────────────────────────
+
+
+class _FakeMultiRingEngine:
+    """A segmentation engine whose one mask always splits into the same two disjoint pixel rings."""
+
+    def segment(self, image_path, *, points=None, box=None, **params):
+        return [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
+                [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)]]
+
+
+def test_stage_proposals_admits_a_two_ring_pixel_proposal_with_pair_vertices(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0200", size=(640, 480))
+    rings = [[[10.0, 10.0], [50.0, 10.0], [50.0, 40.0], [10.0, 40.0]],
+             [[100.0, 100.0], [140.0, 100.0], [120.0, 140.0]]]
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0200",
+                          polygons=[{"subject": "leaf", "conf": 0.9, "rings": rings}])
+
+    assert res["staged"] == 1 and "error" not in res
+    out = Path(prediction_dir(root, "sam", date)) / "IMG_0200.json"
+    polys = json_io.read_annotations(out)
+    assert len(polys) == 1
+    assert isinstance(polys[0].geometry, Polygon)
+    assert [len(r) for r in polys[0].geometry.rings] == [4, 3]
+    assert polys[0].geometry.rings[0][0] == pytest.approx((10.0, 10.0))
+
+
+def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admit case is the platform's own segmenter's actual return, not a hand-built shape."""
+    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.tools.annotation_tools import segment_prompt
+
+    monkeypatch.setitem(proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine())
+
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0201", size=(640, 480))
+    image_path = str(Path(image_dir(root, date)) / "IMG_0201.jpg")
+
+    prompted = segment_prompt(image_path, points=[{"x": 30, "y": 30, "label": 1}],
+                              engine="fake_multi_ring")
+    assert prompted["ring_count"] == 2
+    assert all(isinstance(v, dict) for ring in prompted["rings"] for v in ring)  # {"x":, "y":} vertices
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0201",
+                          polygons=[{"subject": "leaf", "conf": 0.85, "rings": prompted["rings"]}])
+    assert res["staged"] == 1 and "error" not in res
+
+    out = Path(prediction_dir(root, "sam", date)) / "IMG_0201.json"
+    staged_poly = json_io.read_annotations(out)[0]
+    assert [len(r) for r in staged_poly.geometry.rings] == [4, 3]
+
+    # The same mapping-vertex payload, read back through the ground-truth door's own parser.
+    from tcip_annotation.json_io import annotation_from_payload
+    gt = annotation_from_payload(
+        {"subject": "leaf", "rings": prompted["rings"]}, author="breeder", now="2026-02-11T00:00:00+00:00",
+    )
+    assert [len(r) for r in gt.geometry.rings] == [4, 3]
+
+
+def test_stage_proposals_refuses_both_points_and_rings(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0202", size=(640, 480))
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0202", polygons=[{
+        "subject": "leaf", "conf": 0.9,
+        "points": [[0.1, 0.1], [0.3, 0.1], [0.3, 0.4]],
+        "rings": [[[10.0, 10.0], [50.0, 10.0], [50.0, 40.0]]],
+    }])
+
+    assert "error" in res and "exactly one of 'points' or 'rings'" in res["error"]
+    assert not (root / "predictions").exists()
+
+
+def test_stage_proposals_refuses_neither_points_nor_rings(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0203", size=(640, 480))
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0203",
+                          polygons=[{"subject": "leaf", "conf": 0.9}])
+
+    assert "error" in res and "exactly one of 'points' or 'rings'" in res["error"]
+
+
+def test_stage_proposals_refuses_a_short_ring_under_rings(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0204", size=(640, 480))
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0204", polygons=[{
+        "subject": "leaf", "conf": 0.9,
+        "rings": [[[10.0, 10.0], [50.0, 10.0]]],
+    }])
+
+    assert "error" in res and "at least 3 points" in res["error"]
+    assert not (root / "predictions").exists()
+
+
+def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0205", size=(640, 480))
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0205", polygons=[{
+        "subject": "leaf", "conf": 0.9,
+        "rings": [[[10.0, 10.0], [50.0, 10.0], [5000.0, 40.0]]],
+    }])
+
+    assert "error" in res and "pixel bounds" in res["error"]
+    assert not (root / "predictions").exists()
+
+
+def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(tmp_path: Path) -> None:
+    """The pixel-frame counterpart of the normalized-range check: an out-of-range coordinate keeps
+    its refusal, whichever key it arrives under, once it is checked in that key's own frame."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0206", size=(10, 10))
+
+    res = stage_proposals(str(root), "sam", date, "IMG_0206", polygons=[{
+        "subject": "leaf", "conf": 0.9,
+        "rings": [[[-0.5, -0.5], [0.3, -0.5], [0.3, 0.4]]],
+    }])
+
+    assert "error" in res and "pixel bounds" in res["error"]
+
+
 # ── Prediction-bucket immutability ──────────────────────────────────────────
 
 
