@@ -1172,6 +1172,12 @@ def test_state_socket_broadcasts_a_mutation_while_open(client: TestClient) -> No
     client.post("/api/state/tab", json={"active_tab": "annotate"})
 
 
+def test_dataset_state_route_is_retired(client: TestClient) -> None:
+    """``/api/dataset/state`` duplicated ``/api/state`` over the same singleton snapshot and had
+    no browser caller; ``/api/state`` is the one route left over it."""
+    assert client.get("/api/dataset/state").status_code == 404
+
+
 def test_annotate_open_rejects_an_unknown_mode(client: TestClient) -> None:
     before = client.get("/api/state").json()["mode"]
     resp = client.post("/api/annotate/open", json={

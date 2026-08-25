@@ -14,7 +14,6 @@ export const ROUTES = {
   getCoverageCompleteness: "/api/coverage/completeness",
   getCoverageGrid: "/api/coverage/grid",
   getDatasetImages: "/api/dataset/images",
-  getDatasetState: "/api/dataset/state",
   getDatasetTree: "/api/dataset/tree",
   getEventsByPanelRecent: (panel: string) => `/api/events/${encodeURIComponent(panel)}/recent`,
   getFsList: "/api/fs/list",
