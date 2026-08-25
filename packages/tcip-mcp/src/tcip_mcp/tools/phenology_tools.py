@@ -807,6 +807,7 @@ def compute_phenology(
     ``n_dates_missing_images``) but carry no fabricated milestone dates for that plant (see
     CLAUDE.md's measurement-integrity invariant).
     """
+    from tcip_mcp.class_registry import RegistryError, registry_for_pred_dirs
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
         check_operationalization,
@@ -821,8 +822,13 @@ def compute_phenology(
     except TraitUnknownError as e:
         return {"error": str(e), "n_plants": 0}
 
+    # The one dataset every one of this delivery's buckets belongs to; refuses if they disagree.
+    try:
+        registry = registry_for_pred_dirs(list(predictions_by_date.values()))
+    except RegistryError as e:
+        return {"error": str(e), "n_plants": 0}
     # Ahead of the positive class id, so an unstated trait's class-id failure never names the wrong problem.
-    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
     if not stated.ok:
         return {"error": stated.message, "n_plants": 0}
     pos = spec.positive_class_name
@@ -955,7 +961,7 @@ def compute_phenology(
     # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
     spec_now, record_now, _ = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
     still_stated = check_operationalization(
-        spec_now, record_now, STATE_CROSSING_DATES, basis=stated.basis)
+        spec_now, record_now, STATE_CROSSING_DATES, registry=registry, basis=stated.basis)
     if not still_stated.ok:
         return {"error": still_stated.message, "n_plants": len(rows)}
 

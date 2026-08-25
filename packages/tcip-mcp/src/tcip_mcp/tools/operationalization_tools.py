@@ -26,6 +26,7 @@ def state_trait_operationalization(
     delivered_phenotypes: list[str],
     delivered_value_keys: list[str] | None = None,
     relayed_note: str = "",
+    dataset_root: str = "",
 ) -> dict:
     """Record what this trait's delivered number means, in the breeder's terms, for one delivery.
 
@@ -56,11 +57,19 @@ def state_trait_operationalization(
             row schema is fixed by their writer.
         relayed_note: What the breeder said away from the GUI, recorded as a relay attributed to
             the agent. It is surfaced in the refusal and never clears it.
+        dataset_root: The dataset whose registry a `state_crossing_dates` statement's positive
+            class is checked against. Empty resolves the project root's own registry when it is
+            unambiguously the project's one dataset; a project registering several datasets, or
+            none and no registry at the project root, refuses and names them. Ignored for every
+            other delivery_kind.
 
     Returns the record as written, plus `record_seen`, the content hash the confirming surface
     compares against so a click cannot confirm text nobody displayed.
     """
+    registry = None
     try:
+        if delivery_kind == operationalization.STATE_CROSSING_DATES:
+            registry = operationalization.resolve_statement_registry(project_root, dataset_root)
         record = operationalization.state_operationalization(
             project_root,
             trait,
@@ -71,6 +80,7 @@ def state_trait_operationalization(
             delivered_phenotypes=delivered_phenotypes or (),
             delivered_value_keys=delivered_value_keys or (),
             relayed_note=relayed_note,
+            registry=registry,
         )
     except (TraitUnknownError, ValueError) as e:
         return {"error": str(e)}

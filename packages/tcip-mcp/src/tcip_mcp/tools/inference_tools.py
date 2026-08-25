@@ -1835,6 +1835,7 @@ def tabulate_counts(
             variant). Omitted, the CSV can only be delivered provisionally, since its counts would
             rest on no artifact anyone can re-read.
     """
+    from tcip_mcp.class_registry import RegistryError, registry_for_pred_dirs
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
         check_operationalization,
@@ -1849,7 +1850,11 @@ def tabulate_counts(
         spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
     except TraitUnknownError as e:
         return {"error": str(e)}
-    stated = check_operationalization(spec, record, PER_IMAGE_COUNT)
+    try:
+        registry = registry_for_pred_dirs([images_dir])
+    except RegistryError as e:
+        return {"error": str(e)}
+    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=registry)
     if not stated.ok:
         return {"error": stated.message}
 
@@ -1955,8 +1960,12 @@ def tabulate_counts(
     )
     # This response carries the counts too, so it needs the proof at the end that the write did.
     spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    try:
+        registry_now = registry_for_pred_dirs([str(bucket)] if bucket is not None else [images_dir])
+    except RegistryError as e:
+        return {"error": str(e)}
     still_stated = check_operationalization(
-        spec_now, record_now, PER_IMAGE_COUNT, basis=stated.basis)
+        spec_now, record_now, PER_IMAGE_COUNT, registry=registry_now, basis=stated.basis)
     if not still_stated.ok:
         return {"error": still_stated.message}
     out = {

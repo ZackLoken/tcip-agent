@@ -233,7 +233,8 @@ def export_detection_csv(
     recorded_maps = {d: bucket_id_map(Path(d)) for d in (pred_dirs or [])}
     id_maps = {d: m for d, m in recorded_maps.items() if m is not None} or None
     spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
-    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, id_maps=id_maps)
+    # This door never delivers a crossing kind, so it has no registry to check a positive class against.
+    stated = check_operationalization(spec, record, PER_IMAGE_COUNT, id_maps=id_maps, registry=None)
     if not stated.ok:
         raise ValueError(stated.message)
 
@@ -259,7 +260,7 @@ def export_detection_csv(
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
     spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
     still_stated = check_operationalization(
-        spec_now, record_now, PER_IMAGE_COUNT, id_maps=id_maps, basis=stated.basis)
+        spec_now, record_now, PER_IMAGE_COUNT, id_maps=id_maps, registry=None, basis=stated.basis)
     if not still_stated.ok:
         raise ValueError(still_stated.message)
 
