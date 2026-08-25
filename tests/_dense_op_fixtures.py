@@ -75,3 +75,27 @@ def dense_records(
         records.append({"width": width, "height": height, "image_id": f"{id_prefix}_{i}",
                         "gt": gt, "dt": dt})
     return records
+
+
+def good_cal_holdout(
+    *, n_images: int = 20, objects_per_image: int = 80
+) -> tuple[list[dict], list[dict]]:
+    """A dense, realistic calibration/holdout pair: a good detector with one low-conf spurious
+    detection per image (a realistic false-positive profile) that vanishes once conf crosses it,
+    so the count-unbiased pick lands at the high, correct-match score (0.9), comfortably above a
+    real calibration floor, with zero bias/dispersion and full recall/precision on the holdout.
+
+    The holdout is laid out on its own grid (fewer objects per image, wider spacing than
+    calibration's), so every record's geometry differs from calibration's on the one axis
+    ``_content_overlap`` hashes, without needing a per-box coordinate shift. This proves that a
+    validated reference of genuinely distinct content passes the gate; it does not exercise
+    whether an operating point derived on one population transfers to another, a claim no fixture
+    here makes.
+    """
+    miss = [0] * n_images
+    fp = [1] * n_images
+    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image - 8, id_prefix="h",
+                         spacing=45.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    return cal, hold
