@@ -266,6 +266,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TopBar.tsx | (none found) | 3 | 1 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.ts | Mirror the active tab into the backend GUI state so view_gui_state reports the tab the human actually sees. | 3 | 2 |
+| packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/hooks/useBandSelection.ts | The breeder's band selection for the image `bandsInfo` describes, held once per band-set signature (the image's band names, in order) rather than per component, so a composite chosen in one tab is the one the other renders over the same band set, and a detour through a differently-banded image (or a plain colour photo) neither applies the old selection nor destroys it. | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useCoverageGrid.ts | The coverage lattice for the open raster, fetched once the base serve shows the raster is larger than one display-bounded serve (Served-Size below the native dims). | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.ts | Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date, dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the viewing context, and exposes the swept set for the minimap plus the Complete warning facts. | 6 | 2 |
@@ -288,7 +290,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/annotateFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/annotateFocus.ts | Drive the Annotate tab to a specific (subject, date, image, mode) in response to the agent's `annotate_focus` event. | 3 | 2 |
 | packages/tcip-web/frontend/src/lib/bandSelection.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/lib/bandSelection.ts | (none found) | 1 | 5 |
+| packages/tcip-web/frontend/src/lib/bandSelection.ts | (none found) | 1 | 6 |
 | packages/tcip-web/frontend/src/lib/canvasSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/canvasSync.ts | Live canvas-state sync: lets the agent see exactly what the canvas shows. | 3 | 4 |
 | packages/tcip-web/frontend/src/lib/coverage.test.ts | (none found) | 0 | 0 |
@@ -446,6 +448,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TabBanner.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useImageBands.test.ts |
@@ -538,7 +541,7 @@ Docstring is the function's docstring first line, verbatim.
 | `push_panel_data` | `annotation_tools.py:552` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
 | `focus` | `annotation_tools.py:583` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 | `stage_proposals` | `annotation_tools.py:788` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:973` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `write_class_map` | `annotation_tools.py:977` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)
 
@@ -797,36 +800,36 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:174` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:232` |  <!-- queued: P5-129 delete -->
-| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:474` |  <!-- queued: P5-130 merge-or-split -->
-| POST | `/onset_dates` | `onset_dates` | `routes/results.py:507` |  <!-- queued: P5-131 merge-or-split -->
-| POST | `/export_csv` | `export_csv` | `routes/results.py:540` |
-| GET | `/traits` | `list_traits` | `routes/results.py:960` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:659` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:675` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:713` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:815` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:831` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:873` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:939` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:989` |
+| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:236` |  <!-- queued: P5-129 delete -->
+| POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:505` |  <!-- queued: P5-130 merge-or-split -->
+| POST | `/onset_dates` | `onset_dates` | `routes/results.py:538` |  <!-- queued: P5-131 merge-or-split -->
+| POST | `/export_csv` | `export_csv` | `routes/results.py:571` |
+| GET | `/traits` | `list_traits` | `routes/results.py:995` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:694` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:710` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:748` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:850` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:866` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:908` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:974` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:1024` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:441` |
-| POST | `/action` | `record_action` | `routes/review.py:567` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:671` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:721` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:742` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:790` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1127` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1165` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1193` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1313` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1341` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:447` |
+| POST | `/action` | `record_action` | `routes/review.py:573` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:677` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:727` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:748` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:796` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1133` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1171` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1199` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1319` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1347` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1015,7 +1018,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:809`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:818`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:258`.
 
@@ -1120,7 +1123,7 @@ before the outgoing digest is gone.
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:651`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
-`packages/tcip-web/src/tcip_web/routes/review.py:671`, derives it from the GT file through
+`packages/tcip-web/src/tcip_web/routes/review.py:677`, derives it from the GT file through
 `annotations_hold_subject`, scoped to the confirmed subject, and the browser posts that value on
 through `set_image_status`.
 
@@ -1143,7 +1146,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:278`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:174`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:973`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:977`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1488,7 +1491,7 @@ composing a state dir of its own.
 Writer: `ReviewEngine._save_image`, `review_engine.py:285`, called by `mark_image_reviewed`
 (`review_engine.py:331`), `unmark_image_reviewed` (`review_engine.py:362`),
 `record_detection_action` (`review_engine.py:629`), `check_image_review_complete`
-(`review_engine.py:758`); `save_review_state`, `review_engine.py:305`, flushes every shard.
+(`review_engine.py:766`); `save_review_state`, `review_engine.py:305`, flushes every shard.
 
 Readers: `ReviewEngine.load_review_state`, `review_engine.py:264`, which enumerates the store's
 keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:513`,
@@ -1792,7 +1795,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:988` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1023` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -1841,7 +1844,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2503` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1962` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1959` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
@@ -1975,7 +1978,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:186` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:580` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:577` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->

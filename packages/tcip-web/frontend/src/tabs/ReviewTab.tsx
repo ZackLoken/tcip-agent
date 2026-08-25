@@ -127,9 +127,6 @@ export function ReviewTab() {
     [dataset, imgName],
   );
 
-  // Band-composite picker (multispectral only). bandsInfo drives conditional visibility
-  // (band_count > 3); the selection is seeded from the reported bands and otherwise left to
-  // the breeder, carried across image navigation until the dataset's own band set changes.
   const bandsInfo = useImageBands(imgPath);
   const [bandSelection, setBandSelection] = useBandSelection(bandsInfo);
 
