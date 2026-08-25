@@ -18,7 +18,6 @@ import hashlib
 import io
 import json
 import math
-import os
 import tempfile
 import threading
 import uuid
@@ -151,11 +150,10 @@ _stats_lock = threading.Lock()
 
 
 def _render_cache_dir() -> Path:
-    root = os.environ.get("TCIP_PROJECT_ROOT")
-    base = (
-        Path(root) / ".tcip" / "cache" / "img"
-        if root
-        else Path(tempfile.gettempdir()) / "tcip-img-cache"
+    from tcip_mcp.project_paths import resolve_state_or
+
+    base = resolve_state_or(
+        Path(".tcip") / "cache" / "img", Path(tempfile.gettempdir()) / "tcip-img-cache"
     )
     base.mkdir(parents=True, exist_ok=True)
     return base

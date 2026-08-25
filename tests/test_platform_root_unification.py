@@ -16,7 +16,7 @@ def _adopt(tmp_path, monkeypatch, name="hazelnut_catkin_valley") -> Path:
     ws.mkdir()
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     proj = ws / name
-    proj.mkdir()
+    (proj / ".tcip").mkdir(parents=True)
     from tcip_mcp import workspace
 
     workspace.set_active_project(name)
@@ -55,6 +55,16 @@ def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monke
     assert ts.exists(registry_index_key(proj))
     # A different project's registry is untouched: nothing leaked to the repo root / cwd.
     assert not ts.exists(registry_index_key(Path.cwd()))
+
+
+def test_viz_mirrors_the_platform_root_env_var_name():
+    """tcip_annotation must not import tcip_mcp, so it restates the platform-state-root
+    variable name as its own constant; this holds the restatement equal to the declaration
+    it mirrors so the two cannot drift apart silently."""
+    from tcip_annotation.viz import _PLATFORM_ROOT_ENV
+    from tcip_mcp.project_paths import ENV_VAR
+
+    assert _PLATFORM_ROOT_ENV == ENV_VAR
 
 
 def test_no_adoption_keeps_cwd_default(tmp_path, monkeypatch):
