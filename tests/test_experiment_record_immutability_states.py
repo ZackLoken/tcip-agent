@@ -135,6 +135,103 @@ def test_refused_mutations_on_a_failed_run_are_recorded_on_the_audit_log(tmp_pat
     assert {e["status"] for e in refusals} == {"refused"}
 
 
+def test_completed_run_refuses_a_move_to_failed_and_audits_both_states(tmp_path):
+    """The lock refuses a move between the two terminal states, not only a reopen to a
+    non-terminal one: a completed record stays completed and the refusal names both states."""
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    eid = "exp-030-chestnut-burr-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:burr_det"}})
+    update_status(eid, "running")
+    update_status(eid, "completed")
+
+    res = update_status(eid, "failed", error="loss diverged")
+    assert "error" in res
+    assert res["state"] == "completed"
+
+    status = _record(tmp_path, eid, "status.json")
+    assert status["state"] == "completed"
+
+    refusals = _audit_refusals(tmp_path)
+    assert len(refusals) == 1
+    assert refusals[0]["arguments"] == {"experiment_id": eid, "op": "update_status",
+                                        "from": "completed", "to": "failed"}
+
+
+def test_repeat_of_failed_records_a_reason_onto_a_reasonless_record_with_no_restamp(tmp_path, monkeypatch):
+    """A repeat of the current terminal state is idempotent: it applies error only when the
+    record holds none, restamps nothing else (proved against a clock frozen to a date far past
+    the first write, so any restamp would be unmistakable), and audits nothing (not a refusal)."""
+    from datetime import datetime as real_datetime
+
+    import tcip_mcp.experiments as exp_mod
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    eid = "exp-031-currant-cluster-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:cluster_det"}})
+    update_status(eid, "running")
+    update_status(eid, "failed")  # the child's own reasonless failure
+
+    ended_before = _record(tmp_path, eid, "status.json")["ended"]
+
+    class _FrozenLaterClock:
+        @staticmethod
+        def now(tz=None):
+            return real_datetime(2099, 1, 1, tzinfo=tz)
+
+    monkeypatch.setattr(exp_mod, "datetime", _FrozenLaterClock)
+
+    res = update_status(eid, "failed", error="exceeded max_wall_clock_seconds (5)")
+    assert "error" not in res
+
+    status = _record(tmp_path, eid, "status.json")
+    assert status["error"] == "exceeded max_wall_clock_seconds (5)"
+    assert status["ended"] == ended_before  # not restamped to the frozen future
+    assert _audit_refusals(tmp_path) == []
+
+
+def test_repeat_of_the_current_terminal_state_with_an_existing_reason_changes_nothing(tmp_path):
+    """A second repeat, once a reason is already recorded, changes nothing at all: the first
+    reason is never overwritten by a later reasonless (or differently reasoned) repeat."""
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    eid = "exp-032-elderberry-umbel-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:umbel_det"}})
+    update_status(eid, "running")
+    update_status(eid, "failed", error="loss went to nan")
+
+    res = update_status(eid, "failed", error="a different, later reason")
+    assert "error" not in res
+
+    status = _record(tmp_path, eid, "status.json")
+    assert status["error"] == "loss went to nan"
+    assert _audit_refusals(tmp_path) == []
+
+
+def test_update_status_refusal_raises_when_the_audit_append_itself_fails(tmp_path, monkeypatch):
+    """The repo's rule for every other refusal: an audit line that cannot be appended raises
+    rather than vanishing, since the record already reflects the refusal's own outcome (it
+    stayed terminal) by the time the append is attempted."""
+    import pytest
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    eid = "exp-033-persimmon-fruit-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
+    update_status(eid, "running")
+    update_status(eid, "completed")
+
+    import tcip_mcp.audit as audit_mod
+
+    def _refuse_append(*args, **kwargs):
+        raise RuntimeError("the audit log could not be appended to")
+
+    monkeypatch.setattr(audit_mod, "append", _refuse_append)
+
+    with pytest.raises(AuditEntryNotWritten):
+        update_status(eid, "failed")
+
+
 def test_cancelled_run_record_stays_writable_and_reopenable(tmp_path):
     """A cancelled run is not locked the way a completed or failed one is: it stopped on request
     rather than finishing, so its record must still take the epochs and the state a resumed run

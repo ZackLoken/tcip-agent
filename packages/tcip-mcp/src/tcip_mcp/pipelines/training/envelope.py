@@ -460,6 +460,17 @@ def run_training_envelope(ctx: TrainContext) -> None:
                  duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
+def _reconcile_on_refusal(run: Any, result: dict[str, Any]) -> bool:
+    """True when ``result`` is a refusal carrying the record's own state (a not-found result
+    carries none): reconciles ``run.status``/``run.error`` to it, so the closing audit event
+    reports the state the record actually holds rather than the one the child believed."""
+    if "error" not in result or "state" not in result:
+        return False
+    run.status = result["state"]
+    run.error = result["error"]
+    return True
+
+
 def _finalize_run(ctx: TrainContext) -> None:
     """Close status + register the model + record its weights artifact (the completion wiring)."""
     run = ctx.run
@@ -476,12 +487,11 @@ def _finalize_run(ctx: TrainContext) -> None:
         if run.status == "completed" and ctx.final_weights is not None:
             result = complete_run(exp_id, ctx.final_weights)
             if "error" in result:
-                # completed is the last durable write of a run: a refusal here means the record was already terminal (e.g. the wall-clock watchdog raced it to failed first).
-                # Reconcile run.status to what the record actually holds, as the phantom-weights branch below does, so the closing training_run audit event agrees with it.
-                run.status = result.get("state") or run.status
-                run.error = result["error"]
-                logger.warning("Run %s: completion refused (%s); weights at %s were not "
-                               "registered.", run.run_id, result["error"], ctx.final_weights)
+                # completed is the last durable write of a run: a refusal here means the record
+                # was already terminal (e.g. the wall-clock watchdog raced it to failed first).
+                _reconcile_on_refusal(run, result)
+                logger.warning("Run %s: completion refused (%s); weights at %s stay on disk, "
+                               "unregistered.", run.run_id, result["error"], ctx.final_weights)
             else:
                 try:
                     register_model_from_experiment(exp_id, ctx.final_weights)
@@ -489,17 +499,16 @@ def _finalize_run(ctx: TrainContext) -> None:
                     logger.warning("Run %s: model registration failed for weights at %s: %s",
                                    run.run_id, ctx.final_weights, exc)
         elif run.status == "completed":
-            # "completed" with no discoverable weights (no model_best.pt/model_final.pt,
-            # and ctx.set_final_weights() was never called) is a phantom deliverable, not a
-            # real one, refuse rather than register a nonexistent path.
+            # No discoverable weights (no model_best.pt/model_final.pt, ctx.set_final_weights()
+            # never called): a phantom deliverable, refuse rather than register a nonexistent path.
             logger.warning(
                 "Run %s completed but produced no discoverable weights (no model_best.pt/"
                 "model_final.pt and ctx.set_final_weights() was never called), marking failed "
                 "instead of registering a nonexistent path.", run.run_id)
             run.status = "failed"
             run.error = run.error or "training completed but produced no final weights file"
-            update_status(exp_id, "failed")
+            _reconcile_on_refusal(run, update_status(exp_id, "failed"))
         else:
-            update_status(exp_id, run.status or "failed")  # "failed" or "cancelled"
+            _reconcile_on_refusal(run, update_status(exp_id, run.status or "failed"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Experiment completion wiring failed for %s: %s", exp_id, exc)
