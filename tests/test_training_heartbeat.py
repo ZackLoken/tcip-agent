@@ -54,3 +54,36 @@ def test_reconstructed_run_running_vs_interrupted(tmp_path, monkeypatch):
     assert by_id["live"]["status"] == "running"
     assert by_id["live"]["external"] is True
     assert by_id["dead"]["status"] == "interrupted"
+
+
+def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_path, monkeypatch):
+    """list_training_runs, compare_experiments (the tool) and check_training_status must derive
+    "interrupted" the same way under a configured heartbeat window, one accessor
+    (``training_tools.TCIP_HEARTBEAT_STALE_SECONDS``) wired through every consumer: a 300s-old
+    heartbeat reads stale under a 30s window even though it would read fresh under the 600s
+    default."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, status_key, update_status
+    from tcip_mcp.tools import training_tools
+    from tcip_mcp.tools.experiment_tools import compare_experiments as compare_tool
+    from tcip_mcp.tools.training_tools import check_training_status, list_training_runs
+
+    monkeypatch.setattr(training_tools, "TCIP_HEARTBEAT_STALE_SECONDS", 30.0)
+
+    create_experiment("exp-window", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    update_status("exp-window", "running")
+    key = status_key("exp-window")
+    with ts.transaction(key) as txn:
+        s = txn.read(key)
+        s["heartbeat"] = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
+        txn.write(key, s)
+
+    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    assert by_id["exp-window"]["status"] == "interrupted"
+
+    cmp = compare_tool(["exp-window"])
+    assert cmp["experiments"][0]["state"] == "interrupted"
+
+    status = check_training_status("exp-window")
+    assert status["status"] == "interrupted"

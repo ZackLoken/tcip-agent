@@ -45,14 +45,19 @@ def get_experiment(
     """Read an experiment record.
 
     With ``view='full'`` (default) returns the full state: config, status, artifacts, lineage,
-    and metrics, the run's own logged rows, in order, oldest first, and not a verified result.
-    ``n_epochs`` is the number of distinct epoch values logged; ``n_rows`` is the row count and
-    the bound ``metrics_limit``/``metrics_offset`` page against (a bespoke loop may log more than
-    one row per epoch, so the two counts can differ). With ``view='lineage'`` returns only the
-    data → model → predictions chain (data source, parent model, model weights path, predictions
-    path), enriched with the config's data-source block; ``metrics_limit``/``metrics_offset``
-    apply only to ``view='full'`` and are refused with a non-default value under ``view='lineage'``,
-    which has no metrics rows to page.
+    and metrics, the rows the run's own ``log_metrics`` appended, in order, oldest first; the
+    last row is only the last one logged, not a verified result. Nothing binds a row written to
+    that log outside ``log_metrics`` itself, so such a row reaches display through this tool (and
+    ``compare_experiments``'s own last-logged row) the same as any other, and neither is a
+    promotion decision: registering a checkpoint reads that checkpoint's own stamped metrics,
+    never this log, and ranking a registered model reads the registry entry's own
+    ``metrics_source``, not this log either. ``n_epochs`` is the number of distinct epoch values
+    logged; ``n_rows`` is the row count and the bound ``metrics_limit``/``metrics_offset`` page
+    against (a bespoke loop may log more than one row per epoch, so the two counts can differ).
+    With ``view='lineage'`` returns only the data → model → predictions chain (data source,
+    parent model, model weights path, predictions path), enriched with the config's data-source
+    block; ``metrics_limit``/``metrics_offset`` apply only to ``view='full'`` and are refused with
+    a non-default value under ``view='lineage'``, which has no metrics rows to page.
 
     Args:
         experiment_id: Experiment to retrieve.
@@ -101,16 +106,24 @@ def list_experiments() -> dict:
 def compare_experiments(experiment_ids: list[str]) -> dict:
     """Side-by-side comparison of multiple experiments.
 
-    Returns, per experiment: ``recorded_state`` and the heartbeat-derived ``state``,
-    ``log_locked`` (whether the metrics lock refuses further rows), ``last_logged_metrics`` (the
-    last logged row, not a verified final result), ``rows_after_end`` (rows landed after the
-    record's own ``ended``), ``n_epochs``/``n_rows``, ``refused_mutations`` (every refused write
-    the audit log recorded against it, absent when that log can't be read), the model builder,
-    and dataset identity. Use this to compare different model architectures or hyperparameters.
+    Returns, per experiment: ``recorded_state`` and the heartbeat-derived ``state`` (a launched
+    record only; a pre-created experiment never launched reports its ``recorded_state`` instead
+    of a heartbeat-derived guess), ``log_locked`` (whether the metrics lock refuses further rows),
+    ``last_logged_metrics`` (the run's own log's last row, not a verified result: nothing binds a
+    row written to that log outside ``log_metrics``, so registering a checkpoint reads that
+    checkpoint's own stamped metrics instead, and ranking a registered model reads the registry
+    entry's own ``metrics_source``, neither reads this row), ``rows_after_end`` (rows whose own
+    timestamp is a later instant than the record's own ``ended``), ``n_epochs``/``n_rows``,
+    ``refused_mutations`` (every refused write the audit log recorded against it, absent when that
+    log can't be read), the model builder, and dataset identity. Reads the heartbeat freshness
+    window from ``$TCIP_HEARTBEAT_STALE_SECONDS`` (600s by default), the same knob
+    ``check_training_status`` and the run enumeration use, so all three agree under a configured
+    window. Use this to compare different model architectures or hyperparameters.
 
     Args:
         experiment_ids: List of experiment IDs to compare.
     """
     from tcip_mcp.experiments import compare_experiments as _compare
+    from tcip_mcp.tools.training_tools import TCIP_HEARTBEAT_STALE_SECONDS
 
-    return _compare(experiment_ids)
+    return _compare(experiment_ids, stale_seconds=TCIP_HEARTBEAT_STALE_SECONDS)

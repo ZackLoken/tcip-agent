@@ -209,3 +209,139 @@ def test_compare_experiments_reports_refused_mutations(tmp_path, monkeypatch):
     assert len(refusals) == 1
     assert refusals[0]["arguments"]["op"] == "log_metrics"
     assert refusals[0]["arguments"]["experiment_id"] == "exp-refused"
+
+
+def test_compare_experiments_scans_the_audit_log_once_for_many_experiments(tmp_path, monkeypatch):
+    """_index_refused_mutations reads the platform audit log once per compare call, indexed by
+    experiment id, not once per experiment compared: five experiments cost one scan, not five."""
+    monkeypatch.chdir(tmp_path)
+    import tcip_store
+    from tcip_mcp.experiments import compare_experiments, create_experiment
+
+    ids = [f"exp-scan-{i}" for i in range(5)]
+    for eid in ids:
+        create_experiment(eid, {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+
+    calls = {"n": 0}
+    real_read_log = tcip_store.read_log
+
+    def _counting(*a, **k):
+        calls["n"] += 1
+        return real_read_log(*a, **k)
+
+    monkeypatch.setattr(tcip_store, "read_log", _counting)
+
+    result = compare_experiments(ids)
+    assert result["count"] == 5
+    assert calls["n"] == 1
+
+
+def test_compare_experiments_refused_mutations_absent_when_the_read_raises(tmp_path, monkeypatch):
+    """refused_mutations is absent, never an empty list, when the read of the platform audit log
+    itself raises: "no refusals" and "couldn't read the log" must never be told apart by an empty
+    list."""
+    monkeypatch.chdir(tmp_path)
+    import tcip_store
+    from tcip_mcp.experiments import compare_experiments, create_experiment
+
+    create_experiment("exp-log-unreadable", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+
+    def _boom(*a, **k):
+        raise OSError("simulated audit log read failure")
+
+    monkeypatch.setattr(tcip_store, "read_log", _boom)
+
+    result = compare_experiments(["exp-log-unreadable"])
+    assert "refused_mutations" not in result["experiments"][0]
+
+
+def test_compare_experiments_refused_mutations_absent_when_the_page_reports_corrupt_entries(
+    tmp_path, monkeypatch
+):
+    """read_log folds a corrupt entry onto page.corrupt rather than raising, so a page that reads
+    fine but reports corruption must still leave refused_mutations absent for every experiment,
+    not present as an incomplete list: an unreadable log and a corrupt one are the same "can't
+    trust this" fact."""
+    monkeypatch.chdir(tmp_path)
+    import tcip_store
+    from tcip_store import LogPage
+    from tcip_mcp.experiments import compare_experiments, create_experiment
+
+    create_experiment("exp-log-corrupt", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+
+    def _corrupt_page(*a, **k):
+        return LogPage(records=[], cursor="", corrupt=(3,))
+
+    monkeypatch.setattr(tcip_store, "read_log", _corrupt_page)
+
+    result = compare_experiments(["exp-log-corrupt"])
+    assert "refused_mutations" not in result["experiments"][0]
+
+
+def test_compare_experiments_running_with_fresh_heartbeat(tmp_path, monkeypatch):
+    """A rail must admit valid work: a launched, running run with a fresh heartbeat compares
+    state="running", unlocked, with no rows-after-end count since it hasn't ended."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import compare_experiments, create_experiment, update_status
+
+    create_experiment("exp-fresh-running", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    update_status("exp-fresh-running", "running")
+
+    result = compare_experiments(["exp-fresh-running"])
+    c = result["experiments"][0]
+    assert c["state"] == "running"
+    assert c["log_locked"] is False
+    assert c["rows_after_end"] is None
+
+
+def test_compare_experiments_never_launched_reports_recorded_state(tmp_path, monkeypatch):
+    """A pre-created experiment never launched carries no heartbeat; compare must report its own
+    recorded state ("created") rather than deriving "interrupted" from the absent heartbeat, which
+    would misreport a run that never started as one that crashed."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.experiments import compare_experiments, create_experiment
+
+    create_experiment("exp-never-launched", {"a": 1})
+
+    result = compare_experiments(["exp-never-launched"])
+    c = result["experiments"][0]
+    assert c["recorded_state"] == "created"
+    assert c["state"] == "created"
+
+
+def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp_path, monkeypatch):
+    """rows_after_end parses each row's timestamp (and the record's own ``ended``) as an instant
+    and compares strictly-after, so a row stamped in a different UTC offset, or a bare "Z", still
+    compares on the instant it actually names rather than on its ISO text; a row whose timestamp
+    isn't a parseable string (a bespoke loop's own integer counter, say) is skipped, not raised on."""
+    monkeypatch.chdir(tmp_path)
+    import tcip_store as ts
+    from tcip_mcp.experiments import (
+        compare_experiments, create_experiment, metrics_key, status_key, update_status,
+    )
+
+    create_experiment("exp-instants", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    update_status("exp-instants", "running")
+    update_status("exp-instants", "completed")
+
+    ended = "2024-01-01T12:00:00+00:00"
+    key = status_key("exp-instants")
+    with ts.transaction(key) as txn:
+        s = txn.read(key)
+        s["ended"] = ended
+        txn.write(key, s)
+
+    mkey = metrics_key("exp-instants")
+    rows = [
+        {"epoch": 1, "timestamp": "2024-01-01T07:00:01-06:00", "loss": 0.1},  # 13:00:01 UTC: after
+        {"epoch": 2, "timestamp": "2024-01-01T16:59:59+05:00", "loss": 0.2},  # 11:59:59 UTC: before
+        {"epoch": 3, "timestamp": "2024-01-01T11:59:59Z", "loss": 0.3},       # before
+        {"epoch": 4, "timestamp": "2024-01-01T12:00:00+00:00", "loss": 0.4},  # same instant: not after
+        {"epoch": 5, "timestamp": "2024-01-01T12:00:01+00:00", "loss": 0.5},  # after
+        {"epoch": 6, "timestamp": 1704110401, "loss": 0.6},                   # not a string: skipped
+    ]
+    for row in rows:
+        ts.append(mkey, row)
+
+    result = compare_experiments(["exp-instants"])
+    assert result["experiments"][0]["rows_after_end"] == 2

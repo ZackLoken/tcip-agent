@@ -552,8 +552,8 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `create_experiment` | `experiment_tools.py:11` | yes | Create a new experiment to track a training run. |
 | `get_experiment` | `experiment_tools.py:41` | yes | Read an experiment record. |
-| `list_experiments` | `experiment_tools.py:78` | yes | Enumerate every experiment the store holds a status record for. |
-| `compare_experiments` | `experiment_tools.py:101` | yes | Side-by-side comparison of multiple experiments. |
+| `list_experiments` | `experiment_tools.py:83` | yes | Enumerate every experiment the store holds a status record for. |
+| `compare_experiments` | `experiment_tools.py:106` | yes | Side-by-side comparison of multiple experiments. |
 
 ### feedback_tools.py (2 tools)
 
@@ -647,11 +647,11 @@ Docstring is the function's docstring first line, verbatim.
 | `preflight_config` | `training_tools.py:48` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:397` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
 | `check_training_status` | `training_tools.py:615` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:753` | yes | List all training runs in this session. |  <!-- queued: P5-29 unify -->
-| `cancel_training` | `training_tools.py:767` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:796` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `list_training_runs` | `training_tools.py:751` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:765` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:794` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
 | `run_hpo` | `training_tools.py:1163` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2114` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `evaluate_model` | `training_tools.py:2113` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -1256,21 +1256,21 @@ declared; the numbered range 10-15 carries six of them, and `env.json` and `vali
 are listed here with the rest rather than taking numbers of their own.
 
 - `config.json` (`config_key`, `experiments.py:114`): written by `create_experiment`,
-  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:441` (rewrites only
+  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:465` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:942`, and `compare_experiments`, `experiments.py:1289`.
+  `experiments.py:942`, and `compare_experiments`, `experiments.py:1378`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (364), `update_status`
-  (`experiments.py:490`), `stamp_run_identity` (`experiments.py:584`), `_touch_heartbeat`
+  (`experiments.py:490`), `stamp_run_identity` (`experiments.py:608`), `_touch_heartbeat`
   (`experiments.py:749`). Read by `get_experiment` (1201), `reconstruct_run_status`
-  (`experiments.py:712`), `resolve_experiment_dir_for_run` (`experiments.py:608`). `state` is
+  (`experiments.py:712`), `resolve_experiment_dir_for_run` (`experiments.py:632`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (364) and
-  `update_lineage`, `experiments.py:1072`. Read by `get_experiment` (1201) and
-  `get_experiment_lineage`, `experiments.py:1364`.
+  `update_lineage`, `experiments.py:1127`. Read by `get_experiment` (1201) and
+  `get_experiment_lineage`, `experiments.py:1465`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (364) and
-  `record_artifact`, `experiments.py:1038`. Read by `get_experiment` (1201).
+  `record_artifact`, `experiments.py:1093`. Read by `get_experiment` (1201).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
-  `log_metrics`, `experiments.py:781`. Read by `read_metrics`, `experiments.py:768`, which
+  `log_metrics`, `experiments.py:836`. Read by `read_metrics`, `experiments.py:823`, which
   `get_experiment` (1201, paginated) and `reconstruct_run_status` (712, last row only) go through.
 - `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
@@ -1281,13 +1281,13 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:875`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:930`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:829`),
+  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:884`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
   documents whose gate runs the check, `null` for `resolve_scale`. Read by `read_validations`,
-  `experiments.py:910`, `find_validation`, `experiments.py:925` (matching rows by recomputed
-  `validation_digest`, `experiments.py:865`), and included whole by `get_experiment` (1201). The
+  `experiments.py:910`, `find_validation`, `experiments.py:980` (matching rows by recomputed
+  `validation_digest`, `experiments.py:920`), and included whole by `get_experiment` (1201). The
   one member appendable after a terminal state, because a validation is a statement made about a
   run after it ended.
 
@@ -1324,7 +1324,7 @@ transaction on the key `registry_index_key` mints, same file, line 36, so a conc
 entries are not clobbered. `register_model` takes `metrics_source` as a required keyword,
 `"trainer"` / `"training_source"` / `"caller"` / `None`, naming which path produced `metrics`
 without claiming anyone verified it; only the two production callers set it,
-`register_model_from_experiment` (`experiments.py:1115`, reading whether the run's config carries
+`register_model_from_experiment` (`experiments.py:1183`, reading whether the run's config carries
 `training_source`) and the `register_model` tool's explicit mode (`tools/model_tools.py:18`,
 `"caller"` when `metrics` is non-empty). `register_model_from_experiment` no longer falls back to
 the run's `metrics.jsonl` log for a checkpoint with no metrics dict; such a registration carries
@@ -1647,7 +1647,7 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:781` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:836` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -1808,7 +1808,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1385` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1486` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 

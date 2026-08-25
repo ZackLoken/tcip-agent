@@ -692,6 +692,21 @@ def experiment_ids_with_status(root: Path | str | None = None) -> list[str]:
     return sorted(key.parts[0] for key in found if key.parts[1] == STATUS_DOCUMENT)
 
 
+def is_launched(status: dict[str, Any] | None) -> bool:
+    """Whether a status record names a launched run rather than one only created: a stamped
+    ``run_id``, a state other than ``"created"``, or the ``metrics_logged`` marker
+    :func:`log_metrics` stamps before its first append, so a launch whose best-effort
+    :func:`stamp_run_identity` or status write was lost still counts. The one implementation of
+    "was this ever launched", shared by ``training_tools.py``'s own run enumeration and
+    :func:`compare_experiments`, which consults it before deriving a heartbeat state at all: a
+    pre-created, never-launched record carries a heartbeat of ``None`` and would otherwise derive
+    to ``"interrupted"``, misreporting a run that never started as a crashed one.
+    """
+    if not isinstance(status, dict):
+        return False
+    return bool(status.get("run_id")) or status.get("state") != "created" or bool(status.get("metrics_logged"))
+
+
 def derived_state(status: dict[str, Any], stale_seconds: float) -> str:
     """The state a status record reads as once heartbeat freshness applies: a state already
     recorded as done (:data:`_RECORDED_AS_DONE`) is trusted as-is; any other state derives to
@@ -737,10 +752,10 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
     subprocess-delegated and the in-memory record is stale by design.
 
     Returns ``None`` when the run can't be resolved on disk at all (an honestly unknown run, not a
-    guess). ``stale_seconds`` lets a caller (``routes/training.py``, ``training_tools.py``) keep
-    its own configurable heartbeat window rather than being pinned to this module's default. The
-    reconstruction itself is :func:`reconstruct_from_status`, over the one record this function
-    resolves ``run_id`` to.
+    guess). ``stale_seconds`` lets ``training_tools.py``'s own callers (``check_training_status``,
+    ``cancel_training``) pass their configured heartbeat window (``TCIP_HEARTBEAT_STALE_SECONDS``)
+    rather than being pinned to this module's default. The reconstruction itself is
+    :func:`reconstruct_from_status`, over the one record this function resolves ``run_id`` to.
     """
     experiment_id = resolve_experiment_for_run(run_id)
     if experiment_id is None:
@@ -752,19 +767,35 @@ def reconstruct_run_status(run_id: str, *, stale_seconds: float = 600.0) -> dict
                                    read_progress=True)
 
 
+def _parse_iso_instant(value: Any) -> datetime | None:
+    """One timestamp read as an instant: a non-string, or a string ``datetime.fromisoformat``
+    can't parse (a trailing ``Z`` and an offset both parse fine on this platform's Python), is
+    ``None`` rather than a raise, so a caller comparing many rows skips a malformed one instead of
+    aborting the whole comparison. Every platform writer stamps UTC with an explicit offset; a
+    naive value (a row a bespoke loop appended with its own clock) is read as UTC so it compares
+    against those on one clock rather than raising. Shared by :func:`_heartbeat_fresh` and
+    :func:`compare_experiments`'s ``rows_after_end``, the one place either fact is parsed.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _heartbeat_fresh(hb_iso: str | None, stale_seconds: float = 600.0) -> bool:
     """True if ``hb_iso`` (ISO-8601) is within the staleness window, a process is still actively
-    updating this run. Missing/unparseable → not fresh (treat as dead). Mirrors
-    ``routes/training.py``'s own threshold; kept independent since this module has no FastAPI/env
-    dependency and the two consumers (web route, MCP tool) can reasonably differ in the future."""
-    if not hb_iso:
+    updating this run. Missing/unparseable → not fresh (treat as dead). This module's own
+    default window; a caller with a configured one (``training_tools.py``'s
+    ``TCIP_HEARTBEAT_STALE_SECONDS``, read from ``$TCIP_HEARTBEAT_STALE_SECONDS``) passes its own
+    ``stale_seconds`` through rather than being pinned to this default."""
+    hb = _parse_iso_instant(hb_iso)
+    if hb is None:
         return False
-    try:
-        hb = datetime.fromisoformat(hb_iso)
-    except (ValueError, TypeError):
-        return False
-    if hb.tzinfo is None:
-        hb = hb.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - hb).total_seconds() <= stale_seconds
 
 
@@ -1238,6 +1269,15 @@ def get_experiment(
 ) -> dict[str, Any]:
     """Read full experiment state.
 
+    ``metrics`` is the run's own log: every row the run's own :func:`log_metrics` appended, in
+    order, oldest first. Its last row is only the last one logged, not a verified result, and
+    nothing binds a row written to that log outside :func:`log_metrics` itself, so a row a
+    bespoke loop appended reaches display through this reader (and :func:`compare_experiments`'s
+    ``last_logged_metrics``) exactly like any other, and neither one is a promotion decision:
+    registering a checkpoint (:func:`register_model_from_experiment`) reads that checkpoint's own
+    stamped metrics, never this log, and ranking a registered model (``model_registry.
+    best_model``) reads the registry entry's own ``metrics_source``, not this log either.
+
     ``metrics`` can be paginated for long runs: ``metrics_offset`` and ``metrics_limit`` index
     into the row list, so ``n_rows`` (the row count) is the paging bound, not ``n_epochs`` (the
     count of distinct ``epoch`` values; the stock loop logs one row per epoch, a bespoke one may
@@ -1298,12 +1338,17 @@ def list_experiments() -> list[dict[str, Any]]:
     return experiments
 
 
-def _refused_mutations(eid: str) -> list[dict[str, Any]] | None:
-    """Every ``experiment_mutation_refused`` audit entry naming ``eid``, as its ``timestamp`` and
-    ``arguments``, or ``None`` when the platform audit log can't be read (told apart from an
-    empty list, which means the log read fine and holds no refusal against this experiment). Any
-    writer's refusal lands here, a watchdog's cross-terminal write after a completion included;
-    it is a record of what was refused, not a tamper signal, an outside append leaves no entry.
+def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[str, Any]]] | None:
+    """Every ``experiment_mutation_refused`` audit entry naming one of ``experiment_ids``, indexed
+    by ``arguments.experiment_id``, from one scan of the platform audit log, the read
+    :func:`compare_experiments` shares across every experiment it compares rather than repeating
+    per experiment. ``None`` for the whole call when the log can't be read: the read itself
+    raised, or :func:`~tcip_store.read_log` reports corrupt entries (folded onto ``page.corrupt``
+    rather than raising, so an unreadable page would otherwise look like a page with nothing to
+    report). Either way every experiment's own field is then absent, never an empty list, so
+    "no refusals" and "couldn't read the log" are never confused for each other. An id present in
+    the index only when it has at least one entry; an id with none is absent from the index and
+    the caller reads that as an empty list, not as unreadable.
     """
     try:
         from tcip_store import read_log
@@ -1313,34 +1358,51 @@ def _refused_mutations(eid: str) -> list[dict[str, Any]] | None:
         page = read_log(audit_log_key())
     except Exception:
         return None
-    return [
-        {"timestamp": e.get("timestamp"), "arguments": e.get("arguments", {})}
-        for e in page.records
-        if e.get("tool") == "experiment_mutation_refused"
-        and e.get("arguments", {}).get("experiment_id") == eid
-    ]
+    if page.corrupt:
+        return None
+    wanted = set(experiment_ids)
+    index: dict[str, list[dict[str, Any]]] = {}
+    for e in page.records:
+        if e.get("tool") != "experiment_mutation_refused":
+            continue
+        arguments = e.get("arguments", {})
+        eid = arguments.get("experiment_id")
+        if eid not in wanted:
+            continue
+        index.setdefault(eid, []).append({"timestamp": e.get("timestamp"), "arguments": arguments})
+    return index
 
 
-def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
+def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600.0) -> dict[str, Any]:
     """Side-by-side comparison of multiple experiments.
 
-    Per experiment: ``recorded_state`` (the stored state) and ``state`` (the same
-    heartbeat-derived state :func:`list_training_runs` reports, via :func:`derived_state`, so a
-    run whose process died compares as ``"interrupted"`` rather than ``"running"``);
-    ``log_locked``, true when ``recorded_state`` is in the mutation lock's terminal set, no
-    tamper claim, only that :func:`log_metrics` refuses further rows (a cancelled run reads
-    ``log_locked`` false: the lock admits rows there, even though no production flow appends to
-    one); ``last_logged_metrics``, the last metrics row (not ``"final"``: an unlocked log can
-    still take a row after it); ``rows_after_end``, the count of rows whose ``timestamp`` is
-    later than the record's ``ended`` (the one row an unlocked log's own append can admit after
-    the mark, or any row an outside writer appended later), ``None`` when the record has no
-    ``ended``; ``n_epochs``/``n_rows``, always present; and ``refused_mutations``, every refused
-    write the platform audit log recorded against this experiment (see
-    :func:`_refused_mutations`), absent rather than empty when that log itself can't be read.
-    Reading it costs one scan of the platform audit log per compare call, on top of one
-    :func:`get_experiment` per experiment compared.
+    ``stale_seconds`` is the heartbeat freshness window :func:`derived_state` applies; this
+    module's own default, a caller with the configured window (``training_tools.py``'s
+    ``TCIP_HEARTBEAT_STALE_SECONDS``) passes it through rather than being pinned to this default,
+    the same knob :func:`reconstruct_run_status` and the run enumeration take.
+
+    Per experiment: ``recorded_state`` (the stored state) and ``state``, the same
+    heartbeat-derived state the run enumeration reports, via :func:`derived_state`, so a run
+    whose process died compares as ``"interrupted"`` rather than ``"running"``, but only for a
+    launched record (:func:`is_launched`): a pre-created experiment never launched reports
+    ``state`` equal to ``recorded_state`` (``"created"``), never a heartbeat-derived
+    ``"interrupted"`` implying a crash that never happened. ``log_locked``, true when
+    ``recorded_state`` is in the mutation lock's terminal set, no tamper claim, only that
+    :func:`log_metrics` refuses further rows (a cancelled run reads ``log_locked`` false: the
+    lock admits rows there, even though no production flow appends to one); ``last_logged_metrics``,
+    the run's own log's last row (not ``"final"``: an unlocked log can still take a row after it,
+    and this is not a verified result, see :func:`get_experiment`); ``rows_after_end``, the count
+    of rows whose ``timestamp`` is a later instant than the record's own ``ended`` (the one row an
+    unlocked log's own append can admit after the mark, or any row an outside writer appended
+    later), ``None`` when the record has no ``ended``, and a row whose own ``timestamp`` is
+    missing or unparseable never counted rather than raising; ``n_epochs``/``n_rows``, always
+    present; and ``refused_mutations``, every refused write the platform audit log recorded
+    against this experiment (see :func:`_index_refused_mutations`), absent rather than empty when
+    that log itself can't be read. Reading it costs one scan of the platform audit log for the
+    whole call, on top of one :func:`get_experiment` per experiment compared.
     """
     comparisons: list[dict[str, Any]] = []
+    refused_index = _index_refused_mutations(experiment_ids)
 
     for eid in experiment_ids:
         exp = get_experiment(eid)
@@ -1356,7 +1418,7 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "experiment_id": eid,
             "recorded_state": recorded_state,
-            "state": derived_state(status_doc, 600.0),  # this module's own default window
+            "state": derived_state(status_doc, stale_seconds) if is_launched(status_doc) else recorded_state,
             "log_locked": recorded_state in _TERMINAL_STATES,
             "n_epochs": exp["n_epochs"],
             "n_rows": exp["n_rows"],
@@ -1366,15 +1428,17 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
         if metrics:
             summary["last_logged_metrics"] = metrics[-1]
         rows_after_end = None
-        if ended:
+        ended_instant = _parse_iso_instant(ended) if ended else None
+        if ended_instant is not None:
             rows_after_end = sum(
-                1 for row in metrics if isinstance(row, dict) and row.get("timestamp", "") > ended
+                1 for row in metrics
+                if (row_instant := _parse_iso_instant(row.get("timestamp"))) is not None
+                and row_instant > ended_instant
             )
         summary["rows_after_end"] = rows_after_end
 
-        refused = _refused_mutations(eid)
-        if refused is not None:
-            summary["refused_mutations"] = refused
+        if refused_index is not None:
+            summary["refused_mutations"] = refused_index.get(eid, [])
 
         # Get config summary
         config = exp.get("config", {})
