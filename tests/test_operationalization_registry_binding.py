@@ -168,10 +168,34 @@ def test_the_tool_resolves_an_explicit_dataset_root_over_the_project_roots_own(
     assert "is not among subject 'flower'" in result["error"]
 
 
+def test_the_tool_refuses_an_explicit_dataset_root_with_no_registry_by_name(
+    tmp_path: Path,
+) -> None:
+    """An explicit dataset_root with no classes.json refuses through the tool's own error
+    channel rather than raising FileNotFoundError out of it."""
+    from tcip_mcp.tools.operationalization_tools import state_trait_operationalization
+
+    project = fx.seed_project(tmp_path / "project")
+    bare_dataset = tmp_path / "bare_dataset"
+    bare_dataset.mkdir()
+
+    result = state_trait_operationalization(
+        project_root=str(project), trait=fx.CROSSING_TRAIT,
+        delivery_kind=op.STATE_CROSSING_DATES,
+        statement="s", mechanism="m", measured_subject="flower",
+        delivered_phenotypes=["bloom_05per_date", "bloom_50per_date"],
+        dataset_root=str(bare_dataset),
+    )
+
+    assert "error" in result
+    assert bare_dataset.name in result["error"]
+    assert "no class registry" in result["error"]
+
+
 # ── the delivery-time supersession ────────────────────────────────────────────
 
 
-def test_a_confirmed_crossing_delivery_whose_registry_lost_the_class_is_reported_superseded(
+def test_a_confirmed_crossing_delivery_whose_registry_lost_the_class_reports_a_registry_problem(
     project: Path,
 ) -> None:
     record = fx.state_crossing(project)
@@ -187,11 +211,37 @@ def test_a_confirmed_crossing_delivery_whose_registry_lost_the_class_is_reported
         spec, stored, op.STATE_CROSSING_DATES, registry=registry_without_class,
     )
 
-    assert check.state == 3
-    assert check.superseded == (
-        {"field": "positive_class_name", "confirmed_value": "open",
-         "current_value": cr.positive_class_problem(registry_without_class, "flower", "open")},
+    assert not check.ok
+    assert check.state is None
+    assert check.superseded == ()
+    assert check.registry_problem == cr.positive_class_problem(
+        registry_without_class, "flower", "open")
+
+
+def test_reconfirming_does_not_clear_a_live_registry_problem(project: Path) -> None:
+    record = fx.state_crossing(project)
+    fx.confirm(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
+    registry_without_class = cr.ClassRegistry(subjects=(
+        cr.Subject(name="flower", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("closed",)),
+        )),
+    ))
+    spec, stored, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
+    before = op.check_operationalization(
+        spec, stored, op.STATE_CROSSING_DATES, registry=registry_without_class)
+    assert before.registry_problem is not None
+
+    op.confirm_trait_operationalization(
+        project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES,
+        user="user:breeder", record_seen=op.record_seen_hash(stored.value),
+        identity_from_request=True,
     )
+
+    spec2, stored2, _ = fx.resolve(project, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES)
+    after = op.check_operationalization(
+        spec2, stored2, op.STATE_CROSSING_DATES, registry=registry_without_class)
+    assert after.registry_problem is not None
+    assert not after.ok
 
 
 def test_a_confirmed_crossing_delivery_whose_registry_still_declares_the_class_is_ok(
@@ -229,4 +279,82 @@ def test_the_results_panel_reports_a_registry_dropped_class_as_not_current(proje
     ).json()
 
     assert body["confirmed_current"] is False
-    assert body["superseded"][0]["field"] == "positive_class_name"
+    assert body["superseded"] == []
+    assert body["registry_problem"] is not None
+
+
+# ── registry_for_pred_dirs ─────────────────────────────────────────────────────
+
+
+def test_registry_for_pred_dirs_refuses_directories_spanning_two_dataset_roots(
+    tmp_path: Path,
+) -> None:
+    bucket_a = tmp_path / "ds_a" / "predictions" / "run" / "2026-02-11"
+    bucket_b = tmp_path / "ds_b" / "predictions" / "run" / "2026-02-11"
+    bucket_a.mkdir(parents=True)
+    bucket_b.mkdir(parents=True)
+
+    with pytest.raises(cr.RegistryError, match="more than one dataset root"):
+        cr.registry_for_pred_dirs([str(bucket_a), str(bucket_b)])
+
+
+def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys_own_path(
+    tmp_path: Path,
+) -> None:
+    """compute_phenology resolves its registry from the buckets it delivers
+    (registry_for_pred_dirs), not from the project root: a registry written where the buckets
+    actually resolve to is what a crossing delivery's positive-class check reads."""
+    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.tools.phenology_tools import compute_phenology
+    from tests.test_phenology_tools import _bucket, _ds_root, _write_op_sidecar, _write_preds
+
+    fx.seed_project(tmp_path)
+    record = fx.state_crossing(tmp_path)
+    fx.confirm(tmp_path, fx.CROSSING_TRAIT, op.STATE_CROSSING_DATES, record)
+    ds_root = _ds_root(tmp_path)
+    bucket = _bucket(tmp_path, "2026-02-11")
+    _write_preds(bucket, "PLANT_A_2026-02-11", ["open"])
+    id_map = {"closed": 0, "open": 1}
+    _write_op_sidecar(bucket, dataset_root=ds_root, validated=False, id_map=id_map,
+                      trait=fx.CROSSING_TRAIT)
+    cr.write_registry(classes_path(ds_root), cr.ClassRegistry(subjects=(
+        cr.Subject(name="flower", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("closed", "open")),
+        )),
+    )))
+    mapping_path = tmp_path / "mapping.json"
+    import tcip_store as ts
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+
+    ts.replace(plant_mapping_key(mapping_path), {
+        "2026-02-11": [{"stem": "PLANT_A_2026-02-11", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+
+    res = compute_phenology(
+        trait=fx.CROSSING_TRAIT,
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(bucket)},
+        output_csv_path=str(tmp_path / "out.csv"),
+    )
+
+    # Reached the unvalidated-evidence gate, past the operationalization/registry check: the
+    # registry at ds_root, resolved from the bucket itself, declared the positive class.
+    assert "error" in res
+    assert "validated" in res["error"]
+    assert "no class registry" not in res["error"]
+    assert not (tmp_path / "out.csv").exists()
+
+    # A registry at the same resolved root that drops the class refuses at the earlier check.
+    cr.write_registry(classes_path(ds_root), cr.ClassRegistry(subjects=(
+        cr.Subject(name="flower", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("closed",)),
+        )),
+    )))
+    refused = compute_phenology(
+        trait=fx.CROSSING_TRAIT,
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(bucket)},
+        output_csv_path=str(tmp_path / "out2.csv"),
+    )
+    assert "error" in refused
+    assert "no longer holds" in refused["error"]

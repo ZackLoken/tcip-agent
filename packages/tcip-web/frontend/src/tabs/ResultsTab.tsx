@@ -207,6 +207,14 @@ function OperationalizationPanel({
           </div>
         )
       }
+      registryProblemBlockOf={(record) =>
+        record.registry_problem !== null && (
+          <div className="mt-2 rounded border border-tcip-fp/40 p-2 text-[11px] text-tcip-fp">
+            <div>Registry mismatch:</div>
+            <div className="mt-1">{record.registry_problem}</div>
+          </div>
+        )
+      }
       correctionSeedOf={correctionRequest}
       correctionAriaLabelOf={(record) => `Correction for ${record.trait}, ${record.delivery_kind}`}
       confirmingKey={confirmingKey}

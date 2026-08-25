@@ -174,6 +174,12 @@ def _phenology_fixture(
             write_sidecar(bucket, sidecar, "operating_point")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
+    # The Results doors resolve the registry from the delivered buckets' own dataset root, not from
+    # the project root the spec and the confirmed record live under.
+    from tcip_mcp.class_registry import copy_registry
+    from tcip_mcp.dataset_layout import classes_path
+
+    copy_registry(classes_path(tmp_path), classes_path(root))
     mapping_path = tmp_path / "mapping.json"
     tcip_store.replace(plant_mapping_key(mapping_path), mapping)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
@@ -813,3 +819,23 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
     finally:
         with inference_routes._job_lock:
             inference_routes._jobs.pop("inf-retired-test", None)
+
+
+def test_per_plant_curves_refuses_when_the_delivered_dataset_carries_no_registry(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """The confirmed record and its registry live at the project root; the delivered buckets
+    resolve to a different dataset root that carries none. The door refuses by name rather than
+    silently checking the project root's own, unrelated registry."""
+    bucket = tmp_path / "ds" / "predictions" / "live" / "2026-02-11"
+    bucket.mkdir(parents=True)
+    mapping_path = tmp_path / "mapping.json"
+    store.open_project(tmp_path.resolve())
+
+    resp = client.post("/api/results/per_plant_curves", json={
+        "project_root": str(tmp_path), "mapping_path": str(mapping_path),
+        "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "catkin",
+    })
+
+    assert resp.status_code == 400
+    assert "no class registry is reachable" in resp.json()["detail"]

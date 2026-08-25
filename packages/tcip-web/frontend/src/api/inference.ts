@@ -189,6 +189,7 @@ export type OperationalizationRecord = {
   identity_from_request: boolean | null;
   confirmed_current: boolean;
   superseded: OperationalizationSupersession[];
+  registry_problem: string | null;
   delivers: DeliveredPhenotypeDefinition[];
   record_seen: string;
 };
@@ -220,6 +221,7 @@ export interface OperationalizationRefusal {
   trait: string;
   delivery_kind: string;
   message: string;
+  registry_problem: string | null;
 }
 
 /**
@@ -238,6 +240,7 @@ export function operationalizationRefusalOf(e: unknown): OperationalizationRefus
     trait: String(detail.trait ?? ""),
     delivery_kind: String(detail.delivery_kind ?? ""),
     message: typeof detail.message === "string" ? detail.message : e.message,
+    registry_problem: typeof detail.registry_problem === "string" ? detail.registry_problem : null,
   };
 }
 

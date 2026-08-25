@@ -28,8 +28,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -38,6 +39,9 @@ from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
 from tcip_web.paths import assert_path_allowed, assert_project_root_allowed, exposed_arrival, within
 from tcip_web.state import store
+
+if TYPE_CHECKING:
+    from tcip_mcp.class_registry import ClassRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +316,35 @@ class _PhenologyMeasurement:
         return [{k: v for k, v in row.items() if k != "series"} for row in self.plants["rows"]]
 
 
+def _delivered_registry(pred_dirs: Sequence[str]) -> "ClassRegistry | None":
+    """The class registry for the single dataset this delivery's prediction buckets belong to.
+
+    Resolved from the buckets themselves, the way ``compute_phenology`` resolves it, never from the
+    open project's own root: a project's dataset commonly lives outside its own tree. ``None`` when
+    ``pred_dirs`` is empty: with no bucket named yet there is no delivered dataset to check against,
+    the same case a caller-supplied ``predictions_by_date`` of ``{}`` reaches the mapping-not-found
+    refusal through, unchecked here. Otherwise refuses by name when the buckets span more than one
+    dataset root, or resolve to none with a registry, since a state_crossing_dates delivery naming
+    real buckets cannot check its positive class with none in reach.
+    """
+    if not pred_dirs:
+        return None
+    from tcip_mcp.class_registry import RegistryError, registry_for_pred_dirs
+
+    try:
+        registry = registry_for_pred_dirs(pred_dirs)
+    except RegistryError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if registry is None:
+        raise HTTPException(
+            400,
+            f"no class registry is reachable for the dataset behind {list(pred_dirs)}: register "
+            "the dataset (register_dataset) or write its classes.json before a state_crossing_dates "
+            "delivery can check the positive class",
+        )
+    return registry
+
+
 def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     """Compute a trait's phenology measurement and reconcile the evidence behind it: one producer.
 
@@ -326,7 +359,6 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     two can never be read from different projects, and the precondition runs before anything else
     this door does: a breeder must not see a curve on screen that Download would then refuse.
     """
-    from tcip_mcp.class_registry import registry_for_dataset_root
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
         check_operationalization,
@@ -348,19 +380,19 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     except TraitUnknownError as e:
         raise HTTPException(400, str(e)) from e
 
-    # The Results routes serve the project they were opened against, so its own registry is the
-    # delivered dataset's registry: this project root doubles as the dataset root in the common case.
-    registry = registry_for_dataset_root(root)
-    stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
-    if not stated.ok:
-        raise HTTPException(400, stated.as_detail())
-
     mapping_path, *resolved_dirs = _belonging(
         root, payload.mapping_path, *payload.predictions_by_date.values())
     assert mapping_path is not None
     predictions_by_date = {
         date: str(p) for date, p in zip(payload.predictions_by_date, resolved_dirs) if p is not None
     }
+
+    # The delivered dataset's own registry, resolved from the buckets this delivery actually reads.
+    registry = _delivered_registry(list(predictions_by_date.values()))
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
+    if not stated.ok:
+        raise HTTPException(400, stated.as_detail())
+
     mapping_raw = plant_mapping.load_mapping_rows(mapping_path)
     if not mapping_raw:
         raise HTTPException(404, f"no mapping at {payload.mapping_path}")
@@ -409,7 +441,6 @@ def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
     file, so a withdrawal or a spec edit mid-delivery leaves nothing delivered and nothing written.
     Two keys in two stores cannot be read atomically together, so this closes that window instead.
     """
-    from tcip_mcp.class_registry import registry_for_dataset_root
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
         check_operationalization,
@@ -418,7 +449,7 @@ def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
 
     spec, record, _specs_dir = resolve_trait_and_record(
         trait, STATE_CROSSING_DATES, project_root=measurement.project_root)
-    registry = registry_for_dataset_root(measurement.project_root)
+    registry = _delivered_registry(measurement.pred_dirs)
     check = check_operationalization(
         spec, record, STATE_CROSSING_DATES, registry=registry, basis=measurement.basis)
     if not check.ok:
@@ -631,13 +662,16 @@ def _operationalization_body(project_root: Path, trait: str, delivery_kind: str)
     Nothing stated yet reads as null statement fields with ``confirmed_current`` false.
     """
     from tcip_mcp import operationalization as op
-    from tcip_mcp.class_registry import registry_for_dataset_root
     from tcip_mcp.traits import crops_definitions
 
     spec, record, _specs_dir = op.resolve_trait_and_record(
         trait, delivery_kind, project_root=project_root
     )
-    registry = registry_for_dataset_root(project_root)
+    registry = None
+    if delivery_kind == op.STATE_CROSSING_DATES:
+        # No prediction buckets are in scope for a record display, so this resolves the same
+        # project-root-or-single-registered-dataset the statement writer resolves against.
+        registry = op.resolve_statement_registry(str(project_root), "")
     check = op.check_operationalization(spec, record, delivery_kind, registry=registry)
     stated = record.value or {}
     definitions = crops_definitions()
@@ -650,6 +684,7 @@ def _operationalization_body(project_root: Path, trait: str, delivery_kind: str)
         "identity_from_request": stated.get("identity_from_request"),
         "confirmed_current": check.ok,
         "superseded": [dict(entry) for entry in check.superseded],
+        "registry_problem": check.registry_problem,
         "delivers": [{"name": name, "definition": definitions.get(name)} for name in spec.delivers],
         "record_seen": op.record_seen_hash(stated),
     }

@@ -126,6 +126,12 @@ def _currant_bloom_fixture(
             write_sidecar(bucket, sidecar, "operating_point")
         mapping[date_str] = assigns
         preds[date_str] = str(bucket)
+    # The Results doors resolve the registry from the delivered buckets' own dataset root, not from
+    # the project root the spec and the confirmed record live under.
+    from tcip_mcp.class_registry import copy_registry
+    from tcip_mcp.dataset_layout import classes_path
+
+    copy_registry(classes_path(tmp_path), classes_path(root))
     mapping_path = tmp_path / "mapping.json"
     ts.replace(plant_mapping_key(mapping_path), mapping)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.

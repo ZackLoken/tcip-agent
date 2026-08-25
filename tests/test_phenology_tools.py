@@ -215,6 +215,61 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     assert out_csv.exists()
 
 
+def test_compute_phenology_re_reads_the_registry_at_the_second_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The registry is re-resolved immediately before the write, not reused from the first check:
+    a registry edit racing the delivery is exactly the mid-run move that check exists to catch."""
+    from tcip_mcp import class_registry as cr
+
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["dormant"])
+    _write_preds(d2, "P1_b", ["elongated"])
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    declares_it = cr.ClassRegistry(subjects=(
+        cr.Subject(name="catkin", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("dormant", "elongated")),
+        )),
+    ))
+    drops_it = cr.ClassRegistry(subjects=(
+        cr.Subject(name="catkin", attributes=(
+            cr.Attribute(name="state", type="categorical", values=("dormant",)),
+        )),
+    ))
+    calls = {"n": 0}
+
+    def racing_registry(pred_dirs: object) -> cr.ClassRegistry:
+        calls["n"] += 1
+        return declares_it if calls["n"] == 1 else drops_it
+
+    monkeypatch.setattr("tcip_mcp.class_registry.registry_for_pred_dirs", racing_registry)
+
+    res = compute_phenology(
+        trait="catkin",
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        classifier_pred_dirs=[str(d1)],
+        operating_point_conf=0.4,
+        operating_point_validated="held_out_annotations",
+    )
+
+    assert calls["n"] >= 2
+    assert "error" in res
+    assert "no longer holds" in res["error"]
+    assert not out_csv.exists()
+
+
 def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp_path: Path) -> None:
     """A count stamp validated for one trait must not answer for a phenology delivery under a
     different trait: the refusal names the sidecar and both traits."""

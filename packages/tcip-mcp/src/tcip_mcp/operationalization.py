@@ -280,7 +280,14 @@ class OperationalizationBasis:
 
 @dataclass(frozen=True)
 class OperationalizationCheck:
-    """The precondition's answer: which failure state applies, its refusal, and its basis."""
+    """The precondition's answer: which failure state applies, its refusal, and its basis.
+
+    ``registry_problem`` is a separate refusal reason from the numbered states: a state-crossing
+    confirmation whose positive class the delivered dataset's registry no longer declares is not a
+    moved spec field (``superseded`` stays for that), and re-confirming does not clear it, since
+    nothing the breeder confirms changes the registry. It clears only once the registry declares
+    the class again, or the operationalization is restated against a dataset whose registry does.
+    """
 
     trait: str
     delivery_kind: str
@@ -288,11 +295,13 @@ class OperationalizationCheck:
     message: str = ""
     basis: OperationalizationBasis | None = None
     superseded: tuple[dict[str, Any], ...] = ()
+    registry_problem: str | None = None
 
     @property
     def ok(self) -> bool:
-        """Whether the delivery may proceed. Derived, so it cannot disagree with ``state``."""
-        return self.state is None
+        """Whether the delivery may proceed. Derived, so it cannot disagree with ``state`` or
+        ``registry_problem``."""
+        return self.state is None and self.registry_problem is None
 
     def as_detail(self) -> dict[str, Any]:
         """The structured refusal body a web door raises, so no reader dispatches on prose."""
@@ -302,6 +311,7 @@ class OperationalizationCheck:
             "trait": self.trait,
             "delivery_kind": self.delivery_kind,
             "message": self.message,
+            "registry_problem": self.registry_problem,
         }
 
 
@@ -355,13 +365,15 @@ def check_operationalization(
     is about to write, and each is checked only where the delivered artifact carries it. ``registry``
     is the delivered dataset's class registry, checked only for a ``state_crossing_dates`` delivery:
     when given, a registry that no longer declares the confirmed positive class for the confirmed
-    measured subject is reported as a superseded entry beside a moved spec field, in the same shape,
-    since what changed is the definition's binding to the dataset, not the decoded numbers, and the
-    door refuses exactly as it refuses any other unconfirmed statement. A door with no registry to
-    give (the count and aggregate doors, which never deliver a crossing kind) passes ``None``, and
-    every other delivery kind ignores it regardless. ``basis`` is what an earlier call returned: pass
-    it on the re-check immediately before the first write, and a record or spec that moved in
-    between refuses with state 6 rather than delivering against a confirmation nobody gave.
+    measured subject is reported through ``registry_problem``, never folded into ``superseded``,
+    since what changed is the definition's binding to the dataset, not a spec field the breeder's
+    confirmation covers, and re-confirming (which only re-stamps the live spec's constituting
+    values) cannot clear it. The door refuses exactly as it refuses any other unconfirmed statement.
+    A door with no registry to give (the count and aggregate doors, which never deliver a crossing
+    kind) passes ``None``, and every other delivery kind ignores it regardless. ``basis`` is what an
+    earlier call returned: pass it on the re-check immediately before the first write, and a record
+    or spec that moved in between refuses with state 6 rather than delivering against a confirmation
+    nobody gave.
 
     ``acknowledge_unvalidated`` is deliberately not a parameter. An acknowledged provisional number
     whose meaning is stated is honest and ships stamped false; an acknowledged number whose meaning
@@ -379,22 +391,23 @@ def check_operationalization(
         )
 
     moved = _moved_fields(spec, stated, delivery_kind)
-    # An unauthored positive class is state 4's own report (below), not a registry mismatch.
-    if delivery_kind == STATE_CROSSING_DATES and registry is not None and spec.positive_class_name:
-        problem = positive_class_problem(
-            registry, str(stated.get("measured_subject") or ""), spec.positive_class_name
-        )
-        if problem is not None:
-            moved = (*moved, {
-                "field": "positive_class_name",
-                "confirmed_value": spec.positive_class_name,
-                "current_value": problem,
-            })
     if moved:
         return OperationalizationCheck(
             trait, delivery_kind, 3, _state_3_text(spec, delivery_kind, stated, moved[0]),
             superseded=moved,
         )
+
+    # An unauthored positive class is state 4's own report (below), not a registry mismatch.
+    if delivery_kind == STATE_CROSSING_DATES and registry is not None and spec.positive_class_name:
+        registry_problem = positive_class_problem(
+            registry, str(stated.get("measured_subject") or ""), spec.positive_class_name
+        )
+        if registry_problem is not None:
+            return OperationalizationCheck(
+                trait, delivery_kind, None,
+                _registry_problem_text(spec, delivery_kind, stated, registry_problem),
+                registry_problem=registry_problem,
+            )
 
     empty = [f for f in constituting_fields(delivery_kind) if _is_empty(getattr(spec, f))]
     if empty:
@@ -543,6 +556,20 @@ def _state_3_text(
         f"{moved['current_value']!r}. The confirmation covered the old value, so it no longer "
         "covers what would be delivered. Ask the breeder to confirm the current statement in the "
         "Results tab, or restore the confirmed value."
+    )
+
+
+def _registry_problem_text(
+    spec: TraitSpec, delivery_kind: str, stated: Mapping[str, Any], problem: str
+) -> str:
+    return (
+        f"Delivery refused for trait {spec.name!r}: its confirmed positive class "
+        f"{spec.positive_class_name!r} for measured subject {stated.get('measured_subject')!r} no "
+        f"longer holds against the delivered dataset's class registry: {problem}. The definition's "
+        "binding to this dataset changed, not a value the breeder confirmed, so re-confirming "
+        "will not clear this. Author the class into the registry, or restate the "
+        "operationalization with state_trait_operationalization against the dataset whose "
+        "registry declares it."
     )
 
 
@@ -773,7 +800,13 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> C
     from tcip_mcp.tools.project_tools import read_datasets
 
     if dataset_root:
-        return read_registry(classes_path(dataset_root))
+        try:
+            return read_registry(classes_path(dataset_root))
+        except FileNotFoundError as exc:
+            raise ValueError(
+                f"dataset_root {dataset_root!r} carries no class registry of its own. Write one "
+                "(write_registry) before a statement's classes can be checked against it."
+            ) from exc
 
     registered = read_datasets(project_root)
     paths = [d.get("path") for d in registered]
