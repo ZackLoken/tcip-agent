@@ -736,27 +736,35 @@ class ReviewEngine:
         self._save_image(bucket, ctx.img_name)
 
     def review_progress(
-        self, bucket: str, img_name: str, ctx: ReviewContext, matches: dict
+        self, bucket: str, ctx: ReviewContext, dets: list[ReviewDetection]
     ) -> tuple[int, int]:
-        """``(reviewed, total)`` over the current detections: how many of ``matches``' own tp/fp/fn
-        entries have a stored verdict, by the same lookup the per-detection ticks use
-        (:meth:`find_reviewed_entry`), and how many current detections there are in total.
+        """``(reviewed, total)`` over ``dets``: how many distinct stored entries the detections in
+        it find, by the same lookup the per-detection ticks use (:meth:`find_reviewed_entry`), and
+        how many detections there are in total. ``dets`` is the caller's own
+        :meth:`build_detection_list` result, built once and shared rather than rebuilt here, since a
+        caller with an unfiltered list already in hand (:meth:`check_image_review_complete`, the
+        status-bar wheel) would otherwise pay for the same scan twice.
 
         One rule shared by the ticks, the status-bar wheel and :meth:`check_image_review_complete`:
         reviewed never means "a stored entry exists somewhere in the shard", only "a stored entry
         exists for a detection still in this current match set". A confidence threshold raised since
-        an entry was recorded drops that prediction out of ``matches``, so it stops being counted
-        here even though the shard still holds its entry, and the completion gate and the wheel read
-        that one count rather than each keeping their own. Two current detections whose centres
-        alias to the same stored entry both count, a property of the centre-only lookup, not of this
-        method.
+        an entry was recorded drops that prediction out of the current set, so it stops being
+        counted here even though the shard still holds its entry. Two current detections whose
+        centres alias to the same stored entry count as one reviewed of two, not two of two: the
+        count is of distinct entries found, not of detections that find one, since only one of the
+        two ever carries a verdict of its own under a centre-only lookup. A coverage-only sweep
+        attestation (the whole image marked "checked, nothing more found", carrying neither
+        ``gt_bbox_norm`` nor ``pred_bbox_norm``, see :meth:`record_detection_action`) walks no
+        detection in ``dets`` and so counts toward nothing here, since :meth:`_build_reviewed_lookup`
+        indexes only entries carrying one of those two keys.
         """
-        dets = self.build_detection_list(ctx, matches)
-        reviewed = sum(1 for d in dets if self.find_reviewed_entry(bucket, d, ctx) is not None)
-        return reviewed, len(dets)
+        reviewed_entries = {
+            id(entry) for d in dets if (entry := self.find_reviewed_entry(bucket, d, ctx)) is not None
+        }
+        return len(reviewed_entries), len(dets)
 
     def check_image_review_complete(
-        self, bucket: str, img_name: str, ctx: ReviewContext, matches: dict
+        self, bucket: str, ctx: ReviewContext, matches: dict
     ) -> bool:
         """If every current detection on the image has a stored verdict, mark it complete.
 
@@ -765,15 +773,16 @@ class ReviewEngine:
         higher confidence threshold excludes do not complete an image early. Returns ``True`` if
         the image is in the completed state after this call.
         """
-        reviewed, total = self.review_progress(bucket, img_name, ctx, matches)
+        dets = self.build_detection_list(ctx, matches)
+        reviewed, total = self.review_progress(bucket, ctx, dets)
         if total == 0 or reviewed < total:
             return False
 
-        img_data = self._verdicts().get((bucket, img_name))
+        img_data = self._verdicts().get((bucket, ctx.img_name))
         if not img_data:
             return False
         img_data["img_status"] = "completed"
-        self._save_image(bucket, img_name)
+        self._save_image(bucket, ctx.img_name)
         return True
 
     # ── Label backup / save ───────────────────────────────────────────────

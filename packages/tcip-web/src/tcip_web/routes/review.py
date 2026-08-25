@@ -403,9 +403,15 @@ def _matches_response(
     ``matches``, before ``filter_type``/``filter_class`` narrow ``detections`` to what is rendered:
     the status-bar wheel reports the whole image's progress regardless of the active filter.
     """
-    dets = engine.build_detection_list(
-        ctx, matches, filter_type=filter_type, filter_class=filter_class
-    )
+    # Built once for the whole image: the wheel's progress is over the unfiltered set, so a filter
+    # that narrows the rendered list below must not narrow what review_progress counts.
+    all_dets = engine.build_detection_list(ctx, matches)
+    if filter_type == "all" and filter_class == "all":
+        dets = all_dets
+    else:
+        dets = engine.build_detection_list(
+            ctx, matches, filter_type=filter_type, filter_class=filter_class
+        )
     out_dets: list[Detection] = []
     for d in dets:
         entry = engine.find_reviewed_entry(bucket, d, ctx)
@@ -421,7 +427,7 @@ def _matches_response(
             reviewed_action=entry.get("action") if entry else None,
         ))
 
-    n_reviewed, n_total = engine.review_progress(bucket, image_name, ctx, matches)
+    n_reviewed, n_total = engine.review_progress(bucket, ctx, all_dets)
     return MatchesResponse(
         img_width=ctx.img_width,
         img_height=ctx.img_height,
@@ -632,7 +638,7 @@ def record_action(payload: ActionPayload) -> dict:
         iou_threshold=payload.iou_threshold, conf_threshold=payload.conf_threshold,
         subject=payload.subject, attribute=payload.attribute,
     )
-    engine.check_image_review_complete(bucket, payload.image_name, work, matches)
+    engine.check_image_review_complete(bucket, work, matches)
     _audit(payload.dataset_root, "gui_review_action", {
         "image_name": payload.image_name,
         "det_type": payload.det_type,
