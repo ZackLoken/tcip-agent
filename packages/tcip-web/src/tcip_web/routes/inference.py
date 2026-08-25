@@ -291,7 +291,9 @@ def _worker(job: InferenceJob) -> None:
         except Exception:  # noqa: BLE001 (no run scope for the map; predictions decode by raw id)
             id_map = None
 
-        from tcip_mcp.pipelines.resolution import operating_point_stamp, write_sidecar
+        from tcip_mcp.pipelines.resolution import (
+            operating_point_stamp, prediction_producer, write_sidecar,
+        )
 
         # overlap has no home in ResolvedBundle's tracked params (only conf/cross_tile_nms/tiled/
         # tile_size/max_dets are), so the value and source this run actually used travel directly.
@@ -333,8 +335,10 @@ def _worker(job: InferenceJob) -> None:
                 postprocess=job.postprocess,
                 tile_resize=tile_resize,
             )
-            write_predictions_json(output_dir / f"{img.stem}.json", results[0],
-                                   created_by=f"model:{Path(job.checkpoint_path).stem}", id_map=id_map)
+            write_predictions_json(
+                output_dir / f"{img.stem}.json", results[0],
+                created_by=prediction_producer(job.checkpoint_path, identity["sha256"]),
+                id_map=id_map)
             job.results.append({"image": _display_name(img), "n_detections": results[0]["count"]})
             job.done += 1
 

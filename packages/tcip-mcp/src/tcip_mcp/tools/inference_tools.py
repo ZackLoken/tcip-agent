@@ -1093,13 +1093,13 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     condition for a validated stamp: a door opens one only when the run's own dimensions all
     cleared and the bucket sits where a claim can be recorded.
     """
-    from tcip_mcp.pipelines.resolution import operating_point_stamp
+    from tcip_mcp.pipelines.resolution import operating_point_stamp, prediction_producer
 
     out.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
     # The checkpoint's content hash, so an accepted prediction's GT names the exact model behind it.
     sha = result.get("checkpoint_sha256")
-    producer = f"model:{Path(checkpoint_path).stem}" + (f"@{sha[:12]}" if sha else "")
+    producer = prediction_producer(checkpoint_path, sha)
     id_map = result.get("id_map")
     has_masks = False
     for r in result["results"]:
@@ -1204,7 +1204,7 @@ def _export_predictions_raster(
 
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_FALSE, block_calibrated_export_operating_point, check_delivery_gate,
-        operating_point_stamp, raw_operating_point, tile_size_gate_flag,
+        operating_point_stamp, prediction_producer, raw_operating_point, tile_size_gate_flag,
     )
 
     conf_source = "default"
@@ -1343,7 +1343,7 @@ def _export_predictions_raster(
 
     out.mkdir(parents=True, exist_ok=True)
     sha = identity["sha256"]
-    producer = f"model:{Path(checkpoint_path).stem}" + (f"@{sha[:12]}" if sha else "")
+    producer = prediction_producer(checkpoint_path, sha)
     pred_path = out / f"{Path(raster_path).stem}.json"
     write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
     has_masks = bool(result.get("masks"))

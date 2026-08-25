@@ -969,6 +969,17 @@ def operating_point_stamp(
     }
 
 
+def prediction_producer(checkpoint_path: str, sha256: str) -> str:
+    """The one ``created_by`` spelling for a prediction written behind a resolved checkpoint.
+
+    Every checkpoint-backed door (the image and raster export regimes, the web inference worker)
+    resolves a checkpoint's identity before it writes anything, so the hash is always in hand by
+    the time this is called; the parameter is required rather than defaulted so the bare,
+    hash-less form cannot be spelled through it.
+    """
+    return f"model:{Path(checkpoint_path).stem}@{sha256[:12]}"
+
+
 STAMP_KEYS: frozenset[str] = frozenset((
     "trait", "dataset_hash", "operating_point", "id_map", "validated", "validated_by",
     "tile_size_validated", "shippable_issues", "checkpoint", "checkpoint_sha256", "experiment_id",
