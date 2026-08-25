@@ -278,11 +278,8 @@ def validations_key(experiment_id: str, *, root: Path | str | None = None) -> Ke
     return _member_key(EXPERIMENT_VALIDATIONS_STORE, experiment_id, "validations", root)
 
 
-# Once a run reaches a terminal state its record is immutable (experiments are immutable). The lock
-# is additive-only: populated fields freeze, but a still-empty field may take its first write,
-# so the post-completion predictions link + model registration still land. Deliberately excludes
-# "cancelled", a cancelled run's record stays reopenable (e.g. resumed via resume_from), so it
-# must not be lock-frozen the way a genuinely finished run is.
+# Once terminal, a record is immutable and additive-only. Excludes "cancelled": that record
+# stays writable; a resume always mints a fresh id via _ensure_experiment rather than reopening it.
 _TERMINAL_STATES = {"completed", "failed"}
 
 # A different concept sharing similar vocabulary, states reconstruct_run_status trusts as
@@ -336,9 +333,10 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
     one (so the check and the write it guards see the same value) or via :func:`_current_state`
     when it doesn't. The one implementation of "is this experiment terminal" every writer of an
     experiment member consults, rather than each comparing against ``_TERMINAL_STATES`` itself.
-    :func:`update_status` is the one exception: its rule differs (a terminal record refuses only a
-    move to a *non*-terminal state, not a move between two terminal states or a repeat of the
-    current one), so it keeps its own comparison rather than calling this.
+    :func:`record_artifact` and :func:`update_lineage` (and the shared :func:`pointer_frozen`
+    predicate the callers outside this module consult) apply a narrower, additive-only rule
+    instead: a still-empty field takes its first write even past terminal, only a populated one
+    is frozen, so they call this only to build the message once they've decided to refuse.
 
     Never audits itself: an audit line is a log append, which cannot run inside a record
     transaction (``store.transaction`` only ever holds ``kind="record"`` keys), and a caller
@@ -351,14 +349,16 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
 
 
 def _audit_refused(experiment_id: str, op: str, detail: dict[str, Any]) -> None:
-    """Record a refused post-terminal mutation on the append-only audit log (best-effort)."""
-    try:
-        from tcip_mcp.audit import record_event
+    """Record a refused post-terminal mutation on the append-only audit log.
 
-        record_event("experiment_mutation_refused", {"experiment_id": experiment_id, "op": op,
-                                                      **detail}, status="refused")
-    except Exception:
-        logger.debug("could not audit refused mutation", exc_info=True)
+    Through :func:`record_event_or_raise`: the mutation this refusal reports already committed
+    (or, for update_status/complete_run, decided not to), so a line that cannot be appended
+    raises :class:`AuditEntryNotWritten` to the caller rather than vanishing silently.
+    """
+    from tcip_mcp.audit import record_event_or_raise
+
+    record_event_or_raise("experiment_mutation_refused", {"experiment_id": experiment_id, "op": op,
+                                                           **detail}, status="refused")
 
 
 def create_experiment(
@@ -490,41 +490,57 @@ def _mark_completed(status: dict[str, Any]) -> None:
 def update_status(experiment_id: str, state: str, *, error: str | None = None) -> dict[str, Any]:
     """Update experiment state (created → running → completed | failed).
 
+    A repeat of the record's current state is idempotent: nothing restamps (not ``heartbeat``,
+    not ``ended``), and ``error`` lands only when the record does not already carry one, so the
+    watchdog's reasoned ``failed`` landing after the child's own reasonless ``failed`` still
+    records the wall-clock reason, and a second reason never overwrites a first. Any other write
+    to a terminal record (``completed``/``failed``, the other terminal state included) refuses
+    through :func:`refuse_if_terminal`, audited once the transaction closes. ``cancelled`` is not
+    terminal here, so a record in that state still takes any write, including back to ``running``.
+
     ``error`` records a specific failure reason (e.g. a wall-clock-timeout kill) into
-    ``status.json["error"]``, omitted/``None`` never clears a previously-recorded error, only an
-    explicit new value overwrites it.
+    ``status.json["error"]``; outside the idempotent-repeat case above, omitted/``None`` never
+    clears a previously-recorded error, only an explicit new value overwrites it.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     key = status_key(experiment_id)
+    current: str | None = None
+    refused = False
     with store.transaction(key) as txn:
         status = txn.read(key, default={})
         current = status.get("state")
-        # Terminal-state lock: a completed/failed run cannot be re-opened to a non-terminal state.
-        refused_reopen = (
-            current in _TERMINAL_STATES and state != current and state not in _TERMINAL_STATES
-        )
-        if not refused_reopen:
-            if state == "completed":
-                _mark_completed(status)
-            else:
-                status["state"] = state
-                now = datetime.now(timezone.utc).isoformat()
-                status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
-                if state == "running" and not status.get("started"):
-                    status["started"] = now
-                if state == "failed":
-                    status["ended"] = now
-            if error is not None:
+        if state == current:
+            if error is not None and status.get("error") is None:
                 status["error"] = error
+                txn.write(key, status)
+        else:
+            try:
+                refuse_if_terminal(experiment_id, "update_status", current)
+            except ExperimentTerminal:
+                refused = True
 
-            txn.write(key, status)
+            if not refused:
+                if state == "completed":
+                    _mark_completed(status)
+                else:
+                    status["state"] = state
+                    now = datetime.now(timezone.utc).isoformat()
+                    status["heartbeat"] = now  # liveness stamp: a fresh heartbeat means a live process
+                    if state == "running" and not status.get("started"):
+                        status["started"] = now
+                    if state == "failed":
+                        status["ended"] = now
+                if error is not None:
+                    status["error"] = error
 
-    if refused_reopen:
+                txn.write(key, status)
+
+    if refused:
         _audit_refused(experiment_id, "update_status", {"from": current, "to": state})
         return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
-                         f"re-open to {state!r}.", "state": current}
+                         f"move it to {state!r}.", "state": current}
     return {"experiment_id": experiment_id, "state": state}
 
 
@@ -535,9 +551,8 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
     in named-key order and is not crash-atomic across keys, so a crash between the two leaves the
     pointer on a record still ``running`` (a detectably stale state), never ``completed`` with no
     pointer. Refuses (and audits, once the transaction has closed) a run already terminal, naming
-    the weights file that exists on disk so an operator can find it; the error carries the state
-    the record actually holds (``completed`` or ``failed``), for a caller that must reconcile its
-    own in-memory status against it.
+    the weights file that exists on disk so an operator can find it; the refusal's ``state``
+    carries the state the record actually holds, so a caller can reconcile to it.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
