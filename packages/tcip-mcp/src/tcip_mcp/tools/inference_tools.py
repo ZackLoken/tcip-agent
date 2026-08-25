@@ -1378,14 +1378,9 @@ def _export_predictions_raster(
     try:
         import dataclasses
 
-        from tcip_mcp.pipelines.raster_source import (
-            CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
-            raster_content_identity,
-        )
+        from tcip_mcp.pipelines.raster_source import content_identity
 
-        export_identity = raster_content_identity(
-            raster_path, predictor.in_chans, seed=CONTENT_IDENTITY_SEED,
-            window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+        export_identity = content_identity(raster_path, predictor.in_chans)
         op_stamp["raster_content_identity"] = dataclasses.asdict(export_identity)
     except Exception:
         logger.warning("export-time raster content identity could not be recorded", exc_info=True)

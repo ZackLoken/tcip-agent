@@ -271,7 +271,10 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     "job_registry": Claim(ROOT, (_named(".tcip", "state", name="inference_jobs", suffix=".json"),)),
     "proposal_staging": Claim(
         ROOT,
-        ((Constant(".tcip"), Constant("state"), Patterned(starting_with("proposals_"), tail=".json")),),
+        (
+            (Constant(".tcip"), Constant("state"), Constant("proposals"),
+             Patterned(ANY), Patterned(ANY, tail=".json")),
+        ),
     ),
     "model_registry": Claim(ROOT, (_named(".tcip", "models", name="registry", suffix=".json"),)),
     "dataset_registry": Claim(ROOT, (_named(".tcip", name="datasets", suffix=".json"),)),

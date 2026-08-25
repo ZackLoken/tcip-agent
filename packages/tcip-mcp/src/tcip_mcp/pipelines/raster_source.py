@@ -791,6 +791,25 @@ def photographic_container(source: "str | Path | BandGroupRef", num_channels: in
             and Path(source).suffix.lower() not in ARRAY_CONTAINER_EXTS)
 
 
+def image_route_channel_count(
+    source: "str | Path | BandGroupRef", probed: int | None = None,
+) -> int:
+    """The channel count a plain (non-composited) image-route read opens ``source`` at:
+    :func:`~tcip_mcp.pipelines.derivations.probe_channels`, or three in place of a photographic
+    container's own band count, since a plain serve decodes a grayscale or palette frame through
+    PIL's RGB expansion rather than its raw band count.
+
+    ``probed`` lets a caller that already has :func:`probe_channels`'s answer pass it through
+    instead of probing the header twice. The one place this rule is spelled, so the display route
+    and a content identity computed at its default channel count can never drift apart.
+    """
+    from tcip_mcp.pipelines.derivations import probe_channels
+
+    if probed is None:
+        probed = probe_channels(source)
+    return 3 if photographic_container(source, probed) else probed
+
+
 def open_array_source(source: "str | Path | BandGroupRef", num_channels: int) -> RasterSource:
     """Open ``source`` as a plain ``[H, W, C]`` array raster: a band group, a numpy container, or a
     TIFF.
@@ -1121,6 +1140,24 @@ def raster_identity_matches(recorded: dict, source: "str | Path | BandGroupRef")
         and fresh.dtype == recorded["dtype"]
         and fresh.pixel_checksum == recorded["pixel_checksum"]
     )
+
+
+def content_identity(
+    source: "str | Path | BandGroupRef", num_channels: int | None = None,
+) -> RasterIdentity:
+    """:func:`raster_content_identity` of ``source`` under the platform's own sampling budget.
+
+    ``num_channels`` defaults to :func:`image_route_channel_count`'s rule: a caller with no
+    channel count of its own (a proposal run addressing the image it just proposed on) gets the
+    same count the image route would open the file at. A caller that already has one (a trained
+    model's ``in_chans``, a training-time probe already computed for its own reasons) passes it
+    through explicitly and gets exactly that value, never the route's own derivation.
+    """
+    if num_channels is None:
+        num_channels = image_route_channel_count(source)
+    return raster_content_identity(
+        source, num_channels, seed=CONTENT_IDENTITY_SEED,
+        window_size=CONTENT_IDENTITY_WINDOW_SIZE, max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
 
 
 def georeferenced_raster_identity_mismatch(

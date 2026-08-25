@@ -537,11 +537,9 @@ def serve_image(
     band_tokens = _parse_band_tokens(bands) if bands is not None else None
     composite_requested = bands is not None or isinstance(source, BandGroupRef)
     probed = probe_channels(source)
-    # A plain photographic serve is PIL's own RGB frame whatever the file's band count: a
-    # single-band or palette frame expands the way convert("RGB") expands it.
     open_channels = (
-        3 if not composite_requested and raster_source.photographic_container(source, probed)
-        else probed
+        probed if composite_requested
+        else raster_source.image_route_channel_count(source, probed)
     )
     target_width = DISPLAY_MAX_EDGE if max_width is None else max_width
 

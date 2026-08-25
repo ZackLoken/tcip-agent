@@ -1680,16 +1680,11 @@ def _spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
     try:
         from tcip_mcp.pipelines.derivations import probe_channels
         from tcip_mcp.pipelines.image_utils import resolve_image_source
-        from tcip_mcp.pipelines.raster_source import (
-            CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
-            raster_content_identity,
-        )
+        from tcip_mcp.pipelines.raster_source import content_identity
 
         source = resolve_image_source(data_cfg.get("images_dir", ""), stem)
         nc = probe_channels(source)
-        identity = raster_content_identity(
-            source, nc, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
-            max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+        identity = content_identity(source, nc)
         import dataclasses
         return dataclasses.asdict(identity)
     except Exception as exc:  # noqa: BLE001, best-effort provenance, never sinks the split/launch

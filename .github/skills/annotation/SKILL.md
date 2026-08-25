@@ -98,12 +98,17 @@ Full workflow:
    numbered overlay. `grid_cells=[...]` (with `tile_size`, `overlap` echoed by
    `overlay_reference_grid`) restricts the pass to the named cells' bounding rect instead of the
    whole frame, useful on a large or crowded image; the engine itself never sees a region, only a
-   crop, and the returned candidates are already in full-frame coordinates
+   crop, and the returned candidates are already in full-frame coordinates. On a dataset image
+   this stages the run (`staged: true`) keyed by the dataset, capture date and stem, alongside the
+   content identity of the pixels the engine ran on; on a path outside any dataset's `images/`
+   tree the render and candidates still come back (`staged: false`, naming why), but there is
+   nothing for `accept_proposals` to read back later
 2. Agent `view_image` on overlay → identifies and classifies each candidate
-3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → stages
-   accepted candidates as predictions (`created_by=<engine>`) in the predictions tree for human
-   review on the Review canvas, never writes GT directly, and through the verdict-guarded staging
-   helper so a re-run never orphans recorded verdicts
+3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → reads
+   the proposals staged for that image's content, refusing if the image has changed since that
+   run, then stages accepted candidates as predictions (`created_by=<engine>`) in the predictions
+   tree for human review on the Review canvas, never writes GT directly, and through the
+   verdict-guarded staging helper so a re-run never orphans recorded verdicts
 4. Agent `view_image` on the staged result → visual QA pass
 
 Corrective loop (for missed objects):

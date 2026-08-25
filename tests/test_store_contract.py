@@ -1457,8 +1457,8 @@ REGISTERED = {
         f".tcip/retrospectives/{RETROSPECTIVE_UNDER_TEST}.md"),
     "proposal_staging": Registered(
         {"engine": "sam", "candidates": [{"candidate_id": 1, "score": 0.9, "note": "ü"}]},
-        lambda root: vision_tools.proposal_staging_key(PROPOSAL_STEM),
-        f".tcip/state/proposals_{PROPOSAL_STEM}.json", pin=_pin_platform_root),
+        lambda root: vision_tools.proposal_staging_key(root, "2026-03-04", PROPOSAL_STEM),
+        f".tcip/state/proposals/2026-03-04/{PROPOSAL_STEM}.json"),
     "backend_port": Registered(
         "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
         pin=_pin_platform_root),

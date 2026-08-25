@@ -805,6 +805,80 @@ def test_raster_content_identity_refuses_only_when_unopenable(tmp_path: Path) ->
         raster_content_identity(tmp_path / "nonexistent.npy", 3, **_IDENTITY_KW)
 
 
+# ── content_identity: raster_content_identity under the platform's own budget ────────────────
+
+
+def test_content_identity_with_an_explicit_channel_count_matches_the_old_spelling(
+    tmp_path: Path,
+) -> None:
+    """A caller with its own channel count (a model's ``in_chans``, a training-time probe) gets
+    exactly the value the direct ``raster_content_identity`` call under the platform's constants
+    used to compute, never the route's own derivation."""
+    from tcip_mcp.pipelines.raster_source import (
+        CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
+        content_identity, raster_content_identity,
+    )
+
+    path = tmp_path / "content.npy"
+    np.save(str(path), _distinctive_array(24, 20, channels=5))
+
+    old_spelling = raster_content_identity(
+        path, 5, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
+        max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+    via_helper = content_identity(path, 5)
+
+    assert via_helper == old_spelling
+
+
+def _distinctive_gray(height: int, width: int) -> np.ndarray:
+    """A single-band 2-D array, distinctive the same way :func:`_distinctive_array` is."""
+    arr = np.zeros((height, width), dtype=np.uint8)
+    for row in range(height):
+        for col in range(width):
+            arr[row, col] = (row + col) % 256
+    return arr
+
+
+def test_content_identity_with_no_channel_count_uses_the_image_route_rule(tmp_path: Path) -> None:
+    """Omitting ``num_channels`` (the shape ``propose_annotations`` calls it at) resolves the
+    same channel count :func:`image_route_channel_count` gives the source."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.raster_source import content_identity, image_route_channel_count
+
+    path = tmp_path / "photo.png"
+    Image.fromarray(_distinctive_gray(20, 16), mode="L").save(path)
+
+    identity = content_identity(path)
+    assert identity.num_channels == image_route_channel_count(path) == 3
+
+
+def test_image_route_channel_count_expands_a_grayscale_photograph_to_three(tmp_path: Path) -> None:
+    """A grayscale photographic frame opens at three channels on a plain serve (PIL's own RGB
+    expansion), the same override :func:`content_identity`'s default relies on."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.raster_source import image_route_channel_count
+
+    path = tmp_path / "gray.png"
+    Image.fromarray(_distinctive_gray(20, 16), mode="L").save(path)
+
+    assert image_route_channel_count(path) == 3
+
+
+def test_image_route_channel_count_leaves_an_array_container_at_its_own_band_count(
+    tmp_path: Path,
+) -> None:
+    """A non-photographic container (an .npy raster) is never subject to the photographic
+    override: its own probed band count is what a plain serve opens it at."""
+    from tcip_mcp.pipelines.raster_source import image_route_channel_count
+
+    path = tmp_path / "single_band.npy"
+    np.save(str(path), _distinctive_gray(20, 16))
+
+    assert image_route_channel_count(path) == 1
+
+
 # ── raster_identity_matches: the claim-scope comparison ──────────────────────────────────────
 
 
