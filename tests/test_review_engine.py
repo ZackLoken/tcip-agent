@@ -305,6 +305,19 @@ def test_record_overrides_existing(engine: ReviewEngine, ctx: ReviewContext) -> 
     assert len(img_data["detections"]) == 1
 
 
+def test_record_detection_action_refuses_an_action_outside_the_declared_vocabulary(
+    engine: ReviewEngine, ctx: ReviewContext
+) -> None:
+    """The engine's write boundary rejects an action the vocabulary doesn't declare, so a direct
+    caller cannot store a verdict none of the consumers read."""
+    matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
+    dets = engine.build_detection_list(ctx, matches)
+    target = dets[0]
+    with pytest.raises(ValueError, match="unknown verdict action"):
+        engine.record_detection_action(BUCKET, target, ctx, action="approved")
+    assert engine.raw_state == {}
+
+
 def test_record_stamps_missed_object_attested_for_a_genuine_new_attestation(
     engine: ReviewEngine, ctx: ReviewContext
 ) -> None:

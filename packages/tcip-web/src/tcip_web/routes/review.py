@@ -43,6 +43,7 @@ from tcip_annotation import (
 from tcip_annotation.json_io import annotation_from_payload, read_annotations
 from tcip_annotation.review_engine import label_baseline_key
 from tcip_annotation.state import Annotation
+from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_web.identity import resolve_user, user_id
@@ -439,6 +440,12 @@ def compute_image_matches(req: MatchesRequest) -> MatchesResponse:
     )
 
 
+class VerdictActionField(BaseModel):
+    """The verdict action alone, projected into the browser's type union by the generator."""
+
+    action: VerdictAction
+
+
 class ActionPayload(BaseModel):
     dataset_root: str
     image_name: str
@@ -453,9 +460,9 @@ class ActionPayload(BaseModel):
     gt_idx: Optional[int] = None
     pred_idx: Optional[int] = None
     bbox: tuple[float, float, float, float]
-    action: str  # "accepted" | "rejected" | "edited" | "swept" (an explicit "checked this image
-    # for missed objects, found none" attestation: no geometry, never mutates GT, see
-    # _apply_gt_mutation)
+    # "swept" is an explicit "checked this image for missed objects, found none" attestation: no
+    # geometry, never mutates GT, see _apply_gt_mutation.
+    action: VerdictAction
     # GUI-set reviewer identity (bare name, e.g. "breeder"); stamped as accepted_by/created_by
     # ("user:<name>"). Omitted by non-GUI callers -> backend falls back to the OS/env user.
     user: Optional[str] = None
