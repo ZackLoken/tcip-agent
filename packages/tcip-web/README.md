@@ -80,8 +80,9 @@ npm run build      # emits into ../static/
 MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcasts those
 events to any browser subscribed to `/ws/panel/{panel}`.
 
-Port discovery inside MCP tools: `TCIP_WEB_PORT` env > `.tcip/state/web_port.txt`
-> 8765. Host defaults to `127.0.0.1` unless `TCIP_WEB_HOST` is set.
+Port discovery inside MCP tools: `.tcip/state/web_port.txt` (the port actually bound) >
+`TCIP_WEB_PORT` env (read only when no record parses) > 8765. Host defaults to `127.0.0.1`
+unless `TCIP_WEB_HOST` is set.
 
 ## Keyboard map
 
