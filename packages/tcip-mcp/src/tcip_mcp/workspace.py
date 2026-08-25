@@ -107,7 +107,8 @@ def project_path(name: str, *, create: bool = True) -> Path:
     lists or adopts an existing project accepts any safely-named one, since a directory the
     platform did not create is opened by the name it already has. Only the doors that
     create a workspace directory (``ingest_images``, ``init_project``, ``import_project``)
-    hold a new name to the shape.
+    hold a new name to the shape; the first two also take an authored site, recorded on the
+    project's own record (:mod:`tcip_mcp.project_record`).
 
     ``create`` threads through to :func:`workspace_root`; a caller that must not bring the
     workspace root into existence on a bare resolve passes ``create=False``.

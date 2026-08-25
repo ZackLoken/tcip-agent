@@ -19,7 +19,7 @@ follow this arc. Each step links out to the domain skill that owns its detail.
 
 Start the session with `load_project_memory` (kind='reports' and kind='retrospectives'), then `inspect_project`
 on any project you're handed. Surface friction with `claude_reports` the moment you hit
-it (missing site, ambiguous goal, unconfirmed format).
+it (ambiguous goal, unconfirmed format).
 
 ## 1. Name the project: `crop_subject_phenotype`
 
@@ -37,10 +37,11 @@ refuse a non-conforming name when the directory they create lands under the work
 - `phenotype`: what is being measured (see `.github/skills/crop-science`), never a
   `crops.yml` trait name.
 
-The site (field/orchard) is no longer part of the name; where a project's site identity
-gets recorded instead is an open question, filed for the owner. Ask the human for the
-site when the goal doesn't name one and record it wherever the project ends up carrying
-it, rather than folding it back into the directory name.
+The site (field/orchard) is no longer part of the name: it is a required argument of
+`init_project` and `ingest_images`, recorded once on the project's own record
+(`tcip_mcp.project_record`) and shown in the picker. Ask the human for it rather than
+guessing it from a path or filename; a project that already records a different site
+refuses the call rather than silently overwriting it.
 
 Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
 
@@ -49,7 +50,7 @@ Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
 Structure the raw pile into the canonical layout. One auditable primitive:
 
 ```
-ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diameter")
+ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diameter", site="<the breeder's site>")
 ```
 
 - Copies by default (originals are left byte-identical); pass `copy=False` only when
@@ -71,9 +72,10 @@ next steps do. After it, `inspect_project` reports the capture dates and image c
 
 `ingest_images` scaffolds `.tcip/` (`artifacts/`, `models/`) as a side effect of
 structuring images. If you need that scaffold before there are images to ingest, call
-`init_project(project_path)` directly; it creates the identical layout without touching image
-files (both share the same internal scaffolding, so calling one after the other is idempotent,
-not additive).
+`init_project(project_path, site=<site>)` directly; it creates the identical layout without
+touching image files. Both share the same internal scaffolding, so calling one after the other
+with the same site is idempotent, not additive; calling either with a different site than the
+one already recorded refuses rather than silently changing it.
 
 After ingest, `register_dataset(dataset_root, crop)` records the dataset's identity (a minted
 `id` plus a whole-dataset content fingerprint) in `<dataset_root>/dataset.json` and the project's

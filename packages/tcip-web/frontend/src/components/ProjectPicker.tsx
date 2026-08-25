@@ -159,7 +159,7 @@ export function ProjectPicker() {
             <span className="text-tcip-fg font-medium">No projects yet</span>
             <span>
               Ask the agent to structure your images into a project; it creates one with{" "}
-              <span className="font-mono">ingest_images</span>.
+              <span className="font-mono">ingest_images</span>, given a site.
             </span>
           </div>
         )}
@@ -193,6 +193,17 @@ export function ProjectPicker() {
                       <span className="tcip-badge bg-tcip-accent/20 text-tcip-accent">active</span>
                     )}
                   </div>
+                  {p.site ? (
+                    <span className="text-[11px] text-tcip-muted truncate" title={p.site}>
+                      {p.site}
+                    </span>
+                  ) : (
+                    p.site_problem && (
+                      <span className="text-[11px] text-tcip-fp truncate" title={p.site_problem}>
+                        {p.site_problem}
+                      </span>
+                    )
+                  )}
                   {/* Signature: the project's captures across the season, each date labelled. */}
                   <SeasonRail dates={p.dates} showLabels active={date || null} className="my-0.5" />
                   <div className="text-[11px] text-tcip-muted flex flex-wrap gap-x-3 gap-y-0.5">

@@ -113,6 +113,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 3 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 0 | 23 |
+| packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 1 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 1 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 16 | 15 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
@@ -625,12 +626,12 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_dataset` | `project_tools.py:94` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
-| `init_project` | `project_tools.py:184` | yes | Initialise a TCIP project directory. |
-| `set_active_project` | `project_tools.py:208` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:288` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:335` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:447` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:573` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `init_project` | `project_tools.py:192` | yes | Initialise a TCIP project directory. |
+| `set_active_project` | `project_tools.py:224` | yes | Set the workspace's active project so the GUI opens it. |
+| `view_gui_state` | `project_tools.py:304` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:351` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:472` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:598` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### training_tools.py (8 tools)
 
@@ -779,8 +780,8 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `list_projects` | `routes/projects.py:76` |
-| POST | `/active` | `set_active_project` | `routes/projects.py:104` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| GET | `` (root) | `list_projects` | `routes/projects.py:83` |
+| POST | `/active` | `set_active_project` | `routes/projects.py:111` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
 ### routes/results.py, prefix `/api/results` (14 routes)
 
@@ -1506,9 +1507,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:202`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:203`.
 
-Readers: `read_active_project`, `workspace.py:155`; `resolve_project_path`, `workspace.py:194`.
+Readers: `read_active_project`, `workspace.py:156`; `resolve_project_path`, `workspace.py:195`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -1534,6 +1535,23 @@ for this section); `pipelines/region_completeness.py`'s own digest-writing logic
 `pipelines/postprocessing/`, `pipelines/feedback/`, or `pipelines/data/splits.py`'s own output
 tree beyond the `image_status.json` carry-over covered in format 5. No seam id covers this
 placeholder entry since it names no single format.
+
+## 25. `.tcip/project.json`, per-project record (site)
+
+Path: `<project_path>/.tcip/project.json`, addressed by `project_record_key`,
+`packages/tcip-mcp/src/tcip_mcp/project_record.py:68`, on the store `PROJECT_RECORD_STORE`,
+`project_record.py:37`; `project_record_path`, `project_record.py:78`, is the same address as a
+path for a caller that needs one.
+
+Writer: `record_site`, `project_record.py:178`, a create-only write: an absent record is written,
+a present record with the same site is left as is, and a present record with a different or
+unreadable site raises. The one deliberate overwrite is `scripts/conform_project_site.py
+--replace`.
+
+Readers: `read_record`, `project_record.py:130`; `site_fields`, `project_record.py:233`, is the
+one reader every surface (the picker, `inspect_project`, the doctor) calls, and never raises.
+
+No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: the record is new.
 
 ## Formats with a general path-resolution seam but no per-format seam entry above
 
@@ -1637,7 +1655,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:97` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:304` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:320` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->

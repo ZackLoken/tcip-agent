@@ -36,6 +36,7 @@ from tcip_mcp import (
     experiments,
     model_registry,
     operationalization,
+    project_record,
     project_status,
     traits,
     web_client,
@@ -1446,6 +1447,8 @@ REGISTERED = {
     "project_status": Registered(
         {"last_activity": "2026-03-04T12:00:00+00:00", "reports_since_last_retrospective": 2},
         lambda root: project_status.project_status_key(root), ".tcip/state/project_status.json"),
+    "project_record": Registered(
+        {"site": "north orchard"}, project_record.project_record_key, ".tcip/project.json"),
     "friction_reports": Registered(
         {"timestamp": "2026-03-04T12:00:00+00:00", "category": "missing_tool", "detail": "ü",
          "context": {}, "user_disagreement": False},

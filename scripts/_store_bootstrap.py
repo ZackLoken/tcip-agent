@@ -25,6 +25,7 @@ from tcip_mcp import (  # noqa: F401
     experiments,
     model_registry,
     operationalization,
+    project_record,
     project_status,
     traits,
     web_client,

@@ -38,6 +38,8 @@ function summary(name: string): ProjectSummary {
     models_by_date: { "2026-01-01": [] },
     image_count: 1,
     is_active: false,
+    site: "north orchard",
+    site_problem: null,
   };
 }
 

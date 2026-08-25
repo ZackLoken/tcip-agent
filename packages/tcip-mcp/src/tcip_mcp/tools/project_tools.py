@@ -161,37 +161,50 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     return {"dataset_root": str(root), **identity}
 
 
-def _scaffold_project(project_path: str) -> dict:
-    """Create ``.tcip/`` with its artifacts and models directories.
+def _scaffold_project(project_path: str, site: str) -> dict:
+    """Create ``.tcip/`` with its artifacts and models directories, and record the project's site.
 
     The internals of :func:`init_project`, factored out so other tools that
     stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
-    instead of re-implementing it. Idempotent: re-running only re-mkdirs.
+    instead of re-implementing it. The directories are idempotent: re-running only re-mkdirs.
+    The site is written last, by :func:`tcip_mcp.project_record.record_site`, a create-only
+    write: an absent record is written, a present record with the same site is left as is, and
+    a present record with a different or unreadable site raises (``ValueError`` or
+    ``StoreError``, per :func:`~tcip_mcp.project_record.record_site`'s own contract).
     """
+    from tcip_mcp.project_record import record_site
+
     tcip = _project_dir(project_path)
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
+    recorded = record_site(project_path, site)
 
     return {
         "project_path": project_path,
         "tcip_dir": str(tcip),
         "created": [".tcip/", ".tcip/artifacts/", ".tcip/models/"],
+        "site": recorded["site"],
     }
 
 
 @mcp.tool()
 @audited
-def init_project(project_path: str) -> dict:
+def init_project(project_path: str, site: str) -> dict:
     """Initialise a TCIP project directory.
 
-    Creates ``.tcip/`` with its artifacts and models directories. When ``project_path`` is
-    directly under the workspace, its basename must fit ``crop_subject_phenotype``
-    (``workspace.format_project_name``/``parse_project_name``); a path outside the
-    workspace is not a workspace project and is not held to the scheme.
+    Creates ``.tcip/`` with its artifacts and models directories and records the project's
+    site. When ``project_path`` is directly under the workspace, its basename must fit
+    ``crop_subject_phenotype`` (``workspace.format_project_name``/``parse_project_name``);
+    a path outside the workspace is not a workspace project and is not held to the scheme.
 
     Args:
         project_path: Root directory of the project.
+        site: The orchard or station this project's plants stand in, in the breeder's own
+            words. Ask the breeder rather than guessing it from a path or filename; a project
+            that already records a different site refuses rather than overwriting it.
     """
+    from tcip_store import StoreError
+
     from tcip_mcp import workspace
 
     p = Path(project_path).expanduser().resolve()
@@ -200,7 +213,10 @@ def init_project(project_path: str) -> dict:
             workspace.parse_project_name(p.name)
         except ValueError as exc:
             return {"error": str(exc)}
-    return _scaffold_project(project_path)
+    try:
+        return _scaffold_project(project_path, site)
+    except (ValueError, StoreError) as exc:
+        return {"error": str(exc)}
 
 
 @mcp.tool()
@@ -340,6 +356,11 @@ def inspect_project(project_path: str = "") -> dict:
     marker: adoption repins only the adopting process, so the GUI and this process can end
     up naming different projects until both explicitly adopt.
 
+    For a project with ``.tcip``, carries ``site`` and ``site_problem`` from
+    ``tcip_mcp.project_record.site_fields``: exactly one is set, and ``site_problem`` names why
+    there is no site (no record yet, a damaged one, or a root the store refuses to read). A path
+    with no ``.tcip`` carries neither, the same as it carries no other live-computed field.
+
     Args:
         project_path: Root directory of the project. Empty defaults to the active project.
     """
@@ -353,6 +374,10 @@ def inspect_project(project_path: str = "") -> dict:
         status["platform_root_diverges_from_marker"] = divergence
     if not tcip.is_dir():
         return status
+
+    from tcip_mcp.project_record import site_fields
+
+    status.update(site_fields(project_path))
 
     # Models
     models_dir = tcip / "models"

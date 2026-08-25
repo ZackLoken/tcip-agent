@@ -404,7 +404,7 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
     from tcip_mcp.tools.ingest_tools import ingest_images
 
     manifest = ingest_images(
-        source=str(REAL_DJI_DIR), name="ms_valley_farm",
+        source=str(REAL_DJI_DIR), name="ms_valley_farm", site="north orchard",
         date_from="2023-05-23", detect_band_groups=True,
     )
     assert "error" not in manifest
@@ -430,7 +430,7 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
     src.mkdir()
     Image.new("RGB", (16, 16)).save(src / "a.jpg")
 
-    manifest = ingest_images(source=str(src), name="plain_proj_default")
+    manifest = ingest_images(source=str(src), name="plain_proj_default", site="north orchard")
     assert manifest["band_groups"] == {"formed": [], "refused": [], "manifests": []}
 
 

@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_mcp import dataset_layout, workspace
+from tcip_mcp.project_record import site_fields
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -41,6 +42,9 @@ class ProjectSummary(BaseModel):
     models_by_date: dict[str, list[str]]
     image_count: int
     is_active: bool
+    # Exactly one is set (site_fields never raises), so a recordless or damaged project still lists.
+    site: str | None
+    site_problem: str | None
 
 
 class ActiveProject(BaseModel):
@@ -57,6 +61,7 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
             1 for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in _IMAGE_EXTS
         )
     dates = dataset_layout.list_dates(project_dir)
+    site = site_fields(project_dir)
     return ProjectSummary(
         name=project_dir.name,
         path=str(project_dir),
@@ -69,6 +74,8 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
         models_by_date={d: dataset_layout.models_with_predictions(project_dir, d) for d in dates},
         image_count=image_count,
         is_active=project_dir.name == active_name,
+        site=site["site"],
+        site_problem=site["site_problem"],
     )
 
 
