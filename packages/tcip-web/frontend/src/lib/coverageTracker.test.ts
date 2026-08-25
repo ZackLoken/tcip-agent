@@ -203,8 +203,7 @@ describe("CoverageTracker posting", () => {
     expect(body.cells_swept).toEqual(["A1"]);
     expect(body.cells_served_at_native).toEqual(["B1"]);
     // The symbology travels with the cells, or the record cannot say what rendering was seen.
-    // postNow always sets viewing; the payload type leaves it optional for other callers.
-    const viewing = body.viewing!;
+    const viewing = body.viewing;
     expect(viewing.bands).toBe("3,2,1");
     expect(viewing.stretch).toBe("percent_clip");
     expect(viewing.stats_source).toEqual({

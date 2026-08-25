@@ -124,6 +124,22 @@ afterEach(() => {
   loader.pending.length = 0;
 });
 
+describe("CanvasStage base image load failure", () => {
+  it("names the header that failed to parse, rather than the generic missing-image message", async () => {
+    render(<CanvasStage imageUrl={BASE_URL} imgWidth={1000} imgHeight={800} />);
+    await resolveLoad(
+      BASE_URL,
+      makeLoaded({
+        ok: false,
+        image: null,
+        headerParseError: "X-TCIP-Stats-Source did not parse: garbage",
+      }),
+    );
+    expect(screen.getByText(/X-TCIP-Stats-Source did not parse: garbage/)).toBeInTheDocument();
+    expect(screen.queryByText(/it may be missing/)).not.toBeInTheDocument();
+  });
+});
+
 describe("CanvasStage regions", () => {
   it("renders a region at its image-coord rect once its serve loads, and reports the facts", async () => {
     const onLoaded = vi.fn();

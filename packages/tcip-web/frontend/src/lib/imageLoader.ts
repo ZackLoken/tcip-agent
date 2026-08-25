@@ -5,7 +5,7 @@
  * created here is revoked once its bitmap decodes or the load is abandoned.
  */
 
-import type { StatsSource } from "@/api/types.generated";
+import type { CoverageViewing, StatsSource } from "@/api/types.generated";
 
 export interface ImageServeFacts {
   /** Output size of the serve, parsed from X-TCIP-Served-Size ("WxH"). */
@@ -15,8 +15,9 @@ export interface ImageServeFacts {
   /** Where the display-stretch statistics came from, parsed from X-TCIP-Stats-Source. */
   statsSource: StatsSource | null;
   /** The display-bound stretch range the serve was rendered with, parsed from
-   *  X-TCIP-Display-Bounds: one pair per displayed band, positional against `bands`. */
-  displayBounds: [number, number][] | null;
+   *  X-TCIP-Display-Bounds: one pair per displayed band, positional against `bands`. A `null`
+   *  half of a pair is a band whose pixels left the stretch no finite value to report. */
+  displayBounds: CoverageViewing["display_bounds"];
   /** The condition the server named when it refused the request (X-TCIP-Image-Error). */
   imageError: string | null;
 }
@@ -61,10 +62,10 @@ function readFacts(headers: Headers): FactsResult {
   }
 
   const displayBoundsRaw = headers.get("X-TCIP-Display-Bounds");
-  let displayBounds: [number, number][] | null = null;
+  let displayBounds: CoverageViewing["display_bounds"] = null;
   if (displayBoundsRaw !== null) {
     try {
-      displayBounds = JSON.parse(displayBoundsRaw) as [number, number][];
+      displayBounds = JSON.parse(displayBoundsRaw) as CoverageViewing["display_bounds"];
     } catch {
       return { ok: false, error: `X-TCIP-Display-Bounds did not parse: ${displayBoundsRaw}` };
     }

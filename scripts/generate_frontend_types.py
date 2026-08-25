@@ -72,6 +72,10 @@ def _ts_type(schema: dict, where: str) -> str:
         return " | ".join(parts)
     if "enum" in schema:
         return " | ".join(json.dumps(v) for v in schema["enum"])
+    if "const" in schema:
+        # A one-member Literal renders as ``const``, not ``enum``; refuse it by name here rather
+        # than fall through to the bare ``type`` below, which would drop the literal value.
+        raise SystemExit(f"generate_frontend_types.py cannot map the schema for {where}: {schema}")
     kind = schema.get("type")
     if kind == "null":
         return "null"
@@ -82,7 +86,13 @@ def _ts_type(schema: dict, where: str) -> str:
             items = ", ".join(_ts_type(s, where) for s in schema["prefixItems"])
             return f"[{items}]"
         if "items" in schema:
-            return f"{_ts_type(schema['items'], where)}[]"
+            item_schema = schema["items"]
+            item_type = _ts_type(item_schema, where)
+            # A top-level union (anyOf, or an enum of more than one member) renders bare, with no
+            # brackets of its own; parenthesize it so an array of it reads as ``(A | B)[]``.
+            if "anyOf" in item_schema or len(item_schema.get("enum", [])) > 1:
+                item_type = f"({item_type})"
+            return f"{item_type}[]"
     raise SystemExit(f"generate_frontend_types.py cannot map the schema for {where}: {schema}")
 
 

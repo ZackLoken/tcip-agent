@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -25,7 +25,9 @@ if TYPE_CHECKING:
 DISPLAY_CLIP_PERCENTILES = (2.0, 98.0)
 
 # The stretches :func:`stretch_band` implements and a caller may ask for; it refuses anything else.
-STRETCH_MODES = ("minmax", "percent_clip", "none")
+# The one declaration of this vocabulary: a type annotation elsewhere uses StretchMode itself.
+StretchMode = Literal["minmax", "percent_clip", "none"]
+STRETCH_MODES = get_args(StretchMode)
 
 
 @dataclass(frozen=True)

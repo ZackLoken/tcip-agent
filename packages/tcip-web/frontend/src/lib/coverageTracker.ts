@@ -127,8 +127,8 @@ export class CoverageTracker {
   /** Adopt a stored record's cell facts, only when its grid matches the current one. */
   hydrate(record: CoverageRecord | null): void {
     if (!record || !this.grid || !record.grid || !sameGrid(record.grid, this.grid)) return;
-    for (const name of record.cells_served_at_native ?? []) this.servedAtNativeSet.add(name);
-    for (const name of record.cells_swept ?? []) this.sweptSet.add(name);
+    for (const name of record.cells_served_at_native) this.servedAtNativeSet.add(name);
+    for (const name of record.cells_swept) this.sweptSet.add(name);
     this.opts.onChange?.();
   }
 

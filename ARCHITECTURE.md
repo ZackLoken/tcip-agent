@@ -727,9 +727,9 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `/grid` | `get_grid` | `routes/coverage.py:92` |
 | GET | `` (root) | `get_coverage` | `routes/coverage.py:143` |
-| POST | `` (root) | `post_coverage` | `routes/coverage.py:187` |
-| GET | `/completeness` | `get_completeness` | `routes/coverage.py:277` |
-| POST | `/completeness` | `post_completeness` | `routes/coverage.py:318` |
+| POST | `` (root) | `post_coverage` | `routes/coverage.py:189` |
+| GET | `/completeness` | `get_completeness` | `routes/coverage.py:279` |
+| POST | `/completeness` | `post_completeness` | `routes/coverage.py:320` |
 
 ### routes/dataset.py, prefix `/api/dataset` (5 routes)
 
@@ -751,11 +751,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `serve_image` | `routes/images.py:475` |
-| GET | `/dimensions` | `get_dimensions` | `routes/images.py:674` |
-| GET | `/bands` | `get_bands` | `routes/images.py:694` |
-| POST | `/overviews` | `build_image_overviews` | `routes/images.py:827` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:851` |
+| GET | `` (root) | `serve_image` | `routes/images.py:484` |
+| GET | `/dimensions` | `get_dimensions` | `routes/images.py:685` |
+| GET | `/bands` | `get_bands` | `routes/images.py:705` |
+| POST | `/overviews` | `build_image_overviews` | `routes/images.py:838` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:862` |
 
 ### routes/inference.py, prefix `/api/inference` (5 HTTP + 1 WS)
 
@@ -1161,9 +1161,12 @@ models; `scripts/generate_frontend_types.py` renders `frontend/src/api/types.gen
 them, held current by `tests/test_generated_frontend_types.py`; the browser imports the generated
 types (`lib/coverageTracker.ts`) rather than hand-declaring its own. `tests/test_coverage_routes.py`'s
 `test_post_from_a_plain_rgb_view_round_trips` and `test_post_from_a_composite_view_round_trips`
-round-trip through the real `TestClient` route, posting the exact shape the browser sends for each
-view: the earlier gap (a literal dict standing in for what the frontend's `api.coverage.post` sends,
-with the frontend's own tracker test exercising only a mocked `post`) is closed.
+round-trip through the real `TestClient` route, proving the server accepts and stores the shape the
+browser is meant to send. The narrower gap stays open: each body is a Python dict transcribed by
+hand (`tests/test_coverage_routes.py:361-420`) rather than the value `coverageTracker.postNow`
+itself produces, and the two suites (this one and `coverageTracker.test.ts`, which exercises
+`postNow` only against a mocked `post`) run independently, so a drift between what the tracker
+actually builds and what this test believes it builds would not be caught by either.
 
 ## 8. `region_completeness.json` and `region_completeness_digest.json`
 
@@ -1721,7 +1724,7 @@ Phase 3 verdict: single.
 ## S24. view_coverage.json advisory coverage record
 
 Must agree: backend store shape and the browser's coverage payload match, keyed by status_bucket.
-Side A: `packages/tcip-web/src/tcip_web/routes/_coverage_models.py:26` (`class GridGeometry`) through `:101` (`class CoverageRecord`), the one declaration `routes/coverage.py`'s `post_coverage`/`get_coverage` validate against.
+Side A: `packages/tcip-web/src/tcip_web/routes/_coverage_models.py:19` (`class GridGeometry`) through `:101` (`class CoverageRecord`), the one declaration `routes/coverage.py`'s `post_coverage`/`get_coverage` validate against.
 Side B: `scripts/generate_frontend_types.py`, rendering `packages/tcip-web/frontend/src/api/types.generated.ts` from Side A; the browser imports the generated types (`lib/coverageTracker.ts`) rather than hand-declaring its own, held current by `tests/test_generated_frontend_types.py` and round-tripped through the real route by `tests/test_coverage_routes.py`'s `test_post_from_a_plain_rgb_view_round_trips`/`test_post_from_a_composite_view_round_trips`.
 Phase 3 verdict: single.
 
@@ -1919,8 +1922,8 @@ Phase 3 verdict: duplicated.
 ## S52. Image-serve response headers  <!-- queued: P5-301 unify -->
 
 Must agree: header names and value encodings match.
-Side A: `packages/tcip-web/src/tcip_web/routes/images.py:652` (`extra = {"X-TCIP-Stats-Source": stats_source, "X-TCIP-Served-Size": f"{out_w}x{out_h}"}`).
-Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:36` (`servedSize: parseServedSize(headers.get("X-TCIP-Served-Size")),`).
+Side A: `packages/tcip-web/src/tcip_web/routes/images.py:663` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
+Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:54` (`const statsSourceRaw = headers.get("X-TCIP-Stats-Source");`).
 Phase 3 verdict: duplicated.
 
 ## S53. Optimistic-concurrency token for label saves

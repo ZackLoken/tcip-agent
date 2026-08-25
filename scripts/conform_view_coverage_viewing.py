@@ -44,6 +44,8 @@ from tcip_mcp.dataset_layout import view_coverage_key  # noqa: E402
 from tcip_store.binding import bind_default  # noqa: E402
 from tcip_web.routes._coverage_models import CoverageViewing  # noqa: E402
 
+_VIEWING_KEYS = frozenset(
+    {"bands", "stretch", "base_served_size", "working_scale_bar", "stats_source", "display_bounds"})
 _STATS_SOURCE_LITERALS = ("none", "dtype_full_scale", "served_array")
 _OVERVIEW_RE = re.compile(r"^overview\(scale=([^)]+)\)$")
 _SAMPLED_RE = re.compile(r"^sampled\(seed=(-?\d+), pixel_fraction=([^)]+)\)$")
@@ -96,8 +98,12 @@ def _reshaped_viewing(viewing: dict) -> dict:
     ``bands``, ``stretch``, ``base_served_size`` and ``working_scale_bar`` already carry the
     current shape wherever the route ever wrote them, so they pass through unchanged (``None``
     where the key was never present); only ``stats_source`` and ``display_bounds`` held a
-    different shape before this change.
+    different shape before this change. Raises ``ValueError`` naming any key outside the six
+    declared ones rather than silently dropping it: a stray key never reaches ``.get()``.
     """
+    unknown = sorted(set(viewing) - _VIEWING_KEYS)
+    if unknown:
+        raise ValueError(f"viewing carries keys the current shape does not declare: {unknown}")
     return {
         "bands": viewing.get("bands"),
         "stretch": viewing.get("stretch"),

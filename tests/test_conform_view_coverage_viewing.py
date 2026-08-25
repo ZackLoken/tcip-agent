@@ -186,6 +186,27 @@ def test_a_record_already_in_the_current_shape_is_reported_unchanged(tmp_path: P
     assert ts.read(view_coverage_key(tmp_path))["bush/2026-03-01"]["plot.tif"] == record
 
 
+def test_a_viewing_carrying_an_unknown_key_refuses_by_image_name_naming_the_key(tmp_path: Path):
+    _bind_sqlite()
+    module = _load_script()
+    good = _old_shape_record()
+    bad = _old_shape_record(rogue_key="anything")
+    _seed_fresh(tmp_path, "bush/2026-03-01", "good.tif", good)
+    _seed(tmp_path, "bush/2026-03-01", "bad.tif", bad)
+
+    outcomes, refused = module.conform_root(tmp_path, plan=False)
+
+    assert refused is True
+    assert any(
+        o == "bush/2026-03-01/bad.tif: refused, viewing carries keys the current shape does "
+             "not declare: ['rogue_key']"
+        for o in outcomes
+    )
+    stored = ts.read(view_coverage_key(tmp_path))
+    assert stored["bush/2026-03-01"]["good.tif"] == good
+    assert stored["bush/2026-03-01"]["bad.tif"] == bad
+
+
 def test_an_unparseable_viewing_refuses_and_leaves_the_dataset_untouched(tmp_path: Path):
     _bind_sqlite()
     module = _load_script()

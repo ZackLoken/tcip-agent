@@ -69,6 +69,7 @@ export function CanvasStage(props: CanvasStageProps) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [imgError, setImgError] = useState(false);
   const [baseError, setBaseError] = useState<string | null>(null);
+  const [baseHeaderParseError, setBaseHeaderParseError] = useState<string | null>(null);
   const onBaseFactsRef = useRef(props.onBaseFacts);
   onBaseFactsRef.current = props.onBaseFacts;
   // A load the server refused for want of overviews is a wait, not a failure: the build runs and
@@ -96,6 +97,7 @@ export function CanvasStage(props: CanvasStageProps) {
       setImg(null);
       setImgError(false);
       setBaseError(null);
+      setBaseHeaderParseError(null);
       onBaseFactsRef.current?.(null);
       return;
     }
@@ -104,6 +106,7 @@ export function CanvasStage(props: CanvasStageProps) {
     setImg(null);
     setImgError(false);
     setBaseError(null);
+    setBaseHeaderParseError(null);
     onBaseFactsRef.current?.(null);
     const ac = new AbortController();
     void loadImage(props.imageUrl, { signal: ac.signal }).then((res) => {
@@ -113,6 +116,7 @@ export function CanvasStage(props: CanvasStageProps) {
       // empty canvas, otherwise overlays float on a blank stage with no explanation.
       setImgError(!res.ok);
       setBaseError(res.imageError);
+      setBaseHeaderParseError(res.headerParseError);
       onBaseFactsRef.current?.(res);
     });
     return () => ac.abort(); // cancel the abandoned download; rapid flips otherwise queue every skip
@@ -504,6 +508,8 @@ export function CanvasStage(props: CanvasStageProps) {
           <div className="max-w-sm rounded-md border border-tcip-fp/50 bg-tcip-panel/95 px-4 py-3 text-center text-[12px] text-tcip-fp">
             {overview.error ? (
               <>Could not prepare this image for display: {overview.error}</>
+            ) : baseHeaderParseError ? (
+              <>Could not load this image: {baseHeaderParseError}</>
             ) : (
               <>
                 Could not load this image: it may be missing, or its path is outside the location(s)

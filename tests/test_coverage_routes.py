@@ -436,6 +436,29 @@ class TestCoverageRecord:
         resp = client.post("/api/coverage", json=body)
         assert resp.status_code == 422
 
+    def test_a_top_level_undeclared_key_is_refused(self, client, dated_dataset):
+        """``CoveragePayload`` forbids extra keys the same way its nested ``viewing`` does,
+        rather than dropping a top-level key the client sent and no one intended silently
+        discarded."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = _post_body(path, ["A1"], grid)
+        body["mystery_top_level_key"] = "oops"
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 422
+
+    def test_viewing_must_be_explicit(self, client, dated_dataset):
+        """``viewing`` carries no default, the same way ``date`` does not: an omitted key is the
+        model's own required-field refusal, so a post can never silently record a viewing context
+        no browser ever chose."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = _post_body(path, ["A1"], grid)
+        del body["viewing"]
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 422
+        assert any("viewing" in str(err.get("loc")) for err in resp.json()["detail"])
+
     def _seed_old_shape_record(self, root, bucket: str, image_name: str, grid: dict) -> None:
         import tcip_store as ts
         from tcip_mcp.dataset_layout import view_coverage_key

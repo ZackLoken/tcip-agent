@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 import tcip_store
 
@@ -147,7 +147,8 @@ def get_coverage(
     dataset_root: str | None = Query(None),
 ) -> dict:
     """The stored coverage record for one image under one subject/date bucket, or
-    ``{"coverage": null}`` when nothing has been recorded."""
+    ``{"coverage": null}`` when nothing has been recorded. A record stored in an old shape refuses
+    (400), naming ``scripts/conform_view_coverage_viewing.py`` rather than serving it as-is."""
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
 
     _require_subject(subject)
@@ -167,9 +168,12 @@ class CoveragePayload(BaseModel):
     """One coverage post from the browser: the session's accumulated served-at-native and
     swept cell lists (either may be empty; the server union-merges, so resending is
     harmless), with the grid they were accumulated against and the viewing context they
-    were served under. ``date`` carries no default: a non-dated dataset must still pass
-    ``null`` explicitly, so an image under a date bucket can never silently land in the
-    dateless one."""
+    were served under. ``date`` and ``viewing`` carry no default: a non-dated dataset must
+    still pass ``date: null`` explicitly, so an image under a date bucket can never silently
+    land in the dateless one, and every post states the viewing context it was served under
+    rather than the model quietly filling in one no browser ever chose."""
+
+    model_config = ConfigDict(extra="forbid")
 
     image_path: str
     subject: Optional[str] = None
@@ -178,9 +182,7 @@ class CoveragePayload(BaseModel):
     grid: GridGeometry
     cells_served_at_native: list[str] = []
     cells_swept: list[str] = []
-    viewing: CoverageViewing = CoverageViewing(
-        stats_source=None, display_bounds=None, base_served_size=None, working_scale_bar=None,
-    )
+    viewing: CoverageViewing
 
 
 @router.post("")
