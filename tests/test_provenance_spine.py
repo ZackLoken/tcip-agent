@@ -71,7 +71,8 @@ def test_resolve_model_identity_from_registry(tmp_path):
     ckpt = tmp_path / "best.pt"
     ckpt.write_bytes(b"weights")
     ModelRegistry(str(tmp_path)).register_model(
-        "m1", str(ckpt), {"model_source": {"builder": "x:y"}}, tags=["experiment:expR"])
+        "m1", str(ckpt), {"model_source": {"builder": "x:y"}}, tags=["experiment:expR"],
+        metrics_source=None)
 
     ident = resolve_model_identity(ckpt, project_path=str(tmp_path))
     assert ident["sha256"] and len(ident["sha256"]) == 64

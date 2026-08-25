@@ -36,7 +36,7 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         ckpt = run_dir / "model_best.pt"
         ckpt.write_bytes(content)
         reg.register_model(name, str(ckpt), {"data": {"subject": "catkin"}},
-                           metrics={"val_map50": 0.42})
+                           metrics={"val_map50": 0.42}, metrics_source="caller")
 
     models_dir = root / ".tcip" / "models"
     assert ts.exists(registry_index_key(root))
@@ -68,11 +68,11 @@ def test_registering_a_name_again_supersedes_its_earlier_entry(tmp_path: Path) -
     companion.write_bytes(b"a separate run")
 
     reg.register_model("hazelnut_catkin_detector_v1", str(ckpt_v1), {},
-                       metrics={"val_map50": 0.61})
+                       metrics={"val_map50": 0.61}, metrics_source="caller")
     reg.register_model("chestnut_leaf_area_seg_v2", str(companion), {},
-                       metrics={"val_map50": 0.55})
+                       metrics={"val_map50": 0.55}, metrics_source="caller")
     reg.register_model("hazelnut_catkin_detector_v1", str(ckpt_v2), {},
-                       metrics={"val_map50": 0.74})
+                       metrics={"val_map50": 0.74}, metrics_source="caller")
 
     inventory = ModelRegistry(str(root)).list_models()
     assert len(inventory) == 2

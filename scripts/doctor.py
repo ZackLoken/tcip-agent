@@ -122,6 +122,10 @@ def check_registry(root: Path, findings: list) -> None:
         return
     for m in entries if isinstance(entries, list) else []:
         ckpt = m.get("checkpoint_path", "")
+        if "metrics_source" not in m:
+            findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
+                            "metrics_source (predates the field); conform it with "
+                            "scripts/conform_registry_metrics_source.py"))
         if "pytest-of-" in ckpt or "\\Temp\\" in ckpt or "/Temp/" in ckpt:
             findings.append(("error", f"registry entry {m.get('name')!r} points at a test/temp "
                             f"checkpoint: {ckpt}"))

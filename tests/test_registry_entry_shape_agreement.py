@@ -57,6 +57,7 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
         reg.register_model(
             name, str(ckpt), {"data": {"subject": "catkin"}},
             metrics={"val_map50": 0.5 + 0.1 * i}, tags=["detector", f"experiment:run{i}"],
+            metrics_source="caller",
         )
     return root, reg
 
@@ -105,13 +106,13 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(tmp_path
     other = tmp_path / "other_run.pt"
     other.write_bytes(b"a different run entirely")
     reg.register_model("chestnut_leaf_area_seg_v2", str(other), {},
-                       tags=["segmenter", "experiment:leaf_run"])
+                       tags=["segmenter", "experiment:leaf_run"], metrics_source=None)
 
     content = b"the checkpoint that produced the phenotype"
     trained = tmp_path / "model_best.pt"
     trained.write_bytes(content)
     reg.register_model("hazelnut_catkin_detector_v1", str(trained), {},
-                       tags=["detector", "experiment:catkin_run3"])
+                       tags=["detector", "experiment:catkin_run3"], metrics_source=None)
 
     delivered = tmp_path / "delivery" / "model_copy.pt"
     delivered.parent.mkdir()
@@ -144,7 +145,7 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     reg = ModelRegistry(str(root))
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"weights-a")
-    reg.register_model("hazelnut_catkin_detector_v1", str(ckpt), {})
+    reg.register_model("hazelnut_catkin_detector_v1", str(ckpt), {}, metrics_source=None)
 
     index = root / ".tcip" / "models" / "registry.json"
     index.write_text(index.read_text(encoding="utf-8")[:-8], encoding="utf-8")
@@ -197,7 +198,7 @@ def test_every_field_the_browser_reads_off_an_entry_is_one_the_registry_writes(
     ckpt.write_bytes(b"weights-a")
     entry = ModelRegistry(str(root)).register_model(
         "hazelnut_catkin_detector_v1", str(ckpt), {"data": {"subject": "catkin"}},
-        metrics={"val_map50": 0.5}, tags=["detector"],
+        metrics={"val_map50": 0.5}, tags=["detector"], metrics_source="caller",
     )
 
     declared = _declared_entry_fields()

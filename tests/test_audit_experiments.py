@@ -415,9 +415,9 @@ class TestModelRegistryReplaceAudit:
         audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
-        reg.register_model("exp1", self._ckpt("a.pt", b"first"), {})
+        reg.register_model("exp1", self._ckpt("a.pt", b"first"), {}, metrics_source=None)
         first_sha = reg.get_model("exp1")["sha256"]
-        reg.register_model("exp1", self._ckpt("b.pt", b"second, different"), {})
+        reg.register_model("exp1", self._ckpt("b.pt", b"second, different"), {}, metrics_source=None)
         second_sha = reg.get_model("exp1")["sha256"]
         assert first_sha != second_sha
 
@@ -439,8 +439,8 @@ class TestModelRegistryReplaceAudit:
 
         reg = ModelRegistry(str(self.tmpdir))
         ckpt = self._ckpt("a.pt", b"same bytes")
-        reg.register_model("exp1", ckpt, {})
-        reg.register_model("exp1", ckpt, {})  # idempotent re-registration, same content
+        reg.register_model("exp1", ckpt, {}, metrics_source=None)
+        reg.register_model("exp1", ckpt, {}, metrics_source=None)  # idempotent re-registration, same content
 
         lines = self.audit_path.read_text().strip().splitlines() if self.audit_path.exists() else []
         events = [json.loads(line) for line in lines]
@@ -456,7 +456,7 @@ class TestModelRegistryReplaceAudit:
         audit_mod.AUDIT_ROOT = self.tmpdir
 
         reg = ModelRegistry(str(self.tmpdir))
-        reg.register_model("brand_new", self._ckpt("a.pt", b"content"), {})
+        reg.register_model("brand_new", self._ckpt("a.pt", b"content"), {}, metrics_source=None)
 
         lines = self.audit_path.read_text().strip().splitlines() if self.audit_path.exists() else []
         events = [json.loads(line) for line in lines]

@@ -958,38 +958,52 @@ def register_model_from_experiment(
 
     Pulls the experiment's config and the checkpoint's own metrics, the epoch that produced
     this checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training
-    epoch, falling back to the experiment's final ``metrics.jsonl`` row if the checkpoint
-    carries none. Registers with an ``experiment:<id>`` back-reference tag and records it in
-    the experiment's lineage (``model_weights``). Metrics are read, never fabricated.
+    epoch. Registers with an ``experiment:<id>`` back-reference tag and records it in the
+    experiment's lineage (``model_weights``). Metrics are read, never fabricated: a checkpoint
+    that carries no metrics dict, or that will not load at all, registers with an empty
+    ``metrics`` and a ``metrics_source`` of ``None`` rather than substituting a different
+    epoch's numbers (the run's own metrics log describes a different model state than the
+    checkpoint being registered).
+
+    ``metrics_source`` records which path produced the numbers, not that anyone verified them:
+    ``"trainer"`` when the run's config carries no ``training_source`` (the platform's own
+    ``default_train`` computed them), ``"training_source"`` when it does (a bespoke loop's own
+    saved state), and ``None`` when the checkpoint carries no metrics.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
     config = read_member(config_key(experiment_id), {})
 
-    # Prefer metrics stored IN the checkpoint (they describe the epoch it was saved at, so a
-    # best-checkpoint isn't mislabelled with a later, worse epoch's numbers). Fall back to the
-    # experiment's last metrics.jsonl row only if the checkpoint carries none.
+    # Metrics stored IN the checkpoint describe the epoch it was saved at, so a best-checkpoint
+    # is never mislabelled with a later, worse epoch's numbers.
     final_metrics: dict[str, Any] = {}
     kind: str | None = None
     ckpt = Path(checkpoint_path)
     if ckpt.is_file():
+        payload = None
         try:
             import torch  # local checkpoint the caller is registering deliberately
 
             payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-            if isinstance(payload, dict):
-                kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
-                if isinstance(payload.get("metrics"), dict):
-                    final_metrics = dict(payload["metrics"])
-                    if payload.get("epoch") is not None:
-                        final_metrics.setdefault("epoch", payload["epoch"])
-        except Exception:
-            final_metrics = {}
-    if not final_metrics:
-        rows = read_metrics(experiment_id)
-        if rows:
-            final_metrics = rows[-1]
+        except Exception as exc:
+            logger.warning(
+                "checkpoint %s would not load (%s); registering experiment %s with no metrics "
+                "rather than substituting a different epoch's numbers.", ckpt, exc, experiment_id,
+            )
+        if isinstance(payload, dict):
+            kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
+            stamped = payload.get("metrics")
+            if isinstance(stamped, dict) and stamped:
+                final_metrics = dict(stamped)
+                if payload.get("epoch") is not None:
+                    final_metrics.setdefault("epoch", payload["epoch"])
+
+    metrics_source: str | None = None
+    if final_metrics:
+        from tcip_mcp.pipelines.model_build import TRAINING_SOURCE_KEY
+
+        metrics_source = "training_source" if config.get(TRAINING_SOURCE_KEY) else "trainer"
 
     from tcip_mcp.model_registry import ModelRegistry
 
@@ -999,6 +1013,7 @@ def register_model_from_experiment(
     entry = ModelRegistry(registry_root).register_model(
         name or experiment_id, checkpoint_path, config,
         metrics=final_metrics, tags=[f"experiment:{experiment_id}"], kind=kind,
+        metrics_source=metrics_source,
     )
     update_lineage(experiment_id, model_weights=checkpoint_path)
     return {

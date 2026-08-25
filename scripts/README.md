@@ -24,6 +24,11 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `check_dataset_identity.py` - recomputes a dataset's on-disk fingerprint and compares it
   against the fingerprint recorded in `dataset.json` and the project's `.tcip/datasets.json`,
   to catch data that changed or moved since it was registered.
+- `conform_registry_metrics_source.py` - conforms a project's registry entries to carry
+  `metrics_source` (which path produced an entry's metrics: `trainer`/`training_source`/`caller`/
+  `null`), for an entry registered before the field existed. `--plan` previews; an
+  experiment-tagged entry is refused until the operator states its source with
+  `--source NAME=VALUE`, since the tag alone can't be trusted to say which path produced it.
 - `distill_learnings.py` - gathers one project's (or, with `--workspace`, every project's)
   `claude_reports` and `project_retrospective` records into one Markdown worksheet of
   recurring themes, for human review before calling `record_distillation_pass`.
