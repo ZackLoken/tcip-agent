@@ -170,10 +170,10 @@ def test_pointer_frozen_admits_an_absent_or_running_pointer(tmp_path):
     create_experiment(eid, {"model_source": {"builder": "my_models:burr_det"}})
     update_status(eid, "running")
 
-    assert pointer_frozen(eid, "artifacts", "model_final") is None
+    assert pointer_frozen(eid, "artifacts", "model_final", "/runs/020/model_final.pt") is None
 
     record_artifact(eid, "model_final", "/runs/020/model_final.pt")
-    assert pointer_frozen(eid, "artifacts", "model_final") is None
+    assert pointer_frozen(eid, "artifacts", "model_final", "/runs/020/model_final.pt") is None
 
 
 def test_pointer_frozen_names_a_populated_pointer_on_a_terminal_record(tmp_path):
@@ -187,7 +187,7 @@ def test_pointer_frozen_names_a_populated_pointer_on_a_terminal_record(tmp_path)
     record_artifact(eid, "model_final", "/runs/021/model_final.pt")
     update_status(eid, "completed")
 
-    frozen = pointer_frozen(eid, "artifacts", "model_final")
+    frozen = pointer_frozen(eid, "artifacts", "model_final", "/runs/021/model_final_v2.pt")
     assert frozen is not None and eid in frozen and "model_final" in frozen
 
 

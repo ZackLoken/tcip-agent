@@ -370,3 +370,32 @@ def build_bare_score_thresh_detector(*, in_chans: int = 3):
 
 def build_bare_no_knob_detector(*, in_chans: int = 3):
     return BareNoKnobDetector(in_chans=in_chans)
+
+
+class DivergingDetection(nn.Module):
+    """Wraps ``BespokeDetection``, adding one parameter whose loss term drives the training loss
+    to ``nan`` a few optimizer steps in: the fixture ``overfit_check``'s non-finite-loss rendering
+    guards against, since a real training pass can diverge exactly this way."""
+
+    def __init__(self, num_classes: int = 1, **kwargs) -> None:
+        super().__init__()
+        self.inner = BespokeDetection(num_classes, **kwargs)
+        self.w = nn.Parameter(torch.tensor(0.02))
+
+    @property
+    def detector(self):
+        return self.inner.detector
+
+    def forward(self, images, targets=None):
+        out = self.inner(images, targets)
+        if self.training and targets is not None:
+            out = dict(out)
+            out["diverge"] = torch.log(self.w)  # drives w negative under Adam, losses -> nan
+        return out
+
+    def freeze_backbone(self, to_stage: int) -> None:
+        self.inner.freeze_backbone(to_stage)
+
+
+def build_diverging_detection(*, num_classes: int = 1, in_chans: int = 3, **det_kwargs):
+    return DivergingDetection(num_classes, in_chans=in_chans, **det_kwargs)

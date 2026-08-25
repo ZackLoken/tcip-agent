@@ -92,6 +92,36 @@ def test_a_second_image_regime_export_against_a_completed_experiment_refuses_bef
     assert not out2.exists()
 
 
+def test_a_same_path_image_regime_export_against_a_completed_experiment_admits_the_second_run(
+        tmp_path, monkeypatch):
+    """A rail must admit valid work: re-exporting into the same bucket path records the same
+    lineage value the completed experiment already holds, so the additive lock's same-value
+    conjunct admits it rather than refusing a legitimate re-run."""
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+    _fake_predictor(monkeypatch)
+
+    from tcip_mcp.experiments import create_experiment, update_status
+    create_experiment("expImgSame", {"model_source": {"builder": "x:y"}})
+    update_status("expImgSame", "running")
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out = tmp_path / "out"
+    r1 = export_predictions(str(ckpt), str(images_dir), str(out), tile=False,
+                            experiment_id="expImgSame")
+    assert "error" not in r1, r1
+    update_status("expImgSame", "completed")
+
+    r2 = export_predictions(str(ckpt), str(images_dir), str(out), tile=False,
+                            experiment_id="expImgSame")
+    assert "error" not in r2, r2
+    assert (out / "img.json").is_file()
+
+
 def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_verdicts(
     tmp_path, monkeypatch,
 ):

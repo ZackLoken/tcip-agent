@@ -190,11 +190,13 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
 
 
 def test_register_model_from_experiment_twice_on_a_completed_record_is_idempotent(tmp_path, monkeypatch):
-    """The remedy _finalize_run's own docstring names for a registration that fails after
-    complete_run succeeded: call register_model_from_experiment again. A second call on an
-    already-completed record, with the same checkpoint path, must not be a second failure mode
-    of its own: it succeeds again rather than refusing, since ModelRegistry.register_model
-    replaces by name and update_lineage's additive lock only refuses a *changed* value."""
+    """Documents pre-existing behaviour, not new to this row: ModelRegistry.register_model
+    replaces by name and update_lineage's additive lock only refuses a *changed* value, so a
+    second register_model_from_experiment call on an already-completed record, with the same
+    checkpoint path, succeeds again rather than refusing, the remedy _finalize_run's own
+    docstring names for a registration that fails after complete_run succeeded. complete_run is
+    used here only as the producer of a completed record to register against, not itself
+    under test."""
     monkeypatch.chdir(tmp_path)
     import torch
 

@@ -66,6 +66,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             plus a builder import, no model construction and no forward pass.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic and
             report it under ``overfit_check``, never gating (a noisy-but-valid model can fail it).
+            The stored report is already rendered (``model_contract.render_overfit_report``): a
+            diverging model's raw losses may hold ``nan``/``inf``, which this JSON-RPC tool cannot
+            answer with directly.
     """
     from tcip_mcp.pipelines.schemas import validate_train_config_schema
 
@@ -299,7 +302,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     if smoke and not issues:
         try:
             from tcip_mcp.pipelines.model_build import build_model, resolve_contract_dims
-            from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check
+            from tcip_mcp.pipelines.model_contract import (
+                check_model_contract, overfit_check, render_overfit_report,
+            )
 
             ms = config.get("model_source") or {}
             task = ms.get("task") or (config.get("data") or {}).get("task", "detection")
@@ -345,7 +350,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                         }
                     finally:
                         restore_rng_state(rng_state)
-                result["overfit_check"] = raw_report
+                # Rendered before storage: this tool answers over JSON-RPC, which a raw non-finite
+                # loss cannot cross, so a diverging model's report is sanitized here, once.
+                result["overfit_check"] = render_overfit_report(raw_report)
         except Exception as exc:  # noqa: BLE001, a build/contract crash is itself a blocking issue
             issues.append(f"model smoke build failed: {exc}")
 
@@ -421,18 +428,14 @@ def launch_training(
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
 
-    # GUI schema nests stages/batch_size under ``training``; the trainer reads them top-level.
+    # GUI schema nests stages/mixed_precision/batch_size under ``training``, but the trainer reads them top-level; without this hoist a GUI-launched run silently trains the default single stage.
     # run_hpo normalizes separately, inside _apply_hpo_params.
     from tcip_mcp.pipelines.schemas import normalize_train_config
     config = normalize_train_config(config)
 
-    # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
-    # build, not inside it, on the same batch.
-    raw_overfit_report = validation.get("overfit_check")
-    rendered_overfit_report = None
-    if raw_overfit_report is not None:
-        from tcip_mcp.pipelines.model_contract import render_overfit_report
-        rendered_overfit_report = render_overfit_report(raw_overfit_report)
+    # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's build, not inside it, on the same batch.
+    # Already rendered by preflight_config for storage (a raw non-finite loss cannot cross the JSON-RPC boundary), so nothing renders it again here.
+    rendered_overfit_report = validation.get("overfit_check")
 
     # Recorded on the copy above, never the caller's own config dict, so a launch never hands
     # back an argument it silently mutated.
@@ -1352,8 +1355,8 @@ def _ensure_experiment(
     branch, which never otherwise touches ``status.json`` at all.
     """
     from tcip_mcp.experiments import (
-        create_experiment, is_pristine, overwrite_config_if_pristine, read_member,
-        stamp_run_identity, status_key,
+        create_experiment, is_pristine, metrics_logged_of, overwrite_config_if_pristine,
+        read_member, stamp_run_identity, status_key,
     )
 
     created = create_experiment(experiment_id, config, data_source=data_source,
@@ -1366,7 +1369,7 @@ def _ensure_experiment(
     # says pristine, so a non-pristine id mints its fresh id below with no refusal audited.
     status = read_member(status_key(experiment_id), {})
     state = status.get("state") if isinstance(status, dict) else None
-    metrics_logged = bool(status.get("metrics_logged")) if isinstance(status, dict) else False
+    metrics_logged = metrics_logged_of(status)
     if is_pristine(state, metrics_logged):
         overwritten = overwrite_config_if_pristine(experiment_id, config)
         if "error" not in overwritten:
@@ -1494,8 +1497,7 @@ def _dataset_source_kwargs(task: str, data_cfg: dict) -> dict:
         if data_cfg.get("csv_path"):
             kw["csv_path"] = data_cfg["csv_path"]
     if data_cfg.get(DATASET_SOURCE_KEY):
-        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder, threaded
-        # through src so the split machinery passes it (with stems) to every train/val build below.
+        # Bespoke seam (mirrors model_source): route build_dataset to the agent's builder for a task the known loaders don't cover, threaded through src so the split machinery still passes it (with stems) to every train/val build below.
         kw["dataset_source"] = data_cfg[DATASET_SOURCE_KEY]  # left names build_dataset's param
     return kw
 
