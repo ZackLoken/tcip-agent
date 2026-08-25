@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
@@ -291,7 +291,7 @@ def read_ray_dashboard() -> dict | None:
 
 
 @contextmanager
-def _ray_session(ray: Any) -> Iterator[None]:
+def _ray_session(ray: Any) -> Generator[None]:
     """Keep Ray up for the duration of one sweep, shutting it down only when the last
     concurrent sweep leaves and only if this module is what started it.
 
