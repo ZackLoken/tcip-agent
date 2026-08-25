@@ -79,6 +79,20 @@ def _served(resp) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(resp.content)))
 
 
+def _stats_source(resp) -> dict:
+    """``X-TCIP-Stats-Source`` parsed as the ``StatsSource`` JSON it now carries."""
+    import json
+
+    return json.loads(resp.headers["x-tcip-stats-source"])
+
+
+def _display_bounds(resp) -> list[list[float]]:
+    """``X-TCIP-Display-Bounds`` parsed as the JSON list of pairs it now carries."""
+    import json
+
+    return json.loads(resp.headers["x-tcip-display-bounds"])
+
+
 # ── Regions ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -219,7 +233,8 @@ def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(client: TestClient
     resp = client.get("/api/images", params={"path": str(path)})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), (100, 120, 140), atol=3)
-    assert resp.headers["x-tcip-stats-source"] == "none"
+    assert _stats_source(resp) == {"read": "none", "seed": None, "pixel_fraction": None,
+                                   "overview_scale": None}
 
 
 def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp_path: Path):
@@ -231,7 +246,8 @@ def test_a_uint16_raster_serves_on_its_dtypes_full_scale(client: TestClient, tmp
     resp = client.get("/api/images", params={"path": str(path)})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 127.5, atol=3)
-    assert resp.headers["x-tcip-stats-source"] == "dtype_full_scale"
+    assert _stats_source(resp) == {"read": "dtype_full_scale", "seed": None,
+                                   "pixel_fraction": None, "overview_scale": None}
 
 
 def test_a_multi_band_uint16_raster_serves_on_that_same_scale(client: TestClient, tmp_path: Path):
@@ -254,8 +270,9 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(client: TestClien
         "path": str(path), "x0": 0, "y0": 0, "x1": 20, "y1": 32})
     served = _served(resp)
     assert np.allclose(served.mean(axis=(0, 1)), 100.0 / 1000.0 * 255.0, atol=3)
-    assert resp.headers["x-tcip-stats-source"].startswith("sampled(seed=0")
-    assert resp.headers["x-tcip-display-bounds"] == "0,1000"
+    source = _stats_source(resp)
+    assert source["read"] == "window_sample" and source["seed"] == 0
+    assert _display_bounds(resp) == [[0.0, 1000.0]]
 
 
 def test_a_single_band_raster_serves_as_replicated_grey(client: TestClient, tmp_path: Path):
@@ -280,7 +297,8 @@ def test_a_four_band_raster_serves_as_plain_rgb_with_the_fourth_band_dropped(
     served = _served(resp)
     assert served.shape == (32, 40, 3)
     assert np.allclose(served.mean(axis=(0, 1)), (100, 120, 140), atol=3)
-    assert resp.headers["x-tcip-stats-source"] == "none"
+    assert _stats_source(resp) == {"read": "none", "seed": None, "pixel_fraction": None,
+                                   "overview_scale": None}
 
 
 def test_a_five_band_raster_composites_its_first_three_bands(client: TestClient, tmp_path: Path):
@@ -290,7 +308,8 @@ def test_a_five_band_raster_composites_its_first_three_bands(client: TestClient,
     _multiband(path, channels=5)
     resp = client.get("/api/images", params={"path": str(path)})
     assert _served(resp).shape == (24, 40, 3)
-    assert resp.headers["x-tcip-stats-source"] == "served_array"
+    assert _stats_source(resp) == {"read": "served_array", "seed": None, "pixel_fraction": None,
+                                   "overview_scale": None}
 
 
 def _pinned_stretch_raster(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -360,9 +379,10 @@ def test_two_regions_of_one_raster_stretch_against_the_same_bounds(
     right = client.get("/api/images", params={
         "path": str(path), "bands": "0,1,2", "x0": 20, "y0": 0, "x1": 40, "y1": 24})
     assert left.status_code == right.status_code == 200
-    assert left.headers["x-tcip-display-bounds"] == right.headers["x-tcip-display-bounds"]
-    assert left.headers["x-tcip-stats-source"].startswith("sampled(seed=0")
-    assert right.headers["x-tcip-stats-source"] == left.headers["x-tcip-stats-source"]
+    assert _display_bounds(left) == _display_bounds(right)
+    left_source, right_source = _stats_source(left), _stats_source(right)
+    assert left_source["read"] == "window_sample" and left_source["seed"] == 0
+    assert right_source == left_source
 
 
 def test_a_regions_bounds_are_the_rasters_sampled_bounds(client: TestClient, tmp_path: Path):
@@ -371,8 +391,7 @@ def test_a_regions_bounds_are_the_rasters_sampled_bounds(client: TestClient, tmp
     resp = client.get("/api/images", params={
         "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 20, "y1": 24})
     assert resp.status_code == 200
-    reported = [tuple(float(v) for v in pair.split(","))
-                for pair in resp.headers["x-tcip-display-bounds"].split(";")]
+    reported = [tuple(pair) for pair in _display_bounds(resp)]
     assert reported == [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
 
 
@@ -381,9 +400,9 @@ def test_a_whole_view_reports_the_bounds_of_the_array_it_served(client: TestClie
     arr = _multiband(path)
     resp = client.get("/api/images", params={"path": str(path), "bands": "0,1,2"})
     assert resp.status_code == 200
-    assert resp.headers["x-tcip-stats-source"] == "served_array"
-    reported = [tuple(float(v) for v in pair.split(","))
-                for pair in resp.headers["x-tcip-display-bounds"].split(";")]
+    assert _stats_source(resp) == {"read": "served_array", "seed": None, "pixel_fraction": None,
+                                   "overview_scale": None}
+    reported = [tuple(pair) for pair in _display_bounds(resp)]
     assert reported == [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
 
 
@@ -399,8 +418,7 @@ def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
         "x0": 0, "y0": 0, "x1": 20, "y1": 24})
     assert resp.status_code == 200
     stats = images_route._raster_stats(path, 4, raster_source.source_pool_key(path, 4))
-    reported = [float(v) for pair in resp.headers["x-tcip-display-bounds"].split(";")
-                for v in pair.split(",")]
+    reported = [v for pair in _display_bounds(resp) for v in pair]
     expected = [v for i in range(3) for v in stats.clip_bounds[i]]
     assert reported == pytest.approx(expected, rel=1e-5)
 
@@ -524,7 +542,9 @@ def test_a_region_of_an_oversized_raster_reports_the_overview_scale_it_stretched
     resp = client.get("/api/images", params={
         "path": str(path), "bands": "0,1,2", "x0": 0, "y0": 0, "x1": 256, "y1": 64})
     assert resp.status_code == 200
-    assert resp.headers["x-tcip-stats-source"] == f"overview(scale={1024 / 5000:.6g})"
+    source = _stats_source(resp)
+    assert source["read"] == "overview"
+    assert source["overview_scale"] == pytest.approx(1024 / 5000, rel=1e-5)
     assert "x-tcip-display-bounds" in resp.headers
 
 
@@ -650,6 +670,34 @@ def test_a_deep_zoom_region_within_the_cap_is_served_without_overviews(
     served = _served(client.get("/api/images", params={
         "path": str(path), "x0": 0, "y0": 0, "x1": 256, "y1": 64}))
     assert served.shape == (64, 256, 3)
+
+
+# ── Rendered-variant cache: the version key ───────────────────────────────────────────────
+
+
+def test_a_render_cached_under_an_older_version_key_is_not_reused(
+    client: TestClient, tmp_path: Path, monkeypatch,
+):
+    """The render cache key carries ``RENDER_CACHE_VERSION``, so bumping the constant makes
+    every entry cached under the old value unreachable: a bumped version renders and caches
+    fresh, under its own key, rather than replaying what an older version wrote."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr(images_route, "_render_cache_dir", lambda: cache_dir)
+    monkeypatch.setattr(images_route, "RENDER_CACHE_VERSION", 1)
+
+    path = tmp_path / "flat.tif"
+    tifffile.imwrite(str(path), np.full((32, 40, 3), (10, 20, 30), dtype=np.uint8))
+
+    first = client.get("/api/images", params={"path": str(path)})
+    assert first.status_code == 200
+    assert len(list(cache_dir.glob("*.jpg"))) == 1
+
+    monkeypatch.setattr(images_route, "RENDER_CACHE_VERSION", 2)
+    second = client.get("/api/images", params={"path": str(path)})
+    assert second.status_code == 200
+    assert second.headers["etag"] != first.headers["etag"]
+    assert len(list(cache_dir.glob("*.jpg"))) == 2
 
 
 # ── Rendered-variant cache: byte-budget LRU ──────────────────────────────────────────────

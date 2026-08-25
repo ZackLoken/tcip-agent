@@ -5,15 +5,8 @@
 
 import type { HostSize, PixelRect } from "@/lib/viewGeometry";
 
-/** The serializable grid parameter tuple every coverage consumer echoes. */
-export interface GridGeometry {
-  width: number;
-  height: number;
-  tile_size: number;
-  overlap: number;
-  cols: number;
-  rows: number;
-}
+export type { GridGeometry } from "@/api/types.generated";
+import type { GridGeometry } from "@/api/types.generated";
 
 /** One served cell: a name plus its half-open native-pixel rect, clipped to the image extent. */
 export interface GridCell {

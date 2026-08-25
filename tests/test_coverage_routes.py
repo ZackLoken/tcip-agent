@@ -46,15 +46,22 @@ def _audit_entries(root: Path, tool: str) -> list[dict]:
     return [record for record in page.records if record["tool"] == tool]
 
 
+def _grid_only(grid: dict) -> dict:
+    """The six ``GridGeometry`` keys, stripped of ``cells``: what ``useCoverageGrid.ts`` posts
+    (it destructures ``cells`` off the grid route's response before storing the rest)."""
+    return {k: v for k, v in grid.items() if k != "cells"}
+
+
 def _post_body(image_path: str, cells: list[str], grid: dict, **overrides) -> dict:
     body = {
         "image_path": image_path,
         "subject": "bush",
         "date": "2026-03-01",
-        "grid": grid,
+        "grid": _grid_only(grid),
         "cells_served_at_native": cells,
-        "viewing": {"bands": None, "stretch": "minmax", "stats_source": "none",
-                    "base_served_size": "100x80", "display_bounds": None},
+        "viewing": {"bands": None, "stretch": "minmax", "stats_source": {"read": "none"},
+                    "base_served_size": "100x80", "display_bounds": None,
+                    "working_scale_bar": None},
     }
     body.update(overrides)
     return body
@@ -281,13 +288,15 @@ class TestCoverageRecord:
         assert client.get("/api/coverage", params={"path": path}).status_code == 400
 
     def test_date_must_be_explicit(self, client, dated_dataset):
+        """``date`` carries no default on ``CoveragePayload``, so an omitted key is the model's
+        own required-field refusal rather than a route-level check."""
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
         body = _post_body(path, ["A1"], grid)
         del body["date"]
         resp = client.post("/api/coverage", json=body)
-        assert resp.status_code == 400
-        assert "date" in resp.json()["detail"]
+        assert resp.status_code == 422
+        assert any("date" in str(err.get("loc")) for err in resp.json()["detail"])
 
     def test_explicit_null_date_is_the_dateless_bucket(self, client, tmp_path):
         """A non-dated dataset passes date null and lands under the subject-only bucket."""
@@ -338,7 +347,7 @@ class TestCoverageRecord:
     def test_working_scale_bar_round_trips_in_viewing(self, client, dated_dataset):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
-        viewing = {"bands": None, "stretch": "minmax", "stats_source": "none",
+        viewing = {"bands": None, "stretch": "minmax", "stats_source": {"read": "none"},
                    "base_served_size": "100x80", "display_bounds": None,
                    "working_scale_bar": {
                        "value": 0.125,
@@ -348,6 +357,141 @@ class TestCoverageRecord:
         record = client.get("/api/coverage", params={
             "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
         assert record["viewing"]["working_scale_bar"]["value"] == 0.125
+
+    def test_post_from_a_plain_rgb_view_round_trips(self, client, dated_dataset):
+        """The exact shape ``coverageTracker.ts`` sends for a plain RGB view: ``bands``/
+        ``stretch`` are absent (``compositeParams`` returns ``{}`` for a <=3-band raster, and
+        ``JSON.stringify`` drops the resulting ``undefined`` keys), the other four viewing keys
+        are always present."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = {
+            "image_path": path,
+            "dataset_root": None,
+            "subject": "bush",
+            "date": "2026-03-01",
+            "grid": _grid_only(grid),
+            "cells_served_at_native": ["A1"],
+            "cells_swept": [],
+            "viewing": {
+                "stats_source": {"read": "none"},
+                "display_bounds": None,
+                "base_served_size": "100x80",
+                "working_scale_bar": None,
+            },
+        }
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 200, resp.text
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["viewing"]["bands"] is None
+        assert record["viewing"]["stretch"] is None
+        assert record["viewing"]["stats_source"] == {
+            "read": "none", "seed": None, "pixel_fraction": None, "overview_scale": None}
+
+    def test_post_from_a_composite_view_round_trips(self, client, dated_dataset):
+        """The shape a multiband composite view sends: ``bands``/``stretch`` carry real values
+        and ``display_bounds`` carries one pair per displayed band."""
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = {
+            "image_path": path,
+            "dataset_root": None,
+            "subject": "bush",
+            "date": "2026-03-01",
+            "grid": _grid_only(grid),
+            "cells_served_at_native": [],
+            "cells_swept": ["A1"],
+            "viewing": {
+                "bands": "3,2,1",
+                "stretch": "percent_clip",
+                "stats_source": {"read": "window_sample", "seed": 0, "pixel_fraction": 0.5,
+                                 "overview_scale": None},
+                "display_bounds": [[0.0, 1000.0], [5.0, 20.0], [1.0, 2.0]],
+                "base_served_size": "100x80",
+                "working_scale_bar": None,
+            },
+        }
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 200, resp.text
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["viewing"]["bands"] == "3,2,1"
+        assert record["viewing"]["stretch"] == "percent_clip"
+        assert record["viewing"]["display_bounds"] == [[0.0, 1000.0], [5.0, 20.0], [1.0, 2.0]]
+
+    def test_a_viewing_with_an_undeclared_key_is_refused(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = _post_body(path, ["A1"], grid)
+        body["viewing"]["mystery_key"] = "oops"
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 422
+
+    def test_a_bare_string_stats_source_is_refused(self, client, dated_dataset):
+        _root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        body = _post_body(path, ["A1"], grid)
+        body["viewing"]["stats_source"] = "none"
+        resp = client.post("/api/coverage", json=body)
+        assert resp.status_code == 422
+
+    def _seed_old_shape_record(self, root, bucket: str, image_name: str, grid: dict) -> None:
+        import tcip_store as ts
+        from tcip_mcp.dataset_layout import view_coverage_key
+
+        normalized_grid = {k: grid[k] for k in
+                           ("width", "height", "tile_size", "overlap", "cols", "rows")}
+        old_record = {
+            "grid": normalized_grid,
+            "cells_served_at_native": ["A1"],
+            "cells_swept": [],
+            "viewing": {"stats_source": "none", "display_bounds": None,
+                        "base_served_size": "100x80"},
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        ts.replace(view_coverage_key(root), {bucket: {image_name: old_record}},
+                  expect=ts.Version.ABSENT)
+
+    def test_get_coverage_refuses_an_old_shape_stored_record_naming_the_conform_script(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid)
+
+        resp = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"})
+        assert resp.status_code == 400
+        assert "conform_view_coverage_viewing.py" in resp.json()["detail"]
+
+    def test_post_coverage_merge_path_refuses_an_old_shape_stored_record(
+        self, client, dated_dataset,
+    ):
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid)
+
+        resp = client.post("/api/coverage", json=_post_body(path, ["B1"], grid))
+        assert resp.status_code == 400
+        assert "conform_view_coverage_viewing.py" in resp.json()["detail"]
+
+    def test_post_coverage_replace_path_over_an_old_shape_record_succeeds(
+        self, client, dated_dataset,
+    ):
+        """A mismatched grid replaces the record wholesale, with nothing to merge into, so an
+        old-shape stored record does not block it."""
+        root, path = dated_dataset
+        grid64 = _grid(client, path, tile_size=64)
+        self._seed_old_shape_record(root, "bush/2026-03-01", "plot.tif", grid64)
+        grid100 = _grid(client, path, tile_size=100)
+
+        resp = client.post("/api/coverage", json=_post_body(path, ["A1"], grid100))
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["replaced"] is True
+        record = client.get("/api/coverage", params={
+            "path": path, "subject": "bush", "date": "2026-03-01"}).json()["coverage"]
+        assert record["grid"]["tile_size"] == 100
 
     def test_mismatched_grid_replaces_both_facts(self, client, dated_dataset):
         _root, path = dated_dataset
@@ -389,7 +533,7 @@ def test_view_coverage_path_locator(tmp_path):
 
 class TestCompletenessRoute:
     def _toggle(self, client, path, grid, cell, subject="catkin", **overrides):
-        body = {"image_path": path, "subject": subject, "grid": grid, "cell": cell,
+        body = {"image_path": path, "subject": subject, "grid": _grid_only(grid), "cell": cell,
                "user": "breeder"}
         body.update(overrides)
         return client.post("/api/coverage/completeness", json=body)

@@ -1,6 +1,9 @@
 import type { ImageBandInfo, ImageBandsResponse } from "@/api/client";
+import type { CoverageViewing } from "@/api/types.generated";
 
-export type Stretch = "minmax" | "percent_clip";
+/** The stretch modes a band picker offers, the server's own vocabulary minus the ``none`` mode a
+ *  composite selection never asks for. */
+export type Stretch = Exclude<NonNullable<CoverageViewing["stretch"]>, "none">;
 
 export interface BandSelection {
   r: string;

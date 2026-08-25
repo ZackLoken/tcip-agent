@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { GridCell, GridGeometry } from "@/lib/coverage";
-import { CoverageTracker, type CoveragePostBody } from "@/lib/coverageTracker";
+import { CoverageTracker, type CoveragePayload } from "@/lib/coverageTracker";
 
 const GRID: GridGeometry = {
   width: 300,
@@ -27,7 +27,7 @@ const KEY = {
 };
 const FULL_VIEW = { x0: 0, y0: 0, x1: 300, y1: 200 };
 
-let post: Mock<(body: CoveragePostBody) => Promise<unknown>>;
+let post: Mock<(body: CoveragePayload) => Promise<unknown>>;
 let tracker: CoverageTracker;
 
 beforeEach(() => {
@@ -183,9 +183,9 @@ describe("CoverageTracker posting", () => {
     tracker.reset(KEY, GRID, CELLS);
     tracker.setViewing({
       bands: "3,2,1",
-      stretch: "p2",
-      stats_source: "overview",
-      display_bounds: "0..255",
+      stretch: "percent_clip",
+      stats_source: { read: "overview", seed: null, pixel_fraction: null, overview_scale: 0.5 },
+      display_bounds: [[0, 255]],
       base_served_size: "150x100",
     });
     tracker.noteAuthoringScale(1);
@@ -203,12 +203,19 @@ describe("CoverageTracker posting", () => {
     expect(body.cells_swept).toEqual(["A1"]);
     expect(body.cells_served_at_native).toEqual(["B1"]);
     // The symbology travels with the cells, or the record cannot say what rendering was seen.
-    expect(body.viewing.bands).toBe("3,2,1");
-    expect(body.viewing.stretch).toBe("p2");
-    expect(body.viewing.stats_source).toBe("overview");
-    expect(body.viewing.display_bounds).toBe("0..255");
-    expect(body.viewing.base_served_size).toBe("150x100");
-    expect(body.viewing.working_scale_bar).toEqual({
+    // postNow always sets viewing; the payload type leaves it optional for other callers.
+    const viewing = body.viewing!;
+    expect(viewing.bands).toBe("3,2,1");
+    expect(viewing.stretch).toBe("percent_clip");
+    expect(viewing.stats_source).toEqual({
+      read: "overview",
+      seed: null,
+      pixel_fraction: null,
+      overview_scale: 0.5,
+    });
+    expect(viewing.display_bounds).toEqual([[0, 255]]);
+    expect(viewing.base_served_size).toBe("150x100");
+    expect(viewing.working_scale_bar).toEqual({
       value: 1,
       source: expect.stringContaining("annotation commits"),
     });
@@ -244,6 +251,15 @@ describe("CoverageTracker posting", () => {
   });
 });
 
+const NULL_VIEWING = {
+  bands: null,
+  stretch: null,
+  stats_source: null,
+  display_bounds: null,
+  base_served_size: null,
+  working_scale_bar: null,
+};
+
 describe("CoverageTracker hydration", () => {
   it("adopts a stored record's facts only when its grid matches", () => {
     tracker.reset(KEY, GRID, CELLS);
@@ -251,9 +267,17 @@ describe("CoverageTracker hydration", () => {
       grid: { ...GRID, tile_size: 50 },
       cells_swept: ["A1"],
       cells_served_at_native: ["B1"],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
     });
     expect(tracker.swept.size).toBe(0);
-    tracker.hydrate({ grid: GRID, cells_swept: ["A1"], cells_served_at_native: ["B1"] });
+    tracker.hydrate({
+      grid: GRID,
+      cells_swept: ["A1"],
+      cells_served_at_native: ["B1"],
+      viewing: NULL_VIEWING,
+      updated_at: "2026-01-01T00:00:00+00:00",
+    });
     expect(Array.from(tracker.swept)).toEqual(["A1"]);
     expect(Array.from(tracker.servedAtNative)).toEqual(["B1"]);
   });

@@ -81,9 +81,11 @@ function makeLoaded(over: Partial<LoadedImage> = {}): LoadedImage {
     ok: true,
     aborted: false,
     servedSize: null,
+    servedSizeRaw: null,
     statsSource: null,
     displayBounds: null,
     imageError: null,
+    headerParseError: null,
     ...over,
   };
 }

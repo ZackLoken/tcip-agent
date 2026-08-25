@@ -25,42 +25,37 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 import tcip_store
 
+from tcip_web.routes._coverage_models import CoverageRecord, CoverageViewing, GridGeometry
 from tcip_web.routes.classes import _audit_dataset_write, _guard_dataset_root
 from tcip_web.routes.images import _checked
 
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
 
-GRID_KEYS = ("width", "height", "tile_size", "overlap", "cols", "rows")
-
 # One audit entry per image per backend process: the first coverage write for an image
 # audits, the debounced merges that follow coalesce into it.
 _audited_coverage_keys: set[tuple[str, str, str]] = set()
 
+_CONFORM_HINT = (
+    "run scripts/conform_view_coverage_viewing.py against this dataset to bring it to the "
+    "current shape (--plan first to preview the change)"
+)
 
-def _normalized_grid(grid: dict) -> dict:
-    """The grid geometry dict reduced to its defining keys with canonical numeric types,
-    so a stored grid and a posted grid compare by value, not by JSON accident."""
+
+def _validated_record(image_name: str, record: dict) -> None:
+    """Refuse rather than serve or merge into a stored record that no longer validates as
+    ``CoverageRecord``, naming the conform script instead of silently coercing or dropping it."""
     try:
-        normalized = {
-            "width": int(grid["width"]),
-            "height": int(grid["height"]),
-            "tile_size": int(grid["tile_size"]),
-            "overlap": float(grid["overlap"]),
-            "cols": int(grid["cols"]),
-            "rows": int(grid["rows"]),
-        }
-    except (KeyError, TypeError, ValueError) as exc:
+        CoverageRecord.model_validate(record)
+    except ValidationError as exc:
         raise HTTPException(
-            400, f"grid must carry {list(GRID_KEYS)} as numbers: {exc}") from exc
-    if normalized["overlap"] != 0.0:
-        raise HTTPException(
-            400, "a coverage record's grid requires overlap 0: the exact-partition contract "
-                 "puts every native pixel in exactly one cell, which overlapping cells break")
-    return normalized
+            400,
+            f"{image_name}'s stored view-coverage record does not validate against the "
+            f"current shape: {exc}; {_CONFORM_HINT}",
+        ) from exc
 
 
 def _resolve_root(image_path: str, dataset_root: Optional[str]) -> str:
@@ -161,7 +156,10 @@ def get_coverage(
     if not isinstance(store, dict):
         store = {}
     bucket = store.get(status_bucket(subject, date))
-    record = bucket.get(Path(path).name) if isinstance(bucket, dict) else None
+    image_name = Path(path).name
+    record = bucket.get(image_name) if isinstance(bucket, dict) else None
+    if isinstance(record, dict):
+        _validated_record(image_name, record)
     return {"coverage": record}
 
 
@@ -169,18 +167,20 @@ class CoveragePayload(BaseModel):
     """One coverage post from the browser: the session's accumulated served-at-native and
     swept cell lists (either may be empty; the server union-merges, so resending is
     harmless), with the grid they were accumulated against and the viewing context they
-    were served under (bands, stretch, stats_source, base_served_size, display_bounds,
-    and working_scale_bar as ``{value, source}`` where the source states how the bar was
-    measured)."""
+    were served under. ``date`` carries no default: a non-dated dataset must still pass
+    ``null`` explicitly, so an image under a date bucket can never silently land in the
+    dateless one."""
 
     image_path: str
     subject: Optional[str] = None
-    date: Optional[str] = None
+    date: Optional[str]
     dataset_root: Optional[str] = None
-    grid: dict
+    grid: GridGeometry
     cells_served_at_native: list[str] = []
     cells_swept: list[str] = []
-    viewing: dict = {}
+    viewing: CoverageViewing = CoverageViewing(
+        stats_source=None, display_bounds=None, base_served_size=None, working_scale_bar=None,
+    )
 
 
 @router.post("")
@@ -191,19 +191,17 @@ def post_coverage(payload: CoveragePayload) -> dict:
     replaces the record wholesale and the response flags it (``replaced``), since the
     record carries the grid it was accumulated against precisely so a derivation change
     can never silently misread old cell names. Cell names are validated against the
-    posted grid's own cells; unknown names are refused. ``date`` must be explicit:
-    a non-dated dataset passes ``null``, so an image under a date bucket can never
-    silently land in the dateless one.
+    posted grid's own cells; unknown names are refused. On the merge path the stored
+    record is validated against ``CoverageRecord`` before its cells are folded in, naming
+    the conform script when it no longer holds that shape; the replace path overwrites it
+    wholesale, since there is nothing to merge into.
     """
     from tcip_mcp.dataset_layout import status_bucket, view_coverage_key
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     subject = _require_subject(payload.subject)
-    if "date" not in payload.model_fields_set:
-        raise HTTPException(400, "view coverage is bucketed by subject and date; pass date "
-                                 "(null for a non-dated dataset)")
     root = _resolve_root(payload.image_path, payload.dataset_root)
-    grid = _normalized_grid(payload.grid)
+    grid = payload.grid.model_dump()
     valid_names = {c.name for c in reference_cells(
         grid["width"], grid["height"], grid["tile_size"], grid["overlap"], clamp=True)}
     unknown = sorted(
@@ -227,6 +225,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
         served = set(payload.cells_served_at_native)
         swept = set(payload.cells_swept)
         if isinstance(existing, dict) and existing.get("grid") == grid:
+            _validated_record(image_name, existing)
             served |= set(existing.get("cells_served_at_native") or [])
             swept |= set(existing.get("cells_swept") or [])
         else:
@@ -235,7 +234,7 @@ def post_coverage(payload: CoveragePayload) -> dict:
             "grid": grid,
             "cells_served_at_native": sorted(served),
             "cells_swept": sorted(swept),
-            "viewing": payload.viewing,
+            "viewing": payload.viewing.model_dump(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         txn.write(key, store)
@@ -268,7 +267,7 @@ class CompletenessTogglePayload(BaseModel):
     image_path: str
     subject: str
     dataset_root: Optional[str] = None
-    grid: dict
+    grid: GridGeometry
     cell: str
     # GUI-set identity; stamped as attested_by ("user:<name>"), mirroring annotate.py/review.py.
     user: Optional[str] = None
@@ -344,7 +343,7 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
         _root_from_image, date, stem = parse_image_path(payload.image_path)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    grid = _normalized_grid(payload.grid)
+    grid = payload.grid.model_dump()
     cells_by_name = {c.name: c for c in reference_cells(
         grid["width"], grid["height"], grid["tile_size"], grid["overlap"], clamp=True)}
     if payload.cell not in cells_by_name:

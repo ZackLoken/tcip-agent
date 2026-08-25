@@ -3,3 +3,4 @@ dist
 coverage
 package-lock.json
 ../static
+src/api/types.generated.ts

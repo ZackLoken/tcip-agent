@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import { completeWarningMessage, type GridCell, type GridGeometry } from "@/lib/coverage";
-import { CoverageTracker, type CoverageViewing } from "@/lib/coverageTracker";
+import { CoverageTracker, type CoverageViewingInput } from "@/lib/coverageTracker";
 import { computeViewport, measureCanvasHost } from "@/lib/canvasSync";
 import { useStore } from "@/store";
 import type { ViewState } from "@/store/types";
@@ -34,7 +34,7 @@ export function useCoverageTracking(args: {
   view: ViewState;
   imgW: number;
   imgH: number;
-  viewing: CoverageViewing;
+  viewing: CoverageViewingInput;
 }): CoverageTracking {
   const [version, setVersion] = useState(0);
   const trackerRef = useRef<CoverageTracker | null>(null);
@@ -57,8 +57,12 @@ export function useCoverageTracking(args: {
       (record) => {
         if (!cancelled) tracker.hydrate(record);
       },
-      () => {
-        // No stored record readable: the session still accumulates from scratch.
+      (err: unknown) => {
+        // A missing record resolves as null above; a rejection here is a real refusal, so it
+        // surfaces rather than accumulating silently as if nothing were stored.
+        if (cancelled) return;
+        const detail = err instanceof Error ? err.message : String(err);
+        useStore.getState().pushToast(`Could not read the stored coverage record: ${detail}`);
       },
     );
     return () => {
