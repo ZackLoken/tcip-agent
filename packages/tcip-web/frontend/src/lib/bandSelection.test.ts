@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { ImageBandInfo, ImageBandsResponse } from "@/api/client";
-import { defaultBandSelection, isPlainColourFrame } from "@/lib/bandSelection";
+import {
+  bandSetSignature,
+  compositeParams,
+  defaultBandSelection,
+  isPlainColourFrame,
+  showsBandPicker,
+} from "@/lib/bandSelection";
 
 function bandsResponse(bands: ImageBandInfo[]): ImageBandsResponse {
   return { band_count: bands.length, bands };
@@ -69,5 +75,64 @@ describe("defaultBandSelection", () => {
       b: "Panchromatic",
       stretch: "minmax",
     });
+  });
+});
+
+describe("bandSetSignature", () => {
+  it("joins the declared band names in order, so two images with the same bands share one", () => {
+    expect(bandSetSignature(FOUR_SPECTRAL)).toBe("Blue,Green,Red,NIR");
+  });
+
+  it("differs when the band set differs, even by one band", () => {
+    expect(bandSetSignature(FOUR_SPECTRAL)).not.toBe(bandSetSignature(FOUR_SPECTRAL.slice(0, 3)));
+  });
+});
+
+describe("compositeParams", () => {
+  const selection = { r: "Red", g: "Green", b: "Blue", stretch: "minmax" as const };
+
+  it("carries bands/stretch for a multispectral frame whose bands the selection actually names", () => {
+    expect(compositeParams(bandsResponse(FOUR_SPECTRAL), selection)).toEqual({
+      bands: "Red,Green,Blue",
+      stretch: "minmax",
+    });
+  });
+
+  it("carries nothing for a plain colour frame, even with a selection in hand", () => {
+    const rgbaSelection = { r: "red", g: "green", b: "blue", stretch: "minmax" as const };
+    expect(compositeParams(bandsResponse(RGBA), rgbaSelection)).toEqual({});
+  });
+
+  it("carries nothing when the selection names a band this metadata doesn't declare", () => {
+    const stale = { r: "Red", g: "Green", b: "SWIR", stretch: "minmax" as const };
+    expect(compositeParams(bandsResponse(FOUR_SPECTRAL), stale)).toEqual({});
+  });
+
+  it("carries nothing with no bandsInfo or no selection", () => {
+    expect(compositeParams(null, selection)).toEqual({});
+    expect(compositeParams(bandsResponse(FOUR_SPECTRAL), null)).toEqual({});
+  });
+});
+
+describe("showsBandPicker", () => {
+  const selection = { r: "Red", g: "Green", b: "Blue", stretch: "minmax" as const };
+
+  it("shows for a multispectral frame with a selection matching its bands", () => {
+    expect(showsBandPicker(bandsResponse(FOUR_SPECTRAL), selection)).toBe(true);
+  });
+
+  it("hides for a plain colour frame", () => {
+    const rgbaSelection = { r: "red", g: "green", b: "blue", stretch: "minmax" as const };
+    expect(showsBandPicker(bandsResponse(RGBA), rgbaSelection)).toBe(false);
+  });
+
+  it("hides when the selection names a band the current metadata doesn't declare", () => {
+    const stale = { r: "Red", g: "Green", b: "SWIR", stretch: "minmax" as const };
+    expect(showsBandPicker(bandsResponse(FOUR_SPECTRAL), stale)).toBe(false);
+  });
+
+  it("hides while bandsInfo or the selection is not yet known", () => {
+    expect(showsBandPicker(null, selection)).toBe(false);
+    expect(showsBandPicker(bandsResponse(FOUR_SPECTRAL), null)).toBe(false);
   });
 });
