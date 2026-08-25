@@ -721,6 +721,50 @@ def _review_action(client, img_path, gt, dataset_root, **over):
     return client.post("/api/review/action", json=body)
 
 
+def test_review_action_swept_records_verdict_without_mutating_gt(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """A sweep attestation ("checked this image for missed objects, found none") records a
+    verdict entry but writes nothing to ground truth: no geometry, no gt/pred index."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+
+    resp = _review_action(
+        client, img_path, gt, dataset_root,
+        pred_path=str(pred), det_type="sweep", class_name="", gt_idx=None, pred_idx=None,
+        bbox=[0.0, 0.0, 100.0, 80.0], action="swept",
+    )
+    assert resp.status_code == 200
+    state = _shard_state(dataset_root / ".tcip" / "state", "IMG_0000.JPG")
+    assert state["detections"][0]["action"] == "swept"
+    assert state["detections"][0]["gt_bbox_norm"] is None
+    assert state["detections"][0]["pred_bbox_norm"] is None
+    assert len(read_annotations(str(gt))) == 1  # unchanged from the pristine GT
+
+
+def test_review_action_refuses_an_action_outside_the_declared_vocabulary(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """An action the vocabulary doesn't declare is refused at the route, before anything is
+    recorded or written."""
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    gt = tmp_path / "gt.json"
+    _write_gt(gt, [(40, 32, 60, 48)])
+    pred = tmp_path / "pred.json"
+    _write_pred(pred, [(40, 32, 60, 48, 0.9)])
+
+    resp = _review_action(
+        client, img_path, gt, dataset_root,
+        pred_path=str(pred), det_type="tp", class_name="catkin", action="approved",
+    )
+    assert resp.status_code == 422
+    assert not (dataset_root / ".tcip" / "state").exists()
+    assert len(read_annotations(str(gt))) == 1  # unchanged
+
+
 def test_review_accept_fp_adds_prediction_to_gt(client, dataset_root, tmp_path) -> None:
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"

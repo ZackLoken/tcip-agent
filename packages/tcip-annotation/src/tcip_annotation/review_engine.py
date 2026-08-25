@@ -38,6 +38,7 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, Point, bbox_of
+from tcip_annotation.verdicts import VERDICT_ACTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -684,6 +685,10 @@ class ReviewEngine:
         ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once written, so geometry alone cannot tell
         "a genuinely new missed object was attested" apart from "a pre-existing FN was adjudicated".
         """
+        if action not in VERDICT_ACTIONS:
+            raise ValueError(
+                f"unknown verdict action {action!r}; must be one of {VERDICT_ACTIONS}"
+            )
         verdicts = self._review_state.setdefault("verdicts", {})
         is_first_verdict = (bucket, ctx.img_name) not in verdicts
         img_data = verdicts.setdefault(

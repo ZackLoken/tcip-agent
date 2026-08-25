@@ -10,6 +10,7 @@ import {
   RENDER_CACHE_VERSION,
   type CoveragePayload,
   type CoverageRecord,
+  type VerdictActionField,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
@@ -384,10 +385,9 @@ export const api = {
       gt_idx?: number | null;
       pred_idx?: number | null;
       bbox: [number, number, number, number];
-      // "swept": no geometry, no gt/pred index; an explicit "I checked this image for missed
-      // objects and found none" attestation, distinct from "edited" (which always writes a real
-      // GT box). Never mutates ground truth.
-      action: "accepted" | "rejected" | "edited" | "swept";
+      // "swept": an explicit "checked this image for missed objects, found none" attestation,
+      // with no geometry or gt/pred index; unlike "edited", it never mutates ground truth.
+      action: VerdictActionField["action"];
       // Only for action "edited": the shape the user adjusted on the Review canvas.
       edited_box?: [number, number, number, number] | null;
       edited_points?: number[][] | null;

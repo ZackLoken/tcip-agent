@@ -144,7 +144,10 @@ Grid cell system:
 3. `score_predictions` pairs predictions to GT by IoU (default threshold: 0.5) and returns
    aggregate TP/FP/FN; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with
    its class id, box/polygon, IoU, and confidence)
-4. Review in panel: accept correct predictions, correct errors, add missed objects
+4. Review in panel: accept correct predictions, correct errors, add missed objects. The recorded
+   verdict action is one of `tcip_annotation.verdicts.VerdictAction`: accepted, rejected, edited,
+   or swept (an explicit "checked this image, found nothing missed" attestation that mutates no
+   ground truth)
 
 ### The review channel: propose on canvas, never write GT blind
 
