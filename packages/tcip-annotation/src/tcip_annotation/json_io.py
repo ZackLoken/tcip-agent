@@ -161,6 +161,40 @@ def _coerce_point(pt) -> tuple[float, float] | None:
         return None
 
 
+def box_extent_ok(bbox: BBox) -> bool:
+    """Whether ``bbox`` has real extent: ``x2 > x1`` and ``y2 > y1``.
+
+    For a caller that wants to drop or count a degenerate box (a detector's own output clipped
+    to nothing at an image edge) rather than raise: :func:`check_box_extent` enforces the same
+    rule for a request that must be refused rather than silently dropped.
+    """
+    return bbox.x2 > bbox.x1 and bbox.y2 > bbox.y1
+
+
+def check_box_extent(bbox: BBox, *, where: str) -> None:
+    """Refuse a box with no real extent: ``x2 <= x1`` or ``y2 <= y1``.
+
+    ``where`` names what is being written (a subject, a reviewer action, or a record index), so
+    the refusal tells a caller which box failed rather than surfacing as an opaque write.
+    """
+    if not box_extent_ok(bbox):
+        raise ValueError(
+            f"{where}: box (x1={bbox.x1}, y1={bbox.y1}, x2={bbox.x2}, y2={bbox.y2}) has no "
+            "positive extent; a box needs x2 > x1 and y2 > y1"
+        )
+
+
+def bbox_from_corners(x1: float, y1: float, x2: float, y2: float, *, where: str) -> BBox:
+    """A :class:`BBox` from its corners, refusing an inverted or zero-extent one up front.
+
+    The one place a raw request builds a box, so its refusal names ``where`` (the subject or
+    action the request was about) rather than surfacing later at the writer's own record index.
+    """
+    box = BBox(x1, y1, x2, y2)
+    check_box_extent(box, where=where)
+    return box
+
+
 def ring_vertex(vertex) -> tuple[float, float]:
     """A polygon ring vertex as ``(x, y)``, from an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping.
 
@@ -198,7 +232,7 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
         geometry = Polygon(rings=[[ring_vertex(v) for v in payload["points"]]])
     elif payload.get("bbox") is not None:
         x1, y1, x2, y2 = (float(v) for v in payload["bbox"])
-        geometry = BBox(x1, y1, x2, y2)
+        geometry = bbox_from_corners(x1, y1, x2, y2, where=f"subject {payload.get('subject')!r}")
     elif payload.get("point") is not None:
         geometry = Point(float(payload["point"][0]), float(payload["point"][1]))
     round_tripped = bool(payload.get("created_by"))
@@ -404,6 +438,7 @@ def _annotation_record(a: Annotation) -> dict | None:
         poly_box = bbox_of(Polygon(valid_rings))
         rec["bbox"] = xywh(poly_box.x1, poly_box.y1, poly_box.x2, poly_box.y2)
     elif isinstance(geom, BBox):
+        check_box_extent(geom, where=f"{a.subject!r} annotation")
         rec["bbox"] = xywh(geom.x1, geom.y1, geom.x2, geom.y2)
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]

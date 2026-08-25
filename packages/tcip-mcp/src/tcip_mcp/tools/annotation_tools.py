@@ -14,7 +14,7 @@ from tcip_annotation import (
     load_annotations_any,
     save_annotations_any,
 )
-from tcip_annotation.json_io import _PROV_KEYS, annotation_from_payload
+from tcip_annotation.json_io import _PROV_KEYS, annotation_from_payload, box_extent_ok
 from tcip_annotation.json_io import read_annotations as read_labels
 
 from tcip_mcp.dataset_layout import (
@@ -186,7 +186,10 @@ def save_annotations(
     from datetime import datetime, timezone
     _now = datetime.now(timezone.utc).isoformat()
 
-    typed = [annotation_from_payload(a, author=created_by, now=_now) for a in anns_in]
+    try:
+        typed = [annotation_from_payload(a, author=created_by, now=_now) for a in anns_in]
+    except ValueError as exc:
+        return {"error": str(exc)}
 
     out_path = Path(path) if path else annotation_path_for_image(image_path, fmt, date=date)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -920,13 +923,20 @@ def stage_proposals(
     from datetime import datetime, timezone
     created_at = datetime.now(timezone.utc).isoformat()
 
-    proposals: list[Annotation] = [
-        Annotation(subject=subject,
-                   geometry=BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                                 (cx + w / 2) * img_w, (cy + h / 2) * img_h),
-                   score=conf, created_by=model_name, created_at=created_at)
-        for (subject, conf, cx, cy, w, h) in norm_boxes
-    ] + [
+    # A box of nothing is no detection: dropped rather than staged, so it never reaches the
+    # accept branch (which would otherwise hand the persistence boundary a degenerate proposal).
+    box_proposals: list[Annotation] = []
+    dropped_boxes = 0
+    for (subject, conf, cx, cy, w, h) in norm_boxes:
+        box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
+                  (cx + w / 2) * img_w, (cy + h / 2) * img_h)
+        if not box_extent_ok(box):
+            dropped_boxes += 1
+            continue
+        box_proposals.append(Annotation(subject=subject, geometry=box, score=conf,
+                                        created_by=model_name, created_at=created_at))
+
+    proposals: list[Annotation] = box_proposals + [
         Annotation(subject=subject,
                    geometry=Polygon(rings=rings_px),
                    score=conf, created_by=model_name, created_at=created_at)
@@ -949,8 +959,9 @@ def stage_proposals(
                 f"fresh bucket {bucket!r} instead so the reviewed predictions stay intact; " + note)
 
     return {
-        "staged": len(boxes) + len(polygons),
-        "n_detect": len(boxes), "n_segment": len(polygons),
+        "staged": len(box_proposals) + len(norm_polys),
+        "n_detect": len(box_proposals), "n_segment": len(norm_polys),
+        "dropped_nonpositive_boxes": dropped_boxes,
         "path": staged["path"],
         "model_name": model_name, "bucket": bucket, "bucket_redirected": staged["redirected"],
         "date": date, "stem": stem, "note": note,

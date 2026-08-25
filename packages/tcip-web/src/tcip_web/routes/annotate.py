@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tcip_annotation import BBox, Point, Polygon
 from tcip_annotation.json_io import (
@@ -60,7 +60,9 @@ class AnnotationPayload(BaseModel):
 
 class SavePayload(BaseModel):
     image_path: str
-    label_path: Optional[str] = None
+    # Non-empty: a save with nowhere to write can never succeed, so it is refused (422) rather
+    # than accepted as a no-op.
+    label_path: str = Field(min_length=1)
     annotations: list[AnnotationPayload] = []
     # Project root for the audit trail (optional; skipped if absent).
     project_root: Optional[str] = None
@@ -196,37 +198,37 @@ def save_labels(payload: SavePayload) -> dict:
     """
     w, h = _image_dims(payload.image_path)
     label_path = _guard_label_path(payload.label_path)
+    assert label_path is not None  # payload.label_path is non-empty; the guard only confines it
     audit_root = _guarded_audit_root(label_path)
 
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
-    annotations = [
-        annotation_from_payload(ap.model_dump(), author=author, now=now_iso)
-        for ap in payload.annotations
-    ]
+    try:
+        annotations = [
+            annotation_from_payload(ap.model_dump(), author=author, now=now_iso)
+            for ap in payload.annotations
+        ]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
-    written = label_path is not None
-    token: Optional[str] = None
-    if label_path:
-        # The lost-update guard, inside the store's own lock: with a token the write is refused
-        # unless the stored document still matches it, and the client resolves the 409 by reloading.
-        expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
-        try:
-            version = write_annotations(
-                label_path, annotations, w, h, keep_empty=True, expect=expect
-            )
-        except VersionConflict as exc:
-            raise HTTPException(409, {"error": "label file changed since it was loaded"}) from exc
-        except OSError as exc:
-            raise HTTPException(500, f"could not write labels: {exc}") from exc
-        token = version.token if version is not None else None
-        if audit_root is not None:
-            _audit_gui_write(payload, label_path, audit_root)
+    # The lost-update guard, inside the store's own lock: with a token the write is refused
+    # unless the stored document still matches it, and the client resolves the 409 by reloading.
+    expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
+    try:
+        version = write_annotations(label_path, annotations, w, h, keep_empty=True, expect=expect)
+    except VersionConflict as exc:
+        raise HTTPException(409, {"error": "label file changed since it was loaded"}) from exc
+    except OSError as exc:
+        raise HTTPException(500, f"could not write labels: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    token = version.token if version is not None else None
+    if audit_root is not None:
+        _audit_gui_write(payload, label_path, audit_root)
 
     return {
         "status": "ok",
         "image_path": payload.image_path,
-        "label_written": written,
         "n_annotations": len(annotations),
         # New version token so the client can save again without a reload.
         "base_mtime": token,

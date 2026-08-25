@@ -27,7 +27,7 @@ from typing import Optional
 
 import tcip_store
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from tcip_store import Version
 
 from tcip_annotation import (
@@ -40,7 +40,9 @@ from tcip_annotation import (
     compute_classified_trait_matches,
     compute_matches,
 )
-from tcip_annotation.json_io import annotation_from_payload, read_annotations
+from tcip_annotation.json_io import (
+    annotation_from_payload, bbox_from_corners, check_box_extent, read_annotations,
+)
 from tcip_annotation.review_engine import label_baseline_key
 from tcip_annotation.state import Annotation
 from tcip_annotation.verdicts import VerdictAction
@@ -522,7 +524,7 @@ def _apply_gt_mutation(
     if act == "edited":
         geom: BBox | Polygon | None = None
         if payload.edited_box is not None:
-            geom = BBox(*payload.edited_box)
+            geom = bbox_from_corners(*payload.edited_box, where=f"editing {payload.class_name!r}")
         elif payload.edited_points is not None:
             # The reviewer edits one contour by hand on the canvas: single-ring input.
             geom = Polygon(rings=[[(float(p[0]), float(p[1])) for p in payload.edited_points]])
@@ -544,6 +546,8 @@ def _apply_gt_mutation(
     if act == "accepted" and dt == "fp" and payload.pred_idx is not None \
             and 0 <= payload.pred_idx < len(ctx.preds):
         pred = ctx.preds[payload.pred_idx]
+        if isinstance(pred.geometry, BBox):
+            check_box_extent(pred.geometry, where=f"accepting {payload.class_name!r}")
         if classifying:
             # `pred.subject` is the model's predicted value (an attribute-scoped detector's own
             # class space), never the real object type; accepting it as GT means confirming that
@@ -586,7 +590,10 @@ def record_action(payload: ActionPayload) -> dict:
     # Author GT on a copy so the guard can 400 before anything is recorded, and so the verdict
     # entry is recorded against the pristine ctx (its bbox lookups read gt_idx).
     work = replace(ctx, gt=list(ctx.gt))
-    changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso)
+    try:
+        changed, landed_idx = _apply_gt_mutation(work, payload, reviewer, now_iso)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if changed and not gt_path:
         raise HTTPException(
             400, "this verdict writes ground truth, but no annotations path was provided")
@@ -723,7 +730,8 @@ class SaveGtPayload(BaseModel):
     dataset_root: str
     image_name: str
     image_path: str
-    label_path: Optional[str] = None
+    # Non-empty: a save with nowhere to write can never succeed, so it is refused (422).
+    label_path: str = Field(min_length=1)
     # [{subject, bbox?: [x1,y1,x2,y2], rings?: [[[x,y]...], ...], point?: [x,y], attributes?,
     #   created_by?, ...}]
     annotations: list[dict] = []
@@ -741,10 +749,11 @@ def save_gt(payload: SaveGtPayload) -> dict:
     author = user_id(resolve_user(payload.user))
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    ctx = ReviewContext(
-        img_name=payload.image_name, img_width=w, img_height=h,
-        gt=[annotation_from_payload(d, author=author, now=now_iso) for d in payload.annotations],
-    )
+    try:
+        gt = [annotation_from_payload(d, author=author, now=now_iso) for d in payload.annotations]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    ctx = ReviewContext(img_name=payload.image_name, img_width=w, img_height=h, gt=gt)
     ok = engine.save_gt(ctx, path=label_path)
     # Ground truth travels with its dataset, so the edit is recorded beside the labels it changed.
     _audit(payload.dataset_root, "gui_review_save_gt", {

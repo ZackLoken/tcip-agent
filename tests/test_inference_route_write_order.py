@@ -61,7 +61,7 @@ def test_worker_leaves_no_sidecar_when_a_prediction_write_fails_partway(tmp_path
         calls.append(json_path)
         if len(calls) > 1:
             raise OSError("disk full")
-        real_write(json_path, result, **kwargs)
+        return real_write(json_path, result, **kwargs)
 
     monkeypatch.setattr(export, "write_predictions_json", failing_write)
 
@@ -109,5 +109,5 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
     assert sidecar["validated"] is False
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
-                                 "error", "warning"}
+                                 "error", "warning", "dropped_nonpositive_boxes"}
     assert [r["image"] for r in job.results] == ["a.jpg", "b.jpg"]

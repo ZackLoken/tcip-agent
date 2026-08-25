@@ -23,7 +23,7 @@ def _clip(value: float, upper: float | None) -> float:
 def write_predictions_json(
     json_path: str | Path, result: dict, created_by: str | None = None, *,
     id_map: dict[str, int] | None = None,
-) -> None:
+) -> int:
     """Write a ``GenericPredictor`` detection result as a name-based per-image prediction file.
 
     ``result`` carries pixel-xyxy ``boxes``, 1-indexed ``labels`` (background=0), ``scores``, and
@@ -57,6 +57,12 @@ def write_predictions_json(
     own ``operating_point.json`` instead; see :func:`mask_binarize_provenance`, which the two doors
     that write predictions to disk (``export_predictions``, the web inference route) call once and
     fold into that same stamp, mirroring how ``tiled``/``tile_size``/``conf`` already travel there.
+
+    A detector's own box can collapse to zero extent at an image edge (clipping) or a mask that
+    binarized to nothing can fall back to one; a box of nothing is no detection, so it is dropped
+    here rather than raising :func:`~tcip_annotation.json_io.write_annotations`'s own persistence-
+    boundary refusal and failing the whole run over one degenerate detection. Returns the number
+    dropped, for the caller's own run summary.
     """
     from datetime import datetime, timezone
 
@@ -70,6 +76,7 @@ def write_predictions_json(
     id_to_name = decode_class_ids(id_map) if id_map else {}
     masks = result.get("masks")
     preds: list[Annotation] = []
+    dropped = 0
     for i, (box, score, label) in enumerate(zip(
         result.get("boxes", []), result.get("scores", []), result.get("labels", [])
     )):
@@ -79,9 +86,13 @@ def write_predictions_json(
         geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
         if masks is not None and i < len(masks):
             geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name, image_size=(w, h))
+        if isinstance(geometry, BBox) and not json_io.box_extent_ok(geometry):
+            dropped += 1
+            continue
         preds.append(Annotation(subject=name, geometry=geometry, score=float(score),
                                 created_by=created_by, created_at=created_at))
     json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
+    return dropped
 
 
 def mask_binarize_provenance() -> dict:
