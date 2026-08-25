@@ -34,7 +34,7 @@ export const sessionsApi = {
     postJson<unknown>(ROUTES.postSessionsStart, { project_root, user }),
 
   load: (project_root: string) =>
-    getJson<{ sessions: SessionEntry[]; image_status: Record<string, string> }>(
+    getJson<{ sessions: SessionEntry[] }>(
       `${ROUTES.getSessionsLoad}?project_root=${encodeURIComponent(project_root)}`,
     ),
 

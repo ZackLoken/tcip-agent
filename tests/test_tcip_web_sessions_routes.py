@@ -264,4 +264,4 @@ def test_load_missing_returns_empty_shape(client: TestClient, tmp_path: Path) ->
     data = client.get(
         "/api/sessions/load", params={"project_root": str(tmp_path)}
     ).json()
-    assert data == {"sessions": [], "image_status": {}}
+    assert data == {"sessions": []}
