@@ -43,6 +43,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `render_failure_cases` | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
+| `select_best_model` | Rank registered models by a stated metric, direction and verification status |
 
 `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion
 (not the IoU@0.5 comparability convention) determines detection counts/F1, matching what governs
@@ -52,6 +53,14 @@ run is a diagnostic only (matches training-time val mAP, not the shipped full-fr
 `use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
 to report for gating. An untiled checkpoint has no regime split; its one run already is the
 delivery metric (see `evaluate_model`'s own docstring for the full precedence).
+
+`select_best_model` requires a `metric` (no default) and resolves its ranking direction from
+`evaluation.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);
+`higher_is_better` overrides the declaration when a caller states one, required for a metric the
+declaration does not name. It ranks only `metrics_source="trainer"` entries by default (the
+platform's own `default_train` measured them); `include_unverified=True` also ranks
+`"training_source"`/`"caller"` entries, whose numbers were never measured by the platform, and
+`excluded_unverified` in the response names what a default call left out.
 
 ## Calibration/Holdout Split
 
