@@ -15,9 +15,10 @@ torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
-from tests.tiny_trainer_fixtures import ConstantImageDataset
+from tests.tiny_trainer_fixtures import ConstantImageClassDataset, ConstantImageDataset
 
 BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
+CLASSIFIER_BUILDER = "tests.tiny_trainer_fixtures:build_mean_intensity_classifier"
 
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
@@ -110,3 +111,40 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
 
     best = torch.load(out_dir / "model_best.pt", weights_only=False)
     assert best["metrics"]["selection"] == pytest.approx(run.best_metric, abs=1e-6)
+
+
+def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
+    """``f1`` is higher-is-better; model_best.pt must hold the epoch with the highest val f1,
+    not the lowest, and early stopping must track improvement in the same direction."""
+    train_ds = ConstantImageClassDataset(
+        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1])
+    val_ds = ConstantImageClassDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1])
+    collate = task_collate("classification")
+    train_loader = DataLoader(train_ds, batch_size=3, collate_fn=collate)
+    val_loader = DataLoader(val_ds, batch_size=4, collate_fn=collate)
+
+    config = {
+        "model_source": {"builder": CLASSIFIER_BUILDER, "builder_kwargs": {"init_weight": -1.0},
+                         "task": "classification", "in_chans": 1},
+        "device": "cpu",
+        "mixed_precision": False,
+        "stages": [{"freeze_to": 0, "epochs": 5}],
+        "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2, "weight_decay": 0.0},
+        "checkpoint_every_n_epochs": 0,
+        "early_stopping": {"enabled": False},
+        "evaluation": {"selection_metric": "f1"},
+    }
+    run = create_run(config, str(tmp_path / "out"))
+    run = train(run, train_loader, val_loader=val_loader, task="classification")
+
+    assert run.status == "completed", run.error
+    history = run.metrics_history
+    f1_by_epoch = {r["epoch"]: r["val_f1"] for r in history}
+    best_epoch = max(f1_by_epoch, key=lambda e: f1_by_epoch[e])
+    worst_epoch = min(f1_by_epoch, key=lambda e: f1_by_epoch[e])
+    assert f1_by_epoch[best_epoch] > f1_by_epoch[worst_epoch]  # the run must actually vary
+
+    best = torch.load(tmp_path / "out" / "model_best.pt", weights_only=False)
+    assert best["epoch"] == best_epoch
+    assert best["metrics"]["val_f1"] == pytest.approx(f1_by_epoch[best_epoch], abs=1e-6)
+    assert run.best_metric == pytest.approx(f1_by_epoch[best_epoch], abs=1e-6)

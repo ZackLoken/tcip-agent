@@ -101,6 +101,39 @@ CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset({
     "iou_precision", "iou_recall", "iou_f1",
 })
 
+VAL_METRIC_PREFIX = "val_"
+"""What ``_validate`` (generic_trainer.py) prefixes every metric key with before it reaches a
+run's metrics log or a registry entry. Declared once here so a ranking reader strips it without
+importing the training stack."""
+
+HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
+    "loss": False,
+    "objective": False,
+    "mae": False,
+    "rmse": False,
+    "precision": True,
+    "recall": True,
+    "f1": True,
+    "map": True,
+    "map50": True,
+    "map_at_maxdets": True,
+    "map50_at_maxdets": True,
+    "accuracy": True,
+    "rank_acc": True,
+    "quadratic_weighted_kappa": True,
+    "r_squared": True,
+    "mIoU": True,
+    "dice": True,
+    "pixel_acc": True,
+}
+"""Direction of a better value, keyed by the bare (un-``val_``-prefixed) metric name, for every
+scalar ``evaluate()`` (or ``governing_counts``) actually returns across the tasks it scores. A
+metric's value alone never says which way is better, so a ranking that guessed from the key's
+spelling could promote a worse model under an unfamiliar name. A raw count (``tp``/``fp``/``fn``)
+or a signed bias has no such direction and is left out rather than assigned an arbitrary one; a
+non-finite value's state companion (``tcip_store.values.NOT_FINITE_SUFFIX``) is excluded by that
+suffix rule, not listed here."""
+
 
 def _rounded(value):
     """One metric at the reported precision, leaving a non-finite or non-numeric value alone.

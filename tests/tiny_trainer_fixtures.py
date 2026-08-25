@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
@@ -59,6 +60,51 @@ class MeanIntensityRegressor(nn.Module):
 def build_mean_intensity_regressor(*, init_weight: float = 0.0) -> MeanIntensityRegressor:
     """``model_source`` builder for :class:`MeanIntensityRegressor`."""
     return MeanIntensityRegressor(init_weight=init_weight)
+
+
+class ConstantImageClassDataset(Dataset):
+    """Non-square single-channel frames, one intensity per frame, paired with a class label."""
+
+    def __init__(self, intensities, labels, height: int = 6, width: int = 10) -> None:
+        if len(intensities) != len(labels):
+            raise ValueError("intensities and labels must be the same length")
+        self.intensities = [float(i) for i in intensities]
+        self.labels = [int(v) for v in labels]
+        self.height = int(height)
+        self.width = int(width)
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
+    def __getitem__(self, idx: int):
+        image = torch.full((1, self.height, self.width), self.intensities[idx])
+        return image, {"labels": self.labels[idx]}
+
+
+class MeanIntensityClassifier(nn.Module):
+    """Two-class logit ``[0, weight * mean(image)]``, cross-entropy loss in train mode.
+
+    One parameter, so a run's trajectory is decided by the data it is fed alone.
+    """
+
+    num_classes = 2
+
+    def __init__(self, init_weight: float = 0.0) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        self.heads = [self]  # evaluate() reads num_classes off model.heads[0]
+
+    def forward(self, images, targets=None):
+        logit1 = self.weight * images.mean(dim=(1, 2, 3))
+        logits = torch.stack([torch.zeros_like(logit1), logit1], dim=1)
+        if self.training and targets is not None:
+            return {"ce": F.cross_entropy(logits, targets["labels"])}
+        return {"head0_labels": logits.argmax(dim=1)}
+
+
+def build_mean_intensity_classifier(*, init_weight: float = 0.0) -> MeanIntensityClassifier:
+    """``model_source`` builder for :class:`MeanIntensityClassifier`."""
+    return MeanIntensityClassifier(init_weight=init_weight)
 
 
 class DataScaledGradientModel(nn.Module):
