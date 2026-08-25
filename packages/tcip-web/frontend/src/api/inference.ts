@@ -2,6 +2,8 @@
 
 import { decodeRefusal, getJson, postJson, StructuredRefusalError, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import type { JobStatus } from "@/api/types.generated";
+import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 
 /**
  * One entry from the project's trained-model registry, as the browser reads it.
@@ -17,14 +19,9 @@ export interface RegisteredModel {
   tags?: string[];
 }
 
-export type InferenceStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  // Rehydrated after a restart: the job's worker thread is gone (not resumable).
-  | "interrupted";
+// "interrupted" (one of JobStatus's members) is a job rehydrated after a restart: its worker
+// thread is gone and it is not resumable.
+export type InferenceStatus = JobStatus;
 
 export interface InferenceJob {
   job_id: string;
@@ -73,45 +70,33 @@ export const inferenceApi = {
  * backoff if the socket drops mid-run. The server sends a single ``final`` frame at a
  * terminal state and closes; once seen we stop reconnecting (the job is done, not lost).
  */
+function frameType(data: string): string | undefined {
+  try {
+    return (JSON.parse(data) as Record<string, unknown>).type as string | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function openInferenceStream(
   jobId: string,
   onMessage: (msg: Record<string, unknown>) => void,
 ): () => void {
-  const url = wsUrl(ROUTES.socketInferenceJobsByJobIdStream(jobId));
-  let ws: WebSocket | null = null;
-  let closedByClient = false;
-  let terminated = false;
-  let backoff = 500;
-
-  const connect = () => {
-    if (closedByClient) return;
-    ws = new WebSocket(url);
-    ws.onopen = () => {
-      backoff = 500;
-    };
-    ws.onmessage = (ev) => {
+  const socket = createReconnectingSocket({
+    url: wsUrl(ROUTES.socketInferenceJobsByJobIdStream(jobId)),
+    isTerminal: (data) => frameType(data) === "final",
+    onMessage: (data) => {
       let msg: Record<string, unknown>;
       try {
-        msg = JSON.parse(ev.data);
+        msg = JSON.parse(data);
       } catch {
         return;
       }
-      if (msg.type === "final") terminated = true;
       onMessage(msg);
-    };
-    ws.onclose = () => {
-      if (closedByClient || terminated) return;
-      const delay = backoff;
-      backoff = Math.min(backoff * 2, 15_000);
-      setTimeout(connect, delay);
-    };
-  };
-
-  connect();
-  return () => {
-    closedByClient = true;
-    ws?.close();
-  };
+    },
+  });
+  socket.start();
+  return () => socket.stop();
 }
 
 export interface PlantMappingSummary {

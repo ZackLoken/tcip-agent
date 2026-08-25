@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 // xterm renders into canvas/DOM measurement APIs jsdom doesn't have; mock the
 // emulator and its addons; the rail's own logic (status gate, session wiring,
@@ -60,14 +60,21 @@ import { useStore } from "@/store";
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
   static OPEN = 1;
+  static CLOSED = 3;
   readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev: { code: number }) => void) | null = null;
   send = vi.fn();
   close = vi.fn();
   constructor(public url: string) {
     MockWebSocket.instances.push(this);
+  }
+
+  /** Drop the socket (server-side or network); code 1008 mirrors the "unknown session" close. */
+  drop(code = 1006) {
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.({ code });
   }
 }
 vi.stubGlobal("WebSocket", MockWebSocket);
@@ -278,6 +285,45 @@ describe("TerminalRail", () => {
       } finally {
         // Restore, so a later test in this file can't inherit "a project is open".
         useStore.getState().patchGui({ dataset });
+      }
+    });
+  });
+
+  describe("reconnect after a drop", () => {
+    it("reconnects with backoff, keeping the same session for an ordinary drop", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        render(<TerminalRail />);
+        await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+        const first = MockWebSocket.instances[0];
+        first.readyState = MockWebSocket.OPEN;
+        first.onopen?.();
+
+        first.drop(1006);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+        expect(MockWebSocket.instances).toHaveLength(2);
+        expect(terminalApi.createSession).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("invalidates the session on a close-before-open or code 1008, so the next attempt re-creates one", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        render(<TerminalRail />);
+        await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+        MockWebSocket.instances[0].drop(1008); // never opened
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(500);
+        });
+        expect(MockWebSocket.instances).toHaveLength(2);
+        expect(terminalApi.createSession).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
       }
     });
   });

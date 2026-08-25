@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StateSocket } from "@/api/ws";
+import { useStore } from "@/store";
 
 /** Minimal WebSocket stand-in: records instances, lets tests drive events. */
 class FakeWebSocket {
@@ -35,6 +36,10 @@ class FakeWebSocket {
   drop() {
     this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.();
+  }
+
+  error() {
+    this.onerror?.();
   }
 
   /** Client-initiated close: the browser still fires the close event. */
@@ -104,6 +109,46 @@ describe("StateSocket.connect", () => {
     socket.close();
     vi.advanceTimersByTime(60_000);
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+});
+
+describe("StateSocket wsStatus transitions", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    useStore.setState({ wsStatus: "disconnected" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("drives connecting, connected, error and an unexpected drop's disconnected", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    expect(useStore.getState().wsStatus).toBe("connecting");
+
+    lastSocket().open();
+    expect(useStore.getState().wsStatus).toBe("connected");
+
+    lastSocket().error();
+    expect(useStore.getState().wsStatus).toBe("error");
+
+    lastSocket().drop();
+    expect(useStore.getState().wsStatus).toBe("disconnected");
+    socket.close();
+  });
+
+  it("a deliberate close does not flip status to disconnected: supersession suppresses it", () => {
+    const socket = new StateSocket();
+    socket.connect();
+    lastSocket().open();
+    expect(useStore.getState().wsStatus).toBe("connected");
+
+    socket.close();
+    expect(useStore.getState().wsStatus).toBe("connected");
   });
 });
 

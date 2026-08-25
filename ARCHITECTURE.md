@@ -217,7 +217,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
-| packages/tcip-web/frontend/src/App.tsx | (none found) | 27 | 1 |
+| packages/tcip-web/frontend/src/App.tsx | (none found) | 28 | 1 |
 | packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 2 | 7 |
 | packages/tcip-web/frontend/src/api/client.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/api/client.ts | Typed REST client for the tcip-web backend. | 6 | 39 |
@@ -263,7 +263,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 2 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 1 |
-| packages/tcip-web/frontend/src/components/TopBar.tsx | (none found) | 2 | 1 |
+| packages/tcip-web/frontend/src/components/TopBar.tsx | (none found) | 3 | 1 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.ts | Mirror the active tab into the backend GUI state so view_gui_state reports the tab the human actually sees. | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useCoverageGrid.ts | The coverage lattice for the open raster, fetched once the base serve shows the raster is larger than one display-bounded serve (Served-Size below the native dims). | 3 | 2 |
@@ -297,7 +297,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/coverageTracker.ts | Session accumulator for the per-image view-coverage record. | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.ts | Stop the browser's own ctrl+wheel page zoom over the app, so the canvas' zoom is the only zoom. | 0 | 2 |
-| packages/tcip-web/frontend/src/lib/datasetUiState.ts | Per-(project, date, subject/model) UI state, so switching dates/projects and returning lands you back where you were. | 2 | 3 |
+| packages/tcip-web/frontend/src/lib/datasetUiState.ts | Per-(project, date, subject/model) UI state, so switching dates/projects and returning lands you back where you were. | 3 | 3 |
 | packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 0 | 6 |
 | packages/tcip-web/frontend/src/lib/labelSerde.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/labelSerde.ts | The single mapping between the unified name-based label file (one Annotation list per image) and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). | 1 | 3 |
@@ -314,7 +314,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.ts | Drive the Review tab to a model's predictions on a specific frame/detection in response to the agent's `review_focus` event. | 2 | 3 |
 | packages/tcip-web/frontend/src/lib/reviewGeometry.ts | The single source of a review detection's geometry. | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/runStatus.ts | Statuses a training run or a sweep never leaves, so a poll keyed on one can stop. | 0 | 2 |
+| packages/tcip-web/frontend/src/lib/runStatus.ts | Statuses a training run or a sweep never leaves, so a poll keyed on one can stop. | 1 | 2 |
 | packages/tcip-web/frontend/src/lib/viewGeometry.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/viewGeometry.ts | Shared view math for the canvas: fit the view to a pixel rect and clamp pan offsets. | 2 | 7 |
 | packages/tcip-web/frontend/src/main.tsx | (none found) | 1 | 0 |
@@ -678,7 +678,7 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 95 (6 on `app.py` plus 89 across the 16 route modules, both
+Total HTTP routes at HEAD: 93 (6 on `app.py` plus 87 across the 16 route modules, both
 counts obtained this session by grepping `@app.get/post(` and `@router.get/post(` and
 summing).
 
@@ -695,14 +695,14 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:129` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:138` |
-| WS | `/ws/state` | `state_ws` | `app.py:146` |
-| GET | `/health` | `health` | `app.py:229` |
-| GET | `/` | `index` | `app.py:237` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:260` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:304` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:313` |
+| GET | `/api/state` | `get_state` | `app.py:134` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:143` |
+| WS | `/ws/state` | `state_ws` | `app.py:151` |
+| GET | `/health` | `health` | `app.py:234` |
+| GET | `/` | `index` | `app.py:242` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:265` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:309` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:318` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -739,7 +739,7 @@ registered at HEAD.
 | GET | `/completeness` | `get_completeness` | `routes/coverage.py:279` |
 | POST | `/completeness` | `post_completeness` | `routes/coverage.py:320` |
 
-### routes/dataset.py, prefix `/api/dataset` (5 routes)
+### routes/dataset.py, prefix `/api/dataset` (4 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
@@ -747,7 +747,6 @@ registered at HEAD.
 | GET | `/images` | `list_images` | `routes/dataset.py:167` |  <!-- queued: P5-84 delete -->
 | POST | `/select` | `select_dataset` | `routes/dataset.py:189` |
 | POST | `/nav` | `set_current_image` | `routes/dataset.py:269` |
-| GET | `/state` | `get_state_snapshot` | `routes/dataset.py:286` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -765,16 +764,15 @@ registered at HEAD.
 | POST | `/overviews` | `build_image_overviews` | `routes/images.py:838` |
 | GET | `/overviews/status` | `get_overview_job` | `routes/images.py:862` |
 
-### routes/inference.py, prefix `/api/inference` (5 HTTP + 1 WS)
+### routes/inference.py, prefix `/api/inference` (4 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:414` |  <!-- queued: P5-105 delete -->
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:514` |
-| GET | `/jobs/{job_id}` | `get_job` | `routes/inference.py:532` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:549` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:563` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:573` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:415` |  <!-- queued: P5-105 delete -->
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:515` |
+| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:520` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:534` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:544` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -885,7 +883,7 @@ above against HEAD.
 | GET | `/` | loaded by the browser's own navigation, not via fetch/XHR from app code |
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
 | GET | `/api/events/{panel}/recent` | no caller found |
-| GET | `/api/dataset/state` | no caller found |  <!-- queued: P5-87 unify -->
+| GET | `/api/state` | no caller found |
 | GET | `/api/images/dimensions` | no caller found |  <!-- queued: P5-72 delete -->
 | GET | `/api/inference/jobs/{job_id}/preview` | no caller found; `inferenceApi` has no `preview` function |  <!-- queued: P5-125 delete -->
 | GET | `/api/review/image_status` | singular form; no caller found (plural `/api/review/image_statuses` is called) |  <!-- queued: P5-141 delete -->
@@ -1431,15 +1429,15 @@ every declared document (183).
 Path: `<project_root>/.tcip/state/gui.json`, addressed by `gui_snapshot_key`,
 `packages/tcip-web/src/tcip_web/state.py:18`.
 
-Writer: `StateStore._flush_sync`, `tcip_web/state.py:251`, debounced 0.5s after `mutate`/`replace`, which
+Writer: `StateStore._flush_sync`, `tcip_web/state.py:246`, debounced 0.5s after `mutate`/`replace`, which
 resolves the destination at flush time so a project switch during the debounce window cannot write
 one project's snapshot into another's. The store is declared `durable=False`: the snapshot is
 rewritten every debounce cycle and losing the last one costs a re-selection, not history.
 
-Reader: `StateStore.load_from_disk`, `tcip_web/state.py:264`.
+Reader: `StateStore.load_from_disk`, `tcip_web/state.py:259`.
 
-`StateStore.mutate`, `tcip_web/state.py:200`, validates the merged mutation through `GuiState`
-before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:34`) on a field that does not
+`StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
+before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
 `packages/tcip-web/src/tcip_web/app.py:106`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
@@ -1619,7 +1617,7 @@ Phase 3 verdict: single.
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:154` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:157` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:30` (`from tcip_mcp.web_client import VALID_PANELS`).
 Phase 3 verdict: duplicated.
 
@@ -1627,7 +1625,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:708` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:283` (`if event.event_type == "review_focus":`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:288` (`if event.event_type == "review_focus":`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:845`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
@@ -1654,7 +1652,7 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
 
 Must agree: job summaries are written and reloaded against the same pinned platform root.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:45` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:32`; the platform root it keys on is resolved by `project_root`, not composed).
+Side A: `packages/tcip-web/src/tcip_web/jobstore.py:46` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:32`; the platform root it keys on is resolved by `project_root`, not composed).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.persist`/`jobstore.load`).
 Phase 3 verdict: duplicated.
 
@@ -1788,7 +1786,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:988` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:988` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar
@@ -1928,29 +1926,29 @@ Phase 3 verdict: single. The api/ helpers keep their hand-written signatures and
 ## S47. GuiState shape between state.py and store/types.ts  <!-- queued: P5-287 unify -->
 
 Must agree: the snapshot the backend serializes deserializes into the store's typed shape.
-Side A: `packages/tcip-web/src/tcip_web/state.py:103` (`class GuiState(BaseModel):`).
+Side A: `packages/tcip-web/src/tcip_web/state.py:98` (`class GuiState(BaseModel):`).
 Side B: `packages/tcip-web/frontend/src/store/types.ts:2` (comment: `Types mirroring the Python backend's GuiState`, with the keep-in-sync pointer back to `state.py` on the line below).
 Phase 3 verdict: duplicated.
 
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:145` (`@app.websocket("/ws/state")`).
-Side B: `packages/tcip-web/src/tcip_web/state.py:180` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
+Side A: `packages/tcip-web/src/tcip_web/app.py:150` (`@app.websocket("/ws/state")`).
+Side B: `packages/tcip-web/src/tcip_web/state.py:175` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
 Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:325` (`@router.websocket("/ws/{session_id}")`).
-Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:338` (`send({ type: "input", data });`).
+Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:319` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:572` (`@router.websocket("/jobs/{job_id}/stream")`).
-Side B: `packages/tcip-web/src/tcip_web/jobstore.py:56` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:543` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side B: `packages/tcip-web/src/tcip_web/jobstore.py:61` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
@@ -1978,21 +1976,21 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:22` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:195` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:200` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:16` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:145` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:150` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-web/src/tcip_web/state.py:24` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` at line 28 restating it as a tuple for iteration and membership tests).
-Side B: `packages/tcip-web/frontend/src/store/types.ts:8` (`export type TabName =`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:150` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:9` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
 ## S57. Review match computation and its response shape
@@ -2020,7 +2018,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:148` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:153` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets
