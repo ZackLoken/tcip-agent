@@ -181,8 +181,9 @@ frames → they accept on the canvas → only then does it become GT. See
   `replace_image_status_store` rather than by hand. `to_coco_dataset` silently skips an
   empty file that is not in that set, treating it as unannotated. You cannot manufacture
   negatives; writing empty label files does not create them; only the human's Complete does.
-  `python scripts/doctor.py <root>` flags every empty-label/status disagreement. Never delete
-  empty label files without asking.
+  `python scripts/doctor.py <root>` flags every empty-label/status disagreement, a status entry in
+  a shape it cannot read, and a stored `"complete"` whose label file holds no annotation of the
+  confirmed subject. Never delete empty label files without asking.
 - Cohen's κ: inter-annotator agreement (if multiple annotators)
 
 ## Active Learning

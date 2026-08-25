@@ -102,6 +102,38 @@ def check_negatives(root: Path, findings: list) -> None:
                             "(a confirmed negative should have an empty label file)"))
 
 
+def check_status_tokens(root: Path, findings: list) -> None:
+    """Flag two ways the status store can no longer be trusted at face value: an entry a reader
+    doesn't recognize (dropped silently by any merge), and a stored ``"complete"`` whose label
+    file holds no annotation of the confirmed subject (a stale token, possibly reconciled since by
+    the GUI's own hydrate, possibly not). A report, not a rewrite: the record names who confirmed
+    it, and this doctor is not that person.
+    """
+    from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import (
+        annotation_dir, annotations_hold_subject, bucket_subject_date, image_status_path,
+        label_filename, status_confirmations, unreadable_status_entries,
+    )
+
+    raw = _load(image_status_path(root))
+    unreadable = unreadable_status_entries(raw)
+    if unreadable:
+        findings.append(("warn", f"{len(unreadable)} status entr{'y is' if len(unreadable) == 1 else 'ies are'} "
+                        f"in a shape this reader does not recognize, starting with {unreadable[:3]}"))
+
+    for bucket, records in status_confirmations(raw).items():
+        subject, date = bucket_subject_date(bucket)
+        for name, record in records.items():
+            if record.get("status") != "complete":
+                continue
+            stem = Path(name).stem
+            label = annotation_dir(root, date) / label_filename(stem)
+            anns = json_io.read_annotations(str(label)) if label.is_file() else []
+            if not annotations_hold_subject(anns, subject):
+                findings.append(("warn", f"{bucket}/{name}: status says 'complete' but the label "
+                                f"file holds no {subject!r} annotation; re-confirm"))
+
+
 def check_registry(root: Path, findings: list) -> None:
     """Flag registered models whose checkpoint is missing or points into a test/temp tree.
 
@@ -267,6 +299,7 @@ def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:
     """
     return {
         "check_negatives": ((root, "image_status"),),
+        "check_status_tokens": ((root, "image_status"),),
         "check_region_completeness": (
             (root, "region_completeness"),
             (root, "region_completeness_digest"),
@@ -326,8 +359,9 @@ def main() -> int:
 
     findings: list[tuple[str, str]] = []
     invalid = staleness_findings(root)
-    for check in (check_negatives, check_registry, check_provenance, check_state,
-                 check_region_completeness, check_trait_specs, check_trait_spec_statements):
+    for check in (check_negatives, check_status_tokens, check_registry, check_provenance,
+                 check_state, check_region_completeness, check_trait_specs,
+                 check_trait_spec_statements):
         reason = invalid.get(check.__name__)
         if reason:
             findings.append(("error", f"{check.__name__} reads state as files and those files "

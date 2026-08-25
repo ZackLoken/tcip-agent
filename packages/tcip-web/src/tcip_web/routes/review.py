@@ -17,7 +17,6 @@ guessing.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import uuid
 from collections.abc import Callable, Iterable
@@ -44,7 +43,7 @@ from tcip_annotation import (
 from tcip_annotation.json_io import annotation_from_payload, read_annotations
 from tcip_annotation.review_engine import label_baseline_key
 from tcip_annotation.state import Annotation
-from tcip_mcp.dataset_layout import derive_status
+from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.paths import assert_path_allowed
@@ -641,11 +640,13 @@ class MarkCompletePayload(BaseModel):
     dataset_root: str
     image_name: str
     gt_path: Optional[str] = None
-    # The prediction bucket loaded for this image: a confirmed negative carries zero
-    # verdict entries, so it has nowhere else to record which model it was reviewed against; this
-    # stamps that producer-identity fact on the image-level record instead.
+    # A confirmed negative carries zero verdict entries, so this stamps the producer identity
+    # on the image-level record instead of a verdict.
     pred_dir: Optional[str] = None
     completed: bool = True  # False reverses a manual mark (verdicts are kept)
+    # The subject this Complete confirms; absent, completion is still recorded but no
+    # subject-scoped status is derived or mirrored into the classes store.
+    subject: Optional[str] = None
 
 
 @router.post("/mark_complete")
@@ -657,27 +658,28 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     bucket = _bucket_of_dir(pred_dir)
     if payload.completed:
         producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
-        # A zero-verdict Complete is FN-adjudication-covered only when it is a genuine negative:
-        # the bucket held zero predictions for this image, so there was nothing to individually walk
-        # and Complete is itself the confirming act. A bulk-accept of an image the bucket did
-        # predict on, with no individual verdicts recorded, is not covered: the breeder never
-        # actually looked, and treating it as covered would let exactly that padding dilute a real
-        # reference's statistics. No prediction file for this stem reads as "nothing to check" ->
-        # also covered.
+        # Adjudication-covered only for a genuine negative of the reviewed subject: a bulk-accept
+        # with no individual verdicts on a subject the bucket did predict is not covered.
         is_negative = True
         if pred_dir:
             pred_file = Path(pred_dir) / f"{Path(payload.image_name).stem}.json"
-            is_negative = not _has_objects(pred_file)
+            if payload.subject:
+                is_negative = _subject_scoped_prediction_negative(
+                    pred_file, payload.subject, payload.dataset_root)
+            else:
+                is_negative = not _has_objects(pred_file)
         engine.mark_image_reviewed(bucket, payload.image_name,
                                    producer_identity=producer_identity,
                                    adjudication_covered=is_negative)
     else:
         engine.unmark_image_reviewed(bucket, payload.image_name)
-    # Derive the annotation status from the GT file on disk: the client's matches snapshot can be
-    # stale or null mid-navigation and once wrote negatives for annotated frames. A present file
-    # with no annotations of any subject is an empty (negative) record.
-    has_content = bool(gt_path and os.path.isfile(gt_path) and read_annotations(gt_path))
-    annotation_status = derive_status(completed=payload.completed, has_content=has_content)
+    # The annotation status is derived from the GT file, scoped to the confirmed subject.
+    # No subject named -> no status to derive.
+    annotation_status = None
+    if payload.subject:
+        annotations = read_annotations(gt_path) if gt_path else []
+        has_content = annotations_hold_subject(annotations, payload.subject)
+        annotation_status = derive_status(completed=payload.completed, has_content=has_content)
     _audit(payload.dataset_root, "gui_review_mark_complete", {
         "image_name": payload.image_name,
         "completed": payload.completed,
@@ -1095,6 +1097,23 @@ def _has_objects(path: Path) -> bool:
     """True if ``path`` holds at least one annotation record, read through the one label reader.
     An empty (confirmed-negative) or missing file has nothing to review."""
     return bool(read_annotations(str(path)))
+
+
+def _subject_scoped_prediction_negative(pred_file: Path, subject: str, dataset_root: str) -> bool:
+    """True when a Complete on ``subject`` is a genuine subject-scoped negative against ``pred_file``.
+
+    The file must hold no record of ``subject`` and every record it does hold must name a subject
+    registered in the dataset's ``classes.json``: a raw class id (a record decoded with no id map)
+    cannot be told apart from the reviewed subject by name, so such a file leaves the image
+    uncovered rather than reading a mismatch as "predicted none of it".
+    """
+    from tcip_mcp.dataset_layout import list_subjects
+
+    annotations = read_annotations(str(pred_file))
+    if annotations_hold_subject(annotations, subject):
+        return False
+    registered = set(list_subjects(dataset_root))
+    return all(a.subject in registered for a in annotations)
 
 
 def _stems_with_objects(*dirs: Optional[str]) -> set[str]:

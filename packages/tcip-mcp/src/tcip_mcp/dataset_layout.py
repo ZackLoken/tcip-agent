@@ -652,6 +652,16 @@ def derive_status(*, completed: bool, has_content: bool) -> str:
     return "partial" if has_content else "unannotated"
 
 
+def annotations_hold_subject(annotations: Iterable, subject: str) -> bool:
+    """Whether any of ``annotations`` (as :func:`tcip_annotation.json_io.read_annotations` returns
+    them) names ``subject``, geometry or not.
+
+    An image-level record (a subject with no geometry) counts as content for that subject, the
+    same rule :func:`derive_status` and its callers already apply to a whole label file.
+    """
+    return any(a.subject == subject for a in annotations)
+
+
 def is_confirmed_negative(status: object) -> bool:
     """Whether a stored status is a human's confirmation that the image holds none of the subject.
 

@@ -18,7 +18,6 @@ undecodable without it.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import OrderedDict
 from pathlib import Path
@@ -37,34 +36,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/classes", tags=["classes"])
 
 
-# ── Label-JSON memo (mtime-keyed, bounded) ────────────────────────────────
-# derive_image_status and the label-derived subject list both re-parse label JSONs on every call:
-# a dataset-selection change or a /load with no saved registry re-scans the same files repeatedly.
-# Memoize per (path, mtime_ns) so an unchanged file is parsed once; a write bumps mtime_ns and the
-# next read re-parses it.
-_LABEL_JSON_CACHE_MAX = 4096
-_label_json_cache: "OrderedDict[str, tuple[int, object]]" = OrderedDict()
+# ── Label-annotations memo (mtime-keyed, bounded) ─────────────────────────
+# Both consumers below re-parse the same label files on every call; memoize per (path, mtime_ns).
+_LABEL_ANNOTATIONS_CACHE_MAX = 4096
+_label_annotations_cache: "OrderedDict[str, tuple[int, list]]" = OrderedDict()
 
 
-def _cached_label_json(path: Path) -> object:
+def _cached_label_annotations(path: Path) -> list:
+    """The typed annotation records ``read_annotations`` parses from ``path``, memoized by mtime.
+
+    A missing or malformed file reads as no annotations, the reader's own never-raise contract;
+    the cache holds that empty result exactly like a genuine empty file.
+    """
+    from tcip_annotation.json_io import read_annotations
+
     try:
         mtime_ns = path.stat().st_mtime_ns
     except OSError:
-        return None
+        return []
     key = str(path)
-    cached = _label_json_cache.get(key)
+    cached = _label_annotations_cache.get(key)
     if cached is not None and cached[0] == mtime_ns:
-        _label_json_cache.move_to_end(key)
+        _label_annotations_cache.move_to_end(key)
         return cached[1]
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = None
-    _label_json_cache[key] = (mtime_ns, data)
-    _label_json_cache.move_to_end(key)
-    if len(_label_json_cache) > _LABEL_JSON_CACHE_MAX:
-        _label_json_cache.popitem(last=False)
-    return data
+    annotations = read_annotations(path)
+    _label_annotations_cache[key] = (mtime_ns, annotations)
+    _label_annotations_cache.move_to_end(key)
+    if len(_label_annotations_cache) > _LABEL_ANNOTATIONS_CACHE_MAX:
+        _label_annotations_cache.popitem(last=False)
+    return annotations
 
 
 def _guard_dataset_root(root: str) -> str:
@@ -110,12 +110,8 @@ def _subjects_in_dir(d: Path) -> set[str]:
     """Distinct subject names present in a dir's per-image label files."""
     subjects: set[str] = set()
     for jf in d.glob("*.json"):
-        data = _cached_label_json(jf)
-        if not isinstance(data, dict):
-            continue
-        for o in data.get("annotations") or []:
-            if isinstance(o, dict) and isinstance(o.get("subject"), str) and o["subject"]:
-                subjects.add(o["subject"])
+        for record in _cached_label_annotations(jf):
+            subjects.add(record.subject)
     return subjects
 
 
@@ -358,7 +354,7 @@ def set_image_status_bulk(payload: ImageStatusBulkPayload) -> dict:
 class DerivePayload(BaseModel):
     project_root: str
     annotations_dir: Optional[str] = None
-    subject: Optional[str] = None
+    subject: str
     image_list: list[str]
     complete_override: list[str] = []
 
@@ -368,14 +364,13 @@ def derive_image_status(payload: DerivePayload) -> dict:
     """Compute initial per-image status from the per-image label files.
 
     The mapping itself is ``dataset_layout.derive_status``, the same one the review tab's Complete
-    goes through, so the two cannot disagree about what a Complete on an empty image means. When a
-    ``subject`` is given, only annotations of that subject count (per-subject scoping).
+    goes through, so the two cannot disagree about what a Complete on an empty image means.
+    ``has_content`` is scoped to ``subject`` through ``annotations_hold_subject``, the predicate
+    the review route's own Complete derives its token through.
     """
-    from tcip_mcp.dataset_layout import derive_status
+    from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 
-    # Reads label files directly rather than through _resolve_dataset_root, so it needs its own
-    # confinement call (no-op unless TCIP_IMAGE_ROOTS is set): an absolute-path read is exactly
-    # what that lockdown governs.
+    # An absolute-path read needs its own confinement (no-op unless TCIP_IMAGE_ROOTS is set).
     if payload.annotations_dir:
         _guard_dataset_root(payload.annotations_dir)
     adir = Path(payload.annotations_dir) if payload.annotations_dir else None
@@ -386,15 +381,8 @@ def derive_image_status(payload: DerivePayload) -> dict:
         stem = name.rsplit(".", 1)[0]
         has_any = False
         if adir:
-            data = _cached_label_json(adir / f"{stem}.json")
-            if isinstance(data, dict):
-                anns = data.get("annotations") or []
-                if payload.subject:
-                    has_any = any(
-                        isinstance(o, dict) and o.get("subject") == payload.subject for o in anns
-                    )
-                else:
-                    has_any = bool(anns)
+            annotations = _cached_label_annotations(adir / f"{stem}.json")
+            has_any = annotations_hold_subject(annotations, payload.subject)
         statuses[name] = derive_status(completed=name in complete_set, has_content=has_any)
 
     return {"statuses": statuses}

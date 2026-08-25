@@ -266,6 +266,37 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     assert "'catkin'" in contradictions[0]
 
 
+def test_doctor_flags_a_bare_status_token(tmp_path):
+    """A status store entry with no {status, recorded_by, recorded_at} shape is unreadable and
+    would be dropped by any merge; the doctor reports it by count rather than staying silent."""
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
+    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
+    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
+        {status_bucket("catkin", date): {"IMG_S.JPG": "unannotated"}}))
+
+    res = _run(root, file_layout=True)
+    assert "1 status entry is in a shape this reader does not recognize" in res.stdout
+
+
+def test_doctor_flags_a_stale_complete_token(tmp_path):
+    """A stored 'complete' whose label file holds no annotation of the confirmed subject is a
+    token a human should re-confirm; the doctor reports it and does not rewrite it."""
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
+    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
+    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
+        {status_bucket("catkin", date): status_records(
+            {"IMG_S.JPG": "complete"}, recorded_by="user:breeder")}))
+
+    res = _run(root, file_layout=True)
+    stale = _lines(res.stdout, "re-confirm")
+    assert len(stale) == 1, res.stdout
+    assert "catkin" in stale[0] and "IMG_S.JPG" in stale[0]
+
+
 def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_path):
     """Entries written by ModelRegistry are the shape doctor.py reports on, so an entry whose
     checkpoint is gone is named with its own name and path rather than read as nothing."""
