@@ -2,6 +2,7 @@
 
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 
 export interface TrainingRunSummary {
   run_id: string;
@@ -83,6 +84,14 @@ export interface TrainingStreamMsg {
  * dedupe by epoch/step. A ``status`` (terminal) or ``error`` (unknown run) frame ends
  * the stream; once seen we stop reconnecting.
  */
+function frameType(data: string): string | undefined {
+  try {
+    return (JSON.parse(data) as TrainingStreamMsg).type;
+  } catch {
+    return undefined;
+  }
+}
+
 export function openTrainingStream(
   project_root: string,
   run_id: string,
@@ -91,38 +100,22 @@ export function openTrainingStream(
   const url = wsUrl(
     `${ROUTES.socketTrainingRunsByRunIdStream(run_id)}?project_root=${encodeURIComponent(project_root)}`,
   );
-  let ws: WebSocket | null = null;
-  let closedByClient = false;
-  let terminated = false;
-  let backoff = 500;
-
-  const connect = () => {
-    if (closedByClient) return;
-    ws = new WebSocket(url);
-    ws.onopen = () => {
-      backoff = 500;
-    };
-    ws.onmessage = (ev) => {
+  const socket = createReconnectingSocket({
+    url,
+    isTerminal: (data) => {
+      const t = frameType(data);
+      return t === "status" || t === "error";
+    },
+    onMessage: (data) => {
       let m: TrainingStreamMsg;
       try {
-        m = JSON.parse(ev.data);
+        m = JSON.parse(data);
       } catch {
         return;
       }
-      if (m.type === "status" || m.type === "error") terminated = true;
       onMessage(m);
-    };
-    ws.onclose = () => {
-      if (closedByClient || terminated) return;
-      const delay = backoff;
-      backoff = Math.min(backoff * 2, 15_000);
-      setTimeout(connect, delay);
-    };
-  };
-
-  connect();
-  return () => {
-    closedByClient = true;
-    ws?.close();
-  };
+    },
+  });
+  socket.start();
+  return () => socket.stop();
 }

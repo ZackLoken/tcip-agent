@@ -16,9 +16,9 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
+import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
 
-const MAX_BACKOFF_MS = 15_000;
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 480;
 const WIDTH_KEY = "tcip.terminal_width";
@@ -278,60 +278,41 @@ export function TerminalRail() {
     host.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("mouseup", onWindowMouseUp);
 
-    let ws: WebSocket | null = null;
+    // The URL provider re-checks closedByClient after the await, so a torn-down effect
+    // (rail toggled, StrictMode remount) cannot attach a fresh socket to a disposed terminal.
     let closedByClient = false;
-    let backoff = 500;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const send = (payload: unknown) => {
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
-    };
-    sendRef.current = send;
-
-    const connect = async () => {
-      if (closedByClient) return;
-      try {
-        if (!sessionRef.current) {
-          const { session_id } = await terminalApi.createSession(term.rows, term.cols);
-          sessionRef.current = session_id;
+    const socket = createReconnectingSocket({
+      url: async () => {
+        try {
+          if (!sessionRef.current) {
+            const { session_id } = await terminalApi.createSession(term.rows, term.cols);
+            sessionRef.current = session_id;
+          }
+        } catch (e) {
+          setError(String(e));
+          throw e;
         }
-      } catch (e) {
-        setError(String(e));
-        return;
-      }
-      // Re-check after the await: the effect may have cleaned up mid-request (rail
-      // toggled, StrictMode remount); a socket created now would attach to a
-      // disposed terminal and leak.
-      if (closedByClient) return;
-      const socket = new WebSocket(terminalWsUrl(sessionRef.current));
-      ws = socket;
-      let opened = false;
-      socket.onopen = () => {
-        opened = true;
-        backoff = 500;
+        if (closedByClient) throw new Error("terminal rail unmounted mid-connect");
+        return terminalWsUrl(sessionRef.current);
+      },
+      onOpen: () => {
         setError(null);
         setConn("open");
         term.reset(); // the replay repaints the screen from scratch
         send({ type: "resize", rows: term.rows, cols: term.cols });
-      };
-      socket.onmessage = (ev) => {
-        if (typeof ev.data === "string") term.write(ev.data);
-      };
-      socket.onclose = (ev) => {
-        if (closedByClient) return;
+      },
+      onMessage: (data) => term.write(data),
+      // A close before open (or 1008 "unknown session") means the backend no longer knows this
+      // session; retrying the dead id forever is the failure mode, so it is dropped here.
+      onClose: (ev, opened) => {
         setConn("reconnecting");
-        // A close before open (or 1008 "unknown session") means the backend no longer
-        // knows this session, e.g. it restarted. Retrying the dead id forever is the
-        // silent-death failure mode; drop it so the next attempt re-creates a session.
-        if (!opened || ev.code === 1008) {
-          sessionRef.current = null;
-        }
-        const delay = backoff;
-        backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
-        reconnectTimer = setTimeout(() => void connect(), delay);
-      };
-    };
-    void connect();
+        if (!opened || ev.code === 1008) sessionRef.current = null;
+      },
+    });
+
+    const send = (payload: unknown) => socket.send(JSON.stringify(payload));
+    sendRef.current = send;
+    socket.start();
 
     const dataSub = term.onData((data) => {
       setHasInput(true);
@@ -349,7 +330,7 @@ export function TerminalRail() {
 
     return () => {
       closedByClient = true;
-      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      socket.stop();
       observer.disconnect();
       host.removeEventListener("paste", onPaste, true);
       host.removeEventListener("wheel", onWheel, true);
@@ -357,7 +338,6 @@ export function TerminalRail() {
       window.removeEventListener("mouseup", onWindowMouseUp);
       dataSub.dispose();
       resizeSub.dispose();
-      ws?.close();
       term.dispose();
       termRef.current = null;
       sendRef.current = null;
