@@ -84,7 +84,7 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 |-------|-------|------|
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images + plant CSVs → persisted `plant_mapping.json` |
 | `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): mapping.json + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
-| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, `write_phenology_csv` |
+| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, `write_phenology_csv`, `write_phenology_curve_csv` |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping` |
 | Web Results routes | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/per_plant_curves`, `/onset_dates`: the human UI; delegates to the same shared modules |
 

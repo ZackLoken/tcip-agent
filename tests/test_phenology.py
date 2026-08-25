@@ -370,15 +370,92 @@ def test_resolve_positive_class_id_no_bucket_has_it_refuses(tmp_path):
     assert "never assessed" in msg
 
 
-# ── write_phenology_csv raises on an unknown stamp key ────────────────────
+# ── write_phenology_csv: the gate it runs, the cells it composes, the event it records ────
 
 
-def test_write_phenology_csv_raises_on_unknown_stamp_key(tmp_path):
-    import pytest
+def _real_delivery_flags(tmp_path: Path):
+    """Two validated buckets, plus the flags and bindings a real reconciliation produces over them,
+    the way ``compute_phenology`` builds its own before calling this writer."""
+    from tcip_mcp.pipelines.resolution import (
+        bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
+    )
+    from tests.test_phenology_tools import _delivery_setup
 
+    _mapping_path, d1, d2 = _delivery_setup(
+        tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
+    pred_dirs = [str(d1), str(d2)]
+    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    classifier_recon = reconcile_classifier_validity([str(d1)])
+    classifier_state, _note = bind_classifier_validity(
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="catkin")
+    flags = {"classifier": classifier_state, "operating_point": recon["validated"]}
+    return flags, recon["bindings"], pred_dirs
+
+
+def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unvalidated(tmp_path):
+    """The writer runs its own delivery gate before opening the file, the way its sibling writers
+    (``export_aggregated_csv``, ``export_detection_csv``) do; a call whose flags do not clear
+    refuses rather than delivering a silent bare number."""
     with pytest.raises(ValueError):
-        phenology.write_phenology_csv([], tmp_path / "out.csv", CATKIN,
-                                     stamp={"bogus_key": "x"}, basis=schema_basis())
+        phenology.write_phenology_csv(
+            "test", [], tmp_path / "out.csv", CATKIN,
+            flags={"classifier": None, "operating_point": None}, acknowledge_unvalidated=False,
+            basis=schema_basis(), operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
+            project_root=tmp_path)
+    assert not (tmp_path / "out.csv").exists()
+
+
+def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_it(tmp_path):
+    """The delivery event is recorded inside the writer itself: a caller that calls the writer
+    directly, never through ``compute_phenology``, still leaves the record behind."""
+    import tcip_store as ts
+    from tcip_mcp.pipelines import resolution
+
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    phenology.write_phenology_csv(
+        "test.direct_writer_call", [], out_csv, CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path)
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    records = [ts.read(k) for k in keys if ts.read(k)["door"] == "test.direct_writer_call"]
+    assert len(records) == 1, records
+    assert records[0]["output_path"] == str(out_csv)
+    assert records[0]["trait"] == "catkin"
+
+
+def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tmp_path):
+    """No ``stamp`` parameter exists any more: the writer composes its own provenance cells and
+    returns them, so this pins that the set it returns is exactly the schema's provenance columns
+    plus the trait's own majority-provisional marker, nothing else."""
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+
+    cells = phenology.write_phenology_csv(
+        "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path)
+
+    expected = set(phenology.PROVENANCE_COLUMNS) | {phenology.majority_provisional_column(CATKIN)}
+    assert set(cells) == expected
+
+
+def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
+    """The curve table gets its own writer, sharing the same gate/cells/event machinery as the
+    milestone table, minus the milestone-only majority-provisional marker."""
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+    row = {"plant_id": "P1", "accession": "acc-9", "date": "2026-02-11", "n_images": 1,
+          "n_total": 2, "n_positive": 1, "n_unclassified": 0, "n_missing": 0, "ratio": 0.5}
+
+    phenology.write_phenology_curve_csv(
+        "test", [row], tmp_path / "curve.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path)
+
+    header = (tmp_path / "curve.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
+    assert header == phenology.curve_csv_columns()
 
 
 def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
@@ -393,8 +470,12 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
     assert milestones["catkin_05per_date_bound"] == "left_censored"
 
     row = {"plant_id": "P1", "n_dates": 2, "n_observed_dates": 2, **milestones}
-    out = phenology.write_phenology_csv([row], tmp_path / "out.csv", CATKIN, basis=schema_basis())
-    written = Path(out).read_text(encoding="utf-8")
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+    phenology.write_phenology_csv(
+        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path)
+    written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     values = written.splitlines()[1].split(",")
 
@@ -558,15 +639,16 @@ def test_per_plant_phenology_surfaces_n_images_unmapped(tmp_path):
 
 
 def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
-    # per_plant_phenology's row already computes n_observed_dates (a plant fully
-    # classified/observed but with zero real detections on every date must be distinguishable from
-    # one with real detection data). write_phenology_csv is the real MCP delivery door, not the GUI's
-    # own per-row rendering in routes/results.py, which already carries this field, so this column
-    # must reach the CSV too.
+    # A plant fully classified/observed but with zero real detections on every date must be
+    # distinguishable from one with real detection data, so this column must reach the CSV.
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 1,
           "n_dates_unclassified": 0, "n_dates_missing_images": 0}
-    out = phenology.write_phenology_csv([row], tmp_path / "out.csv", CATKIN, basis=schema_basis())
-    written = Path(out).read_text(encoding="utf-8")
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+    phenology.write_phenology_csv(
+        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path)
+    written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     assert "n_observed_dates" in header
     data_row = written.splitlines()[1].split(",")
