@@ -200,7 +200,9 @@ def ingest_images(
             into an existing project opens it by the name it already has.
         site: The orchard or station this project's plants stand in, in the breeder's own
             words. Ask the breeder rather than guessing it from a path or filename; refuses
-            before a byte is copied if the project already records a different site.
+            before a byte is copied if the project already records a different site. A call
+            with no images under ``source`` refuses on that before the site is even read, so a
+            call carrying both faults reports the missing images.
         project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
         date_from: ``"exif"`` (each file's own capture date → ISO date, missing →

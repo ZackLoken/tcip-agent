@@ -69,18 +69,6 @@ def _make_dataset(root: Path) -> None:
         root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
 
 
-def _export_if_database_backed(root: Path) -> None:
-    """Write a root's database-held state back out as files, the way a real archive pass would:
-    a database backend holds a project record in ``store.db``, which an archive bundles as
-    files, not as a database."""
-    from tcip_store.export import export_root
-    from tcip_store.file_backend import database_file
-
-    root_abs = str(root.absolute())
-    if database_file(root_abs).is_file():
-        export_root(root_abs)
-
-
 def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
     import json
 
@@ -312,7 +300,6 @@ def test_import_project_refuses_a_non_conforming_destination_under_the_workspace
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    _export_if_database_backed(src)
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -331,7 +318,6 @@ def test_import_project_admits_a_conforming_destination_under_the_workspace(
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    _export_if_database_backed(src)
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
     assert "error" not in exported
@@ -391,15 +377,6 @@ def test_export_import_roundtrip(tmp_path: Path):
         ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)),
     )
     reg = register_dataset(str(src), crop="hazelnut")  # dataset.json identity travels with the data
-
-    # A database backend holds this project's state in store.db, which an archive bundles as
-    # files, not as a database; write it out first, the way a real export/archive pass would.
-    from tcip_store.file_backend import database_file
-    from tcip_store.export import export_root
-
-    src_abs = str(Path(src).absolute())
-    if database_file(src_abs).is_file():
-        export_root(src_abs)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))
@@ -461,7 +438,6 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     (model_src / "my_model.py").write_text("def build(): ...\n", encoding="utf-8")
     manifest_dir = src / ".tcip" / "experiments" / "exp_001" / "model_src"
     (manifest_dir / "manifest.json").write_text("{}", encoding="utf-8")
-    _export_if_database_backed(src)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path), include_models=True)
@@ -654,6 +630,97 @@ def test_init_project_refuses_an_empty_site(tmp_path: Path, monkeypatch):
     assert site_fields(str(tmp_path))["site"] is None
 
 
+def test_init_project_refuses_an_empty_site_leaving_nothing_on_disk(tmp_path: Path, monkeypatch):
+    """A refused site is validated before anything is created, the same as the name-scheme
+    refusal: the destination is left exactly as it was, not half-scaffolded."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    dest = tmp_path / "fresh_project"
+
+    result = init_project(str(dest), site="   ")
+
+    assert "error" in result
+    assert not dest.exists()
+
+
+def test_init_project_scaffolds_a_relative_path_where_it_resolves(tmp_path: Path, monkeypatch):
+    """A relative project_path scaffolds and records at the same absolute location the
+    workspace-name check itself resolved, rather than the record write refusing a relative
+    root after ``.tcip`` already exists."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    monkeypatch.chdir(tmp_path)
+
+    result = init_project("relative_proj", site="north orchard")
+
+    assert "error" not in result
+    assert (tmp_path / "relative_proj" / ".tcip").is_dir()
+    from tcip_mcp.project_record import read_record
+
+    assert read_record(str(tmp_path / "relative_proj")) == {"site": "north orchard"}
+
+
+def test_init_project_refuses_a_present_but_invalid_record(tmp_path: Path, monkeypatch):
+    """The door surfaces the reader's own refusal rather than the store's raw exception."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    from tcip_mcp.project_record import project_record_key
+
+    key = project_record_key(str(tmp_path))
+    tcip_store.replace(key, {"not_site": "whatever"}, expect=tcip_store.Version.ABSENT)
+
+    result = init_project(str(tmp_path), site="north orchard")
+
+    assert "error" in result
+    assert "does not hold a site" in result["error"]
+
+
+def test_init_project_refuses_an_undecodable_record(tmp_path: Path, monkeypatch):
+    """The store's own DecodeError is a StoreError, caught and returned as the door's error."""
+    from tcip_mcp.project_record import project_record_key
+    from tests._record_damage_fixtures import damage_record
+
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    key = project_record_key(str(tmp_path))
+    tcip_store.replace(key, {"site": "north orchard"}, expect=tcip_store.Version.ABSENT)
+    damage_record(key, b"{not valid json")
+
+    result = init_project(str(tmp_path), site="north orchard")
+
+    assert "error" in result
+    assert "does not decode" in result["error"]
+
+
+def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
+    """A root imported from an archive holds loose record files and no database: the store's
+    conform rail refuses init_project's site write there until scripts/adopt_store.py has run,
+    the same rule every other record store under that root already obeys. Bound to the
+    database backend explicitly, since the loose-files-with-no-database state this proves is a
+    fact about that backend's conform rail, not about whichever backend the suite happens to
+    run this file on."""
+    from tcip_store.sqlite_backend import SqliteBackend
+    from tcip_store.store import _backend
+
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    previous = _backend()
+    backend = SqliteBackend()
+    tcip_store.bind(backend)
+    try:
+        src = tmp_path / "src_project"
+        init_project(str(src), site="north orchard")
+        zip_path = tmp_path / "export.zip"
+        exported = archive_project(str(src), str(zip_path))
+        assert "error" not in exported
+        dest = tmp_path / "unadopted"
+        imported = import_project(str(zip_path), str(dest))
+        assert "error" not in imported
+
+        result = init_project(str(dest), site="north orchard")
+    finally:
+        tcip_store.bind(previous)
+        backend.close()
+
+    assert "error" in result
+    assert "scripts/adopt_store.py" in result["error"]
+
+
 def test_init_project_records_the_site_on_a_directory_that_gained_tcip_with_no_creating_door(
     tmp_path: Path, monkeypatch
 ):
@@ -715,12 +782,13 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path, monkeypatch):
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path, monkeypatch):
-    """The record travels with the project like every other ``.tcip`` document: the archive
-    carries the exported ``project.json`` and a restored copy reads the same site back."""
+    """init_project -> archive_project -> import_project round-trips a project whose record is
+    on disk in the archive: the record travels with the project like every other ``.tcip``
+    document, and archive_project exports it itself, so no operator step sits between the two
+    doors."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     src = tmp_path / "src_project"
     init_project(str(src), site="north orchard")
-    _export_if_database_backed(src)
 
     zip_path = tmp_path / "export.zip"
     exported = archive_project(str(src), str(zip_path))

@@ -441,33 +441,15 @@ def test_doctor_warns_on_a_project_with_no_record(tmp_path):
 
 def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     """A damaged record is a check that could not run, not a clean project: an error, and exit 2."""
-    import os
-    import sqlite3
-
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
     from tcip_mcp.project_record import project_record_key, record_site
+    from tests._record_damage_fixtures import damage_record
 
     root = _layout_project(tmp_path, "2026-03-04")
     record_site(str(root), "north orchard")
     key = project_record_key(str(root))
     # A genuinely undecodable byte string, written under the record's own key, so the finding
     # is the store's own decode error rather than "not a site record".
-
-    if (os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == FILE_BACKEND:
-        from tcip_store.store import _backend
-
-        _backend().path_for(key).write_bytes(b"{not valid json")
-    else:
-        conn = sqlite3.connect(str(database_path(str(root))), isolation_level=None)
-        try:
-            conn.execute(
-                "update records set value = ? where store = ? and parts = ?",
-                (b"{not valid json", key.store, encode_parts(key.parts)),
-            )
-        finally:
-            conn.close()
+    damage_record(key, b"{not valid json")
 
     res = _run(root)
 

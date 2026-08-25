@@ -190,44 +190,17 @@ def test_active_returns_null_when_marker_names_a_traversal(client, workspace_dir
     assert body["active_path"] is None
 
 
-def _damage_record(key, data: bytes) -> None:
-    """Put ``data`` behind a record already written at ``key``, on whichever backend is bound.
-    Mirrors ``tests/test_project_tools.py``'s own helper: this simulates damage no writer
-    through the seam would produce, which ``replace`` (always encoding through the codec)
-    cannot express."""
-    import os
-
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND
-    from tcip_store.store import _backend
-
-    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
-    if name == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(data)
-        return
-    import sqlite3
-
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute(
-            "update records set value = ? where store = ? and parts = ?",
-            (data, key.store, encode_parts(key.parts)),
-        )
-    finally:
-        conn.close()
-
-
 def test_list_reports_site_fields_across_four_project_states(client, workspace_dir):
     """A project with a record, one with ``.tcip`` and nothing else, one whose record is
     undecodable, and one whose record decodes to something else: all four list, each with the
-    right ``site``/``site_problem`` pair, and the recordless one gets no database published
-    under it by the listing."""
+    right ``site``/``site_problem`` pair. The recordless one gets no database published under
+    it by the listing, the store's own guarantee at this surface."""
     import tcip_store
     from tcip_store.file_backend import database_file
 
     from tcip_mcp.project_record import project_record_key
     from tcip_mcp.tools.project_tools import init_project
+    from tests._record_damage_fixtures import damage_record
 
     recorded = workspace_dir / "hazelnut_catkin_recorded"
     init_project(str(recorded), site="north orchard")
@@ -236,7 +209,7 @@ def test_list_reports_site_fields_across_four_project_states(client, workspace_d
 
     undecodable = workspace_dir / "hazelnut_catkin_undecodable"
     init_project(str(undecodable), site="north orchard")
-    _damage_record(project_record_key(str(undecodable)), b"{not valid json")
+    damage_record(project_record_key(str(undecodable)), b"{not valid json")
 
     invalid = workspace_dir / "hazelnut_catkin_invalid"
     init_project(str(invalid), site="north orchard")

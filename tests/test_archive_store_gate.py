@@ -1,10 +1,10 @@
 """What an archive must refuse to bundle, and what a restored bundle still carries.
 
-An archive is a file bundle, so under a database backend it ships the last export's files and
-nothing else. A bundle taken while the database holds writes the files do not would restore a
-project whose confirmed negatives are simply absent, and absence is what an unannotated image
-looks like to a trainer. Both doors are checked here: before the copy, and again after it, so
-the bundle reported is the bundle verified.
+An archive is a file bundle, so under a database backend it exports every database under the
+tree to its files before scanning them, rather than restoring a project whose confirmed
+negatives are simply absent because nobody exported first, and absence is what an unannotated
+image looks like to a trainer. Both doors are checked here: before the copy, and again after
+it, so the bundle reported is the bundle verified.
 """
 
 from __future__ import annotations
@@ -68,19 +68,22 @@ def _project(tmp_path: Path) -> Path:
     return root
 
 
-def test_a_project_whose_state_is_not_in_its_files_refuses_to_archive(tmp_path):
-    """The confirmed negative lives in a row the bundle would not carry, so the archive would
-    restore an annotated project with none of its human decisions in it."""
+def test_a_project_whose_state_is_not_yet_in_its_files_still_archives(tmp_path):
+    """The confirmed negative lives in a row no operator has exported yet; the door exports it
+    itself before bundling, so a project the doors create archives without that step run by
+    hand and the negative is not simply absent from the restored files."""
     root = _project(tmp_path)
     with bound(SqliteBackend()):
         ts.replace(dataset_layout.image_status_key(root), _NEGATIVE, expect=ts.Version.ABSENT)
 
     result = archive_project(str(root), str(tmp_path / "bundle.zip"))
 
-    assert "error" in result
-    assert "scripts/export_store.py" in result["error"]
-    assert "image_status" in result["error"]
-    assert not (tmp_path / "bundle.zip").exists()
+    assert "error" not in result
+    with zipfile.ZipFile(str(tmp_path / "bundle.zip")) as zf:
+        names = zf.namelist()
+        status_name = next(name for name in names if name.endswith("image_status.json"))
+        content = zf.read(status_name)
+    assert b"negative" in content
 
 
 def test_a_project_whose_files_are_current_archives(tmp_path):

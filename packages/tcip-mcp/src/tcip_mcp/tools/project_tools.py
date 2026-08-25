@@ -167,13 +167,17 @@ def _scaffold_project(project_path: str, site: str) -> dict:
     The internals of :func:`init_project`, factored out so other tools that
     stand up a project (e.g. ``ingest_images``) reuse the exact same scaffolding
     instead of re-implementing it. The directories are idempotent: re-running only re-mkdirs.
-    The site is written last, by :func:`tcip_mcp.project_record.record_site`, a create-only
-    write: an absent record is written, a present record with the same site is left as is, and
-    a present record with a different or unreadable site raises (``ValueError`` or
-    ``StoreError``, per :func:`~tcip_mcp.project_record.record_site`'s own contract).
-    """
-    from tcip_mcp.project_record import record_site
 
+    ``site`` is validated before anything is created, so a refused site leaves nothing on disk,
+    the same as the name-scheme refusal each door already holds to. The site is then written
+    last, by :func:`tcip_mcp.project_record.record_site`, a create-only write: an absent record
+    is written, a present record with the same site is left as is, and a present record with a
+    different or unreadable site raises (``ValueError`` or ``StoreError``, per
+    :func:`~tcip_mcp.project_record.record_site`'s own contract).
+    """
+    from tcip_mcp.project_record import record_site, validate_site
+
+    validate_site(site)
     tcip = _project_dir(project_path)
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
@@ -214,7 +218,9 @@ def init_project(project_path: str, site: str) -> dict:
         except ValueError as exc:
             return {"error": str(exc)}
     try:
-        return _scaffold_project(project_path, site)
+        # The resolved path, so a relative project_path scaffolds where the name check above
+        # just resolved it, rather than the record write refusing a relative root afterward.
+        return _scaffold_project(str(p), site)
     except (ValueError, StoreError) as exc:
         return {"error": str(exc)}
 
@@ -441,19 +447,19 @@ def _store_databases(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob(DATABASE_FILENAME) if p.parent.name == ".tcip")
 
 
-def _unexported_stores(root: Path) -> list[str]:
-    """Stores under this tree whose state is in a database and not in the files, as text.
+def _export_stores(root: Path) -> None:
+    """Write every database under this tree back out as files, the way an archive bundles state.
 
-    Every record and log store of every database, not only the ones the doctor reads: an
-    archive ships audit logs, experiment members and registry state too, and a bundle whose
-    confirmed negatives restore as absent is the failure this exists to prevent.
+    Every record and log store of every database under the tree, not only the ones the doctor
+    reads: an archive ships audit logs, experiment members and registry state too, and a bundle
+    whose confirmed negatives restore as absent is the failure this exists to prevent. So the
+    doors that create a project (which write the project record through a database) archive
+    without an operator having run ``scripts/export_store.py`` first.
     """
-    from tcip_store.export import stale_stores
+    from tcip_store.export import export_root
 
-    behind: list[str] = []
     for db_path in _store_databases(root):
-        behind += [f"{store} in {db_path}" for store in stale_stores(db_path)]
-    return behind
+        export_root(str(db_path.parent.parent.absolute()), report=lambda _line: None)
 
 
 def _database_counters(root: Path) -> dict[tuple[str, str], int]:
@@ -477,6 +483,12 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     (one file per image, all subjects), and the single nested registry ``<root>/classes.json``,
     plus the ``.tcip`` config. Optionally includes trained checkpoints.
 
+    Every database under the tree is exported to its loose files first, through the same
+    :func:`tcip_store.export.export_root` ``scripts/export_store.py`` uses, so a project either
+    creating door stood up (which writes the project record through a database) archives without
+    an operator having run that script by hand. The archive refuses only when that export fails
+    or a store becomes unreadable, never merely because it was behind.
+
     Args:
         project_path: Root directory of the project.
         output_path: Destination path for the ZIP file. Defaults to ``<project_name>.tcip.zip``
@@ -491,16 +503,11 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     from tcip_store import StoreError
 
     try:
-        behind = _unexported_stores(root)
+        _export_stores(root)
         before = _database_counters(root)
     except StoreError as exc:
-        return {"error": f"a store database under {root} could not be read, so whether this "
-                         f"project's files hold its state is unknown: {exc}"}
-    if behind:
-        return {"error": "this project's state is in a store database and not in the files this "
-                         f"archive bundles: {'; '.join(behind)}. Write it out with "
-                         "'python scripts/export_store.py' and archive again; a bundle taken "
-                         "now would restore without it."}
+        return {"error": f"a store database under {root} could not be exported before "
+                         f"archiving, so the bundle cannot be vouched for: {exc}"}
 
     if not output_path:
         output_path = str(root.parent / f"{root.name}.tcip.zip")

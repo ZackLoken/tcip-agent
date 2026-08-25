@@ -48,12 +48,16 @@ def main() -> int:
 
     site = result["site"]
     previous = result["previous_site"]
-    if previous is None:
+    problem = result.get("previous_record_problem")
+    if previous is None and problem is None:
         print(f"written: {root} now records site {site!r}")
     elif previous == site:
         print(f"already recorded the same: {root} already records site {site!r}")
-    else:
+    elif previous is not None:
         print(f"replaced: {root} recorded site {previous!r}, now records {site!r}")
+    else:
+        print(f"replaced: {root}'s prior record could not be read ({problem}), now records "
+              f"{site!r}")
     return 0
 
 

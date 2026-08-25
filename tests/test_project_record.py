@@ -31,33 +31,6 @@ def bound(backend):
         backend.close()
 
 
-def _damage(key: ts.Key, data: bytes) -> None:
-    """Put ``data`` behind a record already written at ``key``, wherever the bound backend
-    keeps it, so an undecodable-record case is genuine on whichever backend the suite runs."""
-    import os
-
-    from tcip_store.binding import BACKEND_ENV, DEFAULT_BACKEND, FILE_BACKEND, SQLITE_BACKEND
-    from tcip_store.store import _backend
-
-    name = os.environ.get(BACKEND_ENV) or DEFAULT_BACKEND
-    if name == FILE_BACKEND:
-        _backend().path_for(key).write_bytes(data)
-        return
-    assert name == SQLITE_BACKEND
-    import sqlite3
-
-    from tcip_store.sqlite_backend import database_path, encode_parts
-
-    conn = sqlite3.connect(str(database_path(str(key.root))), isolation_level=None)
-    try:
-        conn.execute(
-            "update records set value = ? where store = ? and parts = ?",
-            (data, key.store, encode_parts(key.parts)),
-        )
-    finally:
-        conn.close()
-
-
 # ── site validation ─────────────────────────────────────────────────────────────
 
 
@@ -161,10 +134,11 @@ def test_record_site_lets_a_decode_error_through_for_a_present_undecodable_recor
     tmp_path: Path,
 ):
     from tcip_mcp.project_record import project_record_key, record_site
+    from tests._record_damage_fixtures import damage_record
 
     key = project_record_key(str(tmp_path))
     ts.replace(key, {"site": "north orchard"}, expect=ts.Version.ABSENT)
-    _damage(key, b"{not valid json")
+    damage_record(key, b"{not valid json")
 
     with pytest.raises(ts.DecodeError):
         record_site(str(tmp_path), "north orchard")
@@ -190,7 +164,9 @@ def test_record_site_replace_writes_fresh_when_nothing_was_there(tmp_path: Path)
     from tcip_mcp.project_record import record_site
 
     recorded = record_site(str(tmp_path), "north orchard", replace=True)
-    assert recorded == {"site": "north orchard", "previous_site": None}
+    assert recorded == {
+        "site": "north orchard", "previous_site": None, "previous_record_problem": None,
+    }
 
 
 def test_record_site_replace_overwrites_a_valid_record_and_reports_the_previous_site(
@@ -202,11 +178,17 @@ def test_record_site_replace_overwrites_a_valid_record_and_reports_the_previous_
 
     recorded = record_site(str(tmp_path), "south orchard", replace=True)
 
-    assert recorded == {"site": "south orchard", "previous_site": "north orchard"}
+    assert recorded == {
+        "site": "south orchard", "previous_site": "north orchard",
+        "previous_record_problem": None,
+    }
     assert read_record(str(tmp_path))["site"] == "south orchard"
 
 
-def test_record_site_replace_overwrites_an_invalid_record(tmp_path: Path):
+def test_record_site_replace_overwrites_an_invalid_record_naming_the_problem(tmp_path: Path):
+    """A prior record that existed but could not be read as a site is a replacement, not a
+    fresh write: ``previous_record_problem`` names it, distinct from ``previous_site`` being
+    unset for a truly new project."""
     from tcip_mcp.project_record import project_record_key, read_record, record_site
 
     key = project_record_key(str(tmp_path))
@@ -214,7 +196,9 @@ def test_record_site_replace_overwrites_an_invalid_record(tmp_path: Path):
 
     recorded = record_site(str(tmp_path), "north orchard", replace=True)
 
-    assert recorded == {"site": "north orchard", "previous_site": None}
+    assert recorded["site"] == "north orchard"
+    assert recorded["previous_site"] is None
+    assert "does not hold a site" in recorded["previous_record_problem"]
     assert read_record(str(tmp_path))["site"] == "north orchard"
 
 
@@ -226,7 +210,9 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
 ):
     """Names both doors: ``init_project`` for a project whose name fits the workspace scheme,
     and the operator script for any project, since ``init_project`` cannot serve one that
-    doesn't (``gui-smoke-scratch``-shaped names)."""
+    doesn't (``gui-smoke-scratch``-shaped names). The no-database assertion holds the store's
+    own guarantee at this surface: a read of an absent record never publishes a database,
+    which ``read_record`` relies on rather than re-checking itself."""
     from tcip_store.file_backend import database_file
 
     from tcip_mcp.project_record import ProjectRecordMissing, read_record
@@ -281,10 +267,11 @@ def test_site_fields_names_a_present_but_invalid_record(tmp_path: Path):
 
 def test_site_fields_names_an_undecodable_record(tmp_path: Path):
     from tcip_mcp.project_record import project_record_key, site_fields
+    from tests._record_damage_fixtures import damage_record
 
     key = project_record_key(str(tmp_path))
     ts.replace(key, {"site": "north orchard"}, expect=ts.Version.ABSENT)
-    _damage(key, b"{not valid json")
+    damage_record(key, b"{not valid json")
 
     fields = site_fields(str(tmp_path))
 
@@ -313,6 +300,29 @@ def test_site_fields_names_a_root_the_store_refuses_to_read(tmp_path: Path):
 
     with bound(SqliteBackend()):
         fields = site_fields(str(tmp_path))
+
+    assert fields["site"] is None
+    assert "scripts/adopt_store.py" in fields["site_problem"]
+
+
+def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
+    """A root imported from an archive holds loose record files and no database: the state
+    ``scripts/adopt_store.py`` conforms. Built through the platform's own doors (init, archive,
+    import), never by hand-writing ``project.json``."""
+    from tcip_mcp.project_record import site_fields
+    from tcip_mcp.tools.project_tools import archive_project, import_project, init_project
+
+    with bound(SqliteBackend()):
+        src = tmp_path / "src_project"
+        init_project(str(src), site="north orchard")
+        zip_path = tmp_path / "export.zip"
+        exported = archive_project(str(src), str(zip_path))
+        assert "error" not in exported
+        dest = tmp_path / "unadopted"
+        imported = import_project(str(zip_path), str(dest))
+        assert "error" not in imported
+
+        fields = site_fields(str(dest))
 
     assert fields["site"] is None
     assert "scripts/adopt_store.py" in fields["site_problem"]
