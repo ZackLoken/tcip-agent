@@ -81,10 +81,14 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert captured["tile"] is True                 # tile=True -> pipeline tiling
     assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
     import json
+
+    from tcip_mcp.model_registry import checkpoint_sha256
+
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
     assert obj["subject"] == "0"                     # no recorded id_map -> id 0 stringified honestly
     assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
     assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
+    assert obj["created_by"] == f"model:m@{checkpoint_sha256(ckpt)[:12]}"
 
 
 def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch):

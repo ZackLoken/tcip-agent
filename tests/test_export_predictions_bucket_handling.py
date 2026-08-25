@@ -42,6 +42,10 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
     # COCO xywh (pixel) from pixel-xyxy box [10,10,30,30].
     assert anns[0]["bbox"] == pytest.approx([10.0, 10.0, 20.0, 20.0])
 
+    from tcip_mcp.model_registry import checkpoint_sha256
+
+    assert anns[0]["created_by"] == f"model:m@{checkpoint_sha256(ckpt)[:12]}"
+
 
 def _fake_predictor(monkeypatch):
     class FakePredictor:
