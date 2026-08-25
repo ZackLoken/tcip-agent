@@ -109,9 +109,14 @@ async def _gui_mutation_invalid_handler(_request: Request, exc: GuiMutationInval
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
+def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any]:
+    """The one envelope shape both the broadcast and the connect-time replay send."""
+    return {"type": "state_snapshot", "state": state, "version": version}
+
+
 async def _broadcast_state_snapshot(payload: dict[str, Any]) -> None:
     """Push the new state (with its version) to every connected browser."""
-    msg = {"type": "state_snapshot", "state": payload["state"], "version": payload["version"]}
+    msg = state_snapshot_message(payload["state"], payload["version"])
     dead: list[WebSocket] = []
     for ws in list(_state_watchers):
         try:
@@ -152,7 +157,7 @@ async def state_ws(websocket: WebSocket) -> None:
     _state_watchers.add(websocket)
     try:
         await websocket.send_json(
-            {"type": "state_snapshot", "state": _gui_store.snapshot(), "version": _gui_store.version}
+            state_snapshot_message(_gui_store.snapshot(), _gui_store.version)
         )
         while True:
             await websocket.receive_text()
