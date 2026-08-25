@@ -77,9 +77,12 @@ contract: the measurement boundary. The model must train (finite-gradient loss) 
 output the library scorers consume. Both synthesize a batch for the task strings `build_dataset`
 routes; for any other task they take `sample_batch=`, an `(images, targets)` pair from your own
 dataset. Given neither, `check_model_contract` returns a `not_smokeable` reason and `overfit_check`
-returns `passed: False` with the reason in `issue`. `preflight_config(smoke=True)` builds that batch
-from the run's `data` config and feeds it to both, so a bespoke task is smoked on real data rather
-than skipped; `smoke["batch_source"]` records which reference proved the contract.
+returns `passed: False` with the reason in `issue`. `preflight_config(smoke=True)` builds that
+batch from the run's `data` config and feeds it to `check_model_contract`; `overfit_check` runs on
+the same batch only when `overfit=True` is also passed, since it is a voluntary diagnostic, not
+part of the always-on smoke build. `smoke["batch_source"]` records which reference proved the
+contract. `launch_training(overfit_check=True)` runs the diagnostic at launch, on the contract's
+own batch, before the subprocess spawns, and records the result on the run's `model_contract`.
 
 ## The `ctx` craft library (`TrainContext`, `pipelines.training.envelope`)
 
@@ -88,11 +91,11 @@ one convenience, not a requirement.
 
 | Group | Methods |
 |-------|---------|
-| model / correctness | `ctx.build_model`, `ctx.check_contract`, `ctx.overfit_check` (voluntary diagnostic, non-gating), `ctx.default_train` |
+| model / correctness | `ctx.build_model`, `ctx.check_contract`, `ctx.overfit_check` (voluntary diagnostic, non-gating; `launch_training(overfit_check=True)` runs the same diagnostic at launch, before your `train(ctx)` ever starts), `ctx.default_train` |
 | data | `ctx.build_dataset`, `ctx.tiled_dataset`, `ctx.task_collate`, `ctx.build_sampler`, `ctx.build_augmentation`, `ctx.auto_train_val` |
 | optimize / schedule / freeze | `ctx.build_optimizer`, `ctx.build_scheduler`, `ctx.apply_stage_freeze` (progressive-unfreeze + monotonic guard: the primitive the default trainer uses), `ctx.compute_lr_scale`, `ctx.set_seed`, `ctx.evaluate`, `ctx.compute_class_weights` |
 | measurement | `ctx.calibrate` (resolve a trait's operating point from record sweeps: the derived, held-out-validated point), `ctx.mask_geometry`, `ctx.instance_geometries` |
-| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`; refuses a payload with no `model_state_dict`, since that stamped kind is what a predictor sniffs to load the weights; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `select_best_model` only with `include_unverified=True`), `ctx.record_artifact`, `ctx.should_cancel`, `ctx.set_final_weights` (declares the deliverable checkpoint), `ctx.report_objective` (reports HPO trial progress for pruning, no-op outside HPO) |
+| audited sinks | `ctx.log_metrics`, `ctx.save_checkpoint` (stamps kind + `model_source` + `experiment_id`; refuses a payload with no `model_state_dict`, since that stamped kind is what a predictor sniffs to load the weights; a `metrics` key in the saved state registers as `metrics_source="training_source"`, unverified, ranked by `select_best_model` only with `include_unverified=True`), `ctx.record_artifact` (a free-form sink for any name except the reserved `"model_weights"`, routed to `ctx.set_final_weights` instead, with a warning), `ctx.should_cancel`, `ctx.set_final_weights` (declares the deliverable checkpoint), `ctx.report_objective` (reports HPO trial progress for pruning, no-op outside HPO) |
 
 Route metrics and checkpoints through the sinks and the run stays audited, immutably versioned, and
 provenance-snapshotted no matter what the loop does. Registration additionally needs the checkpoint

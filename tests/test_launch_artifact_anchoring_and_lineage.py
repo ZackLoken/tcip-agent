@@ -184,6 +184,48 @@ def test_launch_records_what_the_smoke_contract_checked(
     assert launch_config["model_contract"] == record
 
 
+def test_launch_omitting_overfit_check_records_null(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """The flag defaults off: the record carries overfit_check: null, never a missing key."""
+    pytest.importorskip("torchvision")
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+    assert res["overfit_check"] is None
+
+    from tcip_mcp.experiments import config_key
+
+    config = ts.read(config_key(res["experiment_id"]))
+    assert config["model_contract"]["overfit_check"] is None
+
+
+def test_launch_with_overfit_check_records_the_rendered_report(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """``launch_training(overfit_check=True)`` runs the diagnostic on the contract's own batch
+    and records the rendered report on both the returned dict and the persisted config."""
+    pytest.importorskip("torchvision")
+    from tcip_mcp.tools import training_tools
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    res = training_tools.launch_training(
+        _detection_config(images_dir, labels_dir), "", overfit_check=True)
+    assert "error" not in res, res
+    assert res["overfit_check"] is not None
+    assert "passed" in res["overfit_check"]
+
+    from tcip_mcp.experiments import config_key
+
+    config = ts.read(config_key(res["experiment_id"]))
+    assert config["model_contract"]["overfit_check"] == res["overfit_check"]
+
+
 def training_tools_launch(config: dict, output_dir: str) -> dict:
     """Launch and assert the config was accepted, so a preflight refusal never reads as a
     provenance failure in the tests above."""

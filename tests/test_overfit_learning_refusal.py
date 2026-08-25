@@ -63,3 +63,29 @@ def test_a_model_that_really_learns_passes():
     assert report["passed"], report["issue"]
     assert report["issue"] is None
     assert report["final"] < report["initial"]
+
+
+class _AllFrozen(torch.nn.Module):
+    """A legitimate stage-0 configuration: every parameter frozen, nothing to optimize."""
+
+    def __init__(self, num_classes: int = 2, in_chans: int = 3) -> None:
+        super().__init__()
+        self.fc = torch.nn.Linear(in_chans, num_classes)
+        for p in self.fc.parameters():
+            p.requires_grad = False
+
+    def forward(self, images, targets=None):
+        logits = self.fc(images.mean(dim=(2, 3)))
+        if self.training and targets is not None:
+            return {"cls_loss": torch.nn.functional.cross_entropy(logits, targets["labels"])}
+        return {"logits": logits}
+
+
+def test_an_all_frozen_model_reports_rather_than_raises():
+    """Adam raises on an empty parameter list; the check builds it inside its own try, so the
+    empty-parameter case reaches the report instead of escaping the function."""
+    report = overfit_check(_AllFrozen(), "classification", steps=5, num_classes=2, seed=0)
+    assert report["passed"] is False
+    assert "empty parameter list" in report["issue"], report["issue"]
+    assert report["losses"] == []
+    assert report["initial"] is None and report["final"] is None

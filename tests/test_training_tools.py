@@ -48,6 +48,82 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     assert preflight_config(cfg)["valid"] is True
 
 
+# preflight_config's overfit branch: reseed-run-restore, never gating
+
+def _frozen_detection_builder(**kwargs):
+    """An importable builder whose model has nothing to optimize (a legitimate stage-0 shape)."""
+    from tests import bespoke_models
+
+    model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=96)
+    for p in model.parameters():
+        p.requires_grad = False
+    return model
+
+
+def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    return {
+        "model_source": {"builder": builder, "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+        "training": {"batch_size": 2},
+    }
+
+
+def test_preflight_config_overfit_restores_rng_state(tmp_path):
+    """The overfit branch's own reseed-run-restore leaves no net trace on the streams: a plain
+    smoke build (overfit=False) and the same build with overfit=True, run from the same seed,
+    must consume the streams identically once the overfit call returns. Comparing against a
+    fresh reseed with nothing run in between would be wrong: build_model + check_model_contract
+    draw real entropy too, on both paths alike, so the only valid baseline is the sibling call
+    that skips just the overfit branch."""
+    pytest.importorskip("torch")
+    import random
+
+    import numpy as np
+    import torch
+
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    cfg = _detection_smoke_cfg("tests.bespoke_models:build_bespoke_detection", tmp_path)
+
+    random.seed(11)
+    np.random.seed(11)
+    torch.manual_seed(11)
+    preflight_config(cfg, smoke=True, overfit=False)
+    without_overfit = (random.random(), np.random.rand(), torch.rand(1))
+
+    random.seed(11)
+    np.random.seed(11)
+    torch.manual_seed(11)
+    r = preflight_config(cfg, smoke=True, overfit=True)
+    assert r["overfit_check"] is not None
+    with_overfit = (random.random(), np.random.rand(), torch.rand(1))
+
+    assert with_overfit[0] == without_overfit[0]
+    assert with_overfit[1] == without_overfit[1]
+    assert torch.equal(with_overfit[2], without_overfit[2])
+
+
+def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(tmp_path):
+    """check_model_contract's own gradient-presence check independently requires a real
+    learnable path, so a literally all-frozen model already fails smoke on its own terms
+    (valid stays False for that reason); what this proves is narrower and still real: the
+    overfit branch's own empty-parameter case never raises out of preflight_config, and its
+    report still names the empty parameter list rather than being swallowed."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    cfg = _detection_smoke_cfg(f"{__name__}:_frozen_detection_builder", tmp_path)
+    r = preflight_config(cfg, smoke=True, overfit=True)
+    assert any("no parameter received a gradient" in i or "does not require grad" in i
+              for i in r["issues"])
+    assert r["overfit_check"]["passed"] is False
+    assert "empty parameter list" in r["overfit_check"]["issue"]
+
+
 def test_preflight_config_warns_on_ignored_per_stage_lr(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -814,7 +890,7 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(tmp_path, mo
     monkeypatch.chdir(tmp_path)
     seen = []
 
-    def stub_preflight(config, smoke=False):
+    def stub_preflight(config, smoke=False, overfit=False):
         seen.append(config)
         return {"valid": False, "issues": ["stub"]}
 

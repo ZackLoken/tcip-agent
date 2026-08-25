@@ -148,3 +148,25 @@ def test_a_failed_checkpoint_write_preserves_the_previous_one(tmp_path, monkeypa
     # The previous checkpoint is intact and loadable; the staged file was cleaned up.
     assert torch.load(tmp_path / "model_best.pt", weights_only=False)["epoch"] == 1
     assert _run_artifacts(tmp_path) == ["model_best.pt"]
+
+
+# capture_rng_state / restore_rng_state: put the four streams back where they were
+
+def test_capture_and_restore_rng_state_roundtrip():
+    import random
+
+    import numpy as np
+
+    gt.set_seed(0)
+    state = gt.capture_rng_state()
+    expected_next = (random.random(), np.random.rand(), torch.rand(1))
+
+    # Advance every stream further, simulating a diagnostic that draws from them.
+    random.random(), np.random.rand(), torch.rand(1)
+
+    gt.restore_rng_state(state)
+    got_next = (random.random(), np.random.rand(), torch.rand(1))
+
+    assert got_next[0] == expected_next[0]
+    assert got_next[1] == expected_next[1]
+    assert torch.equal(got_next[2], expected_next[2])
