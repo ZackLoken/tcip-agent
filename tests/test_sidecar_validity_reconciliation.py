@@ -109,7 +109,7 @@ def test_a_scale_stamp_flagged_unvalidated_never_reads_back_its_recorded_referen
     beside it."""
     d = _sidecar(tmp_path / "b1", "resolve_scale.json", "scale", bundle_flag=False,
                  recorded_reference=VALIDATED_PHYSICAL_MEASUREMENT, value=0.037, unit="mm")
-    r = reconcile_scale_validity([d], unit="mm", trait="catkin",
+    r = reconcile_scale_validity([d], unit="mm", trait="catkin", images_dir="unused",
                                  asserted=VALIDATED_PHYSICAL_MEASUREMENT)
     assert r["operative"] is True
     assert r["validated"] == VALIDATED_FALSE
@@ -209,7 +209,7 @@ def test_an_annotations_reference_never_clears_a_bucket_scale_even_when_the_stam
     cannot ground it however confidently the stamp itself reports success."""
     d = _sidecar(tmp_path / "b1", "resolve_scale.json", "scale", bundle_flag=True,
                  recorded_reference=VALIDATED_HELD_OUT, value=0.037, unit="mm")
-    r = reconcile_scale_validity([d], unit="mm", trait="catkin")
+    r = reconcile_scale_validity([d], unit="mm", trait="catkin", images_dir="unused")
     assert r["validated"] == VALIDATED_FALSE
     assert r["per_bucket"] == {d: VALIDATED_FALSE}
     assert r["unvalidated_buckets"] == [d]

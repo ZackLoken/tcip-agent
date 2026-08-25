@@ -220,7 +220,7 @@ def test_export_aggregated_csv_units_derived_from_value_key(tmp_path):
     bare linear unit: an area labeled "mm" understates its own dimensionality."""
     results = [
         {"plant_id": "PLANT_001", "value": 12.5, "observations": 1, "value_key": "area_mm2",
-         "measurement_document": "operating_point", "scale_document": "resolve_scale"},
+         "measurement_document": "operating_point"},
     ]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(
@@ -299,7 +299,7 @@ def test_units_never_fall_back_with_no_value_key_at_all():
 
     assert crops_units()["bark_thickness"] == "mm"
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1}]
-    assert _resolve_units("bark_thickness", results) == ("", None)
+    assert _resolve_units("bark_thickness", results, "operating_point") == ("", None)
 
 
 @pytest.mark.parametrize("value_key", ["plant_id", "detections_total", "elongated_fraction", "pct_open"])
@@ -355,12 +355,12 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm2"}]
     # no crops.yml entry -> no cross-check
-    assert _resolve_units("__no_such_trait__", results) == ("mm2", "mm")
+    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm2", "mm")
 
     results_linear = [{"plant_id": "P1", "value": 12.0, "observations": 1,
                        "value_key": "principal_axis_extent_mm"}]
     # non-area stays unsquared
-    assert _resolve_units("__no_such_trait__", results_linear) == ("mm", "mm")
+    assert _resolve_units("__no_such_trait__", results_linear, "operating_point") == ("mm", "mm")
 
     # A real mm-declared trait: the cross-check compares crops.yml's linear "mm" against area_mm2's
     # own linear basis ("mm", not "mm2") and passes; the returned label is still squared.
@@ -369,7 +369,7 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
     units = crops_units()
     mm_trait = next((name for name, u in units.items() if u == "mm"), None)
     if mm_trait is not None:
-        assert _resolve_units(mm_trait, results) == ("mm2", "mm")
+        assert _resolve_units(mm_trait, results, "operating_point") == ("mm2", "mm")
 
 
 def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
@@ -379,7 +379,7 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [{"plant_id": "P1", "value": 14.2, "observations": 1, "value_key": "nut_diameter_mm"}]
-    assert _resolve_units("__no_such_trait__", results) == ("mm", "mm")
+    assert _resolve_units("__no_such_trait__", results, "operating_point") == ("mm", "mm")
 
 
 def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
@@ -389,14 +389,14 @@ def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
 
     results = [{"plant_id": "P1", "value": 800.0, "observations": 1, "value_key": "area_mm"}]
     with pytest.raises(ValueError):
-        _resolve_units("__no_such_trait__", results)
+        _resolve_units("__no_such_trait__", results, "operating_point")
 
 
 def test_export_aggregated_csv_writes_value_key_column(tmp_path):
     """value_key is a real CSV column, not just an internal field: it's the one thing that lets a
     reader independently detect a px/mm mismatch themselves."""
     results = [{"plant_id": "P1", "value": 1.0, "observations": 1, "value_key": "area_mm2",
-                "measurement_document": "operating_point", "scale_document": "resolve_scale"}]
+                "measurement_document": "operating_point"}]
     out_path = tmp_path / "out.csv"
     export_aggregated_csv(results, str(out_path), trait_name="plant_surface_area",
                           acknowledge_unvalidated=True)

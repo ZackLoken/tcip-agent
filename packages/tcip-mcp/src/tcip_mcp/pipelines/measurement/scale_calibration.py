@@ -51,27 +51,37 @@ def resolve_physical_scale(
     measurement decision only the domain expert can make.
 
     The candidate is the mean of the calibration half's implied scales. It clears when its relative
-    deviation from the holdout mean is within the *effective* tolerance, ``max(tolerance_frac, the
-    holdout's own relative dispersion / sqrt(holdout count))``, the same shape
-    ``operating_point._effective_count_bias_tolerance`` uses to derive a floor from the evidence
-    itself rather than from an invented constant, and when the holdout's own relative dispersion
-    (sample standard deviation of its implied scales over their mean) is itself within
-    ``tolerance_frac``: a reference set that disagrees with itself by more than the tolerance cannot
-    validate to it. Either half with fewer than two references refuses, naming which.
+    deviation from the holdout mean is within the authored ``tolerance_frac``, and when the holdout's
+    own relative dispersion (sample standard deviation of its implied scales over their mean) is
+    itself within ``tolerance_frac``: a reference set that disagrees with itself by more than the
+    tolerance cannot validate to it. The dispersion check already bounds the holdout's own relative
+    standard error at ``tolerance_frac / sqrt(holdout count)``, strictly tighter than
+    ``tolerance_frac`` for any holdout of two or more, so a second floor derived from that same
+    standard error would never bind once the dispersion check passes; the relative standard error is
+    still recorded in ``sweep_data`` as a diagnostic. Either half with fewer than two references
+    refuses, naming which.
 
     Returns ``{validated_against, passed, value, unit, failures, sweep_data}``, the same shape the
     scalar-head resolvers return (never a ``ResolvedParam``, which cannot carry a ``failures``
     list): ``value`` is the derived scale on a pass, ``None`` otherwise; ``sweep_data`` carries every
-    implied scale by half, both means, the holdout dispersion, the effective tolerance and the split
-    identity, so a failed calibration is diagnosable from the returned dict alone. Never raises for
-    an evidence-quality failure (too few references, a disagreeing reference set, an unauthored
-    tolerance); raises only for a caller-composition error (a non-string ``unit``, a non-mapping
-    ``references``).
+    implied scale by half, both means, the holdout dispersion, the relative standard error and the
+    split identity, so a failed calibration is diagnosable from the returned dict alone. Never raises
+    for an evidence-quality failure (too few references, a disagreeing reference set, an unauthored
+    tolerance); raises only for a caller-composition error (a non-string ``unit``, a unit that is not
+    a linear length unit crops.yml declares, a non-mapping ``references``).
     """
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, VALIDATED_PHYSICAL_MEASUREMENT
+    from tcip_mcp.traits import crops_length_units
 
     if not isinstance(unit, str) or not unit:
         raise ValueError("resolve_physical_scale requires a non-empty unit string")
+    length_units = crops_length_units()
+    if unit not in length_units:
+        raise ValueError(
+            f"resolve_physical_scale requires unit to be a linear length unit crops.yml declares "
+            f"({sorted(length_units)}), got {unit!r}: a per-pixel scale is a length-per-pixel "
+            "quantity, and a mass or other non-length unit is a contradiction."
+        )
     if not isinstance(references, Mapping):
         raise ValueError(
             "resolve_physical_scale requires references as a stem -> measurement mapping"
@@ -111,11 +121,14 @@ def resolve_physical_scale(
             "failures": ["unit_disagreement"], "sweep_data": {"off_unit_stems": off_unit},
         }
 
-    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+    from tcip_mcp.pipelines.data.splits import (
+        cal_holdout_scope_root,
+        resolve_locked_cal_holdout_split,
+    )
 
     stems = sorted(references)
     locked = resolve_locked_cal_holdout_split(
-        stems, identity_hash=identity_hash, scope_root=dataset_root,
+        stems, identity_hash=identity_hash, scope_root=cal_holdout_scope_root(dataset_root),
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
     )
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
@@ -146,20 +159,19 @@ def resolve_physical_scale(
     hold_std = statistics.stdev(hold_values)
     hold_relative_dispersion = abs(hold_std / hold_mean) if hold_mean else math.inf
     relative_standard_error = hold_relative_dispersion / math.sqrt(len(hold_values))
-    effective_tolerance = max(tolerance_frac, relative_standard_error)
     relative_deviation = abs(candidate - hold_mean) / abs(hold_mean) if hold_mean else math.inf
 
     if hold_relative_dispersion > tolerance_frac:
         failures.append("holdout_dispersion_exceeds_tolerance")
-    if relative_deviation > effective_tolerance:
-        failures.append("holdout_mean_outside_effective_tolerance")
+    if relative_deviation > tolerance_frac:
+        failures.append("holdout_mean_outside_tolerance")
 
     sweep_data.update({
         "calibration_mean": candidate,
         "holdout_mean": hold_mean,
         "holdout_relative_dispersion": hold_relative_dispersion,
         "tolerance_frac": tolerance_frac,
-        "effective_tolerance": effective_tolerance,
+        "relative_standard_error": relative_standard_error,
         "relative_deviation": relative_deviation,
     })
     passed = not failures

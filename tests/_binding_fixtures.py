@@ -35,6 +35,7 @@ def file_validation_record(
     document: str = "operating_point",
     dataset_root: str | Path,
     pred_dirs: list[str | Path] | tuple[str | Path, ...] = (),
+    images_dir: str | Path | None = None,
     experiment_id: str = "exp-binding-reference",
     producing_experiment_id: Any = _HOST,
     trait: str | None = None,
@@ -43,9 +44,10 @@ def file_validation_record(
     """File the record ``stamp`` claims, and return the stamp with its pointer merged in.
 
     ``pred_dirs`` are the buckets a claim covers, hashed as they are on disk now, so they must
-    already hold what the claim is about: prediction bytes for ``operating_point``, image stems for
+    already hold what the claim is about: prediction bytes for ``operating_point``, image bytes for
     ``resolve_scale`` (a scale claim is a fact about the bucket's imagery, not its predictions, the
-    same distinction ``seal_validation`` draws). The other documents cover no bucket and take none.
+    same distinction ``seal_validation`` draws; ``images_dir`` is required for a ``resolve_scale``
+    claim over a non-empty ``pred_dirs``). The other documents cover no bucket and take none.
     """
     from tcip_mcp.experiments import _append_validation, create_experiment, experiment_exists
     from tcip_mcp.pipelines.resolution import _DOCUMENT_PARAM, claim_payload, cleared_reference
@@ -57,7 +59,18 @@ def file_validation_record(
         validation_kind=validation_kind,
     )
     root = Path(dataset_root).resolve()
-    digest_fn = bucket_content_digest if document == "operating_point" else bucket_stems_digest
+    if document == "resolve_scale" and pred_dirs and images_dir is None:
+        raise ValueError(
+            "file_validation_record needs images_dir to hash a resolve_scale claim's covered "
+            "bucket(s)"
+        )
+
+    def digest_fn(d: str | Path) -> str:
+        if document == "operating_point":
+            return bucket_content_digest(d)
+        assert images_dir is not None
+        return bucket_stems_digest(d, images_dir=images_dir)
+
     covered = {Path(d).resolve().relative_to(root).as_posix(): digest_fn(d)
                for d in pred_dirs}
     host = producing_experiment_id if producing_experiment_id is not _HOST else experiment_id
@@ -90,6 +103,7 @@ def write_bound_sidecar(
     document: str = "operating_point",
     dataset_root: str | Path,
     pred_dirs: list[str | Path] | tuple[str | Path, ...] | None = None,
+    images_dir: str | Path | None = None,
     **record: Any,
 ) -> dict:
     """File the record and write the bound stamp, the two steps a producer does in that order."""
@@ -98,7 +112,8 @@ def write_bound_sidecar(
     covered = pred_dirs if pred_dirs is not None else (
         [pred_dir] if document in ("operating_point", "resolve_scale") else [])
     bound = file_validation_record(
-        stamp, document=document, dataset_root=dataset_root, pred_dirs=covered, **record)
+        stamp, document=document, dataset_root=dataset_root, pred_dirs=covered,
+        images_dir=images_dir, **record)
     write_sidecar(pred_dir, bound, document)
     return bound
 

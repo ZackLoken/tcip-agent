@@ -300,7 +300,7 @@ def test_hand_written_scale_stamp_does_not_deliver(tmp_path):
         "capture_id": None}},
         "validated": True, "trait": TRAIT}, "resolve_scale")
 
-    validity = reconcile_scale_validity([str(pred_dir)], unit="mm", trait=TRAIT)
+    validity = reconcile_scale_validity([str(pred_dir)], unit="mm", trait=TRAIT, images_dir="unused")
 
     assert validity["validated"] == "false"
     assert "validated_by" in validity["binding_notes"][str(pred_dir)]

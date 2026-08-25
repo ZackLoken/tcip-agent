@@ -213,13 +213,33 @@ def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
     return unit_from_value_key(value_key)
 
 
-def _resolve_units(trait_name: str, results: list[dict]) -> tuple[str, str | None]:
+def _is_pixel_space_key(value_key: str) -> bool:
+    """Whether ``value_key`` explicitly names pixel space (a trailing ``_px``, or the bare key
+    ``"px"``), as opposed to one that simply carries no unit suffix at all: a stated pixel-space key
+    never inherits a trait's declared physical unit, under any measurement document."""
+    _root, _sep, trailing = value_key.rpartition("_")
+    return value_key == "px" or trailing == "px"
+
+
+def _resolve_units(
+    trait_name: str, results: list[dict], measurement_document: str
+) -> tuple[str, str | None]:
     """``(display_unit, linear_basis)`` implied by the aggregated values' own value_key, crops.yml's
-    declared unit is a cross-check only, never a fallback source. A value_key with no recognized
-    physical-unit suffix (px, count, or a trailing token outside crops.yml's declared unit
-    vocabulary) yields ``("", None)``, exactly like a count trait already does, it never inherits
-    crops.yml's declared unit unopposed, which was the actual defect: a pixel-space value shipping
-    labeled with the trait's declared mm/cm/m because nothing derived a unit to check it against.
+    declared unit is a cross-check only, never a fallback source under ``operating_point``. A
+    value_key with no recognized physical-unit suffix (px, count, or a trailing token outside
+    crops.yml's declared unit vocabulary) yields ``("", None)`` under ``operating_point``, exactly
+    like a count trait already does: it never inherits crops.yml's declared unit unopposed, which was
+    the actual defect there, a pixel-space value shipping labeled with the trait's declared mm/cm/m
+    because nothing derived a unit to check it against.
+
+    Under a scalar head (``ordinal_operating_point``/``regression_operating_point``), a value_key
+    with no unit suffix at all (a bare ``value`` or the trait's own bare name, e.g.
+    ``fruit_diameter``) is not px-space, it states nothing about units either way: a calibrated head
+    predicts in the trait's declared unit by construction, so the units column is that declared unit
+    rather than blank. A value_key that explicitly ends in ``_px`` (or is bare ``"px"``) states pixel
+    space outright and never inherits the declared unit, under either document. A value_key that does
+    imply a physical unit is still cross-checked against the declared one below, the same as under
+    ``operating_point``.
 
     ``display_unit``'s returned unit is squared for an area (``"mm2"``, not ``"mm"``);
     ``linear_basis`` is always linear (crops.yml has no squared-unit vocabulary) and is what the
@@ -234,11 +254,15 @@ def _resolve_units(trait_name: str, results: list[dict]) -> tuple[str, str | Non
             f"export_aggregated_csv: results for trait {trait_name!r} imply more than one physical "
             f"unit ({sorted(implied_units)}) across rows, cannot label a single units column."
         )
+    declared = crops_units().get(trait_name)
     pair = next(iter(implied_pairs), None)
     if pair is None:
+        explicitly_px = any(_is_pixel_space_key(r.get("value_key", "")) for r in results)
+        if measurement_document in ("ordinal_operating_point", "regression_operating_point") \
+                and declared is not None and not explicitly_px:
+            return declared, declared
         return "", None
     display, linear_basis = pair
-    declared = crops_units().get(trait_name)
     if declared is not None and linear_basis != declared:
         raise ValueError(
             f"export_aggregated_csv: trait {trait_name!r} is declared units={declared!r} in "
@@ -258,6 +282,7 @@ def export_aggregated_csv(
     *,
     measurement_validated: str | None = None,
     pred_dirs: list[str] | None = None,
+    images_dir: str | None = None,
     scale_capture_id: str | None = None,
     acknowledge_unvalidated: bool = False,
 ) -> str:
@@ -300,17 +325,23 @@ def export_aggregated_csv(
     explicit acknowledge below.
 
     The physical-scale dimension is reconciled when and only when the results state
-    ``scale_document``. A stated scale with a value_key implying no physical unit refuses (a scale
-    cannot answer for a non-dimensional value); a value_key implying a physical unit with no stated
-    scale is admitted only under a scalar head (``ordinal_operating_point``/
+    ``scale_document`` and ``pred_dirs`` is given. A stated scale with a value_key implying no
+    physical unit refuses (a scale cannot answer for a non-dimensional value), whether or not
+    ``pred_dirs`` is given; a stated scale with no ``pred_dirs`` at all also refuses, since nothing on
+    disk can answer for the claim. With ``pred_dirs`` given, a value_key implying a physical unit
+    with no stated scale is admitted only under a scalar head (``ordinal_operating_point``/
     ``regression_operating_point``, whose predictions are in the trait's declared unit by
     construction) and refuses under ``operating_point``, since a dimensional number from a detection
-    or segmentation bucket with no scale behind it has nothing answering for its unit. When
-    operative, each bucket's ``resolve_scale.json`` is reconciled the same floor-from-disk way the
-    measurement dimension is, checked against the delivered unit and the delivered trait
-    (``reconcile_scale_validity``). ``scale_capture_id`` scopes that reconciliation to one capture
-    when the delivery's physical scale is itself capture-scoped (a handheld standoff that can vary
-    image to image). ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped
+    or segmentation bucket with no scale behind it has nothing answering for its unit; with no
+    ``pred_dirs``, the delivery has no on-disk validity producer at all regardless of unit, and
+    floors to unvalidated exactly as the measurement dimension does, shippable only through
+    ``acknowledge_unvalidated``. When operative, each bucket's ``resolve_scale.json`` is reconciled
+    the same floor-from-disk way the measurement dimension is, checked against the delivered unit
+    and the delivered trait (``reconcile_scale_validity``), which recomputes the claim's imagery
+    digest from ``images_dir`` (required whenever ``scale_document`` is stated alongside
+    ``pred_dirs``). ``scale_capture_id`` scopes that reconciliation to one capture when the
+    delivery's physical scale is itself capture-scoped (a handheld standoff that can vary image to
+    image). ``acknowledge_unvalidated`` ships a clearly-flagged provisional CSV stamped
     ``validated=false``.
 
     Under ``operating_point``, a trait declaring a physical unit (crops.yml) whose delivered
@@ -351,6 +382,8 @@ def export_aggregated_csv(
         pred_dirs: Prediction buckets to reconcile validity from: the results' own stated
             ``measurement_document``, and ``scale_document`` when stated; floored against
             ``measurement_validated``.
+        images_dir: The buckets' own images directory, required when ``scale_document`` is stated
+            (with ``pred_dirs`` given) to recompute a scale claim's imagery digest.
         scale_capture_id: The capture this delivery's physical scale must match, when the scale is
             capture-scoped; a bucket's sidecar recording a different capture floors to unvalidated.
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
@@ -374,7 +407,7 @@ def export_aggregated_csv(
     )
 
     measurement_document, scale_document = _resolve_statement(results, MEASUREMENT_DOCUMENTS)
-    units, linear_basis = _resolve_units(trait_name, results)
+    units, linear_basis = _resolve_units(trait_name, results, measurement_document)
 
     from tcip_mcp.traits import crops_units
 
@@ -391,7 +424,13 @@ def export_aggregated_csv(
             "export_aggregated_csv: results state scale_document but their own value_key implies "
             "no physical unit; a physical scale cannot answer for a non-dimensional value."
         )
-    if units and scale_document is None and measurement_document == "operating_point":
+    if scale_document is not None and not pred_dirs:
+        raise ValueError(
+            "export_aggregated_csv: results state scale_document with no pred_dirs; nothing on "
+            "disk can answer for a physical-scale claim without a bucket to reconcile it from. "
+            "State no scale_document for a provisional delivery with no buckets."
+        )
+    if pred_dirs and units and scale_document is None and measurement_document == "operating_point":
         raise ValueError(
             f"export_aggregated_csv: results imply physical unit {units!r} from an "
             "operating_point measurement document with no stated scale_document; a dimensional "
@@ -447,8 +486,14 @@ def export_aggregated_csv(
             assert linear_basis is not None, (
                 "scale_document is only ever stated alongside a value_key that implies a unit, "
                 "checked above; linear_basis cannot be None here.")
+            if images_dir is None:
+                raise ValueError(
+                    "export_aggregated_csv: results state scale_document with pred_dirs given but "
+                    "no images_dir; a scale claim's imagery digest cannot be recomputed without it."
+                )
             scale_recon = reconcile_scale_validity(
-                pred_dirs, unit=linear_basis, trait=trait, capture_id=scale_capture_id)
+                pred_dirs, unit=linear_basis, trait=trait, images_dir=images_dir,
+                capture_id=scale_capture_id)
     else:
         # No pred_dirs, no on-disk source; a bare caller-asserted string is never trusted alone.
         state = VALIDATED_FALSE
@@ -461,7 +506,12 @@ def export_aggregated_csv(
         flags["claim_scope"] = claim_scope_recon["validated"]
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
-        notes = binding_notes_text(measurement_recon.get("binding_notes", {}))
+        notes = " ".join(filter(None, (
+            binding_notes_text(measurement_recon.get("binding_notes", {})),
+            binding_notes_text(tile_recon.get("binding_notes", {})),
+            binding_notes_text(scale_recon.get("binding_notes", {})),
+            binding_notes_text(claim_scope_recon.get("binding_notes", {})),
+        )))
         raise ValueError(f"{gate.reason} {notes}".rstrip())
 
     # A confirmation withdrawn or a field moved since the first check refuses here, before anything.
