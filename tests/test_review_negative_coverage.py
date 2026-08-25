@@ -147,59 +147,6 @@ def test_complete_named_subject_on_an_image_with_only_another_subjects_gt_is_a_s
     assert resp.json()["annotation_status"] == "negative"
 
 
-def test_complete_named_subject_on_an_image_the_bucket_predicted_only_another_subject_is_covered(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """A bucket that predicted only a registered other subject on this image leaves no ambiguity:
-    it genuinely predicted none of the reviewed subject, so the completion is covered."""
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
-
-    dataset_root = _dataset_root(tmp_path)
-    write_registry(dataset_root / "classes.json",
-                   ClassRegistry(subjects=(Subject(name="catkin"), Subject(name="leaf"))))
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    write_annotations(
-        str(d / "IMG_0060.json"),
-        [Annotation(subject="leaf", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
-        IMG_W, IMG_H)
-
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0060.JPG",
-        "pred_dir": str(d),
-        "subject": "catkin",
-    })
-    assert resp.status_code == 200
-    assert _shard(dataset_root, "IMG_0060.JPG")["adjudication_covered"] is True
-
-
-def test_complete_named_subject_on_a_bucket_holding_a_raw_id_record_is_uncovered(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """A record whose subject is a raw class id (no recorded id map) cannot be told apart from
-    the reviewed subject by name, so it must not read as 'predicted none of it'."""
-    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
-
-    dataset_root = _dataset_root(tmp_path)
-    write_registry(dataset_root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
-    d = tmp_path / "predictions" / "baseline" / "2-11-26"
-    d.mkdir(parents=True)
-    write_annotations(
-        str(d / "IMG_0070.json"),
-        [Annotation(subject="0", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
-        IMG_W, IMG_H)
-
-    resp = client.post("/api/review/mark_complete", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0070.JPG",
-        "pred_dir": str(d),
-        "subject": "catkin",
-    })
-    assert resp.status_code == 200
-    assert _shard(dataset_root, "IMG_0070.JPG")["adjudication_covered"] is False
-
-
 def test_complete_with_no_subject_records_completion_with_a_null_status(
     client: TestClient, tmp_path: Path
 ) -> None:

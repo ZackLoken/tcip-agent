@@ -13,8 +13,8 @@ For each root named: a record with no ``annotation_stats`` document is left alon
 conform); a document with no ``image_status`` key is left alone (already conformed); a document
 whose ``image_status`` is present and empty has the key dropped. A document whose ``image_status``
 is present and non-empty is refused rather than conformed: real data there would mean a writer this
-grounding did not find, and this script's job is to drop a dead key, not to decide what to do with
-one that turns out to be live.
+script does not know about, and this script's job is to drop a dead key, not to decide what to do
+with one that turns out to be live.
 
 Exit codes: 0 for every root conformed (or already clean); 2 if any root was refused.
 """
@@ -44,7 +44,7 @@ def conform_root(root: Path, *, plan: bool) -> str:
     image_status = data["image_status"]
     if image_status != {}:
         return (f"refused: image_status is not empty ({image_status!r}); a writer this "
-                "grounding did not find put real data there")
+                "script does not know about put real data there")
     if plan:
         return "would drop the empty image_status key"
     conformed = {k: v for k, v in data.items() if k != "image_status"}

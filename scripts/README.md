@@ -32,14 +32,15 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `drop_annotation_stats_image_status.py` - drops the dead `image_status` key from a project's
   `annotation_stats` record, which every writer put there empty and nothing read. `--plan`
   previews; a record whose `image_status` is not empty is refused, since that would mean a writer
-  the grounding did not find.
+  this script does not know about.
 - `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
   `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
   `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
   it cannot parse is refused by image name and the dataset left untouched.
 - `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
-  models that declare the view-coverage record's shape, so the browser's types are a projection
-  of the backend's rather than hand-transcribed. Run after changing a declared model;
+  models that declare the view-coverage record's shape and the GUI's tab/mode vocabulary
+  (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's
+  rather than hand-transcribed. Run after changing a declared model;
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
 - `distill_learnings.py` - gathers one project's (or, with `--workspace`, every project's)
   `claude_reports` and `project_retrospective` records into one Markdown worksheet of

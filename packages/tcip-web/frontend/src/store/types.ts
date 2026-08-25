@@ -3,10 +3,12 @@
  * Keep in sync with packages/tcip-web/src/tcip_web/state.py and routes/{annotate,review,classes}.py.
  */
 
+import type { GuiVocabulary } from "@/api/types.generated";
+
 export type TabName =
   "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
 
-export type Mode = "box" | "polygon" | "point";
+export type Mode = GuiVocabulary["mode"];
 
 export interface DatasetSelection {
   project_root: string | null;

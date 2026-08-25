@@ -72,8 +72,8 @@ def test_plan_reports_the_drop_and_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_a_non_empty_image_status_is_refused_rather_than_conformed(tmp_path: Path) -> None:
-    """Real data under image_status would mean a writer this grounding did not find; the script's
-    job is to drop a dead key, not decide what to do with one that turns out to be live."""
+    """Real data under image_status would mean a writer this script does not know about; the
+    script's job is to drop a dead key, not decide what to do with one that turns out to be live."""
     _bind_sqlite()
     module = _load_script()
     key = annotation_stats_key(str(tmp_path))

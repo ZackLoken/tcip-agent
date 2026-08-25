@@ -265,3 +265,24 @@ def test_load_missing_returns_empty_shape(client: TestClient, tmp_path: Path) ->
         "/api/sessions/load", params={"project_root": str(tmp_path)}
     ).json()
     assert data == {"sessions": []}
+
+
+def test_start_then_image_event_stores_only_a_sessions_key(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The stored document carries no dead ``image_status`` key: every writer here puts only
+    ``sessions`` on disk."""
+    pr = str(tmp_path)
+    client.post("/api/sessions/start", json={"project_root": pr, "user": "alice"})
+    client.post(
+        "/api/sessions/image_event",
+        json={
+            "project_root": pr,
+            "image_name": "IMG_A",
+            "session_seconds_delta": 5.0,
+            "annotations_added_delta": 1,
+            "final_annotation_count": 1,
+        },
+    )
+    stored = tcip_store.read(annotation_stats_key(pr))
+    assert list(stored.keys()) == ["sessions"]

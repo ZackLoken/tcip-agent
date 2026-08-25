@@ -123,7 +123,7 @@ export const classesApi = {
   deriveImageStatus: (body: {
     project_root: string;
     annotations_dir: string | null;
-    subject: string | null;
+    subject: string;
     image_list: string[];
     complete_override?: string[];
   }) =>
