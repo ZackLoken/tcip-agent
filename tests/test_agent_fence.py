@@ -788,3 +788,96 @@ def test_classify_drops_repo_rules_in_production_mode_keeping_breeder_data():
     assert fr.classify("/c/proj/.tcip/state/trait_specs/x.json", root=root, mode="prod") == "breeder"
     # Development mode keeps the repo rules on.
     assert fr.classify("packages/tcip-mcp/x.py", root=root, mode="dev") == "protected"
+
+
+# ── the tokenizer: editors denied as a class, redirects and prefixes token-aware ─
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "ed packages/tcip-mcp/server.py",
+        "ex -c 'w packages/tcip-mcp/server.py' scratch",
+        "ex -R packages/tcip-mcp/server.py",
+        "ex -sc 'w' packages/tcip-mcp/server.py",
+    ],
+)
+def test_guard_denies_a_line_editor_regardless_of_its_arguments(cmd):
+    # An editor names its write target inside its own command script, not as a plain argument, so
+    # it is denied as a verb (the delete rule's own precedent) rather than judged by target.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "cp '/tmp/a|b' packages/tcip-mcp/server.py",
+        "cp '/tmp/a>b' packages/tcip-mcp/server.py",
+    ],
+)
+def test_guard_denies_a_destination_reached_past_a_quoted_separator_or_redirect(cmd):
+    # A quoted separator or redirect character inside the source argument stays inside its own
+    # token, so the real destination that follows it is still read and classified.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "env cp a packages/tcip-mcp/server.py",
+        "busybox cp a packages/tcip-mcp/server.py",
+        "nice cp a packages/tcip-mcp/server.py",
+        "time cp a packages/tcip-mcp/server.py",
+        "stdbuf -o0 cp a packages/tcip-mcp/server.py",
+        "command cp a packages/tcip-mcp/server.py",
+        "env FOO=1 BAR=2 cp a packages/tcip-mcp/server.py",
+    ],
+)
+def test_guard_denies_a_writer_run_through_a_transparent_prefix(cmd):
+    # busybox/command/env/nice/time/stdbuf run the real verb unchanged, so the verb underneath a
+    # leading wrapper (env's own NAME=value assignments, stdbuf's own flags) is what gets classified.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_admits_a_writer_run_through_a_transparent_prefix_to_a_free_destination():
+    # The same wrapper stripping must not over-deny: a destination outside platform internals and
+    # breeder data is still free, wrapper or not.
+    r = _run_guard("env FOO=1 cp a /tmp/b")
+    assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "cat evil.json > 'unclosed",
+        "cat evil.json > /tmp/scratch.txt\\",
+    ],
+)
+def test_guard_denies_a_command_the_tokenizer_cannot_parse(cmd):
+    # An unclosed quote or a trailing backslash inside one leaves no reliable parse to judge, so
+    # the guard denies by name rather than falling open on an uncaught tokenizer exception.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_reads_a_multiline_commands_later_line_as_its_own_segment():
+    # A newline is bash's own statement separator; a write on a later line must not hide behind
+    # an unrelated first line the way it would if the tokenizer silently dropped the newline.
+    r = _run_guard("echo hi\ntouch packages/tcip-mcp/x.py")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_reads_a_subshells_verb_as_a_verb():
+    # A subshell's parentheses are segment boundaries, so the verb inside one is read as a verb
+    # rather than swallowed into an unrecognized leading token.
+    r = _run_guard("(cp evil.py packages/tcip-mcp/x.py)")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout

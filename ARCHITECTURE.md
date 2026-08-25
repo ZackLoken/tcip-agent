@@ -2029,7 +2029,7 @@ Phase 3 verdict: single.
 ## S61. Bash guard and PowerShell guard protected-path sets
 
 Must agree: the two shells fence the same platform paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:138` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
+Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:255` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
 Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:149` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
 Phase 3 verdict: single.
 
