@@ -54,11 +54,6 @@ ts.register_store(
     )
 )
 
-_UNDATED_DATE = "undated"
-"""The date segment a flat (non-date-nested) dataset's images stage a proposal under: a store
-key holds no empty part, so the flat layout's missing date needs one declared token rather than
-an omitted segment."""
-
 
 def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) -> ts.Key:
     """The proposals one run staged for one dataset image, for ``accept_proposals`` to read back.
@@ -68,13 +63,32 @@ def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) 
     dataset root, the same as the labels and predictions the proposals eventually become: a
     same-named image in another dataset, or another date bucket of this one, addresses its own
     record. ``date`` is the image's own capture-date bucket, or ``None`` for a flat dataset's
-    undated layout, addressed under :data:`_UNDATED_DATE`.
+    undated layout, addressed under ``ingest_tools.UNDATED_BUCKET``: a store key holds no empty
+    part, so the missing date needs the same declared token ``ingest_images`` buckets a dateless
+    source under, rather than a spelling of its own. A flat-layout image and an image in that
+    literal bucket therefore share one key for a given stem, which is never a real collision:
+    ``ingest_images`` never produces a flat layout beside a dated one in the same dataset.
     """
-    return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (date or _UNDATED_DATE, stem))
+    from tcip_mcp.tools.ingest_tools import UNDATED_BUCKET
+
+    return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (date or UNDATED_BUCKET, stem))
 
 
-def _staging_key_for(image_path: str) -> ts.Key:
-    """The :func:`proposal_staging_key` for the dataset image at ``image_path``.
+class StagingAddress(NamedTuple):
+    """The :func:`proposal_staging_key` for a dataset image, plus the dataset root and date
+    :func:`~tcip_mcp.dataset_layout.parse_image_path` derived to reach it.
+
+    ``accept_proposals`` needs the root and date too, to stage the accepted predictions at the
+    same address; carrying them here means that address is derived once, not twice.
+    """
+
+    key: ts.Key
+    root: Path
+    date: str | None
+
+
+def _staging_key_for(image_path: str) -> StagingAddress:
+    """The :class:`StagingAddress` for the dataset image at ``image_path``.
 
     Runs :func:`~tcip_mcp.dataset_layout.parse_image_path` once, so ``propose_annotations`` and
     ``accept_proposals`` never derive two different addresses for the same image. Raises
@@ -83,7 +97,7 @@ def _staging_key_for(image_path: str) -> ts.Key:
     from tcip_mcp.dataset_layout import parse_image_path
 
     root, date, stem = parse_image_path(image_path)
-    return proposal_staging_key(root, date, stem)
+    return StagingAddress(proposal_staging_key(root, date, stem), root, date)
 
 
 class DisplayRead(NamedTuple):
@@ -197,6 +211,30 @@ def _display_for_path(image_path: str, *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
     ``(dir, stem)`` pair.
     """
     return _read_for_display(_source_for_path(image_path), max_edge=max_edge, region=region)
+
+
+def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
+    """A reason for ``propose_annotations`` to decline staging ``img``, when
+    :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` raised ``exc`` for it (the same
+    call ``accept_proposals`` will make on this path).
+
+    A band-group member's own path (``capture_Red.tif`` when ``capture.bandgroup`` claims it)
+    resolves to nothing: the resolver's own ``FileNotFoundError`` for it reads the same as one for
+    a stem that names no image at all, "no image for stem". This names the manifest that claims
+    it instead, so the refusal points at the path to propose on rather than repeating a generic
+    not-found. ``BandGroupIncomplete`` (a manifest that resolves but is missing a sibling) already
+    carries its own manifest-naming message and is returned unchanged.
+    """
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.image_utils import BandGroupIncomplete, list_logical_images
+
+    if isinstance(exc, BandGroupIncomplete):
+        return str(exc)
+    for source in list_logical_images(img.parent).values():
+        if isinstance(source, BandGroupRef) and img in source.bands.values():
+            return (f"{img} is one band of the group {source.manifest_path.name!r}; propose "
+                    f"on {source.manifest_path} instead.")
+    return str(exc)
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
@@ -708,10 +746,12 @@ def propose_annotations(
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
     dataset, capture date and stem, alongside the content identity of the pixels the engine ran
     on: ``accept_proposals`` reads the record back by that same address and refuses if the
-    image's content no longer matches it. On a path outside any dataset's ``images/`` tree the
-    engine still runs and the render and candidates are returned the same way, but nothing is
-    staged (the response's ``staged`` is ``false``, naming why): there is no dataset address to
-    read the record back by, so such a call cannot later be accepted.
+    image's content no longer matches it. On a path outside any dataset's ``images/`` tree, or a
+    dataset path ``accept_proposals`` would itself fail to resolve (a band-group member's own
+    path when its manifest claims it), the engine still runs and the render and candidates are
+    returned the same way, but nothing is staged (the response's ``staged`` is ``false``, naming
+    why): there is no address ``accept_proposals`` could ever read the record back by, so such a
+    call cannot later be accepted.
 
     The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
     can register another engine (``register_proposal_engine``) or pass a dotted 'module:factory' it
@@ -810,6 +850,13 @@ def propose_annotations(
         candidates = _offset_candidates(candidates, origin)
 
     if not candidates:
+        # A prior run's record must not outlive this one finding nothing to propose.
+        try:
+            stale = _staging_key_for(image_path)
+        except ValueError:
+            pass
+        else:
+            ts.delete(stale.key)
         return {
             "image_path": None,
             "engine": engine,
@@ -834,21 +881,31 @@ def propose_annotations(
         envelope["region"] = region_info
 
     try:
-        key = _staging_key_for(image_path)
+        address = _staging_key_for(image_path)
     except ValueError as exc:
         staged = False
         stage_note = f" Not staged: {exc}"
     else:
-        import dataclasses
+        from tcip_mcp.pipelines import image_utils
 
-        from tcip_mcp.pipelines.raster_source import content_identity
+        try:
+            # The same resolution accept_proposals will make on this path: staging over a
+            # source accept could never reread would leave a record it can never confirm.
+            source = image_utils.resolve_image_source(img.parent, img.stem)
+        except (FileNotFoundError, image_utils.BandGroupIncomplete) as exc:
+            staged = False
+            stage_note = f" Not staged: {_unresolvable_staging_source(img, exc)}"
+        else:
+            import dataclasses
 
-        identity = content_identity(_source_for_path(image_path))
-        envelope["image_identity"] = dataclasses.asdict(identity)
-        envelope["image_path"] = str(img)
-        ts.replace(key, envelope)
-        staged = True
-        stage_note = ""
+            from tcip_mcp.pipelines.raster_source import content_identity
+
+            identity = content_identity(source)
+            envelope["image_identity"] = dataclasses.asdict(identity)
+            envelope["image_path"] = str(img.resolve())
+            ts.replace(address.key, envelope)
+            staged = True
+            stage_note = ""
 
     region_note = f" (region {grid_cells})" if region_info is not None else ""
     return {
@@ -890,7 +947,8 @@ def accept_proposals(
     Reads back the record propose_annotations staged for this exact image (dataset, capture date
     and stem) and refuses if the image's content no longer matches the content identity that run
     recorded: the proposals it staged were candidates over those pixels, not whatever now sits at
-    this path.
+    this path. That check decodes sample windows of the image (the bound ``CONTENT_IDENTITY_*``
+    constants in ``raster_source.py`` set how many and how large), never the whole frame.
 
     Args:
         image_path: Absolute path to the image (same as propose_annotations).
@@ -902,7 +960,7 @@ def accept_proposals(
         return {"error": f"Image not found: {image_path}"}
 
     try:
-        key = _staging_key_for(image_path)
+        address = _staging_key_for(image_path)
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -916,13 +974,18 @@ def accept_proposals(
         return {"error": str(exc)}
 
     # Load cached proposals from the same record propose_annotations staged them in.
-    envelope = ts.read(key, default=None)
+    envelope = ts.read(address.key, default=None)
     if envelope is None:
         return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
 
     from tcip_mcp.pipelines.raster_source import raster_identity_matches
 
-    if not raster_identity_matches(envelope["image_identity"], source):
+    try:
+        matches = raster_identity_matches(envelope["image_identity"], source)
+    except ValueError as exc:
+        return {"error": f"Could not verify {image_path} against its staged proposals: {exc}"}
+
+    if not matches:
         return {"error": f"{image_path} does not match the image propose_annotations ran on: "
                           "its content has changed since that run staged these candidates. "
                           "Run propose_annotations again on the current image."}
@@ -960,13 +1023,11 @@ def accept_proposals(
 
     # Stage into the predictions tree through the shared verdict-guarded helper: model output for a
     # human to accept on the Review canvas, never written straight to ground truth.
-    from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
 
-    root, date, _stem = parse_image_path(str(img))
     try:
         staged = stage_prediction_shapes(
-            str(root), engine, date, img.stem,
+            str(address.root), engine, address.date, img.stem,
             annotations=proposals, img_w=w, img_h=h, overwrite=False,
         )
     except BucketHasVerdicts as exc:

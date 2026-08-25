@@ -813,21 +813,30 @@ def test_content_identity_with_an_explicit_channel_count_matches_the_old_spellin
 ) -> None:
     """A caller with its own channel count (a model's ``in_chans``, a training-time probe) gets
     exactly the value the direct ``raster_content_identity`` call under the platform's constants
-    used to compute, never the route's own derivation."""
+    used to compute, never the route's own derivation.
+
+    A grayscale photograph is the discriminating input: ``probe_channels`` reads it at 1
+    (its own band count) while ``image_route_channel_count`` reads it at 3 (a plain serve's PIL
+    RGB expansion), so a helper that silently ignored the explicit argument and fell back to the
+    route's own rule would still pass a same-count fixture; here the two counts disagree, so only
+    a helper that actually threads the explicit count through can match."""
+    from PIL import Image
+
     from tcip_mcp.pipelines.raster_source import (
         CONTENT_IDENTITY_MAX_WINDOWS, CONTENT_IDENTITY_SEED, CONTENT_IDENTITY_WINDOW_SIZE,
         content_identity, raster_content_identity,
     )
 
-    path = tmp_path / "content.npy"
-    np.save(str(path), _distinctive_array(24, 20, channels=5))
+    path = tmp_path / "gray.png"
+    Image.fromarray(_distinctive_gray(20, 16), mode="L").save(path)
 
+    explicit = content_identity(path, 1)
     old_spelling = raster_content_identity(
-        path, 5, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
+        path, 1, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
         max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
-    via_helper = content_identity(path, 5)
 
-    assert via_helper == old_spelling
+    assert explicit == old_spelling
+    assert explicit != content_identity(path)
 
 
 def _distinctive_gray(height: int, width: int) -> np.ndarray:

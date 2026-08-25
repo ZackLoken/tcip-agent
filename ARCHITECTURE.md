@@ -641,12 +641,12 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `visualize` | `vision_tools.py:255` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `render_failure_cases` | `vision_tools.py:469` | yes | Find and render the worst predictions for failure analysis. |  <!-- queued: P5-45 demote-to-script -->
-| `propose_annotations` | `vision_tools.py:694` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `accept_proposals` | `vision_tools.py:876` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1000` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1130` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `visualize` | `vision_tools.py:293` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
+| `render_failure_cases` | `vision_tools.py:507` | yes | Find and render the worst predictions for failure analysis. |  <!-- queued: P5-45 demote-to-script -->
+| `propose_annotations` | `vision_tools.py:732` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
+| `accept_proposals` | `vision_tools.py:933` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
+| `capture_live_canvas` | `vision_tools.py:1061` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:1191` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 8 + 3 + 3 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 8 + 1 + 6 = 57 tools across 15 modules.
 
@@ -1342,7 +1342,7 @@ Seam S29 ("Prediction-bucket immutability"), verdict `both-sides-one-implementat
 `phase0_implementation: once, shared`: `tests/test_prediction_bucket_resolution.py:39,48`,
 `tests/test_review_channel.py:287,312,325`, `tests/test_export_predictions_bucket_handling.py:60`,
 `tests/test_orthomosaic_tools.py:241-248`, `tests/test_tcip_web_routes.py:898`. Gap: the seam's
-fourth named caller, `vision_tools.py:972` inside `accept_proposals`'s `except BucketHasVerdicts`
+fourth named caller, `vision_tools.py:1033` inside `accept_proposals`'s `except BucketHasVerdicts`
 block, has no test coverage; every `accept_proposals` test writes into a fresh, verdict-free
 bucket.
 
@@ -1608,7 +1608,7 @@ Phase 3 verdict: single.
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:132` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1026` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1027).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1087` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -1735,7 +1735,7 @@ Phase 3 verdict: single.
 
 Must agree: no writer overwrites a bucket whose predictions already carry human review verdicts.
 Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:195` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, line 20, excludes every provenance stamp through `resolution.SIDECAR_FILENAMES` rather than naming one filename).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:875`, `tools/vision_tools.py:968`, `tools/inference_tools.py:1268` and `packages/tcip-web/src/tcip_web/routes/inference.py:430` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:875`, `tools/vision_tools.py:1029`, `tools/inference_tools.py:1268` and `packages/tcip-web/src/tcip_web/routes/inference.py:430` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
 Phase 3 verdict: single.
 
 ## S30. split.json train/val manifest

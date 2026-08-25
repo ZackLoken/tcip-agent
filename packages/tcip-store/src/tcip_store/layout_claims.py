@@ -111,11 +111,6 @@ def literal(text: str) -> PartPattern:
     return PartPattern(literal=text)
 
 
-def starting_with(text: str) -> PartPattern:
-    """A part that varies but always opens with ``text``."""
-    return PartPattern(starts_with=text)
-
-
 @dataclass(frozen=True)
 class Constant:
     """A path segment that reads the same in every entry a store holds."""
@@ -662,7 +657,6 @@ __all__ = [
     "literal",
     "matches_template",
     "platform_claim_stores",
-    "starting_with",
     "template_specificity",
     "unconformed_files",
 ]
