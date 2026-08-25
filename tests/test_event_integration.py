@@ -119,6 +119,16 @@ class TestPostPanelEventRoute:
         assert state["mode"] == "polygon"
         assert state["active_subject"] == "catkin"
 
+    def test_annotate_focus_with_an_unknown_mode_answers_400(self, client: TestClient) -> None:
+        before = client.get("/api/dataset/state").json()["mode"]
+        resp = client.post(
+            "/api/events/app",
+            json={"event_type": "annotate_focus", "data": {"mode": "lasso"}},
+        )
+        assert resp.status_code == 400
+        assert "lasso" in resp.json()["detail"]
+        assert client.get("/api/dataset/state").json()["mode"] == before
+
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
         self, client: TestClient, data_dir: Path, monkeypatch,
     ) -> None:

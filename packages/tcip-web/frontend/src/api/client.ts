@@ -25,6 +25,7 @@ import type {
   DatasetSelection,
   ImageLabels,
   MatchesResponse,
+  Mode,
   PredictionReference,
   ReviewImageStatus,
   TabName,
@@ -340,7 +341,7 @@ export const api = {
       scale?: number;
       offset_x?: number;
       offset_y?: number;
-      mode?: string;
+      mode?: Mode;
       pred_reference?: PredictionReference | null;
     }) =>
       call<{ status: string; image_path: string }>(ROUTES.postAnnotateOpen, {

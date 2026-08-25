@@ -660,7 +660,12 @@ def _focus_annotate(
     image_index: int | None = None,
 ) -> dict:
     """Drive the live Annotate tab to a (subject, date), in the right mode, on a frame labeled for
-    the subject. Posts an ``annotate_focus`` event the GUI honors with local view setters."""
+    the subject. Posts an ``annotate_focus`` event the GUI honors with local view setters.
+
+    The ``mode`` vocabulary this validates against restates ``tcip_web.state.AnnotateMode``: this
+    package cannot import ``tcip_web`` (the dependency runs the other way), so the check is
+    restated here rather than shared.
+    """
     from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
     from tcip_mcp.web_client import post_panel_event
 

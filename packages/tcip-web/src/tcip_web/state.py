@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tcip_store import StoreError, read, replace
 
 from tcip_mcp.web_client import gui_snapshot_key
@@ -35,11 +35,25 @@ class GuiMutationInvalid(ValueError):
     """A :meth:`StateStore.mutate` call whose merged result does not validate as ``GuiState``."""
 
 
+class GuiVocabulary(BaseModel):
+    """``active_tab`` and ``mode``, held together as one small model rather than the whole of
+    :class:`GuiState`, for ``scripts/generate_frontend_types.py`` to project into
+    ``frontend/src/api/types.generated.ts``. ``store/types.ts``'s ``Mode`` and ``client.ts``'s
+    ``openImage`` take the ``mode`` field's type from the generated module instead of restating
+    the literal union by hand.
+    """
+
+    active_tab: ActiveTab
+    mode: AnnotateMode
+
+
 # ── Pydantic state model ────────────────────────────────────────────────
 
 
 class DatasetSelection(BaseModel):
     """Which dataset the GUI is currently looking at."""
+
+    model_config = ConfigDict(extra="forbid")
 
     project_root: Optional[str] = None
     dataset_root: Optional[str] = None
@@ -58,6 +72,8 @@ class DatasetSelection(BaseModel):
 class PredictionReference(BaseModel):
     """Overlay shown in the Annotate tab when user drew via Edit-from-Review."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: str  # "box" | "polygon"
     coords: list[float] | list[list[float]]
     subject: str = ""
@@ -67,12 +83,16 @@ class PredictionReference(BaseModel):
 class ViewState(BaseModel):
     """Pan/zoom state shared between Annotate and Review tabs."""
 
+    model_config = ConfigDict(extra="forbid")
+
     scale: float = 1.0
     offset_x: float = 0.0
     offset_y: float = 0.0
 
 
 class ReviewFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     iou_threshold: float = 0.5
     conf_threshold: float = 0.25
     filter_type: str = "all"      # all|tp|fp|fn
@@ -89,6 +109,8 @@ class GuiState(BaseModel):
     fields here are advisory. Training-run / inference-job / class-registry state
     lives with the corresponding tabs, not here.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     active_tab: ActiveTab = "annotate"
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
@@ -246,6 +268,10 @@ class StateStore:
         a project becomes known (dataset select) so backend state survives a restart.
         An absent snapshot is the ordinary first-open answer and returns quietly; one that
         exists and will not decode is logged, because that is a project losing state it had.
+        A snapshot that will not decode also drops the state held in memory back to
+        ``GuiState()`` defaults: without this, the previously open project's state would stay
+        live under the new project's root and the next mutation would flush it into the new
+        project's own gui.json.
         """
         try:
             data = read(gui_snapshot_key(project_root), default=None)
@@ -256,6 +282,7 @@ class StateStore:
             return True
         except Exception:
             logger.exception("Could not load the GUI snapshot for %s", project_root)
+            self._state = GuiState()
             return False
 
 

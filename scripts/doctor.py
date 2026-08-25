@@ -43,12 +43,14 @@ def check_negatives(root: Path, findings: list) -> None:
     """A negative is empty labels + human Complete, per subject: flag every disk/status disagreement.
 
     Labels are one name-based file per image (all subjects); a confirmed negative is scoped to a
-    subject and date, so the disagreement is checked per subject present in the file.
+    subject and date, so the disagreement is checked per subject present in the file. An
+    image-level record (a subject with no geometry) counts as content for that subject, the same
+    rule ``annotations_hold_subject`` applies everywhere else this question is asked.
     """
     from tcip_annotation import json_io
     from tcip_mcp.dataset_layout import (
-        annotation_date, annotation_root, bucket_subject_date, image_status_path,
-        is_confirmed_negative, normalize_status_store,
+        annotation_date, annotation_root, annotations_hold_subject, bucket_subject_date,
+        image_status_path, is_confirmed_negative, normalize_status_store,
     )
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
@@ -63,14 +65,13 @@ def check_negatives(root: Path, findings: list) -> None:
         anns = json_io.read_annotations(str(label))
         name = stems.get(label.stem, f"{label.stem}.JPG")
         date = annotation_date(label)
-        subjects_here = {a.subject for a in anns if a.geometry is not None}
         for key, bucket in by_bucket.items():
             if not is_confirmed_negative(bucket.get(name)):
                 continue
             subj, bdate = bucket_subject_date(key)
             if bdate != date:
                 continue
-            if subj in subjects_here:
+            if annotations_hold_subject(anns, subj):
                 findings.append(("error", f"{label.relative_to(root)}: has {subj!r} annotations but "
                                 f"the status store says 'negative' for {subj!r}, contradictory; re-review"))
         if not anns and name not in neg_names:
@@ -111,8 +112,8 @@ def check_status_tokens(root: Path, findings: list) -> None:
     """
     from tcip_annotation import json_io
     from tcip_mcp.dataset_layout import (
-        annotation_dir, annotations_hold_subject, bucket_subject_date, image_status_path,
-        label_filename, status_confirmations, unreadable_status_entries,
+        annotation_path, annotations_hold_subject, bucket_subject_date, image_status_path,
+        status_confirmations, unreadable_status_entries,
     )
 
     raw = _load(image_status_path(root))
@@ -126,8 +127,7 @@ def check_status_tokens(root: Path, findings: list) -> None:
         for name, record in records.items():
             if record.get("status") != "complete":
                 continue
-            stem = Path(name).stem
-            label = annotation_dir(root, date) / label_filename(stem)
+            label = annotation_path(root, date, Path(name).stem)
             anns = json_io.read_annotations(str(label)) if label.is_file() else []
             if not annotations_hold_subject(anns, subject):
                 findings.append(("warn", f"{bucket}/{name}: status says 'complete' but the label "
