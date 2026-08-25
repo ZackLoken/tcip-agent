@@ -77,7 +77,8 @@ def test_save_gt_confines_the_label_file_it_writes(
 def test_mark_complete_confines_the_paths_it_reads(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    base = {"dataset_root": str(_dataset_root(allowed)), "image_name": "IMG_0007.JPG"}
+    base = {"dataset_root": str(_dataset_root(allowed)), "image_name": "IMG_0007.JPG",
+             "subject": "catkin"}
 
     assert client.post("/api/review/mark_complete",
                        json={**base, "gt_path": str(outside / "gt.json")}).status_code == 403
@@ -101,6 +102,7 @@ def test_an_optional_path_the_client_omits_is_not_an_escape(
     resp = client.post("/api/review/mark_complete", json={
         "dataset_root": str(_dataset_root(allowed)),
         "image_name": "IMG_0007.JPG",
+        "subject": "catkin",
     })
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] == "negative"

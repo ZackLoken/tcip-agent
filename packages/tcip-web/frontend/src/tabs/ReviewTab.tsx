@@ -877,26 +877,29 @@ export function ReviewTab() {
         gt_path: paths.gt,
         pred_dir: dataset.predictions_dir,
         completed,
+        subject: dataset.subject,
       });
       setImageStatus(res.image_status); // local review badge
       if (imgName) setReviewImageStatus(imgName, res.image_status); // keep the nav filter live
-      // The annotation status comes from the server (GT files on disk), never from a
-      // matches snapshot that can belong to the previous image mid-navigation.
-      setStoreImageStatus(imgName, res.annotation_status);
-      // The registry this status is mirrored into is the project's, not the review store's.
-      if (dataset.project_root) {
-        void classesApi
-          .setImageStatus(
-            dataset.project_root,
-            imgName,
-            res.annotation_status,
-            dataset.subject,
-            dataset.date,
-            dataset.dataset_root,
-            dataset.annotations_dir,
-            useStore.getState().user || undefined,
-          )
-          .catch(() => {});
+      // The annotation status comes from the server (GT files on disk), scoped to the confirmed
+      // subject; null when no subject was named, so nothing to sync or mirror.
+      if (res.annotation_status) {
+        setStoreImageStatus(imgName, res.annotation_status);
+        // The registry this status is mirrored into is the project's, not the review store's.
+        if (dataset.project_root) {
+          void classesApi
+            .setImageStatus(
+              dataset.project_root,
+              imgName,
+              res.annotation_status,
+              dataset.subject,
+              dataset.date,
+              dataset.dataset_root,
+              dataset.annotations_dir,
+              useStore.getState().user || undefined,
+            )
+            .catch(() => {});
+        }
       }
     } catch (e) {
       useStore

@@ -419,12 +419,15 @@ export const api = {
       // so it has nowhere else to record which model it was reviewed against.
       pred_dir?: string | null;
       completed?: boolean;
+      // The subject this Complete confirms; omitted, the completion is recorded with no
+      // subject-scoped status derived.
+      subject?: string | null;
     }) =>
       call<{
         status: string;
         image_status: MatchesResponse["image_status"];
-        // Derived server-side from the GT file, never from a stale client snapshot.
-        annotation_status: ImageStatus;
+        // Derived server-side from the GT file, scoped to subject; null when no subject was named.
+        annotation_status: ImageStatus | null;
       }>(ROUTES.postReviewMarkComplete, {
         method: "POST",
         body: JSON.stringify(body),
