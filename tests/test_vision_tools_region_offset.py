@@ -119,12 +119,12 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     """The bbox the tool reports and the rings it caches are two views of one candidate: both
     are read as full-frame, so they must not be translated by different origins."""
     import tcip_store as ts
-    from tcip_mcp.tools.vision_tools import proposal_staging_key
+    from tcip_mcp.tools.vision_tools import _staging_key_for
 
     result = _propose_over_the_region(patched_frame)
     reported = result["candidates"][0]["bbox"]
 
-    envelope = ts.read(proposal_staging_key("region"))
+    envelope = ts.read(_staging_key_for(str(patched_frame)))
     rings = envelope["candidates"][0]["rings"]
     pts = [p for ring in rings for p in ring]
     assert pts

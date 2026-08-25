@@ -395,14 +395,16 @@ class TestWholeFrameDefaultIsUnaffected:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
 
-        img_path = tmp_path / "no_region.jpg"
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img_path = images_dir / "no_region.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = vision_tools.propose_annotations(image_path=str(img_path))
         assert "error" not in result, result
 
-        envelope = ts.read(vision_tools.proposal_staging_key("no_region"))
-        assert set(envelope) == {"engine", "candidates"}
+        envelope = ts.read(vision_tools._staging_key_for(str(img_path)))
+        assert set(envelope) == {"engine", "candidates", "image_identity", "image_path"}
 
     def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -435,7 +437,8 @@ class TestWholeFrameDefaultIsUnaffected:
 
         assert "candidates[0].bbox" in result["error"]
         assert not resolve_state(
-            Path(".tcip") / "state" / "proposals_unstorable.json").exists()
+            Path(".tcip") / "state" / "proposals" / vision_tools._UNDATED_DATE
+            / "unstorable.json").exists()
 
     def test_an_ordinary_candidate_is_still_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -455,11 +458,13 @@ class TestWholeFrameDefaultIsUnaffected:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: OneBoxProposer())
 
-        img_path = tmp_path / "storable.jpg"
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img_path = images_dir / "storable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = vision_tools.propose_annotations(image_path=str(img_path))
 
         assert "error" not in result, result
-        envelope = ts.read(vision_tools.proposal_staging_key("storable"))
+        envelope = ts.read(vision_tools._staging_key_for(str(img_path)))
         assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]

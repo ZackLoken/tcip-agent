@@ -782,11 +782,11 @@ class TestAcceptProposalsTool:
         assert "error" in result
         assert "Run propose_annotations first" in result["error"]
 
-    def test_with_cached_proposals(self, viz_dataset: Path):
-        import tcip_store as ts
-        from tcip_mcp.tools.vision_tools import accept_proposals, proposal_staging_key
+    def test_with_cached_proposals(self, viz_dataset: Path, monkeypatch: pytest.MonkeyPatch):
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
 
-        # Simulate cached proposals from propose_annotations (neutral schema + engine envelope).
+        # The candidates propose_annotations stages, in the neutral engine schema.
         candidates = [
             {
                 "candidate_id": 0,
@@ -807,7 +807,17 @@ class TestAcceptProposalsTool:
                 "rings": [[[300, 300], [400, 300], [400, 400], [300, 400]]],
             },
         ]
-        ts.replace(proposal_staging_key("img_001"), {"engine": "sam", "candidates": candidates})
+
+        class StubProposer:
+            def propose(self, image_path: str, **params: object) -> list[dict]:
+                return candidates
+
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
+
+        propose_result = propose_annotations(
+            image_path=str(viz_dataset / "images" / "img_001.jpg"), engine="sam")
+        assert "error" not in propose_result, propose_result
+        assert propose_result["staged"] is True
 
         result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
@@ -1094,20 +1104,31 @@ class TestFullPipelineIntegration:
         img.save(images_dir / "sample.jpg")
         return tmp_path
 
-    def _cache_candidates(self, stem: str, candidates: list[dict]) -> None:
-        import tcip_store as ts
-        from tcip_mcp.tools.vision_tools import proposal_staging_key
+    def _propose(
+        self, monkeypatch: pytest.MonkeyPatch, image_path: str, candidates: list[dict],
+    ) -> None:
+        """Stage ``candidates`` through the real writer: a stub engine that hands them back
+        verbatim, driven by an actual ``propose_annotations`` call."""
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.tools.vision_tools import propose_annotations
 
-        envelope = json.loads(json.dumps({"engine": "sam", "candidates": candidates}, default=str))
-        ts.replace(proposal_staging_key(stem), envelope)
+        class StubProposer:
+            def propose(self, image_path: str, **params: object) -> list[dict]:
+                return candidates
 
-    def test_accept_writes_json_detect(self, pipeline_dataset: Path):
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
+        result = propose_annotations(image_path=image_path, engine="sam")
+        assert "error" not in result, result
+
+    def test_accept_writes_json_detect(
+        self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """SAM proposals are staged as predictions: pixel geometry, subject names, and score preserved."""
         from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
-        self._cache_candidates("sample", MOCK_CANDIDATES)
+        self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         result = accept_proposals(
             image_path=img_path,
@@ -1133,13 +1154,15 @@ class TestFullPipelineIntegration:
         objs = json.loads(pred_file.read_text(encoding="utf-8"))["annotations"]
         assert all(isinstance(o["score"], float) for o in objs)
 
-    def test_accept_writes_json_segment(self, pipeline_dataset: Path):
+    def test_accept_writes_json_segment(
+        self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """SAM proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_annotation import json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
-        self._cache_candidates("sample", MOCK_CANDIDATES)
+        self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         result = accept_proposals(
             image_path=img_path,
@@ -1162,13 +1185,15 @@ class TestFullPipelineIntegration:
         assert objs and all(o["created_by"] == "sam" for o in objs)
         assert all(isinstance(o["score"], float) for o in objs)
 
-    def test_detect_and_segment_consistent(self, pipeline_dataset: Path):
+    def test_detect_and_segment_consistent(
+        self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """Box and mask views of the staged predictions cover the same objects (one unified file)."""
         from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
-        self._cache_candidates("sample", MOCK_CANDIDATES)
+        self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         result = accept_proposals(
             image_path=img_path,
@@ -1187,12 +1212,14 @@ class TestFullPipelineIntegration:
         subjects_box = sorted(a.subject for a in anns if bbox_of(a.geometry) is not None)
         assert subjects_poly == subjects_box == ["catkin", "nut"]
 
-    def test_partial_accept_skips_rejected(self, pipeline_dataset: Path):
+    def test_partial_accept_skips_rejected(
+        self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """Only accepted candidates appear in output; rejected are omitted."""
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
-        self._cache_candidates("sample", MOCK_CANDIDATES)
+        self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         # Accept only candidate 1 out of 3
         result = accept_proposals(
@@ -1201,12 +1228,14 @@ class TestFullPipelineIntegration:
         )
         assert result["proposal_count"] == 1
 
-    def test_invalid_candidate_id_silently_skipped(self, pipeline_dataset: Path):
+    def test_invalid_candidate_id_silently_skipped(
+        self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """Assignments with non-existent candidate_id are ignored."""
         from tcip_mcp.tools.vision_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
-        self._cache_candidates("sample", MOCK_CANDIDATES)
+        self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         result = accept_proposals(
             image_path=img_path,
@@ -1217,7 +1246,9 @@ class TestFullPipelineIntegration:
         )
         assert result["proposal_count"] == 1
 
-    def test_render_then_accept_pipeline(self, pipeline_dataset: Path):
+    def test_render_then_accept_pipeline(
+        self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
         from tcip_mcp.tools.vision_tools import accept_proposals
@@ -1234,8 +1265,8 @@ class TestFullPipelineIntegration:
                                           native_size=native)
         assert Path(grid_render).is_file()
 
-        # Step 3: Cache candidates (simulating propose_annotations state save)
-        self._cache_candidates("sample", MOCK_CANDIDATES)
+        # Step 3: propose_annotations stages the candidates for real
+        self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
 
         # Step 4: Accept with class assignments
         result = accept_proposals(
@@ -1397,21 +1428,30 @@ class TestSamPredictionStaging:
         img.save(images_dir / "fmt_test.jpg")
         return tmp_path
 
-    def _cache(self, stem: str) -> None:
-        import tcip_store as ts
-        from tcip_mcp.tools.vision_tools import proposal_staging_key
+    def _propose(self, monkeypatch: pytest.MonkeyPatch, image_path: str) -> None:
+        """Stage MOCK_CANDIDATES through the real writer: a stub engine that hands them back
+        verbatim, driven by an actual ``propose_annotations`` call."""
+        from tcip_mcp.pipelines import proposal
+        from tcip_mcp.tools.vision_tools import propose_annotations
 
-        envelope = json.loads(
-            json.dumps({"engine": "sam", "candidates": MOCK_CANDIDATES}, default=str))
-        ts.replace(proposal_staging_key(stem), envelope)
+        class StubProposer:
+            def propose(self, image_path: str, **params: object) -> list[dict]:
+                return MOCK_CANDIDATES
 
-    def test_json_detect_and_segment_written(self, format_dataset: Path):
+        monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: StubProposer())
+        result = propose_annotations(image_path=image_path, engine="sam")
+        assert "error" not in result, result
+
+    def test_json_detect_and_segment_written(
+        self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         from tcip_annotation import bbox_of, json_io
         from tcip_mcp.tools.vision_tools import accept_proposals
 
-        self._cache("fmt_test")
+        img_path = str(format_dataset / "images" / "fmt_test.jpg")
+        self._propose(monkeypatch, img_path)
         result = accept_proposals(
-            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
         assert "error" not in result
@@ -1426,13 +1466,16 @@ class TestSamPredictionStaging:
         assert anns[0].geometry is not None
         assert bbox_of(anns[0].geometry) is not None
 
-    def test_prediction_carries_sam_score(self, format_dataset: Path):
+    def test_prediction_carries_sam_score(
+        self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
         """Staged SAM output is a prediction: each object has created_by="sam" and a ``score``."""
-        self._cache("fmt_test")
         from tcip_mcp.tools.vision_tools import accept_proposals
 
+        img_path = str(format_dataset / "images" / "fmt_test.jpg")
+        self._propose(monkeypatch, img_path)
         accept_proposals(
-            image_path=str(format_dataset / "images" / "fmt_test.jpg"),
+            image_path=img_path,
             assignments=[{"candidate_id": 0, "subject": "catkin"}],
         )
         pred = format_dataset / "predictions" / "sam" / "fmt_test.json"

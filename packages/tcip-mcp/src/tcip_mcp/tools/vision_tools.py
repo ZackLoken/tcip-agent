@@ -39,30 +39,51 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import Rect
 
 
-_PROPOSAL_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
-"""The proposal envelope one image's run stages, under the platform state root."""
+_PROPOSAL_DOC = RootedFileLocator(prefix=(".tcip", "state", "proposals"), suffix=".json")
+"""The proposal envelope one dataset image's run stages, under the dataset's own state tree."""
 
 PROPOSAL_STAGING_STORE = "proposal_staging"
 ts.register_store(
     ts.StoreDescriptor(
         name=PROPOSAL_STAGING_STORE,
         kind="record",
-        key_fields=("image",),
+        key_fields=("date", "stem"),
         codec=ts.RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_PROPOSAL_DOC,
     )
 )
 
+_UNDATED_DATE = "undated"
+"""The date segment a flat (non-date-nested) dataset's images stage a proposal under: a store
+key holds no empty part, so the flat layout's missing date needs one declared token rather than
+an omitted segment."""
 
-def proposal_staging_key(stem: str) -> ts.Key:
-    """The proposals one run staged for one image, for ``accept_proposals`` to read back.
+
+def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) -> ts.Key:
+    """The proposals one run staged for one dataset image, for ``accept_proposals`` to read back.
 
     ``last_writer_wins``: a run writes the whole envelope from the candidates it just
-    produced, so a re-run replaces the previous one rather than merging into it. Scoped to
-    the platform state root so the handoff survives a cwd that is not the project.
+    produced, so a re-run replaces the previous one rather than merging into it. Scoped to the
+    dataset root, the same as the labels and predictions the proposals eventually become: a
+    same-named image in another dataset, or another date bucket of this one, addresses its own
+    record. ``date`` is the image's own capture-date bucket, or ``None`` for a flat dataset's
+    undated layout, addressed under :data:`_UNDATED_DATE`.
     """
-    return ts.Key(PROPOSAL_STAGING_STORE, str(project_root().resolve()), (f"proposals_{stem}",))
+    return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (date or _UNDATED_DATE, stem))
+
+
+def _staging_key_for(image_path: str) -> ts.Key:
+    """The :func:`proposal_staging_key` for the dataset image at ``image_path``.
+
+    Runs :func:`~tcip_mcp.dataset_layout.parse_image_path` once, so ``propose_annotations`` and
+    ``accept_proposals`` never derive two different addresses for the same image. Raises
+    ``ValueError``, the resolver's own message, for a path outside any dataset's ``images/`` tree.
+    """
+    from tcip_mcp.dataset_layout import parse_image_path
+
+    root, date, stem = parse_image_path(image_path)
+    return proposal_staging_key(root, date, stem)
 
 
 class DisplayRead(NamedTuple):
@@ -680,9 +701,17 @@ def propose_annotations(
 ) -> dict:
     """Propose candidate annotations on an image for review, using a chosen auto-labeling engine.
 
-    Runs the engine's whole-image proposal pass, renders the numbered candidates, caches them, and
-    returns the render path and neutral candidate data. Use view_image on the render, then call
+    Runs the engine's whole-image proposal pass, renders the numbered candidates, and returns the
+    render path and neutral candidate data. Use view_image on the render, then call
     accept_proposals to assign classes and stage the accepted ones as predictions.
+
+    On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
+    dataset, capture date and stem, alongside the content identity of the pixels the engine ran
+    on: ``accept_proposals`` reads the record back by that same address and refuses if the
+    image's content no longer matches it. On a path outside any dataset's ``images/`` tree the
+    engine still runs and the render and candidates are returned the same way, but nothing is
+    staged (the response's ``staged`` is ``false``, naming why): there is no dataset address to
+    read the record back by, so such a call cannot later be accepted.
 
     The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
     can register another engine (``register_proposal_engine``) or pass a dotted 'module:factory' it
@@ -785,6 +814,7 @@ def propose_annotations(
             "image_path": None,
             "engine": engine,
             "summary": f"Engine {engine!r} proposed no candidates",
+            "staged": False,
             "candidates": [],
         }
 
@@ -802,16 +832,33 @@ def propose_annotations(
     envelope: dict = {"engine": engine, "candidates": candidates}
     if region_info is not None:
         envelope["region"] = region_info
-    ts.replace(proposal_staging_key(img.stem), envelope)
+
+    try:
+        key = _staging_key_for(image_path)
+    except ValueError as exc:
+        staged = False
+        stage_note = f" Not staged: {exc}"
+    else:
+        import dataclasses
+
+        from tcip_mcp.pipelines.raster_source import content_identity
+
+        identity = content_identity(_source_for_path(image_path))
+        envelope["image_identity"] = dataclasses.asdict(identity)
+        envelope["image_path"] = str(img)
+        ts.replace(key, envelope)
+        staged = True
+        stage_note = ""
 
     region_note = f" (region {grid_cells})" if region_info is not None else ""
     return {
         "image_path": out,
         "engine": engine,
-        "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}. "
-                   f"Review the numbered overlay, then call accept_proposals "
+        "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}."
+                   f"{stage_note} Review the numbered overlay, then call accept_proposals "
                    f"with class assignments.",
         "candidate_count": len(candidates),
+        "staged": staged,
         "candidates": [
             {
                 "id": c["candidate_id"],
@@ -840,6 +887,11 @@ def accept_proposals(
     truth. Staging goes through the prediction-bucket verdict guard, so a re-run never overwrites
     reviewed predictions or orphans their verdicts. This never writes GT.
 
+    Reads back the record propose_annotations staged for this exact image (dataset, capture date
+    and stem) and refuses if the image's content no longer matches the content identity that run
+    recorded: the proposals it staged were candidates over those pixels, not whatever now sits at
+    this path.
+
     Args:
         image_path: Absolute path to the image (same as propose_annotations).
         assignments: List of dicts, each with 'candidate_id' (int) and 'subject' (name).
@@ -849,18 +901,37 @@ def accept_proposals(
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
 
+    try:
+        key = _staging_key_for(image_path)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    from tcip_mcp.pipelines.image_utils import (
+        BandGroupIncomplete, image_dimensions, resolve_image_source,
+    )
+
+    try:
+        source = resolve_image_source(img.parent, img.stem)
+    except (FileNotFoundError, BandGroupIncomplete) as exc:
+        return {"error": str(exc)}
+
     # Load cached proposals from the same record propose_annotations staged them in.
-    envelope = ts.read(proposal_staging_key(img.stem), default=None)
+    envelope = ts.read(key, default=None)
     if envelope is None:
         return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
+
+    from tcip_mcp.pipelines.raster_source import raster_identity_matches
+
+    if not raster_identity_matches(envelope["image_identity"], source):
+        return {"error": f"{image_path} does not match the image propose_annotations ran on: "
+                          "its content has changed since that run staged these candidates. "
+                          "Run propose_annotations again on the current image."}
 
     engine = envelope.get("engine", "unknown")
     candidates = envelope.get("candidates", [])
     cand_map = {c["candidate_id"]: c for c in candidates}
 
-    from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
-
-    w, h = image_dimensions(resolve_image_source(img.parent, img.stem))
+    w, h = image_dimensions(source)
 
     # Build name-based predictions from accepted candidates (created_by=<engine>, score = the
     # engine's proposal score). Each candidate becomes one Annotation under its subject carrying
