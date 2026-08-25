@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { subjectColor, type AttributeDef, type ImageStatus, type Registry } from "@/api/classes";
+import type { ActionPayload } from "@/api/types.generated";
 import {
   datasetKey,
   loadDatasetUi,
@@ -392,7 +393,7 @@ export interface AppState {
   setReviewFocusIdx: (idx: number | null) => void;
   /** Force a matches refetch even when image/paths are unchanged (re-focus on the open image). */
   bumpReviewRefetch: () => void;
-  markDetectionReviewed: (idx: number, action: string) => void;
+  markDetectionReviewed: (idx: number, action: Exclude<ActionPayload["action"], "swept">) => void;
 }
 
 function snapshot(c: CanvasState): CanvasSnapshot {

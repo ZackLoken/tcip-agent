@@ -8,9 +8,9 @@ import { asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import {
   RENDER_CACHE_VERSION,
+  type ActionPayload,
   type CoveragePayload,
   type CoverageRecord,
-  type VerdictActionField,
 } from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
@@ -373,33 +373,7 @@ export const api = {
         signal,
       }),
 
-    action: (body: {
-      dataset_root: string;
-      image_name: string;
-      image_path: string;
-      gt_path?: string | null;
-      pred_path?: string | null;
-      det_type: string;
-      class_name: string;
-      conf?: number | null;
-      iou?: number | null;
-      gt_idx?: number | null;
-      pred_idx?: number | null;
-      bbox: [number, number, number, number];
-      // "swept": an explicit "checked this image for missed objects, found none" attestation,
-      // with no geometry or gt/pred index; unlike "edited", it never mutates ground truth.
-      action: VerdictActionField["action"];
-      // Only for action "edited": the shape the user adjusted on the Review canvas.
-      edited_box?: [number, number, number, number] | null;
-      edited_points?: number[][] | null;
-      iou_threshold?: number;
-      conf_threshold?: number;
-      // Active filters, so the fresh matches the server returns are scoped like the current view.
-      filter_type?: string;
-      filter_class?: string;
-      /** GUI-set reviewer identity; stamped as accepted_by/created_by ("user:<name>") on GT. */
-      user?: string | null;
-    }) =>
+    action: (body: ActionPayload) =>
       call<{
         status: string;
         image_status: MatchesResponse["image_status"];

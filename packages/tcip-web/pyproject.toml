@@ -12,9 +12,11 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "tcip-mcp",
-    # The storage seam and the review verdict engine are declared here rather than inherited
-    # through tcip-mcp: a package declares the layers it uses directly.
+    # The storage seam is declared here rather than inherited through tcip-mcp: a package
+    # declares the layers it uses directly.
     "tcip-store",
+    # Same reasoning: the routes import the annotation package's label reader, geometry
+    # (BBox/Point/Polygon, routes/annotate.py:17), state, and verdict types directly.
     "tcip-annotation",
     # ConPTY backend for the embedded agent terminal (POSIX uses the stdlib pty).
     "pywinpty>=2.0; sys_platform == 'win32'",

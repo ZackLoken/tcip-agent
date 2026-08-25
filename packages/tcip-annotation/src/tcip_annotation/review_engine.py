@@ -38,7 +38,7 @@ from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.json_io import write_annotations
 from tcip_annotation.state import Annotation, Point, bbox_of
-from tcip_annotation.verdicts import VERDICT_ACTIONS
+from tcip_annotation.verdicts import VERDICT_ACTIONS, VerdictAction
 
 logger = logging.getLogger(__name__)
 
@@ -631,7 +631,7 @@ class ReviewEngine:
         bucket: str,
         det: ReviewDetection,
         ctx: ReviewContext,
-        action: str,
+        action: VerdictAction,
         *,
         norm_det: Optional[ReviewDetection] = None,
         norm_ctx: Optional[ReviewContext] = None,
@@ -639,7 +639,13 @@ class ReviewEngine:
         conf_threshold: Optional[float] = None,
         class_id: Optional[int] = None,
     ) -> None:
-        """Log an accept / reject / edit action for a detection, against ``bucket``.
+        """Log an accept / reject / edit / sweep action for a detection, against ``bucket``.
+
+        ``action`` is typed to :data:`VerdictAction`, but a caller can still reach this method with
+        a plain string outside that vocabulary; the write boundary checks against
+        :data:`VERDICT_ACTIONS` and refuses with a ``ValueError`` rather than storing it.
+        ``"swept"`` is an explicit "checked this image for missed objects, found none" attestation:
+        it is recorded like any other verdict but never mutates ground truth.
 
         ``bucket``: the prediction bucket key the reviewer was looking at (:data:`NO_BUCKET` when
         the review carries no predictions), stored verbatim; it scopes the verdict, so a filename

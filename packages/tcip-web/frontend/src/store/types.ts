@@ -3,7 +3,7 @@
  * Keep in sync with packages/tcip-web/src/tcip_web/state.py and routes/{annotate,review,classes}.py.
  */
 
-import type { GuiVocabulary } from "@/api/types.generated";
+import type { ActionPayload, GuiVocabulary } from "@/api/types.generated";
 
 export type TabName =
   "annotate" | "review" | "training" | "tuning" | "inference" | "results" | "meta";
@@ -158,7 +158,7 @@ export interface Detection {
   pred_idx: number | null;
   bbox: [number, number, number, number];
   reviewed: boolean;
-  reviewed_action: string | null;
+  reviewed_action: ActionPayload["action"] | null;
 }
 
 export interface MatchesResponse {

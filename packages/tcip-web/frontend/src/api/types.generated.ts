@@ -55,8 +55,29 @@ export interface CoveragePayload {
   viewing: CoverageViewing;
 }
 
-export interface VerdictActionField {
+export interface ActionPayload {
+  dataset_root: string;
+  image_name: string;
+  image_path: string;
+  gt_path?: string | null;
+  pred_path?: string | null;
+  det_type: string;
+  class_name: string;
+  conf?: number | null;
+  iou?: number | null;
+  gt_idx?: number | null;
+  pred_idx?: number | null;
+  bbox: [number, number, number, number];
   action: "accepted" | "rejected" | "edited" | "swept";
+  user?: string | null;
+  edited_box?: [number, number, number, number] | null;
+  edited_points?: number[][] | null;
+  iou_threshold?: number;
+  conf_threshold?: number;
+  filter_type?: string;
+  filter_class?: string;
+  subject?: string | null;
+  attribute?: string | null;
 }
 
 export interface GuiVocabulary {
