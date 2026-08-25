@@ -71,7 +71,8 @@ export type LoadedLabels = ImageLabels & { base_mtime: string | null };
 
 export interface SaveLabelsBody {
   image_path: string;
-  label_path?: string | null;
+  // Non-empty: the backend refuses a save with nowhere to write (422); resolve that locally.
+  label_path: string;
   annotations: AnnotationPayload[];
   project_root?: string | null;
   /** Echo the loaded mtime token so the backend can 409 a stale (lost-update) write. */

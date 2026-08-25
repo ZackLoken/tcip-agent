@@ -1100,7 +1100,8 @@ def _seal_and_stamp(out: Path, stamp_body: dict, draft) -> dict:
 
 def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
                                trait: str | None, images_dir: str | None,
-                               tile_size_validated: str | None, draft) -> tuple[list[str], dict]:
+                               tile_size_validated: str | None, draft
+                               ) -> tuple[list[str], int, dict]:
     """Write one prediction file per image, then earn and stamp over exactly what landed.
 
     The steps ``export_predictions`` and ``tabulate_counts`` share once each has resolved its own
@@ -1109,6 +1110,9 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     are one implementation rather than two that agree today. ``draft`` present is exactly the
     condition for a validated stamp: a door opens one only when the run's own dimensions all
     cleared and the bucket sits where a claim can be recorded.
+
+    Returns ``(written, dropped_nonpositive_boxes, stamp_body)``: the middle value is the count of
+    detections dropped for a zero-extent box across every image, for the caller's own summary.
     """
     from tcip_mcp.pipelines.resolution import operating_point_stamp, prediction_producer
 
@@ -1119,9 +1123,10 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     producer = prediction_producer(checkpoint_path, sha)
     id_map = result.get("id_map")
     has_masks = False
+    dropped = 0
     for r in result["results"]:
         out_json = out / f"{Path(r['image']).stem}.json"
-        write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
+        dropped += write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
         written.append(str(out_json))
         has_masks = has_masks or bool(r.get("masks"))
 
@@ -1146,7 +1151,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     if has_masks:
         # The run-constant mask-binarize threshold travels once here rather than per-annotation.
         op_stamp["mask_binarize"] = mask_binarize_provenance()
-    return written, _seal_and_stamp(out, op_stamp, draft)
+    return written, dropped, _seal_and_stamp(out, op_stamp, draft)
 
 
 def _export_predictions_raster(
@@ -1383,7 +1388,7 @@ def _export_predictions_raster(
     sha = identity["sha256"]
     producer = prediction_producer(checkpoint_path, sha)
     pred_path = out / f"{Path(raster_path).stem}.json"
-    write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
+    dropped_boxes = write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
     has_masks = bool(result.get("masks"))
 
     produced_at = datetime.now(timezone.utc).isoformat()
@@ -1445,6 +1450,7 @@ def _export_predictions_raster(
         "experiment_id": exp_id,
         "tiles": result.get("tiles"),
         "verdict_guard_operative": bucket_root is not None,
+        "dropped_nonpositive_boxes": dropped_boxes,
     }
     if bucket_root is None:
         response["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=out)
@@ -1713,7 +1719,7 @@ def export_predictions(
         if frozen is not None:
             return {"error": frozen}
 
-    written, op_stamp = _publish_image_predictions(
+    written, dropped_boxes, op_stamp = _publish_image_predictions(
         out, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
         tile_size_validated=tile_size_validated, draft=draft)
 
@@ -1736,7 +1742,8 @@ def export_predictions(
                 "conf_source": result.get("conf_source"),
                 "checkpoint_sha256": sha,
                 "experiment_id": exp_id,
-                "verdict_guard_operative": bucket_root is not None}
+                "verdict_guard_operative": bucket_root is not None,
+                "dropped_nonpositive_boxes": dropped_boxes}
     if bucket_root is None:
         response["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=out)
     # The run's warnings (a CPU-bound workload) belong on this door's own response too, otherwise
@@ -1934,13 +1941,14 @@ def tabulate_counts(
             "total_detections": result["total_detections"],
         }
 
+    dropped_boxes = 0
     if bucket is not None:
         draft, refusal = _draft_count_claim(
             result, trait=trait, bucket=bucket, dataset_root=bucket_root,
             tile_size_validated=gate.stamp.get("tile_size"))
         if refusal is not None:
             return refusal
-        _publish_image_predictions(
+        _, dropped_boxes, _ = _publish_image_predictions(
             bucket, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
             tile_size_validated=gate.stamp.get("tile_size"), draft=draft)
 
@@ -1986,6 +1994,7 @@ def tabulate_counts(
     if bucket is not None:
         out["bucket_redirected"] = resolution.redirected
         out["verdict_guard_operative"] = bucket_root is not None
+        out["dropped_nonpositive_boxes"] = dropped_boxes
         if bucket_root is None:
             out["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
     # run_inference's own warnings (a CPU-bound workload) are surfaced here too, so a count CSV

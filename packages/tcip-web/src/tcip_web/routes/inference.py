@@ -79,6 +79,9 @@ class InferenceJob:
     error: Optional[str] = None
     warning: Optional[str] = None
     results: list[dict] = field(default_factory=list)  # [{image, n_detections}]
+    # Detections dropped for a zero-extent box (a detector's own output clipped to nothing at an
+    # image edge): a box of nothing is no detection, so it is dropped rather than failing the run.
+    dropped_boxes: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
 
@@ -105,7 +108,7 @@ def _summary(job: InferenceJob) -> dict:
     return {
         "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
         "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
-        "warning": job.warning,
+        "warning": job.warning, "dropped_nonpositive_boxes": job.dropped_boxes,
     }
 
 
@@ -342,7 +345,7 @@ def _worker(job: InferenceJob) -> None:
                 postprocess=job.postprocess,
                 tile_resize=tile_resize,
             )
-            write_predictions_json(
+            job.dropped_boxes += write_predictions_json(
                 output_dir / f"{img.stem}.json", results[0],
                 created_by=prediction_producer(job.checkpoint_path, identity["sha256"]),
                 id_map=id_map)
@@ -375,6 +378,7 @@ def _worker(job: InferenceJob) -> None:
                     "images_written": job.done,
                     "total": job.total,
                     "error": job.error,
+                    "dropped_nonpositive_boxes": job.dropped_boxes,
                 },
             )
         _persist()
@@ -579,6 +583,7 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
                     "status": job.status,
                     "error": job.error,
                     "warning": job.warning,
+                    "dropped_nonpositive_boxes": job.dropped_boxes,
                 })
                 break
             await asyncio.sleep(0.5)

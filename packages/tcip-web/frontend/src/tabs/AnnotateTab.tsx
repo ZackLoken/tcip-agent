@@ -555,6 +555,13 @@ export function AnnotateTab() {
     if (!paths) return; // no confirmed load → refuse to overwrite on-disk labels
     const c = useStore.getState().canvas;
     if (!c.dirty) return;
+    if (!paths.label) {
+      // No annotations directory is set for this dataset, so there is nowhere to write; a
+      // server round trip would only come back with the same refusal.
+      if (interactive)
+        setIoError("This dataset has no annotations directory set; select one to save.");
+      return;
+    }
     const projectRoot = useStore.getState().gui.dataset.project_root;
     const imgFileName = paths.image.split(/[/\\]/).pop() ?? "image";
 

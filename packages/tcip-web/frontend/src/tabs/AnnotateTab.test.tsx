@@ -824,9 +824,23 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     pressSave();
     await flush();
 
-    // The backend answers ok but writes nothing when this field is absent.
     expect(saveSpy).toHaveBeenCalledTimes(1);
     expect(saveSpy.mock.calls[0][0].label_path).toBe("C:/data/annotations/2026-01-01/img1.json");
+  });
+
+  it("refuses to save locally when the dataset has no annotations directory", async () => {
+    useStore.setState((s) => ({
+      gui: { ...s.gui, dataset: { ...s.gui.dataset, annotations_dir: null } },
+    }));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 
   it("commits a drawn box under the subject the drag started on, not the one active at release", async () => {

@@ -24,7 +24,7 @@ describe("annotate.save lost-update handling", () => {
     // A 2026 st_mtime_ns (~1.78e18) exceeds 2**53: as a JSON number it would be rounded
     // by JSON.parse and every echo would 409. String tokens must survive byte-for-byte.
     stubFetch(200, { base_mtime: "1783702599549301100" });
-    const res = await api.annotate.save({ image_path: "x", annotations: [] });
+    const res = await api.annotate.save({ image_path: "x", label_path: "x.json", annotations: [] });
     expect(res.status).toBe("ok");
     if (res.status === "ok") expect(res.base_mtime).toBe("1783702599549301100");
   });
@@ -33,6 +33,7 @@ describe("annotate.save lost-update handling", () => {
     stubFetch(409, { error: "label file changed since it was loaded" });
     const res = await api.annotate.save({
       image_path: "x",
+      label_path: "x.json",
       annotations: [],
       base_mtime: "1",
     });
