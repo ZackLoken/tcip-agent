@@ -134,6 +134,10 @@ def check_status_tokens(root: Path, findings: list) -> None:
                                 f"file holds no {subject!r} annotation; re-confirm"))
 
 
+TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
+"""Path fragments that place a registered checkpoint inside a test or temp tree."""
+
+
 def check_registry(root: Path, findings: list) -> None:
     """Flag registered models whose checkpoint is missing or points into a test/temp tree.
 
@@ -158,7 +162,7 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
                             "metrics_source (predates the field); conform it with "
                             "scripts/conform_registry_metrics_source.py"))
-        if "pytest-of-" in ckpt or "\\Temp\\" in ckpt or "/Temp/" in ckpt:
+        if any(marker in ckpt for marker in TEMP_TREE_MARKERS):
             findings.append(("error", f"registry entry {m.get('name')!r} points at a test/temp "
                             f"checkpoint: {ckpt}"))
         elif ckpt and not Path(ckpt).is_file():
