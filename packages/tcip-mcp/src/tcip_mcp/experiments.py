@@ -333,10 +333,13 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
     one (so the check and the write it guards see the same value) or via :func:`_current_state`
     when it doesn't. The one implementation of "is this experiment terminal" every writer of an
     experiment member consults, rather than each comparing against ``_TERMINAL_STATES`` itself.
-    :func:`record_artifact` and :func:`update_lineage` (and the shared :func:`pointer_frozen`
-    predicate the callers outside this module consult) apply a narrower, additive-only rule
-    instead: a still-empty field takes its first write even past terminal, only a populated one
-    is frozen, so they call this only to build the message once they've decided to refuse.
+    :func:`record_artifact` (and the shared :func:`pointer_frozen` predicate the callers outside
+    this module consult) apply a narrower, additive-only rule instead: a still-empty field takes
+    its first write even past terminal, only a populated one is frozen, so ``record_artifact``
+    decides by that rule first and calls this only to build the message once it already has.
+    :func:`update_lineage` calls this first instead, inside its own transaction, as its initial
+    terminal gate; only when it raises does ``update_lineage`` fall back to the same
+    additive-only rule to decide which of the fields it was given the refusal actually blocks.
 
     Never audits itself: an audit line is a log append, which cannot run inside a record
     transaction (``store.transaction`` only ever holds ``kind="record"`` keys), and a caller
@@ -359,6 +362,25 @@ def _audit_refused(experiment_id: str, op: str, detail: dict[str, Any]) -> None:
 
     record_event_or_raise("experiment_mutation_refused", {"experiment_id": experiment_id, "op": op,
                                                            **detail}, status="refused")
+
+
+def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
+                            refusal: ExperimentTerminal) -> None:
+    """Audit a refusal and re-raise it, whether or not the audit line itself could be written.
+
+    For every caller that lets an :class:`ExperimentTerminal` propagate rather than report it as
+    a return value (``subprocess_worker.py``'s two provenance patches, ``training_tools.py``'s
+    split-manifest write). Those callers sit under an outer ``except Exception`` that would
+    swallow an :class:`~tcip_mcp.audit.AuditEntryNotWritten` raised on its own, together with
+    the refusal it was recording, so a failed append is chained onto ``refusal`` (``raise refusal
+    from audit_exc``) instead: the refusal always reaches the caller and the append failure
+    stays visible on it.
+    """
+    try:
+        _audit_refused(experiment_id, op, detail)
+    except Exception as audit_exc:
+        raise refusal from audit_exc
+    raise refusal
 
 
 def create_experiment(
@@ -1077,6 +1099,13 @@ def update_lineage(
 
     The updates are the caller's own kwargs, merged whole into the stored document, so they
     are checked against what JSON can hold before any of them lands.
+
+    A dropped identity update is audited before the transaction below (it never reaches the
+    transaction at all, see the comment on ``identity_updates``); when that append itself fails,
+    the failure is not raised here, it would abort this call before the transaction applies the
+    other, legitimate updates it was given. It is deferred and raised at the end instead, once
+    those have landed, so the append failure still reaches the caller rather than being logged
+    away, and never at the cost of a write that should have gone through.
     """
     check_json_value(updates, path="updates")
     if not experiment_exists(experiment_id):
@@ -1085,8 +1114,12 @@ def update_lineage(
     # Dataset identity is set once at creation and is immutable, never a lineage edge to backfill: the additive-only lock below would otherwise permit a first write to an empty identity field even post-terminal.
     # That write would be a silent change to what data the run trained on.
     identity_updates = {k: updates.pop(k) for k in ("dataset_id", "dataset_fingerprint") if k in updates}
+    identity_audit_exc: Exception | None = None
     if identity_updates:
-        _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
+        try:
+            _audit_refused(experiment_id, "update_lineage_identity", {"fields": sorted(identity_updates)})
+        except Exception as exc:
+            identity_audit_exc = exc
 
     key, state = lineage_key(experiment_id), status_key(experiment_id)
     refused: dict[str, Any] = {}
@@ -1109,6 +1142,8 @@ def update_lineage(
         # Names the orphaned values themselves: for a path-like field (predictions, model_weights)
         # that value is the file this refusal left unrecorded.
         _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused), **refused})
+    if identity_audit_exc is not None:
+        raise identity_audit_exc
     return {"experiment_id": experiment_id, "lineage": lineage}
 
 

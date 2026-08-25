@@ -1526,10 +1526,9 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
                     state = (txn.read(st_key, default={}) or {}).get("state")
                     refuse_if_terminal(experiment_id, "persist_split_manifest", state)
                     txn.write(key, manifest)
-            except ExperimentTerminal:
-                from tcip_mcp.experiments import _audit_refused
-                _audit_refused(experiment_id, "persist_split_manifest", {})
-                raise
+            except ExperimentTerminal as exc:
+                from tcip_mcp.experiments import audit_refusal_reraising
+                audit_refusal_reraising(experiment_id, "persist_split_manifest", {}, exc)
     except ExperimentTerminal:
         raise
     except Exception as exc:  # noqa: BLE001

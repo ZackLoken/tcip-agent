@@ -133,6 +133,82 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
     assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_id_map"
 
 
+def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
+    """A refusal's own audit line failing to write must not swallow the refusal: the write still
+    never lands and ExperimentTerminal still reaches the caller, chaining the append failure
+    rather than losing it to a logged warning."""
+    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
+    from tcip_mcp.tools.training_tools import _persist_split_manifest
+
+    import pytest
+
+    eid = "exp-027-hazelnut-catkin-det-3"
+    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    update_status(eid, "running")
+    update_status(eid, "failed", error="exceeded max_wall_clock_seconds (5)")
+
+    def _boom(*a, **k):
+        raise OSError("simulated audit append failure")
+
+    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
+
+    with pytest.raises(ExperimentTerminal) as excinfo:
+        _persist_split_manifest(
+            eid, _StemDataset(["img_001"]), _StemDataset(["img_002"]),
+            {"labels_dir": ""},
+        )
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+    assert not ts.exists(exp.split_key(eid, root=tmp_path))  # the write still never landed
+
+
+def test_tiling_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
+    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
+
+    import pytest
+
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_tiling
+
+    eid = "exp-028-currant-cluster-det-2"
+    create_experiment(eid, {"model_source": {"builder": "my_models:cluster_det"}})
+    update_status(eid, "running")
+    update_status(eid, "completed")
+    config_before = ts.read(exp.config_key(eid, root=tmp_path))
+
+    def _boom(*a, **k):
+        raise OSError("simulated audit append failure")
+
+    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
+
+    with pytest.raises(ExperimentTerminal) as excinfo:
+        _patch_experiment_config_tiling(eid, {"tile_size": 224})
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+    assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
+
+
+def test_id_map_patch_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
+    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
+
+    import pytest
+
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_id_map
+
+    eid = "exp-029-persimmon-fruit-det-2"
+    create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
+    update_status(eid, "running")
+    update_status(eid, "failed", error="dataloader raised")
+
+    def _boom(*a, **k):
+        raise OSError("simulated audit append failure")
+
+    monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
+
+    with pytest.raises(ExperimentTerminal) as excinfo:
+        _patch_experiment_config_id_map(eid, "catkin", None, {"catkin": 0})
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
 def test_overwrite_config_if_pristine_still_succeeds_over_a_pristine_experiment(tmp_path):
     """P6-26's transaction narrowing changes no accepted call: a genuinely pristine experiment's
     config is still overwritten."""

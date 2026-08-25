@@ -453,11 +453,13 @@ def run_training_envelope(ctx: TrainContext) -> None:
         logger.exception("Training body failed for %s: %s", run.run_id, exc)
 
     _snapshot_run_provenance(ctx)  # refresh with the real resume/RNG-restore outcome
-    _finalize_run(ctx)
-
-    record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
-                 status=run.status or "failed",
-                 duration_ms=round((time.monotonic() - t0) * 1000, 1))
+    try:
+        _finalize_run(ctx)
+    finally:
+        # Runs even if _finalize_run re-raises: run.status is already reconciled by then.
+        record_event("training_run", {**audit_args, **stored_number("best_metric", run.best_metric)},
+                     status=run.status or "failed",
+                     duration_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
 def _reconcile_on_refusal(run: Any, result: dict[str, Any]) -> bool:
@@ -471,21 +473,47 @@ def _reconcile_on_refusal(run: Any, result: dict[str, Any]) -> bool:
     return True
 
 
+def _reconcile_unaudited_refusal(run: Any, exp_id: str, exc: Exception) -> None:
+    """A refusal's own audit line failed to write, so ``complete_run``/``update_status`` raised
+    instead of returning the refusal dict :func:`_reconcile_on_refusal` reads: reconcile from the
+    record itself, the only place the actual state still is, then re-raise so the failure reaches
+    ``run_training_envelope`` rather than being logged away with the refusal it was recording."""
+    from tcip_mcp.experiments import get_experiment
+
+    record = get_experiment(exp_id)
+    status = record.get("status") if "error" not in record else None
+    if isinstance(status, dict):
+        run.status = status.get("state", run.status)
+        run.error = status.get("error", run.error)
+    raise exc
+
+
 def _finalize_run(ctx: TrainContext) -> None:
-    """Close status + register the model + record its weights artifact (the completion wiring)."""
+    """Close status + register the model + record its weights artifact (the completion wiring).
+
+    A refusal whose own audit line failed to write propagates (see
+    :func:`_reconcile_unaudited_refusal`) rather than being swallowed by the outer handler below:
+    reconciliation still runs, from the record directly since the normal refusal return never
+    came back, and ``run_training_envelope`` wraps this call in a ``finally`` so its closing
+    event still reports the reconciled state.
+    """
     run = ctx.run
     exp_id = ctx.experiment_id
     if exp_id is None:
         return
-    try:
-        from tcip_mcp.experiments import (
-            complete_run,
-            register_model_from_experiment,
-            update_status,
-        )
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.experiments import (
+        complete_run,
+        register_model_from_experiment,
+        update_status,
+    )
 
+    try:
         if run.status == "completed" and ctx.final_weights is not None:
-            result = complete_run(exp_id, ctx.final_weights)
+            try:
+                result = complete_run(exp_id, ctx.final_weights)
+            except AuditEntryNotWritten as exc:
+                _reconcile_unaudited_refusal(run, exp_id, exc)
             if "error" in result:
                 # completed is the last durable write of a run: a refusal here means the record
                 # was already terminal (e.g. the wall-clock watchdog raced it to failed first).
@@ -507,8 +535,16 @@ def _finalize_run(ctx: TrainContext) -> None:
                 "instead of registering a nonexistent path.", run.run_id)
             run.status = "failed"
             run.error = run.error or "training completed but produced no final weights file"
-            _reconcile_on_refusal(run, update_status(exp_id, "failed"))
+            try:
+                _reconcile_on_refusal(run, update_status(exp_id, "failed"))
+            except AuditEntryNotWritten as exc:
+                _reconcile_unaudited_refusal(run, exp_id, exc)
         else:
-            _reconcile_on_refusal(run, update_status(exp_id, run.status or "failed"))
+            try:
+                _reconcile_on_refusal(run, update_status(exp_id, run.status or "failed"))
+            except AuditEntryNotWritten as exc:
+                _reconcile_unaudited_refusal(run, exp_id, exc)
+    except AuditEntryNotWritten:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("Experiment completion wiring failed for %s: %s", exp_id, exc)
