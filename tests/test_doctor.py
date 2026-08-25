@@ -347,14 +347,36 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
     assert "test/temp" in scratch_line and "checkpoint missing" not in scratch_line
 
 
+def _dir_outside_any_temp_tree() -> Path:
+    """A writable directory whose path carries none of the doctor's temp-tree markers.
+
+    The doctor reads a checkpoint under pytest's tree or the OS temp directory as test pollution,
+    so a test wanting the other findings needs a real file elsewhere. The interpreter's temp
+    directory qualifies on Linux and not on Windows, where it sits under a Temp segment, so the
+    filesystem root is tried after it; the first candidate that is creatable and unmarked wins.
+    """
+    import tempfile
+
+    from scripts.doctor import TEMP_TREE_MARKERS
+
+    candidates = [Path(tempfile.gettempdir()), Path(Path.cwd().anchor)]
+    for base in candidates:
+        target = base / "tcip_no_metrics_source_fixture"
+        if any(marker in str(target) for marker in TEMP_TREE_MARKERS):
+            continue
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return target
+    raise RuntimeError(f"no writable directory outside a temp tree among {candidates}")
+
+
 def test_registry_entry_with_no_metrics_source_is_flagged(tmp_path):
     """A registry entry that predates the metrics_source field is reported, not read as though
     the platform had verified its numbers."""
     root = _layout_project(tmp_path, "2026-03-04")
-    # Off root.anchor, not tmp_path: a path under pytest's own tmp tree would also trip the
-    # test/temp-checkpoint pollution check, which this test isn't exercising.
-    ckpt_dir = Path(root.anchor) / "tcip_no_metrics_source_fixture"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_dir = _dir_outside_any_temp_tree()
     ckpt = ckpt_dir / "model.pt"
     ckpt.write_bytes(b"weights")
     models = root / ".tcip" / "models"
