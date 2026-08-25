@@ -29,6 +29,8 @@ from tcip_mcp.dataset_layout import (
     classes_path,
     image_dir,
     image_root,
+    list_dates,
+    list_models,
     list_subjects,
     models_with_predictions,
     prediction_dir,
@@ -84,12 +86,6 @@ class DatasetTree(BaseModel):
     prediction_dirs: dict[str, dict[str, str]]
 
 
-def _list_children(p: Path) -> list[str]:
-    if not p.is_dir():
-        return []
-    return sorted(e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith("."))
-
-
 # ── /tree cache ────────────────────────────────────────────────────────────
 # subjects_with_labels/models_with_predictions each re-list annotations/ or predictions/ and
 # scan every per-image label file per date, so a naive /tree is an iterdir storm on a dataset
@@ -111,7 +107,6 @@ def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
     sig = [
         _dir_mtime_ns(image_root(root)),
         _dir_mtime_ns(annotation_root(root)),
-        _dir_mtime_ns(root / "models"),
         _dir_mtime_ns(prediction_root(root)),
         _dir_mtime_ns(classes_path(root)),
     ]
@@ -129,13 +124,11 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     if not root.is_dir():
         raise HTTPException(404, f"dataset_root not found: {dataset_root}")
 
-    dates = _list_children(image_root(root))
+    dates = list_dates(root)
     # Subjects come from the dataset registry, not from listing annotations/: that dir now holds
     # date buckets, not subject dirs.
     subjects = list_subjects(root)
-    model_names = sorted(
-        set(_list_children(root / "models")) | set(_list_children(prediction_root(root)))
-    )
+    model_names = list_models(root)
 
     key = str(root)
     signature = _tree_signature(root, dates, model_names)
@@ -148,7 +141,7 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         dataset_root=str(root),
         dates_with_images=dates,
         subjects=subjects,
-        # A model is selectable if it has a checkpoint dir and/or a predictions dir.
+        # A model is selectable once it has a predictions bucket under this dataset.
         model_names=model_names,
         subjects_by_date={d: subjects_with_labels(root, d) for d in dates},
         models_by_date={d: models_with_predictions(root, d) for d in dates},

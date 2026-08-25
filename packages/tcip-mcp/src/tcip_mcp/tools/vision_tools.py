@@ -63,13 +63,13 @@ def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) 
     dataset root, the same as the labels and predictions the proposals eventually become: a
     same-named image in another dataset, or another date bucket of this one, addresses its own
     record. ``date`` is the image's own capture-date bucket, or ``None`` for a flat dataset's
-    undated layout, addressed under ``ingest_tools.UNDATED_BUCKET``: a store key holds no empty
+    undated layout, addressed under ``dataset_layout.UNDATED_BUCKET``: a store key holds no empty
     part, so the missing date needs the same declared token ``ingest_images`` buckets a dateless
     source under, rather than a spelling of its own. A flat-layout image and an image in that
     literal bucket therefore share one key for a given stem, which is never a real collision:
     ``ingest_images`` never produces a flat layout beside a dated one in the same dataset.
     """
-    from tcip_mcp.tools.ingest_tools import UNDATED_BUCKET
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (date or UNDATED_BUCKET, stem))
 
