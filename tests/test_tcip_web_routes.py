@@ -82,7 +82,7 @@ def dataset_root(tmp_path: Path) -> Path:
     root = tmp_path / "Valley_Farm"
     (root / "images" / "2-11-26").mkdir(parents=True)
     (root / "images" / "3-2-26").mkdir(parents=True)
-    (root / "models" / "baseline").mkdir(parents=True)
+    (root / "predictions" / "baseline").mkdir(parents=True)
     # The dataset's subjects come from its nested registry, not from listing annotations/.
     write_registry(root / "classes.json", ClassRegistry((Subject("catkin"), Subject("bush"))))
     # Add some images

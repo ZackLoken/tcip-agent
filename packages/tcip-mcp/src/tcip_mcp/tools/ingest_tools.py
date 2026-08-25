@@ -23,8 +23,6 @@ from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
 
-UNDATED_BUCKET = "undated"
-
 
 _DT_ORIGINAL = 0x9003  # EXIF DateTimeOriginal tag id
 _EXIF_IFD = 0x8769  # Exif sub-IFD offset tag
@@ -146,10 +144,11 @@ def _iter_source_images(source: str, recursive: bool):
 
 
 def _validate_bucket_literal(date_from: str) -> None:
-    """A literal ``date_from`` becomes a path segment: reject separators/traversal."""
+    """A literal ``date_from`` becomes a path segment: reject separators/traversal and a
+    dot-prefixed name, the same bucket grammar every listing over ``images/`` enforces."""
     if date_from in ("exif", "none"):
         return
-    if not workspace.is_valid_name(date_from):
+    if not dataset_layout.is_bucket_name(date_from):
         raise ValueError(f"invalid date_from literal bucket: {date_from!r}")
 
 
@@ -161,9 +160,9 @@ def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
     """
     if date_from == "exif":
         iso, unreadable = _capture_iso_date(path)
-        return iso or UNDATED_BUCKET, unreadable
+        return iso or dataset_layout.UNDATED_BUCKET, unreadable
     if date_from == "none":
-        return UNDATED_BUCKET, None
+        return dataset_layout.UNDATED_BUCKET, None
     return date_from, None  # validated literal bucket
 
 
@@ -314,7 +313,7 @@ def ingest_images(
         if date_unreadable:
             unreadable_dates.append({"source": str(src_path), "dest": str(dest),
                                      "bucket": bucket, "reason": date_unreadable})
-        if bucket == UNDATED_BUCKET:
+        if bucket == dataset_layout.UNDATED_BUCKET:
             undated += 1
         else:
             buckets[bucket] = buckets.get(bucket, 0) + 1

@@ -44,6 +44,21 @@ TASKS = ("detect", "segment")
 SPLIT_NAMES = ("train", "val", "test")
 CLASSES_FILENAME = "classes.json"
 
+UNDATED_BUCKET = "undated"
+"""The bucket a dateless capture lands in: ``ingest_images`` writes it, and any store key that
+would otherwise hold an empty date segment (the proposal-staging address included) addresses it
+under this token instead of a spelling of its own."""
+
+
+def is_bucket_name(name: str) -> bool:
+    """Whether ``name`` is legal as a bucket directory name under ``images/`` or a prediction
+    model directory under ``predictions/``: a single safe path segment (see
+    ``workspace.is_valid_name``) that does not start with a dot, so a hidden directory (an
+    editor's swap file, platform cruft) is never mistaken for one."""
+    from tcip_mcp.workspace import is_valid_name
+
+    return is_valid_name(name) and not name.startswith(".")
+
 
 def label_ext(fmt: Optional[str]) -> str:
     """File extension for a label format: always ``.json``; both formats are JSON on disk."""
@@ -160,11 +175,14 @@ def image_key(dataset_root: str | Path, date: str, stem: str, ext: str) -> Key:
 
 
 def list_dates(dataset_root: str | Path) -> list[str]:
-    """Sorted capture-date bucket names under ``images/`` (ISO ``YYYY-MM-DD``)."""
+    """Sorted bucket names under ``images/``: an ISO ``YYYY-MM-DD`` date, ``UNDATED_BUCKET``, or a
+    literal bucket (e.g. a plot name) ``ingest_images`` was told to use. A dot-prefixed directory
+    is never a bucket (see ``is_bucket_name``) and is excluded, so a hidden directory under
+    ``images/`` is invisible to every listing here."""
     imgs = image_root(dataset_root)
     if not imgs.is_dir():
         return []
-    return sorted(p.name for p in imgs.iterdir() if p.is_dir())
+    return sorted(p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name))
 
 
 def annotation_root(dataset_root: str | Path) -> Path:
@@ -951,10 +969,12 @@ def subjects_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[
 
 
 def list_models(dataset_root: str | Path) -> list[str]:
+    """Sorted model bucket names under ``predictions/``. A dot-prefixed directory is never a
+    bucket (see ``is_bucket_name``) and is excluded, the same grammar ``list_dates`` applies."""
     preds = prediction_root(dataset_root)
     if not preds.is_dir():
         return []
-    return sorted(p.name for p in preds.iterdir() if p.is_dir())
+    return sorted(p.name for p in preds.iterdir() if p.is_dir() and is_bucket_name(p.name))
 
 
 def _dir_has_label_file(d: Path) -> bool:
