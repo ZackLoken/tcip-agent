@@ -348,6 +348,33 @@ def test_a_run_with_no_usable_answer_says_so_in_words_at_the_end_of_its_output(
     assert "RUN FAILED" in captured.err
 
 
+# ── the tcip MCP block is read from .mcp.json, not restated ─────────────────
+
+
+def test_load_tcip_mcp_config_reads_the_repos_own_mcp_json(runner):
+    import json as _json
+
+    declared = _json.loads((SCRIPT.parents[1] / ".mcp.json").read_text(encoding="utf-8"))
+    assert runner.load_tcip_mcp_config() == {
+        "mcpServers": {"tcip": declared["mcpServers"]["tcip"]}
+    }
+
+
+def test_load_tcip_mcp_config_refuses_when_mcp_json_is_missing(runner, tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    with pytest.raises(SystemExit, match="cannot read the tcip MCP server block"):
+        runner.load_tcip_mcp_config()
+
+
+def test_load_tcip_mcp_config_refuses_when_the_tcip_block_is_missing(runner, tmp_path, monkeypatch):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"claude-context": {}}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(runner, "REPO_ROOT", tmp_path)
+    with pytest.raises(SystemExit, match="no mcpServers.tcip block"):
+        runner.load_tcip_mcp_config()
+
+
 def test_a_run_whose_families_all_answered_says_so_rather_than_staying_silent(
     runner, tmp_path, monkeypatch, capsys
 ):
