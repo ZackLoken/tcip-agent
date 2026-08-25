@@ -200,3 +200,175 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path
     assert (destination / "classes.json").read_bytes() == (source / "classes.json").read_bytes()
     assert [s.name for s in read_registry(destination / "classes.json").subjects] == \
         ["catkin", "bush"]
+
+
+def _leaf_bush() -> ClassRegistry:
+    """A generic two-subject registry (a detection-only subject, a classified one), for the
+    registry-write tests below."""
+    return ClassRegistry(subjects=(
+        Subject(name="bush", description="one plant crown", defined_by="user:breeder"),
+        Subject(
+            name="leaf",
+            description="one leaf",
+            defined_by="user:breeder",
+            attributes=(Attribute(name="stage", type="categorical", values=("early", "late")),),
+        ),
+    ))
+
+
+def test_replace_registry_refuses_an_empty_registry(tmp_path):
+    from tcip_mcp.class_registry import replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    with pytest.raises(RegistryError):
+        replace_registry(path, ClassRegistry(subjects=()), expect=Version.ABSENT)
+
+
+def test_replace_registry_first_write_succeeds_and_reports_no_sweep(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    # admits valid work: a first write over an absent registry, asserted with Version.ABSENT.
+    path = tmp_path / "classes.json"
+    result = replace_registry(path, _leaf_bush(), expect=Version.ABSENT)
+    assert read_registry(path) == _leaf_bush()
+    assert result["schema_change_sweep"] == {"newly_stamped": {}, "warning": None}
+    assert result["version"] == read_version(path)
+
+
+def test_replace_registry_admits_growing_the_registry(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    # admits valid work: adding a subject/attribute/value never drops a declared name.
+    path = tmp_path / "classes.json"
+    replace_registry(path, ClassRegistry(subjects=(Subject(name="bush"),)), expect=Version.ABSENT)
+    grown = ClassRegistry(subjects=(
+        Subject(name="bush"),
+        Subject(name="leaf", attributes=(
+            Attribute(name="stage", type="categorical", values=("early", "late")),)),
+    ))
+    replace_registry(path, grown, expect=read_version(path))
+    assert read_registry(path) == grown
+
+
+def test_replace_registry_refuses_dropping_a_declared_name_without_allow_removals(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    replace_registry(path, _leaf_bush(), expect=Version.ABSENT)
+    shrunk = ClassRegistry(subjects=(Subject(name="bush"),))  # drops leaf
+    with pytest.raises(RegistryError, match="leaf"):
+        replace_registry(path, shrunk, expect=read_version(path))
+    assert read_registry(path) == _leaf_bush()  # refusal leaves the stored registry untouched
+
+
+def test_replace_registry_allows_removals_when_stated(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version
+
+    path = tmp_path / "classes.json"
+    replace_registry(path, _leaf_bush(), expect=Version.ABSENT)
+    shrunk = ClassRegistry(subjects=(Subject(name="bush"),))
+    replace_registry(path, shrunk, expect=read_version(path), allow_removals=True)
+    assert read_registry(path) == shrunk
+
+
+def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
+    from tcip_mcp.class_registry import read_version, replace_registry
+    from tcip_store import Version, VersionConflict
+
+    path = tmp_path / "classes.json"
+    replace_registry(path, ClassRegistry(subjects=(Subject(name="bush"),)), expect=Version.ABSENT)
+    stale = read_version(path)
+    replace_registry(
+        path, ClassRegistry(subjects=(Subject(name="bush"), Subject(name="leaf"))), expect=stale)
+    with pytest.raises(VersionConflict):
+        replace_registry(
+            path, ClassRegistry(subjects=(Subject(name="bush"), Subject(name="tip"))),
+            expect=stale, allow_removals=True)
+
+
+def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(tmp_path):
+    from tcip_mcp.class_registry import replace_registry
+
+    path = tmp_path / "classes.json"
+    path.write_bytes(b'{"leaf": {"description": "one leaf"')  # truncated mid-object
+    with pytest.raises(RegistryError):
+        replace_registry(path, ClassRegistry(subjects=(Subject(name="bush"),)), expect=None)
+    assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
+
+
+def test_replace_registry_repairs_undecodable_bytes_when_allow_removals(tmp_path):
+    from tcip_mcp.class_registry import replace_registry
+
+    path = tmp_path / "classes.json"
+    path.write_bytes(b'{"leaf": {"description": "one leaf"')
+    replace_registry(
+        path, ClassRegistry(subjects=(Subject(name="bush"),)), expect=None, allow_removals=True)
+    assert read_registry(path) == ClassRegistry(subjects=(Subject(name="bush"),))
+
+
+def test_a_failed_compare_and_set_leaves_no_confirmation_stamp_behind(tmp_path):
+    """A schema-changing write that loses its compare-and-set must not have swept the digest
+    store first: the stamp is tied to the write actually landing, not to the attempt."""
+    from tcip_mcp.class_registry import replace_registry
+    from tcip_mcp.dataset_layout import (
+        image_status_digest_key, record_image_statuses, status_bucket,
+    )
+    from tcip_store import Version, VersionConflict
+    import tcip_store as ts
+
+    path = tmp_path / "classes.json"
+    two_states = ClassRegistry(subjects=(Subject(name="leaf", attributes=(
+        Attribute(name="stage", type="categorical", values=("early", "late")),)),))
+    replace_registry(path, two_states, expect=Version.ABSENT)
+    record_image_statuses(
+        tmp_path, status_bucket("leaf", None), {"img.jpg": "negative"}, recorded_by="user:breeder")
+    assert not ts.exists(image_status_digest_key(tmp_path))
+
+    three_states = ClassRegistry(subjects=(Subject(name="leaf", attributes=(
+        Attribute(name="stage", type="categorical", values=("early", "mid", "late")),)),))
+    with pytest.raises(VersionConflict):
+        replace_registry(path, three_states, expect=Version("not-the-stored-token"))
+
+    assert not ts.exists(image_status_digest_key(tmp_path))
+    assert read_registry(path) == two_states
+
+
+def test_write_class_map_refuses_dropping_a_declared_subject_without_allow_removals(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    write_class_map(str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
+    result = write_class_map(str(tmp_path), {"bush": {}})  # drops leaf
+
+    assert "error" in result and "leaf" in result["error"]
+    assert read_registry(tmp_path / "classes.json").subject("leaf") is not None
+
+
+def test_write_class_map_admits_a_removal_stated_as_deliberate(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    write_class_map(str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
+    result = write_class_map(str(tmp_path), {"bush": {}}, allow_removals=True)
+
+    assert "error" not in result
+    assert read_registry(tmp_path / "classes.json").subject("leaf") is None
+
+
+def test_write_class_map_refuses_undecodable_existing_bytes_without_allow_removals(tmp_path):
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    path = tmp_path / "classes.json"
+    path.write_bytes(b'{"leaf": {"description": "one leaf"')  # truncated mid-object
+
+    result = write_class_map(str(tmp_path), {"bush": {}})
+
+    assert "error" in result
+    assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
+
+    repaired = write_class_map(str(tmp_path), {"bush": {}}, allow_removals=True)
+    assert "error" not in repaired
+    assert read_registry(path) == ClassRegistry(subjects=(Subject(name="bush"),))

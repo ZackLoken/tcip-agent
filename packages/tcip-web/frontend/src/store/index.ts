@@ -160,6 +160,10 @@ interface RegistryState {
   subjects: Registry;
   /** Set after the first successful load for the current dataset. */
   loaded: boolean;
+  /** The stored registry's compare-and-set token as of the last load or save, or null when
+   *  nothing has been saved yet. Carried back into the next save so a stale save is refused
+   *  instead of silently overwriting a registry this browser never saw. */
+  version: string | null;
 }
 
 interface AnnotateUiState {
@@ -320,8 +324,10 @@ export interface AppState {
   setActiveSubject: (subject: string | null) => void;
   setPredReference: (p: PredictionReference | null) => void;
 
-  /** Registry helpers. */
-  setRegistry: (subjects: Registry) => void;
+  /** Registry helpers. ``version`` is the stored registry's compare-and-set token to carry into
+   *  the next save; omitted (or null) for a caller with no version to assert, such as a test
+   *  seeding the registry directly. */
+  setRegistry: (subjects: Registry, version?: string | null) => void;
   subjectNames: () => string[];
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 
@@ -430,7 +436,7 @@ export const useStore = create<AppState>()((set, get) => ({
     set((s) => ({
       bandSelection: { byBandSet: { ...s.bandSelection.byBandSet, [signature]: selection } },
     })),
-  registry: { subjects: {}, loaded: false },
+  registry: { subjects: {}, loaded: false, version: null },
   imageStatus: { byImage: {}, activeFilter: "all" },
   reviewStatus: { byImage: {}, hasDetections: {}, activeFilter: "all" },
   annotateUi: {
@@ -604,7 +610,8 @@ export const useStore = create<AppState>()((set, get) => ({
   setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
   setPredReference: (pred_reference) => set((s) => ({ gui: { ...s.gui, pred_reference } })),
 
-  setRegistry: (subjects) => set(() => ({ registry: { subjects, loaded: true } })),
+  setRegistry: (subjects, version = null) =>
+    set(() => ({ registry: { subjects, loaded: true, version } })),
 
   subjectNames: () => Object.keys(get().registry.subjects),
 

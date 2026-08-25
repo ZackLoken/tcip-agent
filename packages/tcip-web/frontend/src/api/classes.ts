@@ -41,21 +41,24 @@ export const classesApi = {
     const params = new URLSearchParams({ project_root });
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
-    return getJson<{ subjects: Registry }>(`${ROUTES.getClassesLoad}?${params.toString()}`);
+    return getJson<{ subjects: Registry; version: string | null }>(
+      `${ROUTES.getClassesLoad}?${params.toString()}`,
+    );
   },
 
+  // `version`: the token `load` returned beside this registry. A stale one is refused (409)
+  // rather than silently overwritten; omit it for an unconditional write.
   save: (
     project_root: string,
     subjects: Registry,
     dataset_root?: string | null,
     annotations_dir?: string | null,
+    version?: string | null,
   ) =>
-    postJson<{ status: string; n_subjects: number; classes_path: string }>(ROUTES.postClassesSave, {
-      project_root,
-      subjects,
-      dataset_root,
-      annotations_dir,
-    }),
+    postJson<{ status: string; n_subjects: number; classes_path: string; version: string }>(
+      ROUTES.postClassesSave,
+      { project_root, subjects, dataset_root, annotations_dir, version },
+    ),
 
   // A Complete is a statement about one subject on one date. Every read and write is scoped to it,
   // so confirming an image while annotating leaf cannot mark it negative for a disease subject

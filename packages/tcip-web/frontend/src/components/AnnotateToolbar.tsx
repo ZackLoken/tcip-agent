@@ -93,6 +93,7 @@ export function AnnotateToolbar({
   const activeSubject = useStore((s) => s.gui.active_subject);
   const setActiveSubject = useStore((s) => s.setActiveSubject);
   const registry = useStore((s) => s.registry.subjects);
+  const registryVersion = useStore((s) => s.registry.version);
   const setRegistry = useStore((s) => s.setRegistry);
   const canvasBoxes = useStore((s) => s.canvas.boxes);
   const canvasPolygons = useStore((s) => s.canvas.polygons);
@@ -148,20 +149,33 @@ export function AnnotateToolbar({
       return;
     }
     const next = { ...registry, [trimmed]: {} };
-    setRegistry(next);
+    setRegistry(next, registryVersion);
     setActiveSubject(trimmed);
     if (dataset.project_root) {
       try {
-        await classesApi.save(
+        const saved = await classesApi.save(
           dataset.project_root,
           next,
           dataset.dataset_root,
           dataset.annotations_dir,
+          registryVersion,
         );
+        setRegistry(next, saved.version);
       } catch (e) {
+        // A refusal means this browser's registry is not trustworthy: reload rather than keep it.
         useStore
           .getState()
           .pushToast(`Could not add subject: ${e instanceof Error ? e.message : String(e)}`);
+        try {
+          const fresh = await classesApi.load(
+            dataset.project_root,
+            dataset.dataset_root,
+            dataset.annotations_dir,
+          );
+          setRegistry(fresh.subjects, fresh.version);
+        } catch {
+          /* the reload itself failing leaves the optimistic registry in place */
+        }
       }
     }
   }
