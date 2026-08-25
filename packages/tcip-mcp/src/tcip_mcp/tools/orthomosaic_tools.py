@@ -139,9 +139,10 @@ def deliver_orthomosaic_plant_counts(
         spec, record, _specs_dir = resolve_trait_and_record(trait, PER_PLANT_COUNT_AGGREGATE)
     except (TraitUnknownError, ValueError) as exc:
         return {"error": str(exc)}
+    # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
         spec, record, PER_PLANT_COUNT_AGGREGATE, delivered_phenotype=trait_name,
-        value_keys=[_PER_PLANT_VALUE_KEY])
+        value_keys=[_PER_PLANT_VALUE_KEY], registry=None)
     if not stated.ok:
         return {"error": stated.message}
 

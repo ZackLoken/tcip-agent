@@ -19,6 +19,7 @@ from typing import Any
 
 from tcip_store import Version, read_versioned, replace
 
+from tcip_mcp import class_registry as cr
 from tcip_mcp import operationalization as op
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec, trait_spec_key, trait_specs_dir
 
@@ -102,15 +103,50 @@ def write_spec(project_root: Path, spec: TraitSpec) -> None:
     replace(key, data, expect=current.version)
 
 
+def seed_positive_class(project_root: Path, subject_name: str, positive_class_name: str) -> cr.ClassRegistry:
+    """Ensure the project's class registry declares ``positive_class_name`` as a value of
+    ``subject_name``'s own attribute, adding both the subject and the value on first mention and
+    leaving an existing declaration alone; returns the registry as stored.
+
+    An empty ``positive_class_name`` (a spec whose field is not yet authored) adds the subject with
+    whatever attributes it already carries, never an empty-string value, since the registry
+    invariant forbids one and there is nothing yet to declare.
+    """
+    from tcip_mcp.dataset_layout import classes_path
+
+    registry = cr.registry_for_dataset_root(project_root) or cr.ClassRegistry()
+    subjects = {s.name: s for s in registry.subjects}
+    existing = subjects.get(subject_name)
+    attrs = list(existing.attributes) if existing else []
+    if positive_class_name:
+        if attrs:
+            attr = attrs[0]
+            if positive_class_name not in attr.values:
+                attrs[0] = cr.Attribute(name=attr.name, type=attr.type,
+                                        values=(*attr.values, positive_class_name))
+        else:
+            attrs = [cr.Attribute(name="state", type="categorical", values=(positive_class_name,))]
+    subjects[subject_name] = cr.Subject(name=subject_name, attributes=tuple(attrs))
+    updated = cr.ClassRegistry(subjects=tuple(subjects.values()))
+    cr.write_registry(classes_path(project_root), updated)
+    return updated
+
+
 def seed_project(project_root: Path) -> Path:
-    """A project whose registry carries both fixture traits."""
+    """A project whose registry carries both fixture traits, and whose class registry declares the
+    crossing fixture's positive class for the subject it states its crossing operationalization of."""
     write_spec(project_root, CROSSING_SPEC)
     write_spec(project_root, COUNT_SPEC)
+    seed_positive_class(project_root, "flower", CROSSING_SPEC.positive_class_name)
     return Path(project_root)
 
 
 def state_crossing(project_root: Path, **overrides: Any) -> dict[str, Any]:
-    """A stated, unconfirmed crossing record for the fixture crossing trait."""
+    """A stated, unconfirmed crossing record for the fixture crossing trait.
+
+    Passes the project's own class registry (as :func:`seed_project` left it, or as a caller
+    updated it since) to the writer, the registry a crossing statement is checked against.
+    """
     fields: dict[str, Any] = {
         "statement": "the date each plant reached the state the breeder scores in the field",
         "mechanism": "the calibrated state classifier over the isolated flowers of one plant",
@@ -118,8 +154,9 @@ def state_crossing(project_root: Path, **overrides: Any) -> dict[str, Any]:
         "delivered_phenotypes": ["bloom_05per_date", "bloom_50per_date"],
     }
     fields.update(overrides)
+    registry = cr.registry_for_dataset_root(project_root)
     return op.state_operationalization(
-        project_root, CROSSING_TRAIT, op.STATE_CROSSING_DATES, **fields
+        project_root, CROSSING_TRAIT, op.STATE_CROSSING_DATES, registry=registry, **fields
     )
 
 
@@ -261,7 +298,10 @@ def seed_confirmed_crossing(project_root: Path, trait: str, **overrides: Any) ->
     What a test needs when its subject is a delivery rather than the precondition: the crossing
     doors refuse without a confirmed record, so a module whose subject predates that rail seeds one
     and keeps testing what it was written to test. The delivered phenotypes come from the
-    registered spec's own ``delivers``, so this works for any trait a test authors.
+    registered spec's own ``delivers``, so this works for any trait a test authors. Declares the
+    spec's positive class for the measured subject in the project's own class registry, adding
+    both on first mention (see :func:`seed_positive_class`), so the registry the writer now
+    requires is never a hole a test-only trait falls through.
     """
     from tcip_mcp.traits import get_trait_for
 
@@ -273,7 +313,8 @@ def seed_confirmed_crossing(project_root: Path, trait: str, **overrides: Any) ->
         "delivered_phenotypes": list(spec.delivers),
     }
     fields.update(overrides)
+    registry = seed_positive_class(project_root, fields["measured_subject"], spec.positive_class_name)
     record = op.state_operationalization(
-        project_root, trait, op.STATE_CROSSING_DATES, **fields
+        project_root, trait, op.STATE_CROSSING_DATES, registry=registry, **fields
     )
     return confirm(project_root, trait, op.STATE_CROSSING_DATES, record)

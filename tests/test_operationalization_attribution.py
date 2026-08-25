@@ -26,6 +26,7 @@ def project(tmp_path: Path) -> Path:
 
 
 def test_changing_measured_subject_invalidates_the_seen_hash(project: Path):
+    fx.seed_positive_class(project, "bush", fx.CROSSING_SPEC.positive_class_name)
     seen = fx.state_crossing(project)
     fx.state_crossing(project, measured_subject="bush")
 

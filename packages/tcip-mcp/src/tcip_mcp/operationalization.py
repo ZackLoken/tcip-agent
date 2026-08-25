@@ -37,6 +37,7 @@ from tcip_store import RECORD_JSON, Key, StoreDescriptor, Version, Versioned, re
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp import agent_identity
+from tcip_mcp.class_registry import ClassRegistry, positive_class_problem
 from tcip_mcp.identity import user_identity
 from tcip_mcp.statements import canonical, content_hash, now_iso
 from tcip_mcp.traits import TraitSpec, crops_definitions, get_trait_for, trait_specs_dir
@@ -340,6 +341,7 @@ def check_operationalization(
     delivered_phenotype: str | None = None,
     value_keys: Sequence[Any] | None = None,
     id_maps: Mapping[str, Mapping[str, Any]] | None = None,
+    registry: ClassRegistry | None = None,
     basis: OperationalizationBasis | None = None,
 ) -> OperationalizationCheck:
     """Whether this trait's delivered number has a confirmed meaning, and what to say if not.
@@ -350,10 +352,16 @@ def check_operationalization(
     quantity's error is characterized against a reference. The two refusals are never blurred.
 
     ``delivered_phenotype``, ``value_keys`` and ``id_maps`` are what a door knows about the file it
-    is about to write, and each is checked only where the delivered artifact carries it. ``basis``
-    is what an earlier call returned: pass it on the re-check immediately before the first write,
-    and a record or spec that moved in between refuses with state 6 rather than delivering against
-    a confirmation nobody gave.
+    is about to write, and each is checked only where the delivered artifact carries it. ``registry``
+    is the delivered dataset's class registry, checked only for a ``state_crossing_dates`` delivery:
+    when given, a registry that no longer declares the confirmed positive class for the confirmed
+    measured subject is reported as a superseded entry beside a moved spec field, in the same shape,
+    since what changed is the definition's binding to the dataset, not the decoded numbers, and the
+    door refuses exactly as it refuses any other unconfirmed statement. A door with no registry to
+    give (the count and aggregate doors, which never deliver a crossing kind) passes ``None``, and
+    every other delivery kind ignores it regardless. ``basis`` is what an earlier call returned: pass
+    it on the re-check immediately before the first write, and a record or spec that moved in
+    between refuses with state 6 rather than delivering against a confirmation nobody gave.
 
     ``acknowledge_unvalidated`` is deliberately not a parameter. An acknowledged provisional number
     whose meaning is stated is honest and ships stamped false; an acknowledged number whose meaning
@@ -371,6 +379,17 @@ def check_operationalization(
         )
 
     moved = _moved_fields(spec, stated, delivery_kind)
+    # An unauthored positive class is state 4's own report (below), not a registry mismatch.
+    if delivery_kind == STATE_CROSSING_DATES and registry is not None and spec.positive_class_name:
+        problem = positive_class_problem(
+            registry, str(stated.get("measured_subject") or ""), spec.positive_class_name
+        )
+        if problem is not None:
+            moved = (*moved, {
+                "field": "positive_class_name",
+                "confirmed_value": spec.positive_class_name,
+                "current_value": problem,
+            })
     if moved:
         return OperationalizationCheck(
             trait, delivery_kind, 3, _state_3_text(spec, delivery_kind, stated, moved[0]),
@@ -637,6 +656,7 @@ def state_operationalization(
     delivered_phenotypes: Sequence[str] = (),
     delivered_value_keys: Sequence[str] = (),
     relayed_note: str = "",
+    registry: ClassRegistry | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
     """Record what a trait's delivered number means for one delivery kind, unconfirmed.
@@ -645,6 +665,11 @@ def state_operationalization(
     statement. It stamps ``stated_by`` and ``stated_at`` itself and refuses any further payload
     key, naming the confirmation fields when one of those is what arrived: a writer that could fill
     a confirmation field would make honest attribution depend on the agent choosing not to.
+
+    ``registry`` is an explicit keyword, never a payload key: a ``state_crossing_dates`` statement
+    names a positive class, which is not a mechanism a model can realize on its own unless the
+    delivered dataset's registry actually declares that class for the measured subject, so it is
+    required for that kind and refused as missing by name when absent. Every other kind ignores it.
 
     Restating clears the confirmation. A changed definition is unconfirmed by construction, and the
     breeder confirms the new one on the surface where the confirming act happens.
@@ -694,12 +719,32 @@ def state_operationalization(
             "delivered_value_keys must be empty"
         )
 
+    subject_text = _require_text(measured_subject, "measured_subject")
+    if delivery_kind == STATE_CROSSING_DATES:
+        if registry is None:
+            raise ValueError(
+                f"a {STATE_CROSSING_DATES} statement for trait {trait!r} needs the delivered "
+                "dataset's registry (the registry keyword): a state trait cannot be "
+                "operationalized against classes nobody declared. Pass the ClassRegistry read "
+                "from the dataset this statement's classes belong to."
+            )
+        # An unauthored positive class (spec.positive_class_name empty) is a spec-authoring gap
+        # state 4 reports at delivery time, not a registry mismatch: nothing is named yet to check.
+        if spec.positive_class_name:
+            problem = positive_class_problem(registry, subject_text, spec.positive_class_name)
+            if problem is not None:
+                raise ValueError(
+                    f"a {STATE_CROSSING_DATES} statement for trait {trait!r} names positive class "
+                    f"{spec.positive_class_name!r} for subject {subject_text!r}, and {problem}. "
+                    "State a class the registry actually declares, or update the registry first."
+                )
+
     record = {
         "trait": trait,
         "delivery_kind": delivery_kind,
         "statement": _require_text(statement, "statement"),
         "mechanism": _require_text(mechanism, "mechanism"),
-        "measured_subject": _require_text(measured_subject, "measured_subject"),
+        "measured_subject": subject_text,
         "delivered_phenotypes": phenotypes,
         "delivered_value_keys": value_keys,
         "stated_by": STATEMENT_SURFACE,
@@ -711,6 +756,40 @@ def state_operationalization(
     key = operationalization_key(operationalizations_scope(project_root), trait, delivery_kind)
     ts.replace(key, record, expect=existing.version)
     return record
+
+
+def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> ClassRegistry:
+    """The registry a ``state_crossing_dates`` statement is checked against.
+
+    ``dataset_root`` given: that dataset's own registry. Empty: the project root's own registry,
+    served when ``project_root`` is unambiguously the one dataset the project uses (its own
+    ``classes.json`` exists, and the project's dataset registry names at most one dataset), the
+    common single-dataset project layout. Otherwise refuses by name, naming the registered
+    datasets and the ``dataset_root`` parameter, rather than guess which dataset a multi-dataset
+    project means.
+    """
+    from tcip_mcp.class_registry import read_registry
+    from tcip_mcp.dataset_layout import classes_path
+    from tcip_mcp.tools.project_tools import read_datasets
+
+    if dataset_root:
+        return read_registry(classes_path(dataset_root))
+
+    registered = read_datasets(project_root)
+    paths = [d.get("path") for d in registered]
+    if len(registered) > 1:
+        raise ValueError(
+            f"project {project_root!r} registers {len(registered)} datasets {paths}, so which one "
+            "this statement's classes belong to cannot be guessed. Pass dataset_root naming it."
+        )
+    try:
+        return read_registry(classes_path(project_root))
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"project root {project_root!r} carries no class registry of its own (registered "
+            f"datasets: {paths}). Pass dataset_root naming the dataset this statement's classes "
+            "belong to."
+        ) from exc
 
 
 # ── the confirmation writer ──────────────────────────────────────────────────

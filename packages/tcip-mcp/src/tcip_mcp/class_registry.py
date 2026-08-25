@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -337,3 +338,63 @@ def num_classes(registry: ClassRegistry, subject: str, attribute: str | None = N
 def decode_class_ids(id_map: dict[str, int]) -> dict[int, str]:
     """Invert a recorded name→id map to id→name, for decoding a run's predictions."""
     return {cid: name for name, cid in id_map.items()}
+
+
+def positive_class_problem(registry: ClassRegistry, subject_name: str, class_name: str) -> str | None:
+    """Why ``class_name`` cannot be ``subject_name``'s positive class in ``registry``, or ``None``
+    when some attribute of that subject lists it among its values.
+
+    Deliberately stricter than :func:`assign_class_ids`'s own id-map shape: a subject with no
+    attributes decodes as a single class keyed by its own name, a bare detector with no
+    classification axis at all, and a bare single-class detector never assessed a trait's positive
+    state (the precondition ``count_by_class`` checks), so a subject with no attributes cannot
+    carry a positive class here even though it decodes fine as a training scope.
+    """
+    subject = registry.subject(subject_name)
+    if subject is None:
+        known = [s.name for s in registry.subjects]
+        return f"no subject {subject_name!r} in the registry (subjects: {known})"
+    if not subject.attributes:
+        return (
+            f"subject {subject_name!r} has no attributes, so a bare detector decodes it as a "
+            "single class keyed by the subject's own name; a single-class detector with no "
+            "classification axis never assessed a trait's positive state, so it cannot carry one"
+        )
+    values = sorted({v for a in subject.attributes for v in a.values})
+    if class_name not in values:
+        return f"class {class_name!r} is not among subject {subject_name!r}'s attributes' values {values}"
+    return None
+
+
+def registry_for_dataset_root(dataset_root: str | Path) -> ClassRegistry | None:
+    """The registry at ``dataset_root``, or ``None`` when no ``classes.json`` has been written there
+    yet (a dataset with no registry is not corrupt, only unregistered so far)."""
+    from tcip_mcp.dataset_layout import classes_path
+
+    try:
+        return read_registry(classes_path(dataset_root))
+    except FileNotFoundError:
+        return None
+
+
+def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> ClassRegistry | None:
+    """The registry for the single dataset every one of ``pred_dirs`` resolves under.
+
+    ``None`` when none of the directories resolves to a dataset root, or the one they do resolve
+    to carries no registry yet. Refuses (``RegistryError``) when the directories span more than one
+    dataset root: no delivery this platform ships mixes datasets, so that can only be a caller error,
+    never a case to silently resolve by picking one.
+    """
+    from tcip_mcp.dataset_layout import dataset_root_of
+
+    roots: set[Path] = {r for d in pred_dirs if d and (r := dataset_root_of(d)) is not None}
+    if len(roots) > 1:
+        raise RegistryError(
+            "a delivery's prediction directories resolve to more than one dataset root "
+            f"({sorted(str(r) for r in roots)}); no delivery this platform ships spans more than "
+            "one dataset, so this cannot be reconciled to a single registry"
+        )
+    if not roots:
+        return None
+    (root,) = roots
+    return registry_for_dataset_root(root)

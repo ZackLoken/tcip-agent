@@ -326,6 +326,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     two can never be read from different projects, and the precondition runs before anything else
     this door does: a breeder must not see a curve on screen that Download would then refuse.
     """
+    from tcip_mcp.class_registry import registry_for_dataset_root
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
         check_operationalization,
@@ -347,7 +348,10 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     except TraitUnknownError as e:
         raise HTTPException(400, str(e)) from e
 
-    stated = check_operationalization(spec, record, STATE_CROSSING_DATES)
+    # The Results routes serve the project they were opened against, so its own registry is the
+    # delivered dataset's registry: this project root doubles as the dataset root in the common case.
+    registry = registry_for_dataset_root(root)
+    stated = check_operationalization(spec, record, STATE_CROSSING_DATES, registry=registry)
     if not stated.ok:
         raise HTTPException(400, stated.as_detail())
 
@@ -405,6 +409,7 @@ def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
     file, so a withdrawal or a spec edit mid-delivery leaves nothing delivered and nothing written.
     Two keys in two stores cannot be read atomically together, so this closes that window instead.
     """
+    from tcip_mcp.class_registry import registry_for_dataset_root
     from tcip_mcp.operationalization import (
         STATE_CROSSING_DATES,
         check_operationalization,
@@ -413,8 +418,9 @@ def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
 
     spec, record, _specs_dir = resolve_trait_and_record(
         trait, STATE_CROSSING_DATES, project_root=measurement.project_root)
+    registry = registry_for_dataset_root(measurement.project_root)
     check = check_operationalization(
-        spec, record, STATE_CROSSING_DATES, basis=measurement.basis)
+        spec, record, STATE_CROSSING_DATES, registry=registry, basis=measurement.basis)
     if not check.ok:
         raise HTTPException(400, check.as_detail())
 
@@ -625,12 +631,14 @@ def _operationalization_body(project_root: Path, trait: str, delivery_kind: str)
     Nothing stated yet reads as null statement fields with ``confirmed_current`` false.
     """
     from tcip_mcp import operationalization as op
+    from tcip_mcp.class_registry import registry_for_dataset_root
     from tcip_mcp.traits import crops_definitions
 
     spec, record, _specs_dir = op.resolve_trait_and_record(
         trait, delivery_kind, project_root=project_root
     )
-    check = op.check_operationalization(spec, record, delivery_kind)
+    registry = registry_for_dataset_root(project_root)
+    check = op.check_operationalization(spec, record, delivery_kind, registry=registry)
     stated = record.value or {}
     definitions = crops_definitions()
     return {

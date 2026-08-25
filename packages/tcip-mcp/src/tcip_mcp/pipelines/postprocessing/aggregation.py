@@ -459,8 +459,10 @@ def export_aggregated_csv(
     trait = resolve_trait_for_phenotype(trait_name)
     value_keys = [r.get("value_key", "") for r in results]
     spec, record, _specs_dir = resolve_trait_and_record(trait, delivery_kind)
+    # This door never delivers a crossing kind, so it has no registry to check a positive class against.
     stated = check_operationalization(
-        spec, record, delivery_kind, delivered_phenotype=trait_name, value_keys=value_keys)
+        spec, record, delivery_kind, delivered_phenotype=trait_name, value_keys=value_keys,
+        registry=None)
     if not stated.ok:
         raise ValueError(stated.message)
 
@@ -518,7 +520,7 @@ def export_aggregated_csv(
     spec_now, record_now, _ = resolve_trait_and_record(trait, delivery_kind)
     still_stated = check_operationalization(
         spec_now, record_now, delivery_kind, delivered_phenotype=trait_name,
-        value_keys=value_keys, basis=stated.basis)
+        value_keys=value_keys, registry=None, basis=stated.basis)
     if not still_stated.ok:
         raise ValueError(still_stated.message)
 
