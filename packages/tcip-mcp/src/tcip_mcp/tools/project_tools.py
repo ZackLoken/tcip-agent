@@ -252,15 +252,25 @@ def _root_divergence_report() -> dict[str, str] | None:
     processes, so a GUI adoption does not repin this process, and this process's root can
     keep naming a stale or different project until it is deliberately adopted here too.
     ``None`` when there is no marker, the marker's name does not resolve, or the two agree.
+
+    Reads with ``create=False`` so this check, run on every ``inspect_project`` call, cannot
+    bring the workspace directory into existence as a side effect; a workspace store that
+    refuses the read (e.g. loose marker files with no database under the default backend) is
+    reported here rather than raised, naming the refusal.
     """
+    from tcip_store import StoreError
+
     from tcip_mcp import workspace
     from tcip_mcp.project_paths import project_root
 
-    name = workspace.read_active_project()
+    try:
+        name = workspace.read_active_project(create=False)
+    except StoreError as exc:
+        return {"error": str(exc)}
     if not name:
         return None
     try:
-        marker_project = workspace.project_path(name)
+        marker_project = workspace.project_path(name, create=False)
     except ValueError:
         return None
     root = project_root()

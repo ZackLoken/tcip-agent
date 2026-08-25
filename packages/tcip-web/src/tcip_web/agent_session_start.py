@@ -59,7 +59,10 @@ def _resolve_active() -> tuple[str, str]:
     module scope, so an interpreter that cannot see those packages still reports that fact
     rather than a false no-project state. Binds the environment's own backend (the same rule
     every process follows) with a short lock timeout, and reads the marker with
-    ``create=False`` so a bare read cannot bring a workspace directory into existence.
+    ``create=False`` so the read cannot create the workspace root itself. It can still touch
+    disk under an existing ``<workspace>/.tcip/``: opening a database not yet in WAL mode
+    creates that directory (if absent) and a lock file there, and the short timeout bounds
+    only that transition lock, not SQLite's own busy wait on a database another writer holds.
     """
     try:
         from tcip_mcp import workspace
@@ -84,15 +87,20 @@ def _resolve_active() -> tuple[str, str]:
 
 
 def _root_divergence_note(proj: str) -> str:
-    """States it when this session's inherited ``TCIP_PROJECT_ROOT`` names a different
+    """States it when this session's inherited platform-state root names a different
     project than the active marker: that env var is inherited, not a live read (this
     module's own docstring already calls it unreliable on its own), so the two can disagree.
+
+    Reads the variable's name from ``tcip_mcp.project_paths.ENV_VAR`` rather than a literal,
+    since that module is what declares it.
     """
-    inherited = os.environ.get("TCIP_PROJECT_ROOT")
+    from tcip_mcp.project_paths import ENV_VAR
+
+    inherited = os.environ.get(ENV_VAR)
     if not inherited or str(Path(inherited)) == str(Path(proj)):
         return ""
     return (
-        f"This session's inherited TCIP_PROJECT_ROOT ({inherited}) names a different project "
+        f"This session's inherited {ENV_VAR} ({inherited}) names a different project "
         f"than the active marker ({proj}); adopt the marker's project explicitly "
         "(set_active_project) before running the ritual.\n\n"
     )

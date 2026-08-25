@@ -30,7 +30,7 @@ within a segment. Neither function checks a segment against a vocabulary (provis
 per the owner's naming ruling); `ingest_images`, `init_project` and `import_project`
 refuse a non-conforming name when the directory they create lands under the workspace.
 
-    crop_subject_phenotype
+    black-locust_tree_trunk-diameter
 
 - `crop`: one of the six controlled crops (verify in `.github/skills/crops/`).
 - `subject`: the object the annotations isolate (see step 3 below).
@@ -49,7 +49,7 @@ Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
 Structure the raw pile into the canonical layout. One auditable primitive:
 
 ```
-ingest_images(source="<raw folder or glob>", name="crop_subject_phenotype")
+ingest_images(source="<raw folder or glob>", name="black-locust_tree_trunk-diameter")
 ```
 
 - Copies by default (originals are left byte-identical); pass `copy=False` only when

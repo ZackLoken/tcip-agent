@@ -204,6 +204,40 @@ describe("ProjectPicker", () => {
     expect(opts).not.toContain("bush");
   });
 
+  it("auto-opens the active project on first load without writing the marker", async () => {
+    // autoOpenAttempted is module-scoped, already tripped by earlier tests in this file;
+    // reset the module registry to exercise a fresh first load.
+    vi.resetModules();
+    const { api: freshApi } = await import("@/api/client");
+    const { ProjectPicker: FreshProjectPicker } = await import("@/components/ProjectPicker");
+
+    vi.mocked(freshApi.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: PROJECTS[0].name,
+      active_path: PROJECTS[0].path,
+      projects: PROJECTS,
+    });
+    vi.mocked(freshApi.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: {
+        project_root: PROJECTS[0].path,
+        dataset_root: PROJECTS[0].path,
+        subject: "bush",
+        date: "2026-03-01",
+        image_list: [],
+        current_image_index: 0,
+        annotations_dir: null,
+        predictions_dir: null,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    render(<FreshProjectPicker />);
+
+    await waitFor(() => expect(freshApi.dataset.select).toHaveBeenCalledTimes(1));
+    expect(freshApi.projects.setActive).not.toHaveBeenCalled();
+  });
+
   it("has no advanced folder-open escape hatch (project creation is agent-driven)", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",

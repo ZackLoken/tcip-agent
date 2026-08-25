@@ -223,6 +223,45 @@ def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
     assert "platform_root_diverges_from_marker" not in status
 
 
+def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
+    tmp_path: Path, monkeypatch
+):
+    ws = tmp_path / "no_such_workspace"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    inspect_project(str(proj))
+
+    assert not ws.exists()
+
+
+def test_inspect_project_reports_the_workspace_store_refusal_for_a_loose_marker(
+    tmp_path: Path, monkeypatch
+):
+    """A workspace holding a loose ``.active`` with no database is what precedes
+    ``python scripts/adopt_store.py``; the divergence check must name that refusal rather
+    than let it raise out of ``inspect_project``."""
+    from tcip_store.sqlite_backend import SqliteBackend
+
+    from tcip_mcp import workspace
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    tcip_store.bind(SqliteBackend())
+    (ws / workspace.ACTIVE_MARKER).write_text("some_project\n")
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    status = inspect_project(str(proj))
+
+    divergence = status["platform_root_diverges_from_marker"]
+    assert "error" in divergence
+    assert not (ws / ".tcip").exists()
+
+
 def test_init_project_refuses_a_non_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
     ws = tmp_path / "ws"
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))

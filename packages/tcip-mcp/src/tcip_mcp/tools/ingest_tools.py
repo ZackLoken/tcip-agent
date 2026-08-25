@@ -193,9 +193,10 @@ def ingest_images(
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
         name: Project slug; the destination folder is ``<TCIP_WORKSPACE>/<name>/`` unless
-            ``project_path`` overrides it. Landing under the workspace, ``name`` (or the
-            override's basename) must fit ``crop_subject_phenotype``
-            (``workspace.format_project_name``/``parse_project_name``).
+            ``project_path`` overrides it. When that destination is a new directory under the
+            workspace, ``name`` (or the override's basename) must fit ``crop_subject_phenotype``
+            (``workspace.format_project_name``/``parse_project_name``); ingesting another date
+            into an existing project opens it by the name it already has.
         project_path: Absolute destination path instead of ``workspace/<name>``.
         copy: Copy (True, default) or move (False) the source images.
         date_from: ``"exif"`` (each file's own capture date → ISO date, missing →
@@ -220,11 +221,14 @@ def ingest_images(
         if project_path:
             # Resolve so a relative override is explicit/absolute, not silently CWD-based.
             dest_root: Path = Path(project_path).expanduser().resolve()
-            if dest_root.parent == workspace.workspace_root():
+            # Held to the scheme only when creating: an existing project is opened by the
+            # name it already has, conforming or not.
+            if not dest_root.exists() and dest_root.parent == workspace.workspace_root():
                 workspace.parse_project_name(dest_root.name)
         else:
-            workspace.parse_project_name(name)
             dest_root = workspace.project_path(name)
+            if not dest_root.exists():
+                workspace.parse_project_name(name)
     except ValueError as exc:
         return {"error": str(exc)}
 

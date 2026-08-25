@@ -417,6 +417,26 @@ def test_ingest_refuses_a_non_conforming_override_basename_under_the_workspace(
     assert not dest.exists()
 
 
+def test_ingest_a_second_date_into_an_existing_non_conforming_project_opens_it_by_name(
+    tmp_path, _isolate_workspace
+):
+    src1 = tmp_path / "raw1"
+    _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
+    ingest_images(source=str(src1), name="proj_reused_case")
+
+    # Rename to a name that doesn't fit crop_subject_phenotype: what an existing project made
+    # before this rail (or outside the platform) looks like.
+    non_conforming = _isolate_workspace / "two_segments"
+    workspace.project_path("proj_reused_case").rename(non_conforming)
+
+    src2 = tmp_path / "raw2"
+    _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
+    manifest = ingest_images(source=str(src2), name="two_segments")
+
+    assert "error" not in manifest
+    assert (non_conforming / "images" / "2026-03-01" / "b.jpg").is_file()
+
+
 def test_ingest_admits_a_non_conforming_override_outside_the_workspace(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.png")

@@ -18,6 +18,23 @@ from tcip_web import agent_session_start as hook
 HOOK_SRC = Path(hook.__file__).read_text(encoding="utf-8")
 
 
+def _imports(src: str) -> set[str]:
+    """Every module a snippet imports, both ``import a.b`` and ``from a import b`` spellings
+    resolved to the same dotted name, so a banned module cannot hide behind either form."""
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            imported.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+            imported.update(f"{node.module}.{a.name}" for a in node.names)
+    return imported
+
+
+def _imports_module(imported: set[str], banned: str) -> bool:
+    return any(name == banned or name.startswith(f"{banned}.") for name in imported)
+
+
 def _run(monkeypatch, capsys, stdin: str) -> str:
     monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
     hook.main()
@@ -80,20 +97,50 @@ def test_session_start_is_fast_no_subprocess_or_tool_registration(tmp_path, monk
     measurement (see the module docstring), so only ``tcip_mcp.tools`` itself is banned.
     Parses the real imports via AST, so a docstring mention doesn't count.
     """
-    imported: set[str] = set()
-    for node in ast.walk(ast.parse(HOOK_SRC)):
-        if isinstance(node, ast.Import):
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module)
-    assert not any(name == "subprocess" or name.startswith("subprocess.") for name in imported)
-    assert not any(
-        name == "tcip_mcp.tools" or name.startswith("tcip_mcp.tools.") for name in imported
-    )
+    imported = _imports(HOOK_SRC)
+    assert not _imports_module(imported, "subprocess")
+    assert not _imports_module(imported, "tcip_mcp.tools")
     # It emits its directive without touching either: a fresh interpreter would stay fast.
     _workspace(tmp_path, monkeypatch)
     out = _run(monkeypatch, capsys, '{"source":"startup"}')
     assert "SessionStart" in out
+
+
+def test_import_scan_catches_the_from_import_spelling_of_a_banned_module():
+    """``from tcip_mcp import tools`` is the same module access as ``import tcip_mcp.tools``;
+    the guard above must catch both spellings, not only the dotted-import one."""
+    assert _imports_module(_imports("from tcip_mcp import tools\n"), "tcip_mcp.tools")
+
+
+def test_session_start_hook_runs_as_a_real_subprocess(tmp_path, monkeypatch):
+    """The other tests call ``hook.main()`` in-process, sharing the pytest interpreter's
+    already-warm imports; this one spawns a fresh interpreter on the hook module itself, so
+    the fresh-interpreter claim above is measured against a real process, not inferred from
+    an in-process call that never pays the cost a cold import would.
+    """
+    import subprocess
+    import sys
+
+    ws = tmp_path / "ws"
+    proj = ws / "hazelnut_demo"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    from tcip_mcp import workspace
+
+    workspace.set_active_project("hazelnut_demo")
+
+    result = subprocess.run(
+        [sys.executable, hook.__file__],
+        input='{"source":"startup"}',
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    ctx = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "hazelnut_demo" in ctx
+    assert "No active project" not in ctx
 
 
 def test_session_start_reads_a_marker_written_through_the_store(tmp_path, monkeypatch, capsys):

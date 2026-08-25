@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, type ProjectSummary } from "@/api/client";
 import { SeasonRail } from "@/components/SeasonRail";
-import { adoptWorkspaceProject, defaultDate } from "@/lib/openProject";
+import { adoptWorkspaceProject, defaultDate, openProjectByName } from "@/lib/openProject";
 import { useStore } from "@/store";
 
 // Session-scoped: auto-open the active project only on the app's first load, so a later
@@ -108,18 +108,11 @@ export function ProjectPicker() {
           autoOpenAttempted = true;
           const active = res.projects.find((p) => p.name === res.active);
           const d = active ? defaultDate(active.dates) : "";
-          // Auto-open only when the default (newest) date actually has labelled subjects,
-          // otherwise skipping straight into the app would land on a blank canvas with no
-          // way to change date. Instead preselect the card so the human lands on the picker
-          // (honest-empty dropdowns + the date selector) and picks a date with labels.
+          // Auto-open only when the default date has labelled subjects, else preselect the
+          // card; no marker write here, since the app opening what it already names isn't a human adoption.
           if (active && d && subjectsForDate(active, d).length > 0) {
             selectCard(active);
-            void openProject(
-              active,
-              d,
-              subjectsForDate(active, d)[0] ?? "",
-              modelsForDate(active, d)[0] ?? "",
-            );
+            void openProjectByName(active.name).catch((e) => setOpenError(String(e)));
           } else if (active) {
             selectCard(active);
           }
