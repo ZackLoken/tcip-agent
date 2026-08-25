@@ -698,6 +698,7 @@ def _focus_annotate(
     payload = {
         "project_root": project_root, "dataset_root": dataset_root,
         "subject": subject, "date": date, "image_index": image_index, "mode": mode,
+        "active_subject": subject,
     }
     result = post_panel_event("app", "annotate_focus", payload)
     return {

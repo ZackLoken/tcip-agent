@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 import tcip_store
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_web.state import DatasetSelection, GuiState, StateStore
@@ -61,3 +63,24 @@ def test_load_from_disk_roundtrip(tmp_path: Path) -> None:
 
 def test_load_from_disk_missing_returns_false(tmp_path: Path) -> None:
     assert StateStore().load_from_disk(tmp_path) is False
+
+
+def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
+    store = StateStore()
+    with pytest.raises(ValueError):
+        asyncio.run(store.mutate({"active_tab": "nonexistent"}))
+    assert store.version == 0
+    assert store.state.active_tab == "annotate"
+
+
+def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothing() -> None:
+    """A pre-built model instance passes model_copy untouched (revalidate_instances="never"), so
+    mutate must dump it and validate the merged result rather than trust it as already valid."""
+    from tcip_web.state import ReviewFilters
+
+    store = StateStore()
+    bad_filters = ReviewFilters.model_construct(iou_threshold="banana")
+    with pytest.raises(ValueError):
+        asyncio.run(store.mutate({"review": bad_filters}))
+    assert store.version == 0
+    assert store.state.review.iou_threshold == 0.5
