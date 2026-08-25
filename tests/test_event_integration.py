@@ -150,6 +150,7 @@ class TestPostPanelEventRoute:
         state = client.get("/api/dataset/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "point"
+        assert state["active_subject"] == "catkin"
 
     def test_the_browser_tabs_and_the_backend_agree_on_the_panel_names(self) -> None:
         """Every GUI tab subscribes to the panel of its own name.

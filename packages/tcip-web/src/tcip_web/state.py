@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from tcip_store import StoreError, read, replace
 
 from tcip_mcp.web_client import gui_snapshot_key
@@ -21,9 +21,18 @@ logger = logging.getLogger(__name__)
 
 PERSIST_DEBOUNCE_SECONDS = 0.5
 
-TAB_NAMES = ("annotate", "review", "training", "tuning", "inference", "results", "meta")
+ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
-validates against. The frontend's ``TabName`` union (store/types.ts) mirrors this tuple."""
+validates against. The frontend's ``TabName`` union (store/types.ts) mirrors this."""
+
+TAB_NAMES = get_args(ActiveTab)
+
+AnnotateMode = Literal["box", "polygon", "point"]
+"""The Annotate canvas's drawing modes: the vocabulary ``GuiState.mode`` holds."""
+
+
+class GuiMutationInvalid(ValueError):
+    """A :meth:`StateStore.mutate` call whose merged result does not validate as ``GuiState``."""
 
 
 # ── Pydantic state model ────────────────────────────────────────────────
@@ -81,10 +90,10 @@ class GuiState(BaseModel):
     lives with the corresponding tabs, not here.
     """
 
-    active_tab: str = "annotate"  # one of TAB_NAMES
+    active_tab: ActiveTab = "annotate"
     dataset: DatasetSelection = Field(default_factory=DatasetSelection)
     view: ViewState = Field(default_factory=ViewState)
-    mode: str = "box"  # box|polygon|point
+    mode: AnnotateMode = "box"
     active_subject: str = ""
     review: ReviewFilters = Field(default_factory=ReviewFilters)
     pred_reference: Optional[PredictionReference] = None
@@ -167,14 +176,26 @@ class StateStore:
             self._schedule_save()
 
     async def mutate(self, mutation: dict[str, Any]) -> None:
-        """Apply a partial mutation and schedule persistence.
+        """Apply a partial mutation, validated, and schedule persistence.
 
-        ``mutation`` is a shallow dict of top-level field names; nested
-        fields can be set by passing a nested dict (handled via
-        :meth:`BaseModel.model_copy(update=...)`).
+        ``mutation`` is a shallow dict of top-level field names; a nested field is set by
+        passing a fully built model instance or a complete dict for it, never a partial one
+        (a partial nested dict is refused by the nested field's own validation). The merged
+        result is validated through :class:`GuiState` before it is held: a mutation that does
+        not validate raises :class:`GuiMutationInvalid` naming the field, and nothing is held
+        or scheduled.
         """
         async with self._lock:
-            self._state = self._state.model_copy(update=mutation)
+            dumped = {
+                k: v.model_dump(mode="json") if isinstance(v, BaseModel) else v
+                for k, v in mutation.items()
+            }
+            merged = {**self._state.model_dump(mode="json"), **dumped}
+            try:
+                new_state = GuiState.model_validate(merged)
+            except ValidationError as exc:
+                raise GuiMutationInvalid(str(exc)) from exc
+            self._state = new_state
             self._version += 1
             payload = {"state": self.snapshot(), "version": self._version}
             self._schedule_save()
