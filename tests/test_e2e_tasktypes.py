@@ -64,6 +64,9 @@ def _train_config(model_source: dict) -> dict:
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "scheduler": {"type": "cosine"},
         "early_stopping": {"enabled": False},
+        # No val_loader at any call site below: loss is the only metric coherent to select on
+        # without one, detection/instance_seg's own default (objective) needs a validation pass.
+        "evaluation": {"selection_metric": "loss"},
         "gradient_accumulation_steps": 1,
         "checkpoint_every_n_epochs": 1,
     }

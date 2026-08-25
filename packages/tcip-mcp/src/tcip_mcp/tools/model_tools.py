@@ -138,8 +138,9 @@ def select_best_model(
     Ranks only ``metrics_source="trainer"`` entries by default, the platform's own
     ``default_train`` is the one path anything here measured; ``include_unverified=True`` also
     ranks ``"training_source"``/``"caller"`` entries, whose numbers were asserted, not verified.
-    Excluded unverified entries are named in ``excluded_unverified`` either way, so a caller sees
-    what the ranking did not consider.
+    Entries the ranking left out for being unverified are named in ``excluded_unverified`` when
+    ``include_unverified`` is false; when true, nothing is left out on that basis, so the list is
+    always empty.
 
     Args:
         project_path: Project root directory. Empty defaults to the platform state root.

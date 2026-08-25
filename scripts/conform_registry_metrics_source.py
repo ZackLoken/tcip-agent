@@ -32,8 +32,12 @@ read-modify-write ``ModelRegistry.register_model`` uses, never a re-registration
 overwrite the entry's metrics and reset ``registered_at``, and can fail on a missing checkpoint).
 A root already conformed (every entry already carries ``metrics_source``) is reported unchanged.
 
+``--source`` applies its names against one root's own entries; passed with more than one root
+named on the command line it is refused outright, rather than matching a name against every
+root's index.
+
 Exit codes: 0 if every root named was conformed or had nothing to conform; 2 if any root carries
-an entry refused for lack of a stated ``--source``.
+an entry refused for lack of a stated ``--source``, or ``--source`` was given with more than one root.
 """
 
 from __future__ import annotations
@@ -116,13 +120,19 @@ def _plan(root: Path, sources: dict[str, str]) -> tuple[list[str], bool]:
     return outcomes, refused
 
 
-def _apply(root: Path, sources: dict[str, str]) -> list[str]:
+def _apply(root: Path, sources: dict[str, str]) -> tuple[list[str], list[str]]:
     """Write the conformed entries back inside the index's own transaction.
 
-    The caller runs :func:`_plan` first and only reaches this once nothing is refused.
+    Returns ``(outcomes, refused)``. The caller normally runs :func:`_plan` first and only
+    reaches this once nothing is refused, but ``_apply`` does not trust that: a refused entry
+    (no stated ``--source`` for one carrying an ``experiment:`` tag) is still written back
+    unchanged, same as before, but its name is returned in ``refused`` rather than left
+    indistinguishable from a conformed one, so a caller that reaches this directly cannot mistake
+    an unconformed entry for a finished one.
     """
     key = registry_index_key(root)
     outcomes: list[str] = []
+    refused: list[str] = []
     with ts.transaction(key) as txn:
         index = txn.read(key, default=[])
         new_index = []
@@ -132,9 +142,13 @@ def _apply(root: Path, sources: dict[str, str]) -> list[str]:
                 continue
             conformed, line = _conform_entry(entry, sources, plan=False)
             outcomes.append(line)
-            new_index.append(conformed if conformed is not None else entry)
+            if conformed is None:
+                refused.append(entry.get("name"))
+                new_index.append(entry)
+            else:
+                new_index.append(conformed)
         txn.write(key, new_index)
-    return outcomes
+    return outcomes, refused
 
 
 def main() -> int:
@@ -146,6 +160,11 @@ def main() -> int:
     args = ap.parse_args()
 
     bind_default()
+
+    if args.source and len(args.roots) > 1:
+        print("--source applies by entry name, and a name on one root says nothing about "
+              "another; pass one root at a time when stating --source.")
+        return 2
 
     sources: dict[str, str] = {}
     for item in args.source:
@@ -182,13 +201,18 @@ def main() -> int:
             continue
 
         try:
-            applied = _apply(root, sources)
+            applied, apply_refused = _apply(root, sources)
         except ts.StoreError as exc:
             print(f"{root}: refused, {exc}")
             refused_any = True
             continue
         for line in applied:
             print(f"{root}: {line}")
+        if apply_refused:
+            # _plan already found nothing refused above; a non-empty apply_refused here means
+            # the index changed between the two reads, so treat it exactly like a refusal found up front.
+            refused_any = True
+            print(f"{root}: refused entries left unconformed: {apply_refused}")
 
     return 2 if refused_any else 0
 

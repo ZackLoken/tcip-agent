@@ -113,6 +113,8 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         "mixed_precision": False,
         "optimizer": {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0},
         "early_stopping": {"enabled": False},
+        # No val_loader below: loss is the only metric coherent to select on without one.
+        "evaluation": {"selection_metric": "loss"},
     }
     run = create_run(cfg, str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="detection")

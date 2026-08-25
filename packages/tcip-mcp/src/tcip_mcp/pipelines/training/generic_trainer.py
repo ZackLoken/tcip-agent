@@ -36,7 +36,11 @@ from tcip_mcp.pipelines.model_build import (
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC, evaluate
+from tcip_mcp.pipelines.training.evaluation import (
+    HIGHER_IS_BETTER_BY_METRIC,
+    VAL_METRIC_PREFIX,
+    evaluate,
+)
 from tcip_mcp.pipelines.training.optimizer_factory import (
     build_optimizer,
     compute_lr_scale,
@@ -206,8 +210,9 @@ class TrainRun:
     status: str = "created"
     current_epoch: int = 0
     current_stage: int = 0
-    best_metric: float = float("inf")  # best selection value so far; train() resets this to the
-    # losing-side infinity for the run's resolved selection_metric before the first epoch
+    # Best selection value so far; train() resets this to the losing-side infinity for the run's
+    # resolved selection_metric before the first epoch.
+    best_metric: float = float("inf")
     metrics_history: list[dict] = field(default_factory=list)
     start_time: float = 0.0
     end_time: float = 0.0
@@ -391,10 +396,11 @@ def write_checkpoint(payload: dict, key: Key) -> Path:
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
-    """One epoch's metrics as a checkpoint's own ``metrics`` field carries them, normalized
-    exactly as the run's metrics log stores the same dict (:func:`stored_numbers`): a diverged
-    run's ``nan`` reads back as ``null`` plus a state companion on both, never as a value the log
-    accepted and the checkpoint refused."""
+    """One epoch's metrics normalized the one way every destination stores them
+    (:func:`stored_numbers`): a checkpoint's own ``metrics`` field (the three stamp sites in this
+    module) and the run's metrics log row (``envelope.TrainContext._epoch_sink``, which calls
+    this too) agree by construction, so a diverged run's ``nan`` reads back as ``null`` plus a
+    state companion on both, never as a value the log accepted and the checkpoint refused."""
     return stored_numbers(metrics)
 
 
@@ -513,10 +519,12 @@ def _validate(
         iou_type=iou_type, max_dets=max_dets, score_weights=score_weights,
         trait=trait,
     )
-    return {f"val_{k}": v for k, v in metrics.items()}
+    return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
 
-def resolve_selection_metric(task: str, trait: str | None, requested: str | None) -> str:
+def resolve_selection_metric(
+    task: str, trait: str | None, requested: str | None, *, has_val_loader: bool = True,
+) -> str:
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
     both ``model_best.pt`` and early stopping, deliberately the same key for both.
 
@@ -534,42 +542,74 @@ def resolve_selection_metric(task: str, trait: str | None, requested: str | None
     metric is rejected here; ``resolve_match_criterion`` is what fills the recording in the first
     time real GT is available, and every later preflight call sees it.
 
-    A ``requested`` metric with no declared ranking direction
-    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected too: ``model_best.pt`` and early
+    A resolved metric (default or explicit) with no declared ranking direction
+    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected: ``model_best.pt`` and early
     stopping both compare by whichever direction this metric improves, and a direction guessed
     from the key's spelling is exactly the defect this declaration exists to remove.
+
+    ``has_val_loader``: every metric but ``"loss"`` needs a validation pass to exist at all, so a
+    run with no validation loader can only select on ``"loss"`` (the training loss); anything
+    else, including the ``"objective"``/``"loss"`` default itself, is rejected rather than
+    silently degraded to the training loss at selection time. Defaults to ``True`` for a caller,
+    such as ``preflight_config``, that has not built a loader yet and so cannot state the fact
+    either way; ``train()`` passes the real ``val_loader is not None``.
     """
     default = "objective" if task in ("detection", "instance_seg") else "loss"
-    if not requested:
-        return default
-    if requested not in HIGHER_IS_BETTER_BY_METRIC:
+    resolved = requested or default
+    if resolved not in HIGHER_IS_BETTER_BY_METRIC:
         raise ValueError(
-            f"evaluation.selection_metric={requested!r} has no declared ranking direction "
+            f"evaluation.selection_metric={resolved!r} has no declared ranking direction "
             "(evaluation.HIGHER_IS_BETTER_BY_METRIC names no entry for it), so model_best.pt "
             f"and early stopping would have to guess which way it improves. Choose one of "
             f"{sorted(HIGHER_IS_BETTER_BY_METRIC)}."
+        )
+    if not has_val_loader and resolved != "loss":
+        raise ValueError(
+            f"evaluation.selection_metric={resolved!r} needs a validation loader to compute, "
+            "and this run has none. Only 'loss' (the training loss) can be selected on without "
+            "one; configure a validation split, or set evaluation.selection_metric='loss'."
         )
     if trait:
         from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
         from tcip_mcp.traits import CENTER_MATCH, get_trait
 
         spec = get_trait(trait)
-        if spec.localization == CENTER_MATCH and requested in CENTER_MATCH_COMPARABILITY_KEYS:
+        if spec.localization == CENTER_MATCH and resolved in CENTER_MATCH_COMPARABILITY_KEYS:
             raise ValueError(
-                f"evaluation.selection_metric={requested!r} is a comparability-only metric for "
+                f"evaluation.selection_metric={resolved!r} is a comparability-only metric for "
                 f"trait {trait!r} (localization=center_match), it does not govern this trait's "
                 "phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or 'loss', "
                 "which resolve through the trait's own center-match criterion."
             )
-    return requested
+    return resolved
 
 
 def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str) -> float:
-    """Best-model/early-stopping driver: ``val_metrics[f'val_{metric}']``, falling back to ``val_loss``."""
-    key = f"val_{metric}"
+    """Best-model/early-stopping driver: ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
+
+    Raises when the resolved selection metric is not among this epoch's validation metrics: a
+    task/trait mismatch (the metric the run asked for is not one this task's ``evaluate()``
+    produces), since silently substituting a different number here can win the selection
+    comparison under a name nobody chose. The one exception is ``metric == "loss"`` with no
+    validation pass at all (``val_metrics`` empty, ``resolve_selection_metric`` already refused
+    any other metric for such a run): the training loss ``avg_loss`` is what it means to select
+    on loss with nothing to validate against.
+
+    A present value of ``None`` (evaluation.stored_number already normalized a diverged metric
+    to ``null`` plus a state companion) comes back as ``nan``, not ``None``: every comparison
+    and rounding this value goes through already treats a non-finite candidate as never
+    improving, the same convention a raw diverged float would get, and ``None`` has neither.
+    """
+    key = f"{VAL_METRIC_PREFIX}{metric}"
     if key in val_metrics:
-        return val_metrics[key]
-    return val_metrics.get("val_loss", avg_loss)
+        value = val_metrics[key]
+        return value if value is not None else float("nan")
+    if metric == "loss" and not val_metrics:
+        return avg_loss
+    raise ValueError(
+        f"selection metric {metric!r} (key {key!r}) is not among this epoch's validation "
+        f"metrics for task {task!r}: {sorted(val_metrics)}."
+    )
 
 
 def _improves(candidate: float, incumbent: float, *, higher_is_better: bool) -> bool:
@@ -747,7 +787,8 @@ def train(
         prev_trainable = None     # trainable param count of the previous stage
         eval_cfg = config.get("evaluation", {})  # metric / selection params
         trait = eval_cfg.get("trait")
-        selection_metric = resolve_selection_metric(task, trait, eval_cfg.get("selection_metric"))
+        selection_metric = resolve_selection_metric(
+            task, trait, eval_cfg.get("selection_metric"), has_val_loader=val_loader is not None)
         # The losing-side sentinel for this run's own direction: any real value beats it.
         higher_is_better = HIGHER_IS_BETTER_BY_METRIC[selection_metric]
         losing_side = float("-inf") if higher_is_better else float("inf")
@@ -1035,8 +1076,8 @@ def train(
             if run.should_cancel():
                 break  # stop before starting the next stage
 
-        # Final checkpoint (saved even on cancellation so partial progress is recoverable). Its
-        # weights are the last completed epoch's, so metrics is that epoch's dict, or {} when none completed.
+        # Final checkpoint: saved even on cancellation, but a raised exception (caught below) skips
+        # this write, so a failed run leaves no model_final; metrics is the last completed epoch's dict, or {}.
         last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
         write_checkpoint(stamp_model_ref({
             STATE_DICT_KEY: model.state_dict(),

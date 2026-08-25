@@ -342,13 +342,23 @@ class ModelRegistry:
         the metric nor its direction from the key's spelling. By default only an entry whose
         ``metrics_source`` is ``"trainer"``, the one path the platform itself measured, is
         ranked; ``include_unverified=True`` also ranks ``"training_source"`` and ``"caller"``
-        entries, whose numbers nothing here verified. An entry with no ``metrics_source`` key at
-        all (a malformed record predating the field) is treated as unverified.
+        entries, whose numbers nothing here verified. An entry carrying no ``metrics_source`` key
+        at all is a malformed record predating the field, refused by name rather than silently
+        treated as just another unverified entry: conform the registry first with
+        ``scripts/conform_registry_metrics_source.py``. A present ``metrics_source`` of ``None``
+        is not malformed, it is the honest pairing for an entry with no metrics.
         """
+        malformed = [m.get("name") for m in self._index if "metrics_source" not in m]
+        if malformed:
+            raise ValueError(
+                f"registry entries {malformed} carry no metrics_source key (they predate the "
+                "field); conform this registry with scripts/conform_registry_metrics_source.py "
+                "before ranking it."
+            )
         best = None
         best_val: float | None = None
         for m in self._index:
-            source = m.get("metrics_source")
+            source = m["metrics_source"]
             if source != "trainer" and not include_unverified:
                 continue
             val = m.get("metrics", {}).get(metric_key)
