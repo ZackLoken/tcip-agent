@@ -13,6 +13,9 @@ import { api, type ProjectSummary } from "@/api/client";
 import { adoptProjectByName, openWorkspaceProject } from "@/lib/openProject";
 import { loadRecentProjects } from "@/lib/recentProjects";
 import { useStore } from "@/store";
+import type { TabName } from "@/store/types";
+
+const DATASET_TABS: ReadonlySet<TabName> = new Set(["annotate", "review", "results"]);
 
 const subjectsForDate = (p: ProjectSummary, d: string): string[] => p.subjects_by_date[d] ?? [];
 const modelsForDate = (p: ProjectSummary, d: string): string[] => p.models_by_date[d] ?? [];
@@ -69,7 +72,7 @@ export function ProjectBreadcrumb() {
     setMenu(null);
     clearDataset();
     // Land on a dataset-dependent tab so the project front door is shown.
-    if (!["annotate", "review", "results"].includes(activeTab)) setActiveTab("annotate");
+    if (!DATASET_TABS.has(activeTab)) setActiveTab("annotate");
   }
 
   async function openRecent(name: string) {

@@ -23,7 +23,7 @@ import {
   detPredAnnotation,
   type ReviewGeom,
 } from "@/lib/reviewGeometry";
-import type { Box, MatchesResponse, PointShape, PolygonShape } from "@/store/types";
+import type { Box, MatchesResponse, PointShape, PolygonShape, TabName } from "@/store/types";
 
 export interface CanvasViewport {
   x: number;
@@ -53,7 +53,7 @@ export interface CanvasShape {
 export interface CanvasStateBody {
   schema_version: 1;
   project_root: string;
-  tab: "annotate" | "review";
+  tab: Extract<TabName, "annotate" | "review">;
   image_path: string;
   image: string;
   img_width: number;

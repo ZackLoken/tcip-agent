@@ -8,7 +8,6 @@ subscribed WebSocket clients.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -16,9 +15,6 @@ from fastapi.testclient import TestClient
 
 from tcip_mcp.web_client import VALID_PANELS
 from tcip_web.app import app
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 
 
 @pytest.fixture

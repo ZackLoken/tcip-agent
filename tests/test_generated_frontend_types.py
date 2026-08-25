@@ -1,9 +1,10 @@
 """The browser's coverage-record types are a projection of the pydantic models that declare them.
 
 ``scripts/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
-``routes/_coverage_models.py`` and ``routes/coverage.py``; these tests hold that projection to
-what the models produce now, and keep another frontend module from declaring an interface with
-the same field set as a generated one.
+``routes/_coverage_models.py``, ``routes/coverage.py`` and ``tcip_web.state.GuiVocabulary``;
+these tests hold that projection to what the models produce now, and keep another frontend
+module from declaring an interface with the same field set as a generated one, or a bare union
+alias with the same members as one of a generated interface's own literal-union fields.
 """
 
 from __future__ import annotations
@@ -23,6 +24,11 @@ GENERATOR = REPO_ROOT / "scripts" / "generate_frontend_types.py"
 
 _TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
 _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
+_FIELD_UNION_RE = re.compile(r'\w+\??:\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")(?:\s*\|\s*null)?[;,]')
+_TYPE_ALIAS_UNION_RE = re.compile(
+    r'^\s*export\s+type\s+(\w+)\s*=\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")\s*;', re.M
+)
+_QUOTED_RE = re.compile(r'"([^"]+)"')
 
 
 def _generator():
@@ -101,5 +107,34 @@ def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_s
                 offenders.append(source.relative_to(REPO_ROOT).as_posix())
     assert not offenders, (
         "these declare an interface with the same field set as a generated coverage type:\n"
+        + "\n".join(offenders)
+    )
+
+
+def _generated_field_unions() -> list[set[str]]:
+    text = GENERATED.read_text(encoding="utf-8")
+    return [set(_QUOTED_RE.findall(m.group(1))) for m in _FIELD_UNION_RE.finditer(text)]
+
+
+def test_no_frontend_module_hand_declares_a_generated_fields_literal_union() -> None:
+    """A bare ``export type X = "a" | "b" | ...;`` alias parses as neither an interface nor an
+    object type, so the field-set check above never sees it: this catches one whose members
+    exactly match a generated interface field's literal union, the shape a field-set comparison
+    misses entirely."""
+    generated_sets = [s for s in _generated_field_unions() if len(s) > 1]
+    assert generated_sets, "no literal unions parsed out of the generated module's fields"
+
+    sources = [
+        p for p in sorted(list(FRONTEND_SRC.rglob("*.ts")) + list(FRONTEND_SRC.rglob("*.tsx")))
+        if ".test." not in p.name and "test" not in p.parent.name and p != GENERATED
+    ]
+    offenders = []
+    for source in sources:
+        text = source.read_text(encoding="utf-8")
+        for m in _TYPE_ALIAS_UNION_RE.finditer(text):
+            if set(_QUOTED_RE.findall(m.group(2))) in generated_sets:
+                offenders.append(f"{source.relative_to(REPO_ROOT).as_posix()}: {m.group(1)}")
+    assert not offenders, (
+        "these declare a union alias matching a generated field's literal union by hand:\n"
         + "\n".join(offenders)
     )

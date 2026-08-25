@@ -10,6 +10,7 @@ so the persisted file is a record, not a resumable state.)
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from tcip_store import (
     RECORD_JSON,
@@ -53,7 +54,11 @@ def job_registry_key(name: str) -> Key:
 
 
 MAX_JOBS = 100
-TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
+
+JobStatus = Literal["pending", "running", "completed", "failed", "cancelled", "interrupted"]
+"""Every status ``routes.inference.InferenceJob.status`` can hold."""
+
+TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "cancelled", "interrupted"})
 
 
 def persist(name: str, summaries: list[dict]) -> None:

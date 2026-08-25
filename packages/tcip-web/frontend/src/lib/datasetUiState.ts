@@ -11,6 +11,7 @@
  */
 
 import type { ImageStatus } from "@/api/classes";
+import { TAB_NAMES } from "@/api/types.generated";
 import type { DatasetSelection, ReviewFilters, TabName } from "@/store/types";
 
 export interface DatasetUiState {
@@ -51,16 +52,6 @@ export function loadDatasetUi(key: string): DatasetUiState | null {
 // Last-used tab per project: localStorage, cross-session on purpose (unlike the blobs above);
 // no record means a first-ever open, which lands on Annotate.
 const TAB_PREFIX = "tcip.lasttab.";
-
-const TAB_NAMES: readonly TabName[] = [
-  "annotate",
-  "review",
-  "training",
-  "tuning",
-  "inference",
-  "results",
-  "meta",
-];
 
 export function recordLastTab(projectRoot: string, tab: TabName): void {
   try {

@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional, get_args
 
 import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
@@ -147,13 +147,14 @@ def canvas_geometry_key(project_root: str) -> Key:
     return Key(CANVAS_GEOMETRY_STORE, project_root, _GEOMETRY_PARTS)
 
 
-# Every panel a pushed event may target: one per GUI tab, plus "app", the app-level channel for
-# steering the GUI itself (open a project, focus a tab). The MCP tool that pushes and the web
-# backend that receives both validate against this one set, so neither can drift into accepting
-# a panel the other rejects.
-VALID_PANELS = frozenset(
-    {"app", "annotate", "review", "training", "tuning", "inference", "results", "meta"}
-)
+ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]
+"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
+validates against."""
+
+TAB_NAMES = get_args(ActiveTab)
+
+# One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
+VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
 
 
 def resolve_web_host() -> str:

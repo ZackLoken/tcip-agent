@@ -10,22 +10,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Literal, Optional, get_args
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tcip_store import StoreError, read, replace
 
-from tcip_mcp.web_client import gui_snapshot_key
+from tcip_mcp.web_client import ActiveTab, gui_snapshot_key
+from tcip_mcp.web_client import TAB_NAMES as TAB_NAMES
 
 logger = logging.getLogger(__name__)
 
 PERSIST_DEBOUNCE_SECONDS = 0.5
-
-ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]
-"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab``
-validates against. The frontend's ``TabName`` union (store/types.ts) mirrors this."""
-
-TAB_NAMES = get_args(ActiveTab)
 
 AnnotateMode = Literal["box", "polygon", "point"]
 """The Annotate canvas's drawing modes: the vocabulary ``GuiState.mode`` holds."""
