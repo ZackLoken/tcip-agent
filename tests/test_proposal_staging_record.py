@@ -207,6 +207,38 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     assert len(anns) == 1
 
 
+def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proposing directly on a band-group member's own path (rather than its manifest) is a
+    path ``accept_proposals`` could never resolve back to the same source, so it must not be
+    staged: staging it anyway would leave a record accept can never confirm."""
+    import tifffile
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+    from tcip_mcp.tools.vision_tools import _staging_key_for, propose_annotations
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    bands = {}
+    for name in ("Red", "Green", "Blue"):
+        band_path = images_dir / f"capture_{name}.tif"
+        tifffile.imwrite(str(band_path), np.full((48, 48), 30, dtype=np.uint8))
+        bands[name] = band_path
+    manifest = write_band_group_manifest(images_dir, "capture", bands)
+
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    member_path = bands["Red"]
+    proposed = propose_annotations(image_path=str(member_path), engine="sam")
+    assert "error" not in proposed, proposed
+    assert proposed["staged"] is False
+    assert manifest.name in proposed["summary"]
+    assert Path(proposed["image_path"]).is_file()
+
+    address = _staging_key_for(str(member_path))
+    assert ts.read(address.key, default=None) is None
+
+
 def test_a_second_accept_of_the_same_staged_run_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -255,3 +287,56 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
     anns = json_io.read_annotations(tmp_path / "predictions" / "sam" / "rerun.json")
     xs = [p[0] for ring in anns[0].geometry.rings for p in ring]
     assert min(xs) == pytest.approx(40.0)
+
+
+def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run that proposes zero candidates must not leave a prior run's record readable: a later
+    accept would otherwise stage that stale run's candidates as if this run had proposed them."""
+    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+
+    img_path = tmp_path / "images" / "goes_empty.jpg"
+    _make_image(img_path)
+
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    first = propose_annotations(image_path=str(img_path), engine="sam")
+    assert "error" not in first, first
+    assert first["staged"] is True
+
+    _install_stub(monkeypatch, [])
+    second = propose_annotations(image_path=str(img_path), engine="sam")
+    assert "error" not in second, second
+    assert second["staged"] is False
+
+    accepted = accept_proposals(
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+    assert "error" in accepted
+    assert "propose_annotations" in accepted["error"]
+
+
+def test_accept_reports_an_unsampleable_image_as_an_error_dict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A source that opens but cannot be sampled (``raster_content_identity``'s own refusal) must
+    reach the caller the same way a mismatched or missing record does: a returned ``error``, not
+    an uncaught exception out of the tool."""
+    from tcip_mcp.pipelines import raster_source
+    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+
+    img_path = tmp_path / "images" / "unsampleable.jpg"
+    _make_image(img_path)
+
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    proposed = propose_annotations(image_path=str(img_path), engine="sam")
+    assert "error" not in proposed, proposed
+
+    def _raises(*args: object, **kwargs: object) -> None:
+        raise ValueError(f"cannot open raster {img_path!r} for a content identity: boom")
+
+    monkeypatch.setattr(raster_source, "raster_content_identity", _raises)
+
+    accepted = accept_proposals(
+        image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+    assert "error" in accepted
+    assert str(img_path) in accepted["error"]

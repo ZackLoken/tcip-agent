@@ -403,7 +403,7 @@ class TestWholeFrameDefaultIsUnaffected:
         result = vision_tools.propose_annotations(image_path=str(img_path))
         assert "error" not in result, result
 
-        envelope = ts.read(vision_tools._staging_key_for(str(img_path)))
+        envelope = ts.read(vision_tools._staging_key_for(str(img_path)).key)
         assert set(envelope) == {"engine", "candidates", "image_identity", "image_path"}
 
     def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
@@ -416,9 +416,8 @@ class TestWholeFrameDefaultIsUnaffected:
         candidate that reached it as a string would become a label nobody could trace back.
         """
         import numpy as np
-
+        import tcip_store as ts
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.project_paths import resolve_state
         from tcip_mcp.tools import vision_tools
 
         class ArrayBoxProposer:
@@ -430,15 +429,15 @@ class TestWholeFrameDefaultIsUnaffected:
 
         monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: ArrayBoxProposer())
 
-        img_path = tmp_path / "unstorable.jpg"
+        images_dir = tmp_path / "images"
+        images_dir.mkdir()
+        img_path = images_dir / "unstorable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
         result = vision_tools.propose_annotations(image_path=str(img_path))
 
         assert "candidates[0].bbox" in result["error"]
-        assert not resolve_state(
-            Path(".tcip") / "state" / "proposals" / vision_tools._UNDATED_DATE
-            / "unstorable.json").exists()
+        assert ts.read(vision_tools._staging_key_for(str(img_path)).key, default=None) is None
 
     def test_an_ordinary_candidate_is_still_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -466,5 +465,5 @@ class TestWholeFrameDefaultIsUnaffected:
         result = vision_tools.propose_annotations(image_path=str(img_path))
 
         assert "error" not in result, result
-        envelope = ts.read(vision_tools._staging_key_for(str(img_path)))
+        envelope = ts.read(vision_tools._staging_key_for(str(img_path)).key)
         assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]

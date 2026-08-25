@@ -124,7 +124,7 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     result = _propose_over_the_region(patched_frame)
     reported = result["candidates"][0]["bbox"]
 
-    envelope = ts.read(_staging_key_for(str(patched_frame)))
+    envelope = ts.read(_staging_key_for(str(patched_frame)).key)
     rings = envelope["candidates"][0]["rings"]
     pts = [p for ring in rings for p in ring]
     assert pts
