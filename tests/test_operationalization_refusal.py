@@ -663,6 +663,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
     )
 
     from tests._trait_fixtures import CATKIN
@@ -675,7 +676,8 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     classifier_recon = reconcile_classifier_validity(pred_dirs)
     classifier_state, _note = bind_classifier_validity(
         classifier_recon["validated"], pred_dirs, pred_dirs, trait="catkin")
-    flags = {"classifier": classifier_state, "operating_point": recon["validated"]}
+    tile_recon = reconcile_tile_size_validity(pred_dirs)
+    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
 
     phenology.write_phenology_csv(

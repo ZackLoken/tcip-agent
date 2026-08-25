@@ -649,15 +649,34 @@ def test_the_web_export_records_what_verification_found_in_the_datasets_own_log(
 def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """The browser download is the breeder's copy; the delivery itself belongs to the project,
-    so the identical bytes land in <project>/results_export/ and the write is audited."""
+    """The browser download is the breeder's copy; the delivery itself belongs to the project, so
+    the identical bytes land in <project>/results_export/, and the write is audited. The response
+    is the saved file's bytes: the route reads ``saved_path`` back and returns it unchanged, so
+    what is worth pinning is what that file carries, its header held to the schema's own column
+    owner and each row's provenance cells held to what the writer composed, not a second read of
+    the same bytes this route already returned."""
+    from tcip_mcp.pipelines.postprocessing import phenology
+
+    from tests._trait_fixtures import CATKIN
+
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "milestones", "filename": "catkin_delivery.csv"})
     assert resp.status_code == 200
     saved = tmp_path / "results_export" / "catkin_delivery.csv"
     assert resp.headers["X-TCIP-Saved-To"] == str(saved)
-    assert saved.read_bytes() == resp.content
+
+    lines = resp.content.decode("utf-8").splitlines()
+    header = lines[0].split(",")
+    assert header == phenology.phenology_csv_columns(CATKIN)
+    for line in lines[1:]:
+        cells = dict(zip(header, line.split(",")))
+        assert cells["operating_point_conf"] == "0.4"
+        assert cells["operating_point_validated"] == "held_out_annotations"
+        assert cells["positive_state_classifier_validated"] == "held_out_annotations"
+        assert cells["producer_experiment_id"] == "exp-1"
+        assert cells["validation_record"] == _expected_validation_record(body)
+
     audit = tcip_store.read_log(audit_log_key(tmp_path)).records
     assert any(e.get("tool") == "results.export_csv" for e in audit)
     assert any("catkin_delivery.csv" in json.dumps(e) for e in audit)

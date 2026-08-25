@@ -908,9 +908,7 @@ def compute_phenology(
 
     # A delivered phenotype needs both the classifier and the count operating point validated against a
     # reference sized to the trait, the one shared refuse-or-stamp gate, or an explicit acknowledge.
-    flags = {"classifier": classifier_state, "operating_point": op_state}
-    if tile_recon["operative"]:
-        flags["tile_size"] = tile_recon["validated"]
+    flags = phenology.phenology_delivery_flags(classifier_state, op_state, tile_recon)
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         floor_note = ""

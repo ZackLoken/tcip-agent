@@ -82,10 +82,12 @@ def majority_provisional_column(spec) -> str | None:
     """The column that marks a trait's majority alias as a provisional reading, or ``None`` when the
     spec names no majority crossing for it to qualify.
 
-    The single owner of that column's name. ``phenology_csv_columns`` declares it and every delivery
-    door stamps it through this same function, so declaration and production cannot disagree: a
-    stamped key the schema does not declare makes ``write_phenology_csv`` raise on an unknown key,
-    and a declared column nothing stamps ships permanently blank.
+    The single owner of that column's name. ``phenology_csv_columns`` declares it, and
+    ``_write_phenology_delivery`` (the one writer both ``write_phenology_csv`` and
+    ``write_phenology_curve_csv`` share, and this column's one caller) composes it through this same
+    function, so declaration and production cannot disagree.
+    ``tests/test_phenology.py``'s ``test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns``
+    holds the writer's composed cells to exactly the schema's provenance columns plus this marker.
     """
     if not spec.majority_milestone:
         return None
@@ -147,9 +149,11 @@ PROVENANCE_COLUMNS = [
 def delivered_provenance_cells(asserted, bindings) -> dict:
     """The producer tail's cells for a phenology delivery, from the bindings the reconciler verified.
 
-    Both phenology delivery doors call this instead of writing a stamp's self-declared names, so a
-    bucket whose validation claim no record answers for cannot put producer names into a delivered
-    phenology CSV, and a delivery every bucket of which is bound names the records that bound it.
+    ``_write_phenology_delivery``, the one writer both phenology delivery doors
+    (``compute_phenology``, the web ``export_csv``) share, calls this instead of writing a stamp's
+    self-declared names, so a bucket whose validation claim no record answers for cannot put
+    producer names into a delivered phenology CSV, and a delivery every bucket of which is bound
+    names the records that bound it.
 
     The values come from ``resolution.delivered_provenance``, the one builder behind every delivered
     producer column. Only the spelling differs: this schema calls the producing run
@@ -518,6 +522,28 @@ def per_plant_phenology(
             "n_images_unmapped": n_images_unmapped}
 
 
+def phenology_delivery_flags(
+    classifier_state: str | None, operating_point_state: str | None, tile_recon: dict,
+) -> dict[str, str | None]:
+    """The ``check_delivery_gate`` flags dict a phenology delivery gates on.
+
+    Both delivery doors (``compute_phenology``, the web ``export_csv``) reconcile the classifier and
+    the count operating point themselves, from evidence that differs per door (a caller-supplied
+    bucket list for the classifier there, the delivery's own buckets here), and hand the reconciled
+    states here rather than assembling the flags dict a second time each. ``tile_size`` enters only
+    when ``tile_recon["operative"]`` is true (``reconcile_tile_size_validity``'s own read of whether
+    these buckets ran tiled at all): an untiled delivery's flags carry no ``tile_size`` key, never a
+    floored one, since ``check_delivery_gate`` reads a dimension's absence differently from an
+    unvalidated value present under it.
+    """
+    flags: dict[str, str | None] = {
+        "classifier": classifier_state, "operating_point": operating_point_state,
+    }
+    if tile_recon["operative"]:
+        flags["tile_size"] = tile_recon["validated"]
+    return flags
+
+
 def _write_phenology_delivery(
     door: str,
     rows: list[dict],
@@ -572,6 +598,12 @@ def _write_phenology_delivery(
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
         raise ValueError(gate.reason)
+    if "classifier" not in gate.stamp:
+        raise ValueError(
+            "a phenology delivery's flags carry no 'classifier' dimension: this writer stamps the "
+            "delivered classifier-validity column from it, so flags composed some other way than "
+            "phenology_delivery_flags must still include it."
+        )
 
     cells: dict = {
         "operating_point_conf": operating_point_conf,
