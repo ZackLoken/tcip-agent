@@ -476,14 +476,15 @@ def test_describe_review_validation_leaked_message():
     assert "also used to train" in out["reason"]
 
 
-def test_describe_review_validation_content_duplicated_message():
+def test_describe_review_validation_content_shared_with_calibration_message():
     from tcip_mcp.pipelines.feedback import describe_review_validation
 
     b = _review_bundle({"conf_censored": False, "disjoint": True, "passed_holdout": False,
-                        "content_duplicated": True, "failures": ["content_duplicated"]})
+                        "content_shared_with_calibration": True,
+                        "failures": ["content_shared_with_calibration"]})
     out = describe_review_validation(b, reviewed_image_count=4)
     assert out["validated"] is False
-    assert "duplicate" in out["reason"]
+    assert "share content" in out["reason"]
 
 
 def test_sweep_summary_surfaces_disjointness_fields():
@@ -492,7 +493,8 @@ def test_sweep_summary_surfaces_disjointness_fields():
 
     conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
                    validated_against=VALIDATED_FALSE,
-                   sweep={"disjoint": True, "content_overlap_frac": 0.0, "content_duplicated": False,
+                   sweep={"disjoint": True, "content_overlap_frac": 0.0,
+                          "content_shared_with_calibration": False,
                           "train_disjointness": {"unresolvable": False, "leaked_groups": ["g1"]},
                           "passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
                           "pooled_count_bias_tolerance": 4.0})

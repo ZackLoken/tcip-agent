@@ -65,8 +65,8 @@ all follow from the kind. A sixth member is added deliberately, with its own thr
 
 _CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
     STATE_CROSSING_DATES: ("positive_class_name", "milestone_on", "milestone_fractions"),
-    PER_IMAGE_COUNT: ("count_objective", "localization"),
-    PER_PLANT_COUNT_AGGREGATE: ("count_objective",),
+    PER_IMAGE_COUNT: ("count_objective", "localization", "holdout_match_quality_floor"),
+    PER_PLANT_COUNT_AGGREGATE: ("count_objective", "holdout_match_quality_floor"),
     PER_PLANT_ORDINAL_AGGREGATE: ("ordinal_agreement_floor",),
     PER_PLANT_REGRESSION_AGGREGATE: ("regression_skill_floor",),
 }

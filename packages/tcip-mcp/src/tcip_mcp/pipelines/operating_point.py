@@ -188,24 +188,51 @@ def _bias_equivalence_ok(mean: float, std: float, n: int, *, tolerance_frac: flo
     return abs(mean) + _EQUIVALENCE_Z * se <= tolerance
 
 
+OPERATING_POINT_ATTRS = ("score_thresh", "nms_thresh", "detections_per_img")
+"""The three knobs the detection operating point governs, wherever a module holds them."""
+
+
+def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
+    """Where a model's operating-point knobs live, and the attribute path to name it by.
+
+    Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
+    itself, its ``.detector``'s ``roi_heads`` (two-stage detectors), its ``.detector`` (one-stage).
+    A composed torchvision detector under ``.detector`` resolves the way it always has; a bespoke
+    module exposing a knob on itself, with no ``.detector`` to route through, now reaches it too,
+    independently of what a given call actually sets. Returns ``(None, None)`` when no candidate
+    exposes any of the three: nothing here can govern which boxes exist.
+    """
+    det = getattr(model, "detector", None)
+    for holder, path in (
+        (model, "self"),
+        (getattr(det, "roi_heads", None), "detector.roi_heads"),
+        (det, "detector"),
+    ):
+        if holder is not None and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS):
+            return holder, path
+    return None, None
+
+
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
                                  nms_thresh: float | None = None,
                                  detections_per_img: int | None = None) -> dict:
     """Set the *in-model* torchvision thresholds so the operating point governs which boxes exist.
 
-    Two-stage detectors keep them on ``roi_heads``; one-stage (FCOS/RetinaNet) on the detector itself.
-    The composed model wraps the torchvision net as ``.detector``. Returns what was applied.
-    (Without this, a post-hoc score filter can never recover a box the model's internal
-    ``score_thresh``/``detections_per_img`` had already discarded.)
+    Resolves where the knobs live through :func:`detector_operating_point_holder`, so the module
+    itself, its ``.detector.roi_heads`` (two-stage detectors) or its ``.detector`` (one-stage) can
+    each hold them. Returns what was applied plus ``"attribute_path"``, the holder's own path (or
+    ``None`` when nothing exposed any knob). (Without this, a post-hoc score filter can never
+    recover a box the model's internal ``score_thresh``/``detections_per_img`` had already
+    discarded.)
     """
-    det = getattr(model, "detector", model)
-    target = getattr(det, "roi_heads", None) or det
-    applied: dict = {}
-    for attr, val in (("score_thresh", score_thresh), ("nms_thresh", nms_thresh),
-                      ("detections_per_img", detections_per_img)):
-        if val is not None and hasattr(target, attr):
-            setattr(target, attr, val)
-            applied[attr] = val
+    target, path = detector_operating_point_holder(model)
+    applied: dict = {"attribute_path": path}
+    if target is not None:
+        for attr, val in (("score_thresh", score_thresh), ("nms_thresh", nms_thresh),
+                          ("detections_per_img", detections_per_img)):
+            if val is not None and hasattr(target, attr):
+                setattr(target, attr, val)
+                applied[attr] = val
     return applied
 
 
@@ -270,18 +297,17 @@ def _cap_saturated_frac(records: list[dict] | None) -> float | None:
 
 
 def _conf_censored(chosen_conf: float, staged_conf_floor: float | None) -> bool:
-    """True when the picked conf sits at or below the floor the reference was staged/filtered at.
+    """True when a *stated* floor sits at or above the picked conf, so the sweep could not see
+    whether an even-lower conf would have done better.
 
     The count-unbiased sweep is only trustworthy when the reference includes the low-conf tail below
     the picked conf. A conf picked strictly above the staging floor is fully supported by the
     reference, every surviving detection with ``score >= conf`` genuinely survived the floor's own
-    filter, so the sweep saw everything it needed to. A conf at or below the floor means the sweep
-    could not see whether an even-lower conf would have done better, so the pick is untrustworthy.
-    ``staged_conf_floor is None`` (the caller made no assertion of what floor the reference was
-    generated at) is always censored, there is nothing here to reconcile the pick against, so
-    validation fails closed rather than trusting an unstated assumption.
+    filter, so the sweep saw everything it needed to. ``staged_conf_floor is None`` (the caller made
+    no assertion of what floor the reference was generated at) is a distinct failure, not this one:
+    see ``conf_floor_unstated``, gated separately so the two causes never share one name.
     """
-    return staged_conf_floor is None or chosen_conf <= staged_conf_floor
+    return staged_conf_floor is not None and chosen_conf <= staged_conf_floor
 
 
 def _floor_mismatch(records: list[dict] | None, staged_conf_floor: float | None) -> bool:
@@ -338,34 +364,23 @@ def _record_content_hash(rec: dict) -> str | None:
 
 
 def _content_overlap(cal_records: list[dict], hold_records: list[dict]) -> dict:
-    """Whether the holdout's GT content is (fully) cloned from calibration's.
+    """Whether the holdout shares any image's GT content with calibration.
 
-    ``duplicated`` fires only on full containment, holdout's non-empty content-hash set is a
-    subset of calibration's, not on any overlap, so a holdout that merely shares one image with
-    calibration (partially overlapping content) is not penalized; only a holdout whose entire
-    content already exists in calibration (a byte-identical or re-labeled-copy holdout, unable to
-    function as an independent check) is refused.
-
-    Known residual, a design tradeoff to revisit rather than an oversight: the classifier path calls
-    this at instance granularity (one record per matched detection, via
-    ``resolve_classifier_operating_point``'s ``_as_record``), where full-containment was designed for
-    image-granularity records. This cuts both ways, not just one: (a) one extra, genuinely-independent
-    instance in an otherwise wholesale-cloned holdout defeats the subset check, real duplication
-    escapes, the rail too permissive; and (b) two genuinely independent images that happen to share
-    dimensions and produce a detection at the same pixel coordinates (plausible for a fixed-camera rig
-    or center-cropped tiles) hash identically even though nothing was cloned, a valid, independent
-    holdout can be flagged duplicated, the rail too strict (a rail must admit valid work, not only
-    reject invalid work, not just the more obvious permissive failure). ``content_overlap_frac`` is
-    computed but never itself gated (only the boolean ``duplicated`` is). A tighter classifier-path
-    criterion (e.g. gating on the fraction directly, or grouping instances back to per-image records)
-    is real follow-up work.
+    ``shared`` fires on any overlap at all, not only full containment: a holdout that shares even
+    one image's content with calibration is not independent for that image, so a holdout sharing
+    images with the calibration set is refused rather than merely flagged. Both callers compare at
+    image granularity, one record per image: the detection path's records already are one per
+    image, and the classifier path (``resolve_classifier_operating_point``) groups its per-instance
+    items back to one record per ``image_id`` before calling this, so two images sharing an
+    instance's coordinates never hash equal unless their whole classified content agrees.
+    ``content_overlap_frac`` travels for provenance; ``shared`` is the boolean the gate reads.
     """
     cal_hashes = {h for h in (_record_content_hash(r) for r in cal_records) if h is not None}
     hold_hashes = {h for h in (_record_content_hash(r) for r in hold_records) if h is not None}
     if not hold_hashes:
-        return {"content_overlap_frac": 0.0, "duplicated": False}
+        return {"content_overlap_frac": 0.0, "shared": False}
     frac = len(hold_hashes & cal_hashes) / len(hold_hashes)
-    return {"content_overlap_frac": frac, "duplicated": hold_hashes.issubset(cal_hashes)}
+    return {"content_overlap_frac": frac, "shared": frac > 0}
 
 
 _UNRESOLVABLE_TRAIN_DISJOINTNESS = {
@@ -577,6 +592,7 @@ def resolve_operating_point(
     holdout_records: list[dict] | None = None,
     tile_size: int | None = None,
     tile_size_source: str = "default",
+    tile_size_derived_from: str | None = None,
     tiled: bool | None = None,
     tiled_source: str = "default",
     cross_tile_nms: float | None = None,
@@ -585,6 +601,7 @@ def resolve_operating_point(
     validated_reference: str = VALIDATED_HELD_OUT,
     experiment_id: str | None = None,
     staged_conf_floor: float | None = None,
+    staged_conf_floor_attribute_path: str | None = None,
     adjudication_covered: Callable[[dict], bool] | None = None,
     cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
     hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
@@ -625,9 +642,21 @@ def resolve_operating_point(
 
     ``staged_conf_floor`` is the floor the reference's predictions were actually generated / filtered
     at, a caller-supplied fact, not inferred from the reference's own scores. ``None`` (the caller
-    asserted nothing) fails closed: see ``_conf_censored``. The GT/calibration callers thread the
-    value ``set_detector_operating_point`` actually applied; the review path has no floor threaded
-    here yet (see ``feedback.review_calibration.resolve_operating_point_from_review`` for that seam).
+    asserted nothing) gates as ``conf_floor_unstated``, a distinct name from ``conf_censored`` (a
+    stated floor the picked conf does not clear): see ``_conf_censored``. The GT/calibration callers
+    thread the value ``set_detector_operating_point`` actually applied; the review path threads
+    ``max(generation_conf, review_conf_threshold)`` through the same seam
+    (``feedback.review_calibration.resolve_operating_point_from_review``, computed at
+    ``routes/review.py``, which has no floor to apply through a model and so has no attribute path
+    either). ``staged_conf_floor_attribute_path`` is the module attribute the floor was applied on
+    (``set_detector_operating_point``'s own ``"attribute_path"``), or ``None`` when the floor has no
+    such producer; true for every producer of an unstated floor, never only the bespoke-module case.
+
+    ``tile_size_derived_from`` is forwarded to :func:`~tcip_mcp.pipelines.resolution.
+    resolve_tile_size_param` unchanged; it matters only for ``tile_size_source == "explicit"``. The
+    GT/calibration callers compose it through
+    :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`; the review path
+    forwards the stored stamp's own text (it holds no predictor to compose one from).
 
     ``adjudication_covered``: an optional per-record predicate, when given, it is a gate, not a
     filter: every calibration and holdout record must satisfy it, or the whole reference is refused
@@ -830,12 +859,13 @@ def resolve_operating_point(
             # evidenced in the holdout too, the same positive-evidence rule (never an inference from
             # absence) the per-side `insufficient_*_gt` conjuncts already apply to the pooled count.
             holdout_missing_classes = sorted(classes_with_evidence(cb) - classes_with_evidence(hb))
-            # A real (still-categorical, not tuned) match-quality floor, mathematically equivalent
-            # to tp > 0 (precision/recall are both 0 exactly when tp is 0), so it catches the
-            # fully-degenerate case while count bias vanishes; it does not discriminate a trivial
-            # 1-of-many match from a near-complete one (a continuous quality criterion is future
-            # work).
-            localization_floor_ok = hb["recall"] > 0 and hb["precision"] > 0
+            # A trait-authored floor (no platform default): held-out precision and recall of the
+            # governing criterion at the shipped conf must both clear it; unauthored gates below.
+            holdout_match_quality_floor = trait.holdout_match_quality_floor
+            localization_floor_ok = (
+                holdout_match_quality_floor is not None
+                and hb["precision"] >= holdout_match_quality_floor
+                and hb["recall"] >= holdout_match_quality_floor)
             # A p90 tail dispersion floor, gated only once a real value is authored for this trait
             # (no invented default, see TraitSpec.count_error_tolerance).
             dispersion_ok = (
@@ -869,10 +899,12 @@ def resolve_operating_point(
                 failures.append("insufficient_adjudication_coverage")
             if not disjoint:
                 failures.append("not_disjoint")
-            if censored:
+            if staged_conf_floor is None:
+                failures.append("conf_floor_unstated")
+            elif censored:
                 failures.append("conf_censored")
-            if content["duplicated"]:
-                failures.append("content_duplicated")
+            if content["shared"]:
+                failures.append("content_shared_with_calibration")
             if td["unresolvable"]:
                 failures.append("train_disjointness_unresolvable")
             if td["leaked_groups"] or td["leaked_stems"]:
@@ -896,7 +928,9 @@ def resolve_operating_point(
                 failures.append("insufficient_holdout_images_per_class")
             if holdout_missing_classes:
                 failures.append("holdout_missing_class")
-            if not localization_floor_ok:
+            if holdout_match_quality_floor is None:
+                failures.append("holdout_match_quality_floor_unauthored")
+            elif not localization_floor_ok:
                 failures.append("localization_quality_floor_failed")
             if not dispersion_ok:
                 failures.append("count_error_dispersion_too_high")
@@ -908,6 +942,7 @@ def resolve_operating_point(
                           "count_bias_tolerance_frac_source": (
                               "trait" if trait.count_bias_tolerance_frac is not None
                               else "platform_provisional_default"),
+                          "holdout_match_quality_floor": holdout_match_quality_floor,
                           # Reconstructibility: the fraction alone does not say what a pass/refusal
                           # actually compared against, the derived typical count and the resulting
                           # absolute tolerance, per scope, so a reviewer can rebuild the gate's own
@@ -930,10 +965,11 @@ def resolve_operating_point(
                           "equivalence_z": _EQUIVALENCE_Z,
                           "disjoint": disjoint, "conf_censored": censored,
                           "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
+                          "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
                           "adjudication_covered": adjudication_ok,
                           "passed_holdout": passed, "failures": failures,
                           "content_overlap_frac": content["content_overlap_frac"],
-                          "content_duplicated": content["duplicated"],
+                          "content_shared_with_calibration": content["shared"],
                           "train_disjointness": td,
                           "calibration_image_ids": sorted(cal_ids), "holdout_image_ids": sorted(hold_ids),
                           "calibration_observed_min_score": _min_dt_score(calibration_records),
@@ -947,6 +983,7 @@ def resolve_operating_point(
         else:
             sweep_data = {"calibration": cal_sweep, "conf_censored": censored,
                           "conf_floor_mismatch": floor_mismatch, "staged_conf_floor": staged_conf_floor,
+                          "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
                           "calibration_observed_min_score": _min_dt_score(calibration_records),
                           "calibration_cap_saturated_frac": _cap_saturated_frac(calibration_records),
                           "note": "calibrated but not held-out-measured"}
@@ -975,7 +1012,8 @@ def resolve_operating_point(
     # tile_size uses the same shared resolve_tile_size_param() raw_operating_point also calls.
     resolved_tiled = bool(tiled)  # already a concrete bool: the None-check above raised otherwise
     params["tile_size"] = resolve_tile_size_param(
-        tile_size, tiled=resolved_tiled, tile_size_source=tile_size_source)
+        tile_size, tiled=resolved_tiled, tile_size_source=tile_size_source,
+        tile_size_derived_from=tile_size_derived_from)
     if tiled_source == "explicit":
         params["tiled"] = ResolvedParam(
             "tiled", resolved_tiled, source="explicit", derived_from="caller override")
@@ -1059,7 +1097,7 @@ def resolve_classifier_operating_point(
     instance: ``{"image_id": str, "is_true_positive": bool, "is_pred_positive": bool,
     "bbox": [x1, y1, x2, y2]}``, whether the GT/reviewer-confirmed label and the classifier's own
     call are the trait's positive state, plus the instance's own GT geometry (required, see
-    ``_as_record`` below for why a placeholder box cannot substitute for it).
+    ``_grouped_records`` below for why a placeholder box cannot substitute for it).
 
     Returns a dict structurally distinct from a ``ResolvedParam``/``ResolvedBundle``, never a
     shape a generic writer could mistake for the count operating point's ``conf`` param and stamp
@@ -1093,21 +1131,18 @@ def resolve_classifier_operating_point(
     hold_ids = {it["image_id"] for it in holdout_items if "image_id" in it}
     disjoint = bool(cal_ids) and bool(hold_ids) and not (cal_ids & hold_ids)
 
-    # Reuse the detection path's content-overlap/train-disjointness primitives by shaping each
-    # classification item as a one-annotation image record, never a second implementation of
-    # "is this holdout content actually cloned from calibration" or "was this in the training split".
-    # The item's real GT bbox is required here, not a placeholder: _record_content_hash's whole
-    # purpose is a per-instance content fingerprint, and every item of the same class would collapse
-    # to one identical hash if the geometry were faked, making the content-duplication check fire on
-    # every well-formed reference and pass only a degenerate single-class one, the exact inversion
-    # of what it's meant to catch.
-    def _as_record(it: dict) -> dict:
-        cid = 1 if it["is_true_positive"] else 0
-        return {"image_id": it.get("image_id"), "width": 0, "height": 0,
-                "gt": [{"category_id": cid, "bbox": it["bbox"]}]}
+    # Reuse the detection path's content-overlap primitive, grouping each image's real GT boxes
+    # into one record: a placeholder box would collapse every same-class item to one hash.
+    def _grouped_records(items: list[dict]) -> list[dict]:
+        by_image: dict[str | None, list[dict]] = {}
+        for it in items:
+            cid = 1 if it["is_true_positive"] else 0
+            by_image.setdefault(it.get("image_id"), []).append(
+                {"category_id": cid, "bbox": it["bbox"]})
+        return [{"image_id": image_id, "width": 0, "height": 0, "gt": gt}
+                for image_id, gt in by_image.items()]
 
-    content = _content_overlap([_as_record(it) for it in calibration_items],
-                               [_as_record(it) for it in holdout_items])
+    content = _content_overlap(_grouped_records(calibration_items), _grouped_records(holdout_items))
     td = _train_disjointness(experiment_id, cal_ids, hold_ids)
 
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
@@ -1173,8 +1208,8 @@ def resolve_classifier_operating_point(
         failures.append("insufficient_adjudication_coverage")
     if not disjoint:
         failures.append("not_disjoint")
-    if content["duplicated"]:
-        failures.append("content_duplicated")
+    if content["shared"]:
+        failures.append("content_shared_with_calibration")
     if td["unresolvable"]:
         failures.append("train_disjointness_unresolvable")
     if td["leaked_groups"] or td["leaked_stems"]:
@@ -1199,7 +1234,8 @@ def resolve_classifier_operating_point(
     passed = not failures
 
     sweep_data = {
-        "content_overlap_frac": content["content_overlap_frac"], "content_duplicated": content["duplicated"],
+        "content_overlap_frac": content["content_overlap_frac"],
+        "content_shared_with_calibration": content["shared"],
         "train_disjointness": td, "disjoint": disjoint, "adjudication_covered": adjudication_ok,
         "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
         "count_bias_tolerance_frac": count_bias_tolerance_frac,

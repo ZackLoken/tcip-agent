@@ -19,6 +19,10 @@ _HOST = object()
 """Default for ``producing_experiment_id``: the run that produced the predictions is the experiment
 the row is filed on, which is the ordinary case for a bucket a training run's checkpoint produced."""
 
+_UNSTATED = object()
+"""Default for ``train_disjointness``: the same shape an unchecked, foreign-checkpoint row carries,
+picked per document since ``resolve_scale`` has no training run to check at all."""
+
 
 def write_prediction(pred_dir: str | Path, stem: str, *, count: int = 1) -> Path:
     """One per-image prediction document in a bucket, enough to give the bucket content to hash."""
@@ -40,6 +44,7 @@ def file_validation_record(
     producing_experiment_id: Any = _HOST,
     trait: str | None = None,
     reference_identity: dict | None = None,
+    train_disjointness: Any = _UNSTATED,
 ) -> dict:
     """File the record ``stamp`` claims, and return the stamp with its pointer merged in.
 
@@ -74,6 +79,10 @@ def file_validation_record(
     covered = {Path(d).resolve().relative_to(root).as_posix(): digest_fn(d)
                for d in pred_dirs}
     host = producing_experiment_id if producing_experiment_id is not _HOST else experiment_id
+    if train_disjointness is _UNSTATED:
+        td = None if document == "resolve_scale" else {"checked": False, "group_check": None}
+    else:
+        td = train_disjointness
 
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {"derived_from": "a reference for a test whose subject is "
@@ -89,6 +98,7 @@ def file_validation_record(
         "covered_buckets": covered,
         "dataset_root": str(root),
         "recorded_at": "2026-03-04T12:00:00+00:00",
+        "train_disjointness": td,
     }
     appended = _append_validation(experiment_id, body)
     assert "error" not in appended, appended

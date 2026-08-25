@@ -163,7 +163,10 @@ def resolve_tile_geometry(
     in the source (e.g. a delivery gate that must not silently fabricate a number) inspects the
     returned source itself and decides whether to refuse, warn, or proceed, that policy does not
     belong here, since an exploratory caller (``run_inference``) and a certifying caller
-    (``run_full_frame_evaluation``) legitimately make different calls on the same fact.
+    (``run_full_frame_evaluation``) legitimately make different calls on the same fact. The one
+    policy every tiling door shares, that a stated edge contradicting the checkpoint's own recorded
+    geometry is never silently accepted, lives in :func:`resolve_tile_regime` instead, since that is
+    where ``tiled`` (the fact that makes a typed edge operative at all) is known.
     """
     from tcip_mcp.pipelines.resolution import DEFAULT_OVERLAP
 
@@ -183,6 +186,44 @@ def resolve_tile_geometry(
         resolved_overlap, overlap_source = DEFAULT_OVERLAP, "default"
 
     return resolved_tile, tile_source, resolved_overlap, overlap_source
+
+
+class TileEdgeContradiction(ValueError):
+    """A caller-stated tile edge that differs from the checkpoint's own recorded tile geometry."""
+
+
+def _recorded_geometry_edge(predictor: Any) -> tuple[int | None, str]:
+    """The checkpoint's own recorded tile edge a stated edge is checked against, and what kind of
+    record it came from: the persisted training tile geometry when the checkpoint carries one, else
+    the edge its recorded uniform untiled training frame yields, else ``None`` (the checkpoint
+    records no tile geometry at all, the foreign-checkpoint case).
+    """
+    train_tile = getattr(predictor, "train_tile_size", None)
+    if train_tile is not None:
+        return int(train_tile), "persisted training tile geometry"
+    native_edge, _native_tier = _native_ratio_tile_size(
+        getattr(predictor, "train_native_size", None))
+    if native_edge is not None:
+        return native_edge, "recorded untiled training frame"
+    return None, "no persisted geometry"
+
+
+def explicit_edge_provenance(predictor: Any, edge: int) -> str:
+    """The ``derived_from`` sentence for a stated tile edge that cleared
+    :func:`resolve_tile_regime`'s contradiction check, from the facts the door holds: equal to the
+    checkpoint's persisted training tile geometry, equal to the edge its recorded untiled training
+    frame yields (run without that frame's own recorded resize, which the stated-edge path never
+    applies), or stated on a checkpoint that records no tile geometry at all.
+    """
+    recorded, kind = _recorded_geometry_edge(predictor)
+    if recorded is not None and int(recorded) == int(edge):
+        if kind == "persisted training tile geometry":
+            return "equal to the checkpoint's persisted training tile geometry"
+        return (
+            "equal to the edge the checkpoint's recorded untiled training frame yields, run "
+            "without that frame's own recorded resize"
+        )
+    return "stated on a checkpoint that records no tile geometry"
 
 
 def native_ratio_tile_resize(predictor: Any, tile_size_source: str) -> tuple[int, int] | None:
@@ -221,6 +262,15 @@ def resolve_tile_regime(
     composes them and raises whatever the resize raises for a native-ratio tier whose recorded
     augmentation config cannot be built.
 
+    Also carries the one policy every tiling door shares: when ``tiled`` and the caller states an
+    edge, that edge is checked against the checkpoint's own recorded geometry
+    (:func:`_recorded_geometry_edge`, the persisted training tile geometry, or, absent one, the edge
+    its recorded uniform untiled frame yields) and :class:`TileEdgeContradiction` is raised, naming
+    both edges and the recorded geometry's own kind, when they differ. A checkpoint recording
+    neither (the foreign-checkpoint case) has nothing to contradict, so a stated edge on it always
+    clears. An untiled call with a stated edge is inert: the edge never governs a count there, so it
+    is never checked.
+
     The resize is resolved only when ``tiled``: an untiled run reads no tile geometry, so an
     unreadable recorded augmentation config must not sink one. A door that always tiles (the raster
     export, ``run_full_frame_evaluation``) passes ``tiled=True`` unconditionally; ``run_inference``
@@ -228,6 +278,14 @@ def resolve_tile_regime(
 
     Returns ``(tile_size, tile_size_source, overlap, overlap_source, tile_resize)``.
     """
+    if tiled and tile_size is not None:
+        recorded, kind = _recorded_geometry_edge(predictor)
+        if recorded is not None and int(recorded) != int(tile_size):
+            raise TileEdgeContradiction(
+                f"stated tile_size {int(tile_size)} contradicts this checkpoint's own recorded "
+                f"{kind} of {recorded}. Pass tile_size {recorded} to match the checkpoint, or "
+                "leave tile_size unset to derive it from the checkpoint."
+            )
     resolved_tile, tile_size_source, resolved_overlap, overlap_source = resolve_tile_geometry(
         predictor, tile_size=tile_size, overlap=overlap)
     tile_resize = native_ratio_tile_resize(predictor, tile_size_source) if tiled else None

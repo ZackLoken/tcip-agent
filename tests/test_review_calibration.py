@@ -161,7 +161,8 @@ def test_review_confirmed_fails_closed_without_a_staged_conf_floor(tmp_path):
     conf = b.get("conf")
     assert conf.validated_against == VALIDATED_FALSE
     assert b.is_shippable is False
-    assert "conf_censored" in conf.sweep["failures"]
+    assert "conf_floor_unstated" in conf.sweep["failures"]
+    assert "conf_censored" not in conf.sweep["failures"]
 
 
 def test_conf_censored_review_reference_refused_when_picked_conf_at_or_below_the_staged_floor(tmp_path):

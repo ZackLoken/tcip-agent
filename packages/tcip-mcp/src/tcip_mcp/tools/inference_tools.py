@@ -165,7 +165,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile, tile_size, overlap, tile_batch_size,
                                global_nms_iou, postprocess, cross_tile_nms, max_dets,
                                tile_resize=None,
-                               tile_size_source="default", tiled_source="default",
+                               tile_size_source="default", tile_size_derived_from=None,
+                               tiled_source="default",
                                group_by="tile_prefix", group_key_map=None, experiment_id=None,
                                seed=0, holdout_ratio=0.5):
     """Resolve a per-dataset operating point from a labeled split.
@@ -212,6 +213,9 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     provenance for ``tile_size``/``tile``, forwarded into ``resolve_operating_point`` so the
     calibrated bundle doesn't stamp a fabricated tile_size as ``"derived"``, and so it records
     whether calibration itself actually tiled rather than always asserting ``tiled=True``.
+    ``tile_size_derived_from`` is the caller's own composed ``derived_from`` text for an explicit
+    edge (see ``predictor.explicit_edge_provenance``), forwarded unchanged; ``None`` for every
+    other source.
     """
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
@@ -326,9 +330,11 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     resolver_inputs = {
         "dataset_hash": dh, "calibration_records": cal_records,
         "holdout_records": hold_records or None, "tile_size": tile_size,
-        "tile_size_source": tile_size_source, "tiled": tile, "tiled_source": tiled_source,
+        "tile_size_source": tile_size_source, "tile_size_derived_from": tile_size_derived_from,
+        "tiled": tile, "tiled_source": tiled_source,
         "cross_tile_nms": cross_tile_nms, "max_dets": max_dets,
         "staged_conf_floor": applied.get("score_thresh"),
+        "staged_conf_floor_attribute_path": applied.get("attribute_path"),
     }
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
@@ -390,7 +396,7 @@ def _sweep_summary(conf_param) -> dict:
         "count_error_p90": hb.get("count_error_p90") if isinstance(hb, dict) else None,
         "disjoint": sweep.get("disjoint"),
         "content_overlap_frac": sweep.get("content_overlap_frac"),
-        "content_duplicated": sweep.get("content_duplicated"),
+        "content_shared_with_calibration": sweep.get("content_shared_with_calibration"),
         "train_disjointness": sweep.get("train_disjointness"),
         "split_policy_divergence": sweep.get("split_policy_divergence"),
         "split_unlocked_stems": sweep.get("split_unlocked_stems"),
@@ -689,14 +695,23 @@ def run_inference(
 
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
-    # Derive tile geometry from training geometry unless the caller pinned it. Pure fact-return,
-    # never refuses; the warn-and-proceed policy for this exploratory path lives here.
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
+    # Derive tile geometry from training geometry unless the caller pinned it; refuses only when a
+    # stated edge contradicts the checkpoint's own recorded geometry.
+    from tcip_mcp.pipelines.inference.predictor import (
+        TileEdgeContradiction, explicit_edge_provenance, resolve_tile_regime,
+    )
 
     # resolve_tile_regime resolves the resize half only when tiled, so an untiled run is never
     # sunk by an unreadable recorded augmentation config.
-    resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
-        resolve_tile_regime(predictor, tiled=resolved_tile_bool, tile_size=tile_size, overlap=overlap))
+    try:
+        resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+            resolve_tile_regime(
+                predictor, tiled=resolved_tile_bool, tile_size=tile_size, overlap=overlap))
+    except TileEdgeContradiction as exc:
+        return {"error": str(exc)}
+    tile_size_derived_from = (
+        explicit_edge_provenance(predictor, resolved_tile)
+        if tile_size_source == "explicit" and resolved_tile is not None else None)
     if resolved_tile_bool and resolved_tile is None:
         # Tiling was requested but nothing justifies a scale: refuse rather than fabricate one.
         return {"error": (
@@ -739,7 +754,8 @@ def run_inference(
                 predictor, trait, calibration_labels_dir, cal_images,
                 tile=resolved_tile_bool, tile_size=resolved_tile, overlap=resolved_overlap,
                 tile_resize=tile_resize,
-                tile_size_source=tile_size_source, tiled_source=tiled_source,
+                tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from,
+                tiled_source=tiled_source,
                 tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou,
                 postprocess=postprocess,
                 cross_tile_nms=global_nms_iou, max_dets=max_dets,
@@ -853,6 +869,7 @@ def run_inference(
         op_bundle = raw_operating_point(
             conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=resolved_tile_bool,
             tile_size=resolved_tile, max_dets=applied_max_dets, tile_size_source=tile_size_source,
+            tile_size_derived_from=tile_size_derived_from,
             tiled_source=tiled_source, conf_stated=conf_stated,
             max_dets_stated=max_dets_stated,
         )
@@ -1171,10 +1188,15 @@ def _export_predictions_raster(
     is unconditional, never overridable via ``acknowledge_unvalidated`` (there is no value to
     provisionally proceed with). This door has no real-but-unvalidated tile scale left to admit on
     acknowledgement: every basis the gate below resolves to either clears it on its own or is this
-    no-basis-at-all case.
+    no-basis-at-all case. An explicit ``tile_size`` that contradicts the checkpoint's own recorded
+    geometry refuses before that, from ``resolve_tile_regime`` itself. For the ``trait`` path, the
+    block calibration's own reserved-region bands must also be tiled at this same resolved edge;
+    a split manifest recorded at a different edge refuses there too.
     """
     from tcip_mcp.model_registry import resolve_model_identity
-    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import (
+        TileEdgeContradiction, build_predictor, explicit_edge_provenance, resolve_tile_regime,
+    )
 
     # An unstated cap falls to the shared platform default for the pass; this regime has no
     # per-dataset derivation of one to leave room for.
@@ -1190,10 +1212,16 @@ def _export_predictions_raster(
     )
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
 
-    # Resolved (resize included) before the raster is opened, so an unreadable recorded
-    # augmentation config refuses here rather than partway through an expensive pass.
-    resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
-        resolve_tile_regime(predictor, tiled=True, tile_size=tile_size, overlap=overlap))
+    # Resolved (resize included) before the raster is opened: an unreadable recorded augmentation
+    # config, or a stated edge contradicting the checkpoint, refuses here, not mid-pass.
+    try:
+        resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
+            resolve_tile_regime(predictor, tiled=True, tile_size=tile_size, overlap=overlap))
+    except TileEdgeContradiction as exc:
+        return {"error": str(exc)}
+    tile_size_derived_from = (
+        explicit_edge_provenance(predictor, resolved_tile)
+        if tile_size_source == "explicit" and resolved_tile is not None else None)
     if resolved_tile is None:
         return {"error": (
             f"tile_size could not be resolved for {checkpoint_path}: this checkpoint carries no "
@@ -1230,6 +1258,7 @@ def _export_predictions_raster(
             block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
                 predictor, checkpoint_path=checkpoint_path, trait_name=trait,
                 experiment_id=identity["experiment_id"], global_nms_iou=applied_nms_iou,
+                export_tile_size=resolved_tile,
                 tile_batch_size=tile_batch_size, postprocess=postprocess,
             )
         except BlockCalibrationRefused as exc:
@@ -1275,7 +1304,7 @@ def _export_predictions_raster(
 
         op_bundle = block_calibrated_export_operating_point(
             block_bundle, trait=trait, tile_size=resolved_tile,
-            tile_size_source=tile_size_source)
+            tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from)
         op_provenance = op_bundle.to_provenance()["operating_point"]
 
         tile_ref = tile_size_gate_flag(op_provenance)
@@ -1311,7 +1340,8 @@ def _export_predictions_raster(
         op_bundle = raw_operating_point(
             conf=applied_conf, cross_tile_nms=applied_nms_iou, tiled=True,
             tile_size=resolved_tile, max_dets=applied_max_dets,
-            tile_size_source=tile_size_source, tiled_source="default",
+            tile_size_source=tile_size_source, tile_size_derived_from=tile_size_derived_from,
+            tiled_source="default",
             conf_stated=raw_conf_stated, max_dets_stated=raw_max_dets_stated,
         )
         op_provenance = op_bundle.to_provenance()["operating_point"]
@@ -1609,17 +1639,27 @@ def export_predictions(
     from types import SimpleNamespace
 
     from tcip_mcp.model_registry import read_checkpoint_data_config
-    from tcip_mcp.pipelines.inference.predictor import resolve_tile_geometry
+    from tcip_mcp.pipelines.inference.predictor import (
+        TileEdgeContradiction, explicit_edge_provenance, resolve_tile_regime,
+    )
 
     data_cfg = read_checkpoint_data_config(checkpoint_path)
     tiling_cfg = data_cfg.get("tiling") or {}
     stub = SimpleNamespace(
         train_tile_size=tiling_cfg.get("tile_size"), train_overlap=tiling_cfg.get("overlap"),
         train_native_size=data_cfg.get("train_native_size"))
-    pre_tile, pre_tile_source, _pre_overlap, _pre_overlap_source = resolve_tile_geometry(
-        stub, tile_size=tile_size, overlap=overlap)
     pre_tiled = (stub.train_tile_size is not None) if tile is None else tile
-    pre_param = resolve_tile_size_param(pre_tile, tiled=pre_tiled, tile_size_source=pre_tile_source)
+    try:
+        pre_tile, pre_tile_source, _pre_overlap, _pre_overlap_source, _pre_resize = resolve_tile_regime(
+            stub, tiled=pre_tiled, tile_size=tile_size, overlap=overlap)
+    except TileEdgeContradiction as exc:
+        return {"error": str(exc)}
+    pre_tile_derived_from = (
+        explicit_edge_provenance(stub, pre_tile)
+        if pre_tile_source == "explicit" and pre_tile is not None else None)
+    pre_param = resolve_tile_size_param(
+        pre_tile, tiled=pre_tiled, tile_size_source=pre_tile_source,
+        tile_size_derived_from=pre_tile_derived_from)
     pre_tile_ref = tile_size_gate_flag({"tile_size": pre_param.to_provenance()})
     pre_gate = check_delivery_gate(
         {"tile_size": pre_tile_ref} if pre_tile_ref is not None else {},

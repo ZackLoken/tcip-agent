@@ -179,7 +179,7 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 
 def resolve_block_calibration_records(
     predictor: Any, *, checkpoint_path: str, trait_name: str, experiment_id: str | None,
-    global_nms_iou: float, tile_batch_size: int = 96, postprocess: str = "nms",
+    global_nms_iou: float, export_tile_size: int, tile_batch_size: int = 96, postprocess: str = "nms",
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST, seed: int = 0,
 ) -> tuple[Any, dict, dict]:
     """Resolve a detection operating point directly against a mosaic's own reserved
@@ -205,6 +205,11 @@ def resolve_block_calibration_records(
     own ``config.json`` (``data.plant_csv_paths``, a list of plant-locations CSV paths) resolves
     at least two georeferenced plants and the training raster carries a real geotransform; a
     ``BandGroupRef`` source (no single file to read tags from) always falls back to GT-spacing.
+
+    ``export_tile_size`` (required, no default) is the edge the caller's own whole-mosaic export
+    pass resolved to run at; refused when it differs from the split manifest's own ``tile_size``,
+    naming both, so the reserved-region claim this resolves and the bucket the export pass writes
+    are tiled at one regime by construction, never two values nothing holds equal.
     """
     from tcip_store import store
 
@@ -299,6 +304,14 @@ def resolve_block_calibration_records(
     gt_labels_arr = np.asarray(gt_labels, dtype=np.int64)
 
     tile_size, overlap = int(spatial["tile_size"]), float(spatial["overlap"])
+    if tile_size != int(export_tile_size):
+        raise BlockCalibrationRefused(
+            f"block calibration refused: the split manifest's reserved regions were tiled at "
+            f"{tile_size}px, but this export is resolved to run the whole-mosaic pass at "
+            f"{int(export_tile_size)}px; the reserved-region claim and the exported bucket must be "
+            "tiled at one regime, or the claim says nothing about the counts the export actually "
+            "produces."
+        )
     mosaic_w, mosaic_h = int(spatial["width"]), int(spatial["height"])
 
     def _region_rect(region: list) -> tuple[int, int, int, int]:
@@ -426,6 +439,7 @@ def resolve_block_calibration_records(
         "max_dets_derived_from": (
             "~1.5x p99 GT objects/image, pooled across all calibration+test bands"),
         "staged_conf_floor": applied.get("score_thresh"),
+        "staged_conf_floor_attribute_path": applied.get("attribute_path"),
         "cal_rects": cal_rects, "hold_rects": test_rects,
     }
     bundle = resolve_operating_point(trait_name, experiment_id=experiment_id, **resolver_inputs)

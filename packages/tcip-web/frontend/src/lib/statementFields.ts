@@ -48,6 +48,7 @@ export const STATEMENT_FIELD_LABELS: Record<string, string> = {
   classifier_agreement_floor: "Classifier agreement floor",
   ordinal_agreement_floor: "Ordinal agreement floor",
   regression_skill_floor: "Regression skill floor",
+  holdout_match_quality_floor: "Held-out match quality floor",
   notes: "Notes",
 };
 

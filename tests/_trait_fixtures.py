@@ -20,6 +20,7 @@ CATKIN = TraitSpec(
     localization=CENTER_MATCH,
     localization_tolerance="half_class_avg_size",
     localization_tolerance_frac=0.5,
+    holdout_match_quality_floor=0.5,
     positive_class_name="elongated",
     milestone_fractions=(0.05, 0.50, 0.95),
     milestone_on="positive_fraction",

@@ -310,16 +310,19 @@ def test_column_stamp_reports_the_cleared_reference_when_everything_cleared():
 
 @pytest.mark.parametrize("source", ["derived", "explicit"])
 def test_tile_size_source_round_trips_through_its_reference(source):
-    param = resolve_tile_size_param(512, tiled=True, tile_size_source=source)
+    param = resolve_tile_size_param(512, tiled=True, tile_size_source=source,
+                                    tile_size_derived_from=None)
 
     assert tile_size_source_of(param.validated_against, tile_size=512) == source
 
 
 def test_tile_size_source_of_recovers_each_geometry_tier_from_its_own_reference():
-    native_param = resolve_tile_size_param(512, tiled=True, tile_size_source="native_ratio")
+    native_param = resolve_tile_size_param(512, tiled=True, tile_size_source="native_ratio",
+                                           tile_size_derived_from=None)
     assert tile_size_source_of(native_param.validated_against, tile_size=512) == "native_ratio"
 
-    persisted_param = resolve_tile_size_param(512, tiled=True, tile_size_source="derived")
+    persisted_param = resolve_tile_size_param(512, tiled=True, tile_size_source="derived",
+                                              tile_size_derived_from=None)
     assert tile_size_source_of(persisted_param.validated_against, tile_size=512) == "derived"
 
     # A reference nothing in the current vocabulary answers for: recorded (the edge is kept), never

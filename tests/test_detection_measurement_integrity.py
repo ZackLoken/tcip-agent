@@ -491,15 +491,29 @@ def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch
 
 
 def test_explicit_tile_size_wins(tmp_path, monkeypatch):
+    """An explicit edge that agrees with the checkpoint's own persisted geometry wins over
+    deriving it, still stamped as the caller's own explicit statement."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
-    captured = _stub_inference(monkeypatch, train_tile_size=224)  # would derive 224...
+    captured = _stub_inference(monkeypatch, train_tile_size=224)
     r = run_inference(str(ckpt), image_paths=[_one_image(tmp_path)], device="cpu",
-                      tile=True, tile_size=512)  # ...but explicit override wins
-    assert captured["tile_size"] == 512
+                      tile=True, tile_size=224)
+    assert captured["tile_size"] == 224
     assert r["operating_point"]["tile_size"]["source"] == "explicit"
+
+
+def test_explicit_tile_size_contradicting_persisted_geometry_refuses(tmp_path, monkeypatch):
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    _stub_inference(monkeypatch, train_tile_size=224)
+    r = run_inference(str(ckpt), image_paths=[_one_image(tmp_path)], device="cpu",
+                      tile=True, tile_size=512)
+    assert "error" in r
+    assert "512" in r["error"] and "224" in r["error"]
 
 
 def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch):

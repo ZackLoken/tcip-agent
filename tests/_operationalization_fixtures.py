@@ -40,6 +40,7 @@ COUNT_SPEC = TraitSpec(
     localization=CENTER_MATCH,
     ordinal_agreement_floor=0.6,
     regression_skill_floor=0.5,
+    holdout_match_quality_floor=0.5,
     delivers=("stem_count",),
 )
 
@@ -60,6 +61,7 @@ def _delivering(phenotype: str) -> TraitSpec:
         localization=CENTER_MATCH,
         ordinal_agreement_floor=0.6,
         regression_skill_floor=0.5,
+        holdout_match_quality_floor=0.5,
         delivers=(phenotype,),
     )
 

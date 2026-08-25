@@ -138,7 +138,11 @@ def check_model_contract(
 ) -> dict:
     """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
 
-    ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None}``.
+    ``{"ok": bool, "issues": [...], "train_loss": float|None, "eval_output_type": str|None,
+    "operating_point_knobs": list[str]|None}``. ``operating_point_knobs`` is which of
+    score_thresh/nms_thresh/detections_per_img the model exposes wherever it holds them
+    (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), for a detection
+    or instance segmentation task; ``None`` for every other task, which has no such knobs.
 
     ``sample_batch`` is an ``(images, targets)`` pair from this run's own dataset. It is required
     for a task outside ``_SYNTHESIZABLE_TASKS``: the contract will not invent a target shape for a
@@ -150,7 +154,18 @@ def check_model_contract(
     issues: list[str] = []
     report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None,
                               "eval_output_type": None, "not_smokeable": None,
-                              "gradient_magnitudes": None}
+                              "gradient_magnitudes": None, "operating_point_knobs": None}
+    if task in _DETECTION_TASKS:
+        # Which of score_thresh/nms_thresh/detections_per_img the model exposes, wherever it holds
+        # them (detector_operating_point_holder), a fact beside the smoke's own pass/fail verdict.
+        from tcip_mcp.pipelines.operating_point import (
+            OPERATING_POINT_ATTRS, detector_operating_point_holder,
+        )
+
+        holder, _path = detector_operating_point_holder(model)
+        report["operating_point_knobs"] = (
+            sorted(attr for attr in OPERATING_POINT_ATTRS if hasattr(holder, attr))
+            if holder is not None else [])
     if sample_batch is None and task not in _SYNTHESIZABLE_TASKS:
         # Do not invent a target shape for a task we have no schema for: a green report earned
         # against a guessed shape proves nothing. Say so, and let the caller smoke it with a real

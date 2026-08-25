@@ -198,6 +198,9 @@ class TraitSpec:
     # Max relative disagreement a physical-scale reference half may show (scale_calibration.
     # resolve_physical_scale); None has no platform-provisional fallback, unlike count_bias_tolerance_frac.
     scale_tolerance_frac: float | None = None
+    # Min held-out precision and recall the detection gate's governing localization criterion must
+    # both clear at the shipped conf. No fallback: None refuses to validate rather than substitute one.
+    holdout_match_quality_floor: float | None = None
     # crops.yml controlled-vocab trait names this spec is authored to deliver, the anti-fabrication
     # anchor a config-loaded spec is cross-checked against (a spec can't claim a phenotype not in the vocab).
     delivers: tuple[str, ...] = ()
@@ -306,6 +309,11 @@ def _spec_from_config(data: dict, vocab: set[str]) -> tuple[TraitSpec | None, st
     off_vocab = [d for d in delivers if d not in vocab]
     if not delivers or off_vocab:
         reason = f"delivers must be non-empty and all in crops.yml (off-vocab: {off_vocab})"
+        logger.warning("trait spec %r skipped: %s", name, reason)
+        return None, reason
+    floor = data.get("holdout_match_quality_floor")
+    if floor is not None and not (isinstance(floor, (int, float)) and 0 < floor <= 1):
+        reason = f"holdout_match_quality_floor must be in (0, 1], got {floor!r}"
         logger.warning("trait spec %r skipped: %s", name, reason)
         return None, reason
     # count_objective is not validated against a closed vocabulary, a trait may name any
@@ -517,7 +525,8 @@ _AUTHORED_SPEC_FIELDS = (
     "delivers", "positive_class_name", "milestone_fractions", "milestone_on", "majority_milestone",
     "majority_provisional", "phenology_prefix", "majority_label", "count_objective",
     "count_bias_tolerance_frac", "count_error_tolerance", "classifier_agreement_floor",
-    "ordinal_agreement_floor", "regression_skill_floor", "scale_tolerance_frac", "notes",
+    "ordinal_agreement_floor", "regression_skill_floor", "scale_tolerance_frac",
+    "holdout_match_quality_floor", "notes",
 )
 """Every ``TraitSpec`` field ``author_trait_spec`` accepts; see its own docstring for why the rest
 of ``TraitSpec`` is not here."""
@@ -635,6 +644,7 @@ def author_trait_spec(
     ordinal_agreement_floor: float | None = None,
     regression_skill_floor: float | None = None,
     scale_tolerance_frac: float | None = None,
+    holdout_match_quality_floor: float | None = None,
     notes: str = "",
     rationale: str,
     relayed_note: str = "",
@@ -699,6 +709,7 @@ def author_trait_spec(
         "ordinal_agreement_floor": ordinal_agreement_floor,
         "regression_skill_floor": regression_skill_floor,
         "scale_tolerance_frac": scale_tolerance_frac,
+        "holdout_match_quality_floor": holdout_match_quality_floor,
         "notes": notes,
     }
     if existing_spec.value is not None:

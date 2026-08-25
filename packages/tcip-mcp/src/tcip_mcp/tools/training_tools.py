@@ -413,6 +413,7 @@ def launch_training(
         "dims": smoke_report.get("dims"),
         "issues": smoke_report.get("issues", []),
         "gradient_magnitudes": smoke_report.get("gradient_magnitudes"),
+        "operating_point_knobs": smoke_report.get("operating_point_knobs"),
     }
     check_json_value(model_contract_record, path="model_contract")
     config["model_contract"] = model_contract_record

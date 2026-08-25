@@ -740,16 +740,18 @@ def test_calibrate_classifier_operating_point_refuses_a_dataset_root_its_gt_dirs
     assert not (tmp_path / "out").exists()  # a refused calibration stamps nothing
 
 
-def test_calibrate_classifier_operating_point_refuses_genuinely_duplicated_holdout(tmp_path: Path) -> None:
+def test_calibrate_classifier_operating_point_refuses_genuinely_shared_content_holdout(
+    tmp_path: Path,
+) -> None:
     """A holdout whose GT content is cloned from calibration (same classification calls, same
-    geometry) must refuse content_duplicated even under different image ids: the whole point of
-    a content hash, not an image-id check."""
+    geometry) must refuse content_shared_with_calibration even under different image ids: the whole
+    point of a content hash, not an image-id check."""
     cal_gt, cal_pred = tmp_path / "cal_gt", tmp_path / "cal_pred"
     hold_gt, hold_pred = tmp_path / "hold_gt", tmp_path / "hold_pred"
     calls = _alternating_calls
     _write_split(cal_gt, cal_pred, prefix="cal", n_images=20, per_image_calls=calls)
     # Different stems ("dup" vs "cal"), but identical per-image geometry+calls -> disjoint by
-    # image_id, still content-duplicated.
+    # image_id, still content-shared.
     _write_split(hold_gt, hold_pred, prefix="dup", n_images=20, per_image_calls=calls)
 
     res = calibrate_classifier_operating_point(
@@ -760,7 +762,7 @@ def test_calibrate_classifier_operating_point_refuses_genuinely_duplicated_holdo
     )
 
     assert res["passed"] is False
-    assert "content_duplicated" in res["failures"]
+    assert "content_shared_with_calibration" in res["failures"]
 
 
 def test_calibrate_classifier_operating_point_partial_flip_fails_compensating_error_floor(
@@ -866,20 +868,24 @@ def test_resolve_classifier_operating_point_bias_is_scoped_to_present_images() -
     assert "count_bias_exceeds_tolerance" in res["failures"], res["failures"]
 
 
-def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
+def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=(), image_offset=0):
     """``pos_per_image`` correctly-called positives per image, plus one token negative per image (so
     kappa stays defined). On ``miscall_images`` (indices), one extra false-positive-called instance
-    is added -- the same absolute miscall, regardless of density."""
+    is added -- the same absolute miscall, regardless of density. Every image's whole geometry is
+    offset by its own index (``image_offset`` shifts a sibling split's sequence further still), so
+    two images never share content by construction unless a test deliberately reuses one.
+    """
     items = []
     for i in range(n_images):
+        base = (image_offset + i) * 1000.0
         for k in range(pos_per_image):
             items.append({"image_id": f"{prefix}{i}", "is_true_positive": True, "is_pred_positive": True,
-                         "bbox": [float(k * 15), 0.0, float(k * 15 + 10), 10.0]})
+                         "bbox": [base + k * 15.0, 0.0, base + k * 15.0 + 10.0, 10.0]})
         if i in miscall_images:
             items.append({"image_id": f"{prefix}{i}", "is_true_positive": False, "is_pred_positive": True,
-                         "bbox": [9000.0, 0.0, 9010.0, 10.0]})
+                         "bbox": [base + 9000.0, 0.0, base + 9010.0, 10.0]})
         items.append({"image_id": f"{prefix}{i}", "is_true_positive": False, "is_pred_positive": False,
-                     "bbox": [-100.0 - i, 0.0, -90.0 - i, 10.0]})
+                     "bbox": [base - 100.0, 0.0, base - 90.0, 10.0]})
     return items
 
 
@@ -894,14 +900,16 @@ def test_resolve_classifier_operating_point_relative_tolerance_refuses_a_sparse_
 
     sparse = resolve_classifier_operating_point(
         "catkin", calibration_items=_classifier_items("c", 20, 1),
-        holdout_items=_classifier_items("h", 20, 1, miscall_images=[0]), experiment_id=None)
+        holdout_items=_classifier_items("h", 20, 1, miscall_images=[0], image_offset=20),
+        experiment_id=None)
     assert sparse["sweep_data"]["typical_positive_count"] == pytest.approx(1.0)
     assert sparse["passed"] is False
     assert "count_bias_exceeds_tolerance" in sparse["failures"]
 
     dense = resolve_classifier_operating_point(
         "catkin", calibration_items=_classifier_items("c", 20, 150),
-        holdout_items=_classifier_items("h", 20, 150, miscall_images=[0]), experiment_id=None)
+        holdout_items=_classifier_items("h", 20, 150, miscall_images=[0], image_offset=20),
+        experiment_id=None)
     assert dense["sweep_data"]["typical_positive_count"] == pytest.approx(150.0)
     # Same count_bias/count_bias_std as the sparse case (the miscall pattern is identical) -- only
     # the derived tolerance differs, proving density is what changed the outcome.

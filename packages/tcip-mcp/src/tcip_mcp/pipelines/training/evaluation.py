@@ -1350,7 +1350,9 @@ def run_full_frame_evaluation(
     number as one.
     """
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
-    from tcip_mcp.pipelines.inference.predictor import build_predictor, resolve_tile_regime
+    from tcip_mcp.pipelines.inference.predictor import (
+        build_predictor, explicit_edge_provenance, resolve_tile_regime,
+    )
     from tcip_mcp.pipelines.operating_point import _cap_saturated_frac
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
@@ -1358,11 +1360,18 @@ def run_full_frame_evaluation(
         checkpoint_path=str(ckpt_path), device=device,
         score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
 
+    # A stated edge contradicting the checkpoint's own recorded geometry raises here and propagates
+    # to this function's own caller, the same as every other refusal on this delivery-gating path.
     resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize = (
         resolve_tile_regime(predictor, tiled=True, tile_size=tile_size, overlap=overlap))
+    tile_size_derived_from = (
+        explicit_edge_provenance(predictor, resolved_tile)
+        if tile_size_source == "explicit" and resolved_tile is not None else None)
     # The shared gate every other door resolves through: acceptance is that vocabulary and nothing
     # else, never a hand-written tuple of source labels.
-    tile_param = resolve_tile_size_param(resolved_tile, tiled=True, tile_size_source=tile_size_source)
+    tile_param = resolve_tile_size_param(
+        resolved_tile, tiled=True, tile_size_source=tile_size_source,
+        tile_size_derived_from=tile_size_derived_from)
     if not tile_param.is_shippable:
         raise ValueError(
             f"Cannot resolve a trustworthy tile_size for {ckpt_path}: no explicit tile_size was "

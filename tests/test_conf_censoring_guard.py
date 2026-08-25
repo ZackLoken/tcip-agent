@@ -5,9 +5,11 @@ score against a hardcoded display floor (that predicate was tautologically true 
 since every surviving score is >= the calibration floor by construction, and missed a display-
 floored reference whose observed scores merely happened to dip below the display constant once).
 Instead the caller asserts ``staged_conf_floor``, the floor the reference's predictions were
-actually generated/filtered at, and ``censored = staged_conf_floor is None or chosen_conf <=
-staged_conf_floor``, reconciled against the reference's own observed minimum score
-(``_floor_mismatch``) as an independent, distinctly-named check.
+actually generated/filtered at, and ``censored = staged_conf_floor is not None and chosen_conf <=
+staged_conf_floor``. An unstated floor is a distinct, separately-named gate
+(``conf_floor_unstated``), never folded into ``conf_censored``, so the two causes are never
+reported under one name; ``_floor_mismatch`` reconciles a stated floor against the reference's own
+observed minimum score as an independent, non-gating check.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ OBJECTS_PER_IMAGE = 80
 # ── unit: the two independent censoring predicates ─────────────────────────
 
 def test_conf_censored_predicate():
-    assert _conf_censored(0.6, None) is True                # no assertion at all -> fail closed
+    assert _conf_censored(0.6, None) is False                # no assertion -> conf_floor_unstated's job
     assert _conf_censored(0.6, 0.01) is False                # picked conf comfortably above the floor
     assert _conf_censored(0.6, 0.6) is True                  # picked conf AT the floor
     assert _conf_censored(0.4, 0.5) is True                  # picked conf BELOW the floor
@@ -91,16 +93,17 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
 
 
 def test_no_staged_conf_floor_asserted_fails_closed():
-    # Identical geometry to the passing case above, but the caller never asserts a floor, so this
-    # must fail closed (the honest default), not silently validate.
+    # No floor asserted must fail closed (the honest default), named conf_floor_unstated,
+    # distinct from conf_censored (a stated floor the pick does not clear).
     cal, hold = _cal_holdout(fp_score=0.05)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold)
     conf = b.get("conf")
     assert conf.validated_against == "false"
     assert b.is_shippable is False
-    assert conf.sweep["conf_censored"] is True
-    assert "conf_censored" in conf.sweep["failures"]
+    assert conf.sweep["conf_censored"] is False
+    assert "conf_floor_unstated" in conf.sweep["failures"]
+    assert "conf_censored" not in conf.sweep["failures"]
 
 
 def test_reference_truncated_above_the_picked_conf_is_refused():
