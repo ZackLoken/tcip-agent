@@ -1200,6 +1200,8 @@ def _resolver_value(result: Any, param_key: str) -> Any:
         return result.get(param_key)._raw
     if isinstance(result, ResolvedParam):
         return result._raw
+    if isinstance(result, Mapping) and "value" in result:
+        return result["value"]
     return _UNCOMPARED
 
 
@@ -1410,6 +1412,7 @@ def seal_validation(
     dataset_root: str | Path,
     bucket_dirs: list[str | Path] | tuple[str | Path, ...],
     stamp_body: dict,
+    images_dir: str | Path | None = None,
 ) -> tuple[str, dict]:
     """Append the record a passed gate earned, over the files as they are now, and stamp the pointer.
 
@@ -1431,10 +1434,11 @@ def seal_validation(
 
     For the ``operating_point`` document the digest is over the bucket's prediction bytes
     (:func:`~tcip_mcp.prediction_buckets.bucket_content_digest`), since that claim is about what was
-    predicted. For ``resolve_scale`` the digest is over the bucket's own image stems
-    (:func:`~tcip_mcp.prediction_buckets.bucket_stems_digest`) instead: a scale claim is a fact
-    about the bucket's imagery, not its predictions, so re-exporting predictions over the same
-    images must not floor it, while an image added to or removed from the bucket must.
+    predicted. For ``resolve_scale`` the digest is over the bytes of the bucket's own images, read
+    from ``images_dir`` (:func:`~tcip_mcp.prediction_buckets.bucket_stems_digest`) instead: a scale
+    claim is a fact about the bucket's imagery, not its predictions, so re-exporting predictions over
+    the same images must not floor it, while an image added to, removed from, or replaced in the
+    bucket must. ``images_dir`` is required for a ``resolve_scale`` draft, and unused otherwise.
     """
     from tcip_mcp.experiments import _append_validation, ensure_calibration_experiment
     from tcip_mcp.prediction_buckets import bucket_content_digest, bucket_stems_digest
@@ -1451,10 +1455,20 @@ def seal_validation(
             f"{draft.dataset_root!r}; the covered buckets and the reference identity are recorded "
             "against one root, so they cannot be sealed against another."
         )
+    if draft.document == "resolve_scale" and bucket_dirs and images_dir is None:
+        raise ValueError(
+            "seal_validation needs images_dir to hash a resolve_scale claim's covered bucket(s): "
+            "the claim binds to the imagery, not the predictions."
+        )
 
     covered: dict[str, str] = {}
     if draft.document in ("operating_point", "resolve_scale"):
-        digest_fn = bucket_content_digest if draft.document == "operating_point" else bucket_stems_digest
+        def digest_fn(d: Path) -> str:
+            if draft.document == "operating_point":
+                return bucket_content_digest(d)
+            assert images_dir is not None
+            return bucket_stems_digest(d, images_dir=images_dir)
+
         for d in bucket_dirs:
             resolved = Path(d).resolve()
             try:
@@ -1544,20 +1558,22 @@ class StampBinding:
 
 def verify_stamp_binding(
     sidecar: dict | None, pred_dir: str | Path, *, document: str, trait: str | None = None,
-    digest_memo: dict[str, str] | None = None,
+    digest_memo: dict[str, str] | None = None, images_dir: str | Path | None = None,
 ) -> StampBinding:
     """Check that a stamp's validation claim is answered for by a record it cannot itself write.
 
     Called from inside the reconcilers rather than at each delivery door, so no door can deliver
-    without it. Every check is cheap: a stamp read, a log read, and for the count document one pass
-    over the prediction files the claim covers. No model is loaded and no gate is re-run.
+    without it. Every check is cheap: a stamp read, a log read, and for the count and scale
+    documents one pass over the bucket's own prediction files or imagery the claim covers. No model
+    is loaded and no gate is re-run.
 
     In order: the stamp's own parameter cleared a reference of the document's kind (unchanged, and
     still first); it names an experiment and a row; that experiment exists; that row is in it and
     still hashes to the identity the stamp committed to; the row agrees with the stamp on document,
     reference, checkpoint identity (absence equal to absence), trait and the whole claim payload; and
-    for the count document, every bucket being read is in the covered set at its dataset-relative key
-    with the content identity it was earned over, recomputed now.
+    for the count and scale documents, every bucket being read is in the covered set at its
+    dataset-relative key with the content (or imagery) identity it was earned over, recomputed now.
+    ``images_dir`` is required to reach that last check for ``resolve_scale`` and unused otherwise.
 
     Verification is per stamp file, not per parameter. One failed check floors every dimension that
     stamp carries, so a count operating point, a tile geometry, a claim scope and a review upgrade
@@ -1661,8 +1677,14 @@ def verify_stamp_binding(
                 f"{document}.json at {bucket!r} claims a validated {noun}, and record "
                 f"{record_digest!r} covers {sorted(covered)} rather than {key!r}. Write to a fresh "
                 "bucket variant and re-validate.", **known)
+        if document == "resolve_scale" and images_dir is None:
+            raise ValueError(
+                f"verify_stamp_binding needs images_dir to recompute the imagery digest a "
+                f"resolve_scale claim at {bucket!r} covers."
+            )
         recomputed = (bucket_content_digest(resolved, memo=digest_memo)
-                     if document == "operating_point" else bucket_stems_digest(resolved))
+                     if document == "operating_point"
+                     else bucket_stems_digest(resolved, images_dir=images_dir))
         if recomputed != covered[key]:
             what = "prediction files" if document == "operating_point" else "image set"
             return floored(
@@ -2205,7 +2227,7 @@ def reconcile_claim_scope_validity(
 
 
 def reconcile_scale_validity(
-    pred_dirs: list[str] | tuple[str, ...], *, unit: str, trait: str,
+    pred_dirs: list[str] | tuple[str, ...], *, unit: str, trait: str, images_dir: str | Path,
     capture_id: str | None = None, asserted: str | None = None,
     digest_memo: dict[str, str] | None = None,
 ) -> dict:
@@ -2237,7 +2259,9 @@ def reconcile_scale_validity(
     bucket whose stamped ``operating_point.scale.unit`` differs floors, naming both, so a scale
     stamped in centimetres cannot clear a delivery in millimetres. ``trait`` is the delivery's own
     registry trait, threaded into :func:`verify_stamp_binding` the same way the three measurement
-    reconcilers thread it, so a scale earned for another trait floors.
+    reconcilers thread it, so a scale earned for another trait floors. ``images_dir`` is the
+    delivery's own images directory, threaded into :func:`verify_stamp_binding` to recompute the
+    imagery digest a scale claim's covered bucket names.
 
     ``asserted``, mirroring :func:`reconcile_operating_point_validity`, may only lower the on-disk
     result, never raise it: a caller string can never launder an ungrounded scale into a shippable one.
@@ -2275,7 +2299,7 @@ def reconcile_scale_validity(
                     "delivery in another."
                 )
         binding = verify_stamp_binding(sc, d, document="resolve_scale", trait=trait,
-                                       digest_memo=memo)
+                                       digest_memo=memo, images_dir=images_dir)
         if not binding.ok:
             binding_notes[str(d)] = binding.note
             ref = VALIDATED_FALSE

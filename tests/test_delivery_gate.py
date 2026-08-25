@@ -381,6 +381,7 @@ def test_export_aggregated_csv_regression_trait_ships_when_sidecar_validated(tmp
         pred_dirs=[bucket])
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
+    assert rows[0]["units"] == "mm"
 
 
 def test_export_aggregated_csv_ordinal_trait_floors_on_missing_sidecar(tmp_path):
@@ -1071,8 +1072,13 @@ def _write_scale_sidecar(path, *, validated_against, capture_id=None, value=0.05
         },
     }
     if is_validated:
+        from tcip_mcp.prediction_buckets import bucket_stems
+
+        images_dir = path.parent.parent / "images"
+        for stem in bucket_stems(path):
+            _write_bucket_image(images_dir, stem)
         write_bound_sidecar(path, stamp, document="resolve_scale", dataset_root=path.parent.parent,
-                            experiment_id=f"exp-scale-{path.name}")
+                            images_dir=images_dir, experiment_id=f"exp-scale-{path.name}")
     else:
         (path / "resolve_scale.json").write_text(json.dumps(stamp), encoding="utf-8")
     return str(path)
@@ -1090,7 +1096,7 @@ def test_export_aggregated_csv_ships_dimensional_value_with_a_validated_scale(tm
     _write_scale_sidecar(Path(d), validated_against=VALIDATED_PHYSICAL_MEASUREMENT)
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
-                          pred_dirs=[d])
+                          pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"))
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
     assert rows[0]["units"] == "mm2"
@@ -1106,7 +1112,8 @@ def test_export_aggregated_csv_refuses_a_dimensional_delivery_with_no_scale_side
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
-                              trait_name="plant_surface_area", pred_dirs=[d])
+                              trait_name="plant_surface_area", pred_dirs=[d],
+                              images_dir=str(tmp_path / "ds" / "images"))
 
 
 def test_export_aggregated_csv_count_trait_never_gates_on_scale(tmp_path):
@@ -1137,6 +1144,7 @@ def test_export_aggregated_csv_scale_capture_id_mismatch_floors(tmp_path):
     with pytest.raises(ValueError, match="unvalidated measurement"):
         export_aggregated_csv(_DIM_RESULTS, str(tmp_path / "o.csv"),
                               trait_name="plant_surface_area", pred_dirs=[d],
+                              images_dir=str(tmp_path / "ds" / "images"),
                               scale_capture_id="2026-02-10_plot9")
 
 
@@ -1151,7 +1159,8 @@ def test_export_aggregated_csv_scale_capture_id_match_ships(tmp_path):
                          capture_id="2026-02-10_plot7")
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
-                          pred_dirs=[d], scale_capture_id="2026-02-10_plot7")
+                          pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
+                          scale_capture_id="2026-02-10_plot7")
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
 
@@ -1165,7 +1174,8 @@ def test_export_aggregated_csv_acknowledged_unvalidated_scale_floors_the_row_sta
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT, trait="plant_surface_area")
     out = tmp_path / "o.csv"
     export_aggregated_csv(_DIM_RESULTS, str(out), trait_name="plant_surface_area",
-                          pred_dirs=[d], acknowledge_unvalidated=True)
+                          pred_dirs=[d], images_dir=str(tmp_path / "ds" / "images"),
+                          acknowledge_unvalidated=True)
     rows = list(csv.DictReader(out.open()))
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
@@ -1537,11 +1547,12 @@ def _write_reference_bbox(labels_dir, stem, *, subject, points, width=1000, heig
     json_io.write_annotations(str(labels_dir / f"{stem}.json"), [ann], width, height)
 
 
-def _write_reference_csv(path, rows):
-    """``rows`` is ``[(stem, physical_extent, unit), ...]``."""
+def _write_reference_csv(path, rows, header=("image_stem", "physical_extent", "unit")):
+    """``rows`` is ``[(stem, physical_extent, unit), ...]`` by default; ``header`` names the columns
+    those rows are written under."""
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["image_stem", "physical_extent", "unit"])
+        writer.writerow(list(header))
         for row in rows:
             writer.writerow(row)
 
@@ -1552,14 +1563,25 @@ def _author_scale_tolerance(tmp_path, trait, tolerance_frac=0.1):
     write_trait_spec_fields(trait, {"scale_tolerance_frac": tolerance_frac}, project_root=tmp_path)
 
 
+def _write_bucket_image(images_dir, stem, *, color=(120, 120, 120)):
+    """A real, tiny image file for ``stem``, so a bucket's imagery digest has real bytes to read."""
+    from PIL import Image
+
+    Path(images_dir).mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (8, 8), color).save(Path(images_dir) / f"{stem}.png")
+
+
 def _calibration_setup(tmp_path, *, lengths_px, unit="mm", angle_deg_by_index=None):
     """A bucket carrying one real prediction plus one reference-object image per entry in
     ``lengths_px``, and the reference labels/CSV a calibrate_physical_scale call reads, each
-    reference's physical_extent derived from the same fixed scale. Returns (pred_dir, labels_dir,
-    reference_csv, stems, group_key_map)."""
+    reference's physical_extent derived from the same fixed scale. Every stem also gets a real image
+    file under the dataset's own images directory, since the scale claim binds to that imagery.
+    Returns (pred_dir, labels_dir, reference_csv, stems, group_key_map, images_dir)."""
     root = tmp_path / "ds"
     pred_dir = root / "predictions" / "preds"
+    images_dir = root / "images"
     write_prediction(pred_dir, "img_a")
+    _write_bucket_image(images_dir, "img_a")
     labels_dir = tmp_path / "reference_labels"
     csv_path = tmp_path / "reference.csv"
     stems = [f"r{i}" for i in range(1, len(lengths_px) + 1)]
@@ -1570,11 +1592,12 @@ def _calibration_setup(tmp_path, *, lengths_px, unit="mm", angle_deg_by_index=No
         _write_reference_annotation(labels_dir, stem, subject="cal_bar",
                                     points_by_annotation=[points])
         write_prediction(pred_dir, stem)
+        _write_bucket_image(images_dir, stem)
         physical = round(length_px / _SCALE_PX_PER_MM, 6)
         rows.append((stem, physical, unit))
     _write_reference_csv(csv_path, rows)
     group_key_map = {s: s for s in stems}
-    return str(pred_dir), str(labels_dir), str(csv_path), stems, group_key_map
+    return str(pred_dir), str(labels_dir), str(csv_path), stems, group_key_map, str(images_dir)
 
 
 def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_path):
@@ -1588,6 +1611,7 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
     # References are written into the bucket before it seals, so the count operating point's
     # digest covers the final file set (adding files after sealing would invalidate that claim).
     bucket_dir = tmp_path / "ds" / "predictions" / "preds"
+    images_dir = tmp_path / "ds" / "images"
     labels_dir = tmp_path / "reference_labels"
     ref_csv = tmp_path / "reference.csv"
     stems = ["r1", "r2", "r3", "r4"]
@@ -1597,17 +1621,19 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
         _write_reference_annotation(labels_dir, stem, subject="cal_bar",
                                     points_by_annotation=[points])
         write_prediction(bucket_dir, stem)
+        _write_bucket_image(images_dir, stem)
         rows.append((stem, round(100.0 / _SCALE_PX_PER_MM, 6), "mm"))
     _write_reference_csv(ref_csv, rows)
     group_key_map = {s: s for s in stems}
 
     bucket = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT,
                            trait="plant_surface_area")
+    _write_bucket_image(images_dir, "img_a")
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=bucket, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=str(labels_dir),
-        reference_csv=str(ref_csv), group_key_map=group_key_map)
+        images_dir=str(images_dir), unit="mm", reference_subject="cal_bar",
+        labels_dir=str(labels_dir), reference_csv=str(ref_csv), group_key_map=group_key_map)
 
     assert result["passed"] is True, result
     assert result["value"] == pytest.approx(0.1)  # 10 mm implied over a 100 px reference length
@@ -1615,7 +1641,8 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
 
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, reconcile_scale_validity
 
-    recon = reconcile_scale_validity([bucket], unit="mm", trait="plant_surface_area")
+    recon = reconcile_scale_validity([bucket], unit="mm", trait="plant_surface_area",
+                                     images_dir=str(images_dir))
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
 
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
@@ -1624,7 +1651,7 @@ def test_calibrate_physical_scale_whole_chain_delivers_a_validated_mm2_area(tmp_
     export_aggregated_csv(
         [{"plant_id": "p1", "value": 12.5, "observations": 1, "value_key": "area_mm2",
          "measurement_document": "operating_point", "scale_document": "resolve_scale"}],
-        str(out), trait_name="plant_surface_area", pred_dirs=[bucket])
+        str(out), trait_name="plant_surface_area", pred_dirs=[bucket], images_dir=str(images_dir))
     out_rows = list(csv.DictReader(out.open()))
     assert out_rows[0]["measurement_validated"] == VALIDATED_HELD_OUT
     assert out_rows[0]["units"] == "mm2"
@@ -1636,20 +1663,60 @@ def test_calibrate_physical_scale_survives_a_prediction_re_export(tmp_path):
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert result["passed"] is True, result
 
     write_prediction(Path(pred_dir), "img_a", count=9)  # re-export: same images, new bytes
 
     from tcip_mcp.pipelines.resolution import VALIDATED_PHYSICAL_MEASUREMENT, reconcile_scale_validity
 
-    recon = reconcile_scale_validity([pred_dir], unit="mm", trait="plant_surface_area")
+    recon = reconcile_scale_validity([pred_dir], unit="mm", trait="plant_surface_area",
+                                     images_dir=images_dir)
     assert recon["validated"] == VALIDATED_PHYSICAL_MEASUREMENT
+
+
+def test_calibrate_physical_scale_refuses_a_replaced_image_under_the_same_stem(tmp_path):
+    """A scale claim binds to the bucket's own imagery, not its stem names: an image swapped under
+    the same filename must not leave the claim standing, even though no stem was added or removed."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
+    assert result["passed"] is True, result
+
+    _write_bucket_image(images_dir, "img_a", color=(1, 2, 3))  # same filename, different bytes
+
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, reconcile_scale_validity
+
+    recon = reconcile_scale_validity([pred_dir], unit="mm", trait="plant_surface_area",
+                                     images_dir=images_dir)
+    assert recon["validated"] == VALIDATED_FALSE
+    assert recon["unvalidated_buckets"] == [pred_dir]
+
+
+def test_bucket_stems_digest_refuses_a_stem_with_no_image_under_the_directory(tmp_path):
+    """A bucket whose stem has no image under the directory it is bound to is a bucket and an
+    image directory that do not belong together: the digest names the stem rather than hashing
+    the image as empty, which would let a claim seal against imagery that is not there."""
+    from tcip_mcp.prediction_buckets import bucket_stems_digest
+
+    pred_dir, _labels_dir, _ref_csv, _stems, _group_key_map, images_dir = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+    assert bucket_stems_digest(pred_dir, images_dir=images_dir)
+    (Path(pred_dir) / "orphan.json").write_text('{"boxes": [], "scores": [], "labels": []}',
+                                                encoding="utf-8")
+    with pytest.raises(ValueError, match="orphan"):
+        bucket_stems_digest(pred_dir, images_dir=images_dir)
 
 
 def test_calibrate_physical_scale_copied_sidecar_refuses(tmp_path):
@@ -1658,12 +1725,12 @@ def test_calibrate_physical_scale_copied_sidecar_refuses(tmp_path):
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert result["passed"] is True, result
 
     from tcip_mcp.pipelines.resolution import (
@@ -1677,7 +1744,8 @@ def test_calibrate_physical_scale_copied_sidecar_refuses(tmp_path):
     write_prediction(other, "img_z")
     write_sidecar(other, read_scale_sidecar(pred_dir), "resolve_scale")
 
-    recon = reconcile_scale_validity([str(other)], unit="mm", trait="plant_surface_area")
+    recon = reconcile_scale_validity([str(other)], unit="mm", trait="plant_surface_area",
+                                     images_dir=images_dir)
     assert recon["validated"] == VALIDATED_FALSE
     assert recon["unvalidated_buckets"] == [str(other)]
 
@@ -1688,7 +1756,7 @@ def test_calibrate_physical_scale_refuses_a_box_reference_geometry(tmp_path):
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0])
     # Overwrite one reference's annotation with a BBox instead of a Polygon.
     _write_reference_bbox(Path(labels_dir), stems[0], subject="cal_bar",
@@ -1696,8 +1764,8 @@ def test_calibrate_physical_scale_refuses_a_box_reference_geometry(tmp_path):
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert "error" in result
     assert "Polygon" in result["error"] or "polygon" in result["error"]
 
@@ -1708,7 +1776,7 @@ def test_calibrate_physical_scale_refuses_a_reference_stem_outside_the_bucket(tm
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0])
     # Add a reference row/annotation for a stem never written into the bucket.
     _write_reference_annotation(Path(labels_dir), "outsider", subject="cal_bar",
@@ -1718,8 +1786,8 @@ def test_calibrate_physical_scale_refuses_a_reference_stem_outside_the_bucket(tm
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map={**group_key_map, "outsider": "outsider"})
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map={**group_key_map, "outsider": "outsider"})
     assert "error" in result
     assert "outsider" in result["error"]
 
@@ -1730,7 +1798,7 @@ def test_calibrate_physical_scale_refuses_an_image_with_two_reference_annotation
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0])
     _write_reference_annotation(
         Path(labels_dir), stems[0], subject="cal_bar",
@@ -1738,8 +1806,8 @@ def test_calibrate_physical_scale_refuses_an_image_with_two_reference_annotation
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert "error" in result
 
 
@@ -1748,15 +1816,32 @@ def test_calibrate_physical_scale_refuses_with_no_authored_tolerance(tmp_path):
     and names the field, never validating against a platform-invented number."""
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
-    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert "error" in result
     assert "scale_tolerance_frac" in result["error"]
+
+
+def test_calibrate_physical_scale_refuses_a_non_length_unit(tmp_path):
+    """The scale's unit must be a length: a per-pixel scale in grams is a contradiction, so the tool
+    refuses naming the unit rather than stamping a mass as though it were a linear scale."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0], unit="g")
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
+        images_dir=images_dir, unit="g", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
+    assert "error" in result
+    assert "g" in result["error"]
 
 
 def test_resolve_physical_scale_refuses_too_few_references_per_half(tmp_path):
@@ -1765,13 +1850,13 @@ def test_resolve_physical_scale_refuses_too_few_references_per_half(tmp_path):
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0])
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert result["passed"] is False
     assert any(f.startswith("insufficient_") for f in result["failures"]), result["failures"]
 
@@ -1803,8 +1888,8 @@ def test_resolve_physical_scale_refuses_a_wildly_inconsistent_reference_set(tmp_
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=str(pred_dir), dataset_root=str(root),
-        unit="mm", reference_subject="cal_bar", labels_dir=str(labels_dir),
-        reference_csv=str(csv_path), group_key_map=group_key_map)
+        images_dir=str(root / "images"), unit="mm", reference_subject="cal_bar",
+        labels_dir=str(labels_dir), reference_csv=str(csv_path), group_key_map=group_key_map)
     assert result["passed"] is False, result
 
 
@@ -1814,12 +1899,153 @@ def test_calibrate_physical_scale_a_45_degree_bar_validates_the_same_as_axis_ali
     from tcip_mcp.tools.scale_tools import calibrate_physical_scale
 
     _author_scale_tolerance(tmp_path, "plant_surface_area")
-    pred_dir, labels_dir, ref_csv, _stems, group_key_map = _calibration_setup(
+    pred_dir, labels_dir, ref_csv, _stems, group_key_map, images_dir = _calibration_setup(
         tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0], angle_deg_by_index={0: 45.0})
 
     result = calibrate_physical_scale(
         trait="plant_surface_area", pred_dir=pred_dir, dataset_root=str(tmp_path / "ds"),
-        unit="mm", reference_subject="cal_bar", labels_dir=labels_dir, reference_csv=ref_csv,
-        group_key_map=group_key_map)
+        images_dir=images_dir, unit="mm", reference_subject="cal_bar", labels_dir=labels_dir,
+        reference_csv=ref_csv, group_key_map=group_key_map)
     assert result["passed"] is True, result
     assert result["value"] == pytest.approx(0.1)  # 10 mm implied over a 100 px reference length
+
+
+def test_calibrate_physical_scale_defaults_to_stem_grouping_for_ordinary_camera_filenames(tmp_path):
+    """Reference objects are not tiles: the default group_by must not collapse ordinary same-prefix
+    camera filenames into one group and starve one half of the locked split, the way the tile-
+    offset-stripping ``tile_prefix`` default would (``splits.default_group_key`` strips a trailing
+    ``_<row>_<col>``, and ``IMG_<date>_<n>`` matches that shape once four such stems share a date)."""
+    from tcip_mcp.tools.scale_tools import calibrate_physical_scale
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    root = tmp_path / "ds"
+    pred_dir = root / "predictions" / "preds"
+    images_dir = root / "images"
+    write_prediction(pred_dir, "img_a")
+    _write_bucket_image(images_dir, "img_a")
+    labels_dir = tmp_path / "reference_labels"
+    csv_path = tmp_path / "reference.csv"
+    stems = [f"IMG_20240513_{i:04d}" for i in range(1, 5)]
+    rows = []
+    for stem in stems:
+        points = _rect_points(100.0, 10.0)
+        _write_reference_annotation(labels_dir, stem, subject="cal_bar",
+                                    points_by_annotation=[points])
+        write_prediction(pred_dir, stem)
+        _write_bucket_image(images_dir, stem)
+        rows.append((stem, round(100.0 / _SCALE_PX_PER_MM, 6), "mm"))
+    _write_reference_csv(csv_path, rows)
+
+    result = calibrate_physical_scale(
+        trait="plant_surface_area", pred_dir=str(pred_dir), dataset_root=str(root),
+        images_dir=str(images_dir), unit="mm", reference_subject="cal_bar",
+        labels_dir=str(labels_dir), reference_csv=str(csv_path))
+    assert result["passed"] is True, result
+    assert result["value"] == pytest.approx(0.1)
+
+
+# ── the reference CSV reader: read by name, refuse rather than guess ──────
+
+def test_read_reference_csv_reads_a_reordered_header_by_name(tmp_path):
+    """The header is read by name, not by position: reordering (or extending) the columns still
+    resolves the three this reads."""
+    from tcip_mcp.tools.scale_tools import _read_reference_csv
+
+    path = tmp_path / "reference.csv"
+    _write_reference_csv(path, [("mm", "r1", 10.0), ("mm", "r2", 12.5)],
+                         header=("unit", "image_stem", "physical_extent"))
+    refs = _read_reference_csv(str(path))
+    assert refs == {"r1": {"physical_extent": 10.0, "unit": "mm"},
+                    "r2": {"physical_extent": 12.5, "unit": "mm"}}
+
+
+def test_read_reference_csv_refuses_a_non_numeric_extent_naming_its_line(tmp_path):
+    from tcip_mcp.tools.scale_tools import ReferenceCsvError, _read_reference_csv
+
+    path = tmp_path / "reference.csv"
+    _write_reference_csv(path, [("r1", "10.0", "mm"), ("r2", "not-a-number", "mm")])
+    with pytest.raises(ReferenceCsvError, match=r":3\b.*non-numeric"):
+        _read_reference_csv(str(path))
+
+
+def test_read_reference_csv_refuses_a_duplicate_stem_naming_it(tmp_path):
+    from tcip_mcp.tools.scale_tools import ReferenceCsvError, _read_reference_csv
+
+    path = tmp_path / "reference.csv"
+    _write_reference_csv(path, [("r1", "10.0", "mm"), ("r1", "11.0", "mm")])
+    with pytest.raises(ReferenceCsvError, match="r1"):
+        _read_reference_csv(str(path))
+
+
+def test_read_reference_csv_refuses_a_short_row_naming_its_line(tmp_path):
+    from tcip_mcp.tools.scale_tools import ReferenceCsvError, _read_reference_csv
+
+    path = tmp_path / "reference.csv"
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["image_stem", "physical_extent", "unit"])
+        w.writerow(["r1", "10.0"])
+    with pytest.raises(ReferenceCsvError, match=r":2\b"):
+        _read_reference_csv(str(path))
+
+
+# ── a mapping resolver's value reaches the stamp/gate agreement check ─────
+
+def test_seal_validation_refuses_a_scale_stamp_whose_value_disagrees_with_the_gate(tmp_path):
+    """``resolve_physical_scale`` returns a mapping, never a ``ResolvedParam``; ``_resolver_value``
+    must still read its ``value`` so a stamp asserting a different number than the gate resolved is
+    caught rather than sealed as though the gate had seen it."""
+    import hashlib
+
+    from tcip_annotation import json_io
+    from tcip_mcp.pipelines.measurement.mask_geometry import principal_axis_extent_of_points
+    from tcip_mcp.pipelines.resolution import (
+        csv_dataset_hash,
+        dataset_hash,
+        open_validation,
+        seal_validation,
+    )
+    from tcip_mcp.tools.scale_tools import _read_reference_csv
+
+    _author_scale_tolerance(tmp_path, "plant_surface_area")
+    pred_dir, labels_dir, ref_csv, stems, group_key_map, images_dir = _calibration_setup(
+        tmp_path, lengths_px=[100.0, 100.0, 100.0, 100.0])
+
+    references_raw = _read_reference_csv(ref_csv)
+    references = {}
+    for stem, row in sorted(references_raw.items()):
+        annotations = [a for a in json_io.read_annotations(str(Path(labels_dir) / f"{stem}.json"))
+                      if a.subject == "cal_bar"]
+        points = [p for ring in annotations[0].geometry.rings for p in ring]
+        references[stem] = {"physical_extent": row["physical_extent"], "unit": row["unit"],
+                            "pixel_extent": principal_axis_extent_of_points(points)}
+    identity_hash = hashlib.sha256(
+        f"{csv_dataset_hash(ref_csv)}:{dataset_hash(labels_dir, stems=sorted(references_raw))}"
+        .encode()
+    ).hexdigest()[:16]
+
+    draft = open_validation(
+        document="resolve_scale",
+        evidence={"resolver": "resolve_physical_scale",
+                  "inputs": {"unit": "mm", "references": references, "tolerance_frac": 0.1,
+                             "dataset_root": str(tmp_path / "ds"), "identity_hash": identity_hash,
+                             "group_by": "stem", "group_key_map": group_key_map, "seed": 0,
+                             "holdout_ratio": 0.5, "capture_id": None}},
+        trait="plant_surface_area", checkpoint_sha256=None, producing_experiment_id=None,
+        reference_inputs={"dataset_root": str(tmp_path / "ds"),
+                          "label_dirs": {"reference": labels_dir},
+                          "label_csvs": {"reference": ref_csv},
+                          "stated_values": {"split_identity": identity_hash}},
+    )
+    assert draft.result["value"] == pytest.approx(0.1)
+
+    wrong_stamp = {
+        "operating_point": {"scale": {
+            "name": "scale_mm_per_px", "value": 999.0, "unit": "mm",
+            "validated_against": draft.validated_against,
+        }},
+        "validated": True, "trait": "plant_surface_area",
+    }
+    with pytest.raises(ValueError, match="gate"):
+        seal_validation(draft, dataset_root=str(tmp_path / "ds"), bucket_dirs=[pred_dir],
+                        stamp_body=wrong_stamp, images_dir=images_dir)

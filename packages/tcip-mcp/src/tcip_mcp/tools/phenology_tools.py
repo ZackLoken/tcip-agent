@@ -621,7 +621,7 @@ def calibrate_ordinal_regression_operating_point(
     if disagreement:
         return {"error": disagreement}
 
-    from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
+    from tcip_mcp.pipelines.data.splits import cal_holdout_scope_root, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
@@ -656,7 +656,7 @@ def calibrate_ordinal_regression_operating_point(
     identity_hash = csv_dataset_hash(csv_path)
     try:
         locked = resolve_locked_cal_holdout_split(
-            stems, identity_hash=identity_hash, scope_root=dataset_root,
+            stems, identity_hash=identity_hash, scope_root=cal_holdout_scope_root(dataset_root),
             group_by=group_by, group_key_map=group_key_map,
             seed=seed, holdout_ratio=holdout_ratio,
         )

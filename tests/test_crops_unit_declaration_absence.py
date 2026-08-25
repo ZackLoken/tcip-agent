@@ -107,9 +107,8 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(tm
     that the measurement is refused: an mm-keyed area still resolves to its own squared label. A
     stand-in unit in the mapping would turn this legitimate delivery into a mismatch refusal."""
     results = [{"plant_id": "PLANT_001", "value": 812.5, "observations": 2,
-                "value_key": "area_mm2", "measurement_document": "operating_point",
-                "scale_document": "resolve_scale"}]
-    assert _resolve_units("plant_surface_area", results) == ("mm2", "mm")
+                "value_key": "area_mm2", "measurement_document": "operating_point"}]
+    assert _resolve_units("plant_surface_area", results, "operating_point") == ("mm2", "mm")
 
     out_path = tmp_path / "area.csv"
     export_aggregated_csv(results, str(out_path), trait_name="plant_surface_area",

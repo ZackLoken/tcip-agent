@@ -18,7 +18,7 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | crop | string | Crop species |
 | trait_name | string | Measured trait (from crop skill) |
 | value | float/string | Measurement value |
-| units | string | Physical unit implied by the value's own `value_key`; blank when the key implies none (a count, a px-space value), never inherited from `crops.yml` |
+| units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. Under `operating_point`, a unit-declared trait's `value_key` must itself imply a unit; a px-space value refuses rather than shipping blank. Under a scalar head (`ordinal_operating_point`/`regression_operating_point`), a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` instead of blank, since a calibrated head predicts in that unit by construction |
 | value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
 | measurement_document | string | Which sidecar document (`operating_point`, `ordinal_operating_point`, `regression_operating_point`) answers for the measurement that produced `value`, stated by the caller's records and checked against every named bucket |
 | scale_document | string | `resolve_scale` when a per-pixel physical scale produced `value`, blank otherwise |

@@ -23,19 +23,59 @@ from tcip_mcp.server import mcp
 logger = logging.getLogger(__name__)
 
 
+_REFERENCE_CSV_COLUMNS = ("image_stem", "physical_extent", "unit")
+
+
+class ReferenceCsvError(ValueError):
+    """A reference CSV's header or a row is malformed; the tool reports this rather than guessing
+    through a short row, a non-numeric extent or a repeated stem."""
+
+
 def _read_reference_csv(csv_path: str) -> dict[str, dict[str, float | str]]:
     """``stem -> {"physical_extent": float, "unit": str}`` from the breeder's reference CSV
     (``image_stem, physical_extent, unit``, one row per reference image), the same standing a
-    ground-truth CSV has for ``calibrate_ordinal_regression_operating_point``."""
+    ground-truth CSV has for ``calibrate_ordinal_regression_operating_point``.
+
+    The header is read by name, not by position, so a reordered or extended CSV still resolves the
+    three columns this reads. A row with a missing or non-numeric ``physical_extent``, or a stem
+    already seen earlier in the file, raises :class:`ReferenceCsvError` naming its line rather than
+    being silently skipped or silently overwriting the earlier row.
+    """
     out: dict[str, dict[str, float | str]] = {}
     with open(csv_path, newline="") as f:
         reader = csv.reader(f)
-        next(reader, None)
-        for row in reader:
-            if len(row) < 3:
-                continue
-            stem, extent, row_unit = row[0].strip(), row[1].strip(), row[2].strip()
-            out[stem] = {"physical_extent": float(extent), "unit": row_unit}
+        header = next(reader, None)
+        if header is None:
+            return out
+        indices = {name: header.index(name) for name in _REFERENCE_CSV_COLUMNS if name in header}
+        missing = [name for name in _REFERENCE_CSV_COLUMNS if name not in indices]
+        if missing:
+            raise ReferenceCsvError(
+                f"{csv_path} is missing required column(s) {missing} in its header {header!r}; "
+                f"expected {list(_REFERENCE_CSV_COLUMNS)}."
+            )
+        for line_no, row in enumerate(reader, start=2):
+            if len(row) < len(header):
+                raise ReferenceCsvError(
+                    f"{csv_path}:{line_no} has {len(row)} column(s), fewer than the header's "
+                    f"{len(header)}."
+                )
+            stem = row[indices["image_stem"]].strip()
+            extent_text = row[indices["physical_extent"]].strip()
+            row_unit = row[indices["unit"]].strip()
+            try:
+                extent = float(extent_text)
+            except ValueError:
+                raise ReferenceCsvError(
+                    f"{csv_path}:{line_no} has a non-numeric physical_extent {extent_text!r} for "
+                    f"stem {stem!r}."
+                ) from None
+            if stem in out:
+                raise ReferenceCsvError(
+                    f"{csv_path}:{line_no} repeats stem {stem!r}, already read earlier in the file; "
+                    "a reference CSV names each image once."
+                )
+            out[stem] = {"physical_extent": extent, "unit": row_unit}
     return out
 
 
@@ -45,12 +85,13 @@ def calibrate_physical_scale(
     trait: str,
     pred_dir: str,
     dataset_root: str,
+    images_dir: str,
     unit: str,
     reference_subject: str,
     labels_dir: str,
     reference_csv: str,
     capture_id: str | None = None,
-    group_by: str = "tile_prefix",
+    group_by: str = "stem",
     group_key_map: dict[str, str] | None = None,
     seed: int = 0,
     holdout_ratio: float = 0.5,
@@ -69,23 +110,26 @@ def calibrate_physical_scale(
     The scale is derived on a locked calibration half of the references and validated against the
     holdout half it was not derived from (``scale_calibration.resolve_physical_scale``), against
     ``trait``'s own authored ``scale_tolerance_frac``; a trait with none authored refuses rather than
-    validating against a platform-invented number.
+    validating against a platform-invented number. ``unit`` must be a linear length unit crops.yml
+    declares (``traits.crops_length_units``): a per-pixel scale is a length-per-pixel quantity, and a
+    mass or other non-length unit refuses rather than being silently accepted.
 
     On a pass, ``open_validation``/``seal_validation`` earn and record the claim the same two-phase
-    way every other calibration door does, with ``covered_buckets`` keyed by ``pred_dir``'s own image
-    stems (never its prediction bytes): re-exporting predictions over the same images leaves the
-    scale claim standing, while an image added to or removed from the bucket floors it, a real
-    reason to re-run this tool. ``write_sidecar`` writes the stamp last, whether or not the gate
-    passed, so a failed calibration still leaves a readable, honestly-unvalidated record of what was
-    tried.
+    way every other calibration door does, with ``covered_buckets`` keyed by a digest over the bytes
+    of ``pred_dir``'s own images in ``images_dir`` (never its prediction bytes): re-exporting
+    predictions over the same images leaves the scale claim standing, while an image added to,
+    removed from, or replaced in the bucket floors it, a real reason to re-run this tool.
+    ``write_sidecar`` writes the stamp last, whether or not the gate passed, so a failed calibration
+    still leaves a readable, honestly-unvalidated record of what was tried.
 
     Args:
         trait: The registered trait this physical scale is earned for; a delivery reading a
             different trait's scale floors (``reconcile_scale_validity``).
-        pred_dir: The prediction bucket to stamp; the scale claim binds to this bucket's own image
-            stems.
+        pred_dir: The prediction bucket to stamp; the scale claim binds to this bucket's own imagery.
         dataset_root: The dataset this calibration's claim hangs off; the reference locations and
             the locked split are recorded and stored against it.
+        images_dir: Directory holding the bucket's own images, one per predicted stem; hashed (not
+            the stems alone) to bind the claim to the imagery it was earned on.
         unit: The physical unit every reference (and the stamped scale) is in; a reference CSV row
             in a different unit refuses rather than being silently converted.
         reference_subject: The ``classes.json`` subject the reference object is annotated as.
@@ -96,9 +140,13 @@ def calibrate_physical_scale(
             bucket.
         group_by / group_key_map / seed / holdout_ratio: The locked cal/holdout split's grouping
             policy, same semantics as the ordinal/regression calibrator's own arguments; only the
-            first call for this reference's identity draws the split.
+            first call for this reference's identity draws the split. ``group_by`` defaults to
+            ``"stem"``: reference objects are not tiles, so the ``"tile_prefix"`` default
+            (``splits.default_group_key``, which strips a trailing ``_<row>_<col>`` tile offset)
+            would collapse ordinary same-prefix camera filenames like
+            ``IMG_20240513_0001``..``0004`` into one group, starving both halves of a locked split.
     """
-    from tcip_mcp.traits import TraitUnknownError, get_trait
+    from tcip_mcp.traits import TraitUnknownError, crops_length_units, get_trait
 
     try:
         spec = get_trait(trait)
@@ -109,6 +157,13 @@ def calibrate_physical_scale(
             f"trait {trait!r} has no authored scale_tolerance_frac; a physical-scale gate has no "
             "platform-provisional fallback for how much reference disagreement is acceptable. "
             "Author it via update_trait_spec_fields before calibrating this trait's scale."
+        )}
+    length_units = crops_length_units()
+    if unit not in length_units:
+        return {"error": (
+            f"unit {unit!r} is not a linear length unit crops.yml declares ({sorted(length_units)}); "
+            "a per-pixel scale is a length-per-pixel quantity, and a mass or other non-length unit "
+            "is a contradiction."
         )}
 
     from tcip_mcp.tools.phenology_tools import _stated_root_disagreement
@@ -224,7 +279,7 @@ def calibrate_physical_scale(
             },
         )
         _, stamp = seal_validation(draft, dataset_root=dataset_root, bucket_dirs=[pred_dir],
-                                   stamp_body=stamp)
+                                   stamp_body=stamp, images_dir=images_dir)
     write_sidecar(pred_dir, stamp, "resolve_scale")
     return {
         "pred_dir": pred_dir,

@@ -255,6 +255,23 @@ def crops_units() -> dict[str, str]:
     return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
 
 
+_METRIC_LENGTH_UNITS = {"mm", "cm", "m", "km", "um"}
+"""The metric length-unit symbols a physical scale may legitimately be expressed in, a dimensional
+fact about these symbols, not a trait-by-trait choice: it never grows or shrinks with which traits
+crops.yml happens to declare. ``crops_length_units`` intersects this against crops.yml's actual
+declared vocabulary, so the length subset always reflects what the vocabulary really contains."""
+
+
+def crops_length_units() -> set[str]:
+    """The subset of :func:`crops_units`'s own declared units that are linear length units.
+
+    Picked out of whatever crops.yml actually declares by a dimensional rule (a unit symbol that
+    names a metric length), never a hand list of which traits use one: a mass unit (``g``/``kg``) or
+    a mass-ratio concentration (``ug/g``) is never a length regardless of how a trait spells it, and
+    a per-pixel physical scale (a length-per-pixel quantity) is refused in any other unit."""
+    return {u for u in crops_units().values() if u in _METRIC_LENGTH_UNITS}
+
+
 def crops_definitions() -> dict[str, str]:
     """trait name -> crops.yml's declared definition, for every trait that carries one.
 
