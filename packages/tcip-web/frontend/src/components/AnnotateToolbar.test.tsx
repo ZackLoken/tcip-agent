@@ -165,9 +165,12 @@ describe("AnnotateToolbar subject authoring", () => {
     // An untrimmed registry key would open a second subject that reads as the first.
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }));
-    const saveSpy = vi
-      .spyOn(classesApi, "save")
-      .mockResolvedValue({ status: "ok", n_subjects: 2, classes_path: "C:/data/classes.json" });
+    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 2,
+      classes_path: "C:/data/classes.json",
+      version: "v1",
+    });
     answerPrompt("  husk  ");
     renderToolbar();
 
@@ -188,9 +191,12 @@ describe("AnnotateToolbar subject authoring", () => {
       attributes: { stage: { type: "ordinal" as const, values: ["early", "late"] } },
     };
     act(() => useStore.getState().setRegistry({ leaf: leafDef, husk: {} }));
-    const saveSpy = vi
-      .spyOn(classesApi, "save")
-      .mockResolvedValue({ status: "ok", n_subjects: 2, classes_path: "C:/data/classes.json" });
+    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 2,
+      classes_path: "C:/data/classes.json",
+      version: "v1",
+    });
     answerPrompt("leaf");
     renderToolbar();
 
@@ -207,9 +213,12 @@ describe("AnnotateToolbar subject authoring", () => {
   it("adds nothing when the prompt is dismissed or answered with only whitespace", async () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }));
-    const saveSpy = vi
-      .spyOn(classesApi, "save")
-      .mockResolvedValue({ status: "ok", n_subjects: 1, classes_path: "C:/data/classes.json" });
+    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 1,
+      classes_path: "C:/data/classes.json",
+      version: "v1",
+    });
     const promptSpy = answerPrompt(null);
     renderToolbar();
 
@@ -228,6 +237,45 @@ describe("AnnotateToolbar subject authoring", () => {
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
     expect(useStore.getState().gui.active_subject).toBeNull();
     expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("posts the loaded registry version and stores the version the save returns", async () => {
+    seedDataset();
+    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
+    const saveSpy = vi.spyOn(classesApi, "save").mockResolvedValue({
+      status: "ok",
+      n_subjects: 2,
+      classes_path: "C:/data/classes.json",
+      version: "v2",
+    });
+    answerPrompt("husk");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    expect(saveSpy.mock.calls[0][4]).toBe("v1");
+    expect(useStore.getState().registry.version).toBe("v2");
+  });
+
+  it("reloads the registry from the server when the save is refused", async () => {
+    seedDataset();
+    act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
+    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(classesApi, "load").mockResolvedValue({ subjects: { leaf: {} }, version: "v3" });
+    answerPrompt("husk");
+    renderToolbar();
+
+    openSubjectMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    // The refused optimistic add is discarded in favor of what the server actually holds.
+    expect(useStore.getState().registry.subjects).toEqual({ leaf: {} });
+    expect(useStore.getState().registry.version).toBe("v3");
   });
 });
 

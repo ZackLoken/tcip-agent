@@ -959,27 +959,46 @@ def stage_proposals(
 
 @mcp.tool()
 @audited(scope_arg="dataset_root")
-def write_class_map(dataset_root: str, subjects: dict, output_path: str = "") -> dict:
+def write_class_map(
+    dataset_root: str, subjects: dict, output_path: str = "", allow_removals: bool = False,
+) -> dict:
     """Author the dataset's nested class registry, a thin wrapper over ``class_registry``.
 
     ``subjects`` is the nested registry mapping the expert defines, subjects to their
     ``description`` / provenance and zero or more ``attributes`` (each ``categorical`` | ``ordinal``
     with ordered ``values``). It is validated through :func:`class_registry.registry_from_dict` (a
     malformed shape refuses loudly) and written to ``<dataset_root>/classes.json`` via
-    :func:`class_registry.write_registry`. No numeric class ids, no colors, no id enumeration: a
-    label-scan cannot infer an attribute's type or rank, the expert's fact is the input here.
+    :func:`class_registry.replace_registry`, which reads the current version and passes it straight
+    back in as that same call's own ``expect``. This call holds no version of its own to carry, the
+    way the GUI holds the one its last load returned: the read and the put happen back to back
+    inside this one call, so it guards only the store's own window between them, never a window
+    open before this call was made. A GUI edit landing in that earlier window that drops no
+    declared name is not caught by the by-name refusal and is silently overwritten by this write;
+    only a dropped name, an empty registry, or undecodable stored bytes are ever refused. No
+    numeric class ids, no colors, no id enumeration: a label-scan cannot infer an attribute's type
+    or rank, the expert's fact is the input here.
+
+    A write that would drop a subject, attribute or attribute value the stored registry declares
+    is refused (labels or confirmations may still reference the dropped name) unless
+    ``allow_removals`` is set, which states the removal as deliberate; the same flag also allows
+    replacing a stored registry whose bytes will not decode, since that is this tool's own repair
+    door.
 
     Changing a subject's attribute vocabulary invalidates the confirmations made under the old one,
-    so before the new registry lands, :func:`class_registry.stamp_unstamped_confirmations` records
-    the outgoing digest onto that subject's still-unstamped confirmations; they then read as
-    predating the change rather than as made under the new vocabulary. What it stamped, and any
-    warning if it could not, comes back under ``schema_change_sweep``.
+    so once the new registry lands, the outgoing digest is recorded onto that subject's still-
+    unstamped confirmations; they then read as predating the change rather than as made under the
+    new vocabulary. What was stamped, and any warning if the sweep could not complete, comes back
+    under ``schema_change_sweep``.
 
     Args:
         dataset_root: Dataset root; the registry is written to ``<dataset_root>/classes.json``.
         subjects: Nested ``{subject: {description?, defined_by?, defined_at?, attributes?}}`` dict.
         output_path: Optional explicit path (overrides ``<dataset_root>/classes.json``).
+        allow_removals: State a dropped name, or a stored registry that will not decode, as a
+            deliberate removal/repair rather than refusing it.
     """
+    from tcip_store import VersionConflict
+
     from tcip_mcp import class_registry
     from tcip_mcp.dataset_layout import classes_path
 
@@ -991,7 +1010,11 @@ def write_class_map(dataset_root: str, subjects: dict, output_path: str = "") ->
         return {"error": f"invalid registry: {exc}"}
 
     out = Path(output_path) if output_path else classes_path(dataset_root)
-    sweep = class_registry.stamp_unstamped_confirmations(out, registry)
-    class_registry.write_registry(out, registry)
+    expect = class_registry.read_version(out)
+    try:
+        result = class_registry.replace_registry(
+            out, registry, expect=expect, allow_removals=allow_removals)
+    except (class_registry.RegistryError, VersionConflict) as exc:
+        return {"error": str(exc)}
     return {"classes_path": str(out), "subjects": [s.name for s in registry.subjects],
-            "schema_change_sweep": sweep}
+            "schema_change_sweep": result["schema_change_sweep"]}

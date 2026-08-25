@@ -125,13 +125,18 @@ def load_classes(
 
     Resolution: the dataset's saved ``classes.json`` -> else a provisional registry of the subjects
     actually present in the labels (detection-only, no attributes) -> else empty. Returns
-    ``{"subjects": <nested registry mapping>}``.
+    ``{"subjects": <nested registry mapping>, "version": <token> | None}``: ``version`` is the
+    stored registry's compare-and-set token when one was saved, else ``None`` (a provisional or
+    empty registry names nothing to assert against). A save posting this ``version`` back is
+    refused with 409 if the stored registry has moved on since; a save posting ``None`` is an
+    unconditional write, since it names no version to assert against.
     """
     from tcip_mcp.class_registry import (
         ClassRegistry,
         RegistryError,
         Subject,
         read_registry,
+        read_version,
         registry_to_dict,
     )
     from tcip_mcp.dataset_layout import classes_path
@@ -141,17 +146,18 @@ def load_classes(
         p = classes_path(root)
         if p.exists():
             try:
-                return {"subjects": registry_to_dict(read_registry(p))}
+                registry = read_registry(p)
             except (OSError, RegistryError) as exc:
                 raise HTTPException(500, f"could not parse {p}: {exc}") from exc
+            return {"subjects": registry_to_dict(registry), "version": read_version(p).token}
 
     if annotations_dir and Path(annotations_dir).is_dir():
         subjects = _subjects_in_dir(Path(annotations_dir))
         if subjects:
             reg = ClassRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
-            return {"subjects": registry_to_dict(reg)}
+            return {"subjects": registry_to_dict(reg), "version": None}
 
-    return {"subjects": {}}
+    return {"subjects": {}, "version": None}
 
 
 class SaveClassesPayload(BaseModel):
@@ -159,22 +165,27 @@ class SaveClassesPayload(BaseModel):
     subjects: dict  # the nested registry mapping (subjects -> attributes -> values)
     dataset_root: Optional[str] = None
     annotations_dir: Optional[str] = None
+    # The version load_classes returned beside the registry this save was built from.
+    # None is an unconditional write; the toolbar always carries the version it loaded.
+    version: Optional[str] = None
 
 
 @router.post("/save")
 def save_classes(payload: SaveClassesPayload) -> dict:
-    """Write the dataset's class registry.
+    """Write the dataset's class registry through :func:`class_registry.replace_registry`.
 
-    Changing a subject's attribute vocabulary invalidates the confirmations made under the old one,
-    so ``stamp_unstamped_confirmations`` runs first, while the outgoing registry is still readable,
-    and records its digest onto that subject's still-unstamped confirmations. They then read as
-    predating the change instead of as made under the new vocabulary. Like ``_stamp_digest``, it
-    never blocks the write it accompanies; what it stamped, and any warning, ride back in
-    ``schema_change_sweep``.
+    Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
+    declares: the GUI's own save is additive by construction (see ``AnnotateToolbar``), so a drop
+    arriving here means the browser held a stale registry, and the refusal names what it would
+    have lost. Refuses (409) a stale ``version``. Changing a subject's attribute vocabulary
+    invalidates the confirmations made under the old one, so once the write lands the outgoing
+    digest is recorded onto that subject's still-unstamped confirmations; they then read as
+    predating the change instead of as made under the new vocabulary. That never blocks the write
+    it accompanies; what it stamped, and any warning, ride back in ``schema_change_sweep``.
     """
-    from tcip_mcp.class_registry import (
-        RegistryError, registry_from_dict, stamp_unstamped_confirmations, write_registry,
-    )
+    from tcip_store import Version, VersionConflict
+
+    from tcip_mcp.class_registry import RegistryError, registry_from_dict, replace_registry
     from tcip_mcp.dataset_layout import classes_path
 
     root = _resolve_dataset_root(payload.dataset_root, payload.annotations_dir)
@@ -187,20 +198,25 @@ def save_classes(payload: SaveClassesPayload) -> dict:
         raise HTTPException(400, f"invalid class registry: {exc}") from exc
     path = classes_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    sweep = stamp_unstamped_confirmations(path, registry)
-    if sweep["warning"]:
-        logger.warning("%s", sweep["warning"])
+    expect = Version(payload.version) if payload.version is not None else None
     try:
-        write_registry(path, registry)
+        result = replace_registry(path, registry, expect=expect)
+    except RegistryError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except VersionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except OSError as exc:
         raise HTTPException(500, f"could not write {path}: {exc}") from exc
+    sweep = result["schema_change_sweep"]
+    if sweep["warning"]:
+        logger.warning("%s", sweep["warning"])
     _audit_dataset_write(
         root, "gui_save_classes",
         {"classes_path": str(path), "n_subjects": len(registry.subjects),
          "confirmations_stamped_with_outgoing_schema": sweep["newly_stamped"]},
     )
     return {"status": "ok", "n_subjects": len(registry.subjects), "classes_path": str(path),
-            "schema_change_sweep": sweep}
+            "version": result["version"].token, "schema_change_sweep": sweep}
 
 
 # ── Per-image status (used by Complete checkbox + status filter) ─────────

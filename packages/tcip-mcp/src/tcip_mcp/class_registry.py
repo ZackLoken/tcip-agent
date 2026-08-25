@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from tcip_store import Key
+    from tcip_store import Key, Version
 
 #: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module docstring.
 ATTR_TYPES = ("categorical", "ordinal")
@@ -209,10 +209,13 @@ def read_registry(path: str | Path) -> ClassRegistry:
 
 
 def write_registry(path: str | Path, registry: ClassRegistry) -> None:
-    """Write a :class:`ClassRegistry` to ``classes.json``.
+    """Write a :class:`ClassRegistry` to ``classes.json``, unconditionally.
 
     Encoded through the canonical record codec object rather than a spelling of its own, so
     the ordered subject and attribute sequences land exactly as every other JSON document does.
+    A plain overwrite, with no compare-and-set and no refusal for a dropped name: a fixture or a
+    repair that means to place a registry outright uses this; the two doors a breeder or agent
+    actually authors a registry through call :func:`replace_registry` instead.
     """
     import tcip_store
 
@@ -221,9 +224,43 @@ def write_registry(path: str | Path, registry: ClassRegistry) -> None:
     )
 
 
-def stamp_unstamped_confirmations(path: str | Path, incoming: ClassRegistry) -> dict:
-    """Before ``incoming`` replaces the registry at ``path``, stamp the outgoing attribute-schema
-    digest onto every confirmation of an affected subject that carries no stamp yet.
+def read_version(path: str | Path) -> "Version":
+    """The class registry blob's current version token (``Version.ABSENT`` if it does not exist).
+
+    Reads the version alone, never the content, so it never raises on bytes that will not
+    decode: a caller that only wants a version to pass as :func:`replace_registry`'s ``expect``
+    does not need the stored registry to be readable first.
+    """
+    import tcip_store
+
+    return tcip_store.read_blob_versioned(_registry_key(path), default=None).version
+
+
+def _dropped_names(outgoing: ClassRegistry, incoming: ClassRegistry) -> list[str]:
+    """Every subject, attribute or attribute value ``outgoing`` declares that ``incoming`` does
+    not, dotted (``subject``, ``subject.attribute``, ``subject.attribute=value``)."""
+    dropped: list[str] = []
+    for s in outgoing.subjects:
+        new_s = incoming.subject(s.name)
+        if new_s is None:
+            dropped.append(s.name)
+            continue
+        for a in s.attributes:
+            new_a = new_s.attribute(a.name)
+            if new_a is None:
+                dropped.append(f"{s.name}.{a.name}")
+                continue
+            dropped.extend(
+                f"{s.name}.{a.name}={v}" for v in a.values if v not in new_a.values
+            )
+    return dropped
+
+
+def _sweep_schema_change(
+    dataset_root: Path, outgoing: ClassRegistry | None, incoming: ClassRegistry
+) -> dict:
+    """Stamp the outgoing attribute-schema digest onto every confirmation of an affected subject
+    that carries no stamp yet, before ``incoming`` is what a later read sees.
 
     A confirmation and its digest stamp are two transactions, status first, so a stamp that could not
     be written never rejects the human's confirmation and unstamped confirmations legitimately exist
@@ -231,19 +268,19 @@ def stamp_unstamped_confirmations(path: str | Path, incoming: ClassRegistry) -> 
     (``tcip_mcp.pipelines.data.datasets.confirmed_negative_names`` quarantines only a stamp that
     positively disagrees), which is right until the vocabulary changes underneath it: from then on
     nothing distinguishes it from a confirmation made under the new schema, and it trains against a
-    definition its human never saw. The outgoing registry is the last moment that digest is
-    recoverable, so it is recorded here, and those confirmations then read as stale exactly like the
-    stamped ones.
+    definition its human never saw. ``outgoing`` (``None`` for a first-ever write, or a stored
+    registry :func:`replace_registry` could not decode) is the last state that digest is
+    recoverable from, so it is recorded here, and those confirmations then read as stale exactly
+    like the stamped ones.
 
     Stamps the same set the confirmation-time writer stamps, every status in the subject's buckets
     rather than the negatives alone, since the quarantine question is asked of whatever a later
     reader takes from the store. Already-stamped confirmations, and subjects whose digest is
-    unchanged, are left alone. The dataset swept is the one holding this registry file, the root
-    :func:`read_registry` and :func:`write_registry` address it by.
+    unchanged, are left alone.
 
-    Never blocks the registry write: a missing outgoing registry (a first-ever write) is a no-op, and
-    an unreadable one or a failing sweep returns a ``warning`` for the caller to surface. Returns
-    ``{"newly_stamped": {subject: count}, "warning": str | None}``.
+    Never blocks the registry write, which has already landed by the time this runs: an absent
+    ``outgoing`` is a no-op, and a failing sweep returns a ``warning`` for the caller to surface.
+    Returns ``{"newly_stamped": {subject: count}, "warning": str | None}``.
     """
     import tcip_store
 
@@ -251,17 +288,9 @@ def stamp_unstamped_confirmations(path: str | Path, incoming: ClassRegistry) -> 
         bucket_subject_date, image_status_key, normalize_status_store, stamp_image_status_digests,
     )
 
-    dataset_root = Path(path).absolute().parent
     newly_stamped: dict[str, int] = {}
-    try:
-        outgoing = read_registry(path)
-    except FileNotFoundError:
+    if outgoing is None:
         return {"newly_stamped": newly_stamped, "warning": None}
-    except (OSError, RegistryError) as exc:
-        return {"newly_stamped": newly_stamped, "warning":
-                f"the outgoing registry at {path} does not read ({exc}), so confirmations made "
-                f"under it stay unstamped and will read as made under the new schema; re-review "
-                f"them before they train"}
     changed = {
         s.name: digest for s in outgoing.subjects
         if (digest := attribute_schema_digest(outgoing, s.name)) is not None
@@ -287,6 +316,72 @@ def stamp_unstamped_confirmations(path: str | Path, incoming: ClassRegistry) -> 
                 f"{dataset_root} ({exc}); the unstamped ones will read as made under the new "
                 f"schema, so re-review them before they train"}
     return {"newly_stamped": newly_stamped, "warning": None}
+
+
+def replace_registry(
+    path: str | Path, registry: ClassRegistry, *, expect: "Version | None", allow_removals: bool = False,
+) -> dict:
+    """The one write both registry doors call: read what it replaces, refuse a silent drop.
+
+    Refuses an empty ``registry`` outright, whether or not ``allow_removals`` is set: a registry
+    write states subjects, never clears them. Reads the stored registry (absent reads as no
+    prior registry, not a refusal) and refuses a write that drops a subject, an attribute, or an
+    attribute value the stored one declares, unless ``allow_removals`` is true, since labels and
+    confirmations may still reference the dropped name. Stored bytes present but undecodable are
+    likewise refused unless ``allow_removals`` is true, since replacing them is how such a
+    registry is repaired and a repair drops whatever the bytes held.
+
+    ``expect`` is compare-and-set against the blob's actual version at write time
+    (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
+    read, or ``Version.ABSENT`` for a caller asserting no registry exists yet. ``None`` skips the
+    check (an unconditional write), for a caller with no version to assert against.
+
+    The confirmation-digest sweep (:func:`_sweep_schema_change`) runs only once the write has
+    actually landed, against the registry this call read before writing, so a write that loses
+    the compare-and-set leaves no stamp against a registry that never landed. Returns
+    ``{"version": Version, "schema_change_sweep": dict}``.
+    """
+    import tcip_store
+
+    if not registry.subjects:
+        raise RegistryError("a class registry write must declare at least one subject")
+
+    key = _registry_key(path)
+    versioned = tcip_store.read_blob_versioned(key, default=None)
+    outgoing: ClassRegistry | None = None
+    decode_warning: str | None = None
+    if versioned.value is not None:
+        try:
+            outgoing = registry_from_dict(tcip_store.RECORD_JSON.decode(versioned.value))
+        except ValueError as exc:
+            if not allow_removals:
+                raise RegistryError(
+                    f"the stored registry at {path} does not decode ({exc}); pass allow_removals "
+                    "to replace it anyway, since a repair drops whatever the stored bytes held"
+                ) from exc
+            decode_warning = (
+                f"the outgoing registry at {path} does not read ({exc}), so confirmations made "
+                "under it stay unstamped and will read as made under the new schema; re-review "
+                "them before they train"
+            )
+
+    if outgoing is not None and not allow_removals:
+        dropped = _dropped_names(outgoing, registry)
+        if dropped:
+            raise RegistryError(
+                f"this write drops {dropped} from the registry at {path}, and labels or "
+                "confirmations may still reference them; pass allow_removals to drop them "
+                "deliberately"
+            )
+
+    new_version = tcip_store.put_blob(
+        key, tcip_store.RECORD_JSON.encode(registry_to_dict(registry)), expect=expect
+    )
+
+    sweep = _sweep_schema_change(Path(path).absolute().parent, outgoing, registry)
+    if decode_warning and sweep["warning"] is None:
+        sweep = {**sweep, "warning": decode_warning}
+    return {"version": new_version, "schema_change_sweep": sweep}
 
 
 def copy_registry(source: str | Path, destination: str | Path) -> None:

@@ -34,7 +34,7 @@ def _status_store_exists(dataset_root: Path) -> bool:
 def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
     resp = client.get("/api/classes/load", params={"project_root": str(tmp_path)})
     assert resp.status_code == 200
-    assert resp.json() == {"subjects": {}}
+    assert resp.json() == {"subjects": {}, "version": None}
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
@@ -68,6 +68,93 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
     # Lands in the dataset as one nested classes.json (no per-subject files, no numeric ids).
     on_disk = json.loads((tmp_path / "classes.json").read_text())
     assert set(on_disk) == {"catkin", "bush"}
+
+
+def test_save_refuses_an_empty_registry(client: TestClient, tmp_path: Path) -> None:
+    """A registry write states subjects; it never clears them, at either door."""
+    r = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subjects": {}},
+    )
+    assert r.status_code == 400
+    assert not (tmp_path / "classes.json").exists()
+
+
+def test_save_refuses_dropping_a_declared_subject(client: TestClient, tmp_path: Path) -> None:
+    """A stale browser posting a subset of the stored registry is refused by name, not silently
+    written: the additive-only toolbar makes a drop arriving here a sign of staleness."""
+    first = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "b"}}},
+    )
+    assert first.status_code == 200
+
+    dropped = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bush": {"description": "b"}}},
+    )
+    assert dropped.status_code == 400
+    assert "leaf" in dropped.text
+    on_disk = json.loads((tmp_path / "classes.json").read_text())
+    assert "leaf" in on_disk  # the refused write never landed
+
+
+def test_load_returns_the_version_and_save_round_trips_it(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The toolbar carries the version it loaded back into its next save, the shape that lets a
+    stale browser be told apart from a caller with nothing to assert."""
+    save = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "one leaf"}}},
+    )
+    assert save.status_code == 200
+
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
+    ).json()
+    assert load["version"]
+
+    grown = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
+              "version": load["version"]},
+    )
+    assert grown.status_code == 200
+    assert grown.json()["version"]
+
+
+def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> None:
+    """A save carrying a version the store has moved past since is refused with 409, naming the
+    conflict, rather than silently overwriting a registry the browser never saw."""
+    client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "one leaf"}}},
+    )
+    stale_load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path)},
+    ).json()
+    client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "one leaf"}, "bush": {}},
+              "version": stale_load["version"]},
+    )
+
+    conflicted = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "one leaf"}, "bush": {}, "tip": {}},
+              "version": stale_load["version"]},
+    )
+    assert conflicted.status_code == 409
 
 
 def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> None:
