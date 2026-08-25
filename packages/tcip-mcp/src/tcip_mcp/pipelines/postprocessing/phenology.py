@@ -518,44 +518,147 @@ def per_plant_phenology(
             "n_images_unmapped": n_images_unmapped}
 
 
-def write_phenology_csv(
+def _write_phenology_delivery(
+    door: str,
     rows: list[dict],
     out_path: Path,
     spec,
-    stamp: dict | None = None,
+    columns: list[str],
     *,
+    include_majority_marker: bool,
+    flags: dict[str, str | None],
+    acknowledge_unvalidated: bool,
     basis: OperationalizationBasis | None,
-) -> str:
-    """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
+    operating_point_conf: float | None,
+    producer: dict,
+    bindings: dict,
+    pred_dirs: list[str],
+    project_root: str | Path | None,
+) -> dict:
+    """Gate, compose and write one phenology delivery's provenance cells, then record the delivery.
 
-    Emits exactly ``phenology_csv_columns(spec)``, a stamp key absent from that spec-derived set
-    raises rather than being silently dropped: ``extrasaction="ignore"`` alone would silently
-    discard a stray/mistyped provenance key with no signal. ``stamp`` (the
-    operating point + validation status) is written into every row so the phenotype is traceable.
+    Shared by ``write_phenology_csv`` (the milestone table) and ``write_phenology_curve_csv`` (the
+    curve table): the schema (``columns``) and whether the majority-provisional marker applies
+    (``include_majority_marker``) are the only difference between the two tables, so both entry
+    points call through here rather than each running its own gate, composing its own cells, or
+    recording its own delivery event.
 
-    ``basis`` is what a passing ``check_operationalization`` returned, and it is required: this
-    writer takes a spec object rather than a trait name and a project root, so it cannot read the
-    record itself without becoming a second resolver beside ``resolve_trait_and_record``. Demanding
-    the proof its caller already produced keeps one implementation of the precondition and closes
-    the direct call that would otherwise write a delivered phenotype nobody defined.
+    Runs ``check_delivery_gate`` over ``flags`` itself, the way its sibling writers
+    (``export_aggregated_csv``, ``export_detection_csv``) run their own gate before opening a file:
+    a gate that does not pass raises ``ValueError`` with the gate's own reason, and nothing is
+    written. ``basis`` is what a passing ``check_operationalization`` returned, and it is required:
+    this writer takes a spec object rather than a project it could read the record from, so it
+    cannot prove the precondition itself.
+
+    Composes every provenance cell the schema declares (the operating-point and classifier
+    validity columns through ``check_delivery_gate``'s own stamp, the producer tail through
+    ``delivered_provenance_cells``, and, when ``include_majority_marker`` is set, the trait's
+    majority-alias marker through ``majority_provisional_column``) and returns them, so a caller
+    fills its own response from what was actually written rather than re-deriving the same values.
+    Records the delivery through ``record_delivery_binding_event`` after the file is written, under
+    the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
+    cannot exist without both the gate having run and the delivery having been recorded.
     """
     if not isinstance(basis, OperationalizationBasis):
         raise ValueError(
-            "write_phenology_csv writes a delivered phenotype, so it requires the basis a passing "
-            "check_operationalization returned for this trait's state_crossing_dates delivery. "
-            "compute_phenology produces one and is the primitive to call; this writer cannot read "
-            "the record itself, because it is given a trait spec rather than a project to read from."
+            "a phenology delivery requires the basis a passing check_operationalization returned "
+            "for this trait's state_crossing_dates delivery. compute_phenology and export_csv "
+            "produce one and are the primitives to call; this writer cannot read the record itself, "
+            "because it is given a trait spec rather than a project to read from."
         )
+    from tcip_mcp.operationalization import STATE_CROSSING_DATES
+    from tcip_mcp.pipelines.resolution import check_delivery_gate, record_delivery_binding_event
+
+    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        raise ValueError(gate.reason)
+
+    cells: dict = {
+        "operating_point_conf": operating_point_conf,
+        "operating_point_validated": gate.column_stamp(
+            "operating_point", own_column=("classifier",)),
+        "positive_state_classifier_validated": gate.stamp["classifier"],
+        **delivered_provenance_cells(
+            {"producer_model_sha256": producer.get("sha256"),
+             "experiment_id": producer.get("experiment_id")},
+            bindings),
+    }
+    if include_majority_marker:
+        provisional_column = majority_provisional_column(spec)
+        if provisional_column:
+            cells[provisional_column] = "true" if spec.majority_provisional else "false"
+
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    stamp = stamp or {}
-    columns = phenology_csv_columns(spec)
-    unknown = set(stamp) - set(columns)
-    if unknown:
-        raise ValueError(f"stamp key(s) {sorted(unknown)} not in this trait's column set {columns}")
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow({**row, **stamp})
-    return str(out_path)
+            writer.writerow({**row, **cells})
+
+    record_delivery_binding_event(
+        door, str(out_path), list(pred_dirs), bindings,
+        measurement_documents=["operating_point", "classifier_operating_point"],
+        scale_document=None, trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
+        project_root=project_root,
+    )
+    return cells
+
+
+def write_phenology_csv(
+    door: str,
+    rows: list[dict],
+    out_path: Path,
+    spec,
+    *,
+    flags: dict[str, str | None],
+    acknowledge_unvalidated: bool,
+    basis: OperationalizationBasis | None,
+    operating_point_conf: float | None,
+    producer: dict,
+    bindings: dict,
+    pred_dirs: list[str],
+    project_root: str | Path | None,
+) -> dict:
+    """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
+
+    Emits exactly ``phenology_csv_columns(spec)`` through ``_write_phenology_delivery``: the gate,
+    the composed provenance cells (including the trait's majority-provisional marker when the spec
+    names one) and the recorded delivery event are all that function's, not a second copy of any of
+    them. ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
+    """
+    return _write_phenology_delivery(
+        door, rows, out_path, spec, phenology_csv_columns(spec),
+        include_majority_marker=True, flags=flags,
+        acknowledge_unvalidated=acknowledge_unvalidated, basis=basis,
+        operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=project_root)
+
+
+def write_phenology_curve_csv(
+    door: str,
+    rows: list[dict],
+    out_path: Path,
+    spec,
+    *,
+    flags: dict[str, str | None],
+    acknowledge_unvalidated: bool,
+    basis: OperationalizationBasis | None,
+    operating_point_conf: float | None,
+    producer: dict,
+    bindings: dict,
+    pred_dirs: list[str],
+    project_root: str | Path | None,
+) -> dict:
+    """Write per-(plant, date) curve rows to the delivery CSV, for the given trait's spec.
+
+    Emits exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``, the same gate,
+    provenance composition and delivery recording ``write_phenology_csv`` runs, minus the
+    milestone-only majority-provisional marker: a curve names no crossing for one to qualify.
+    """
+    return _write_phenology_delivery(
+        door, rows, out_path, spec, curve_csv_columns(),
+        include_majority_marker=False, flags=flags,
+        acknowledge_unvalidated=acknowledge_unvalidated, basis=basis,
+        operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=project_root)

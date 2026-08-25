@@ -26,10 +26,8 @@ The backend owns everything except the model inference (which is driven by the I
 
 from __future__ import annotations
 
-import csv
 import logging
 import os
-from io import StringIO
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -276,7 +274,7 @@ class _PhenologyMeasurement:
 
     def __init__(
         self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
-        basis, bindings: dict, predictions_by_date: dict[str, str],
+        basis, bindings: dict, predictions_by_date: dict[str, str], flags: dict[str, str | None],
     ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
@@ -288,6 +286,9 @@ class _PhenologyMeasurement:
         self.project_root = project_root
         # What the precondition rested on, re-checked before this measurement reaches a caller.
         self.basis = basis
+        # The dimension flags the gate above was computed from; validity["tile_size"] is None for
+        # an untiled delivery, not the same as the key being absent from the gate's own flags.
+        self.flags = flags
 
     @property
     def positive_class_assessed(self) -> bool:
@@ -396,7 +397,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
         spec, plants, validity, gate, positive_class_id, root, stated.basis,
-        recon["bindings"], predictions_by_date)
+        recon["bindings"], predictions_by_date, flags)
 
 
 def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
@@ -539,13 +540,14 @@ def export_csv(payload: ExportCsvPayload) -> Response:
     the rows from the buckets (``_measure_phenology``) instead of accepting a caller-composed table, so the only
     question left is whether the evidence on disk supports delivering them. ``acknowledge_unvalidated``
     is deliberately ignored here: it lets the breeder look at provisional numbers on screen, never
-    write them to a file that leaves the platform without its evidence.
+    write them to a file that leaves the platform without its evidence, so the writer below is
+    always called with ``acknowledge_unvalidated=False``.
 
-    Milestone rows are written in the canonical ``phenology_csv_columns`` schema, so a web-delivered
-    CSV and the MCP door's ``write_phenology_csv`` cannot disagree about what a phenology
-    delivery's columns are. The producer tail comes from ``delivered_provenance_cells`` over the
-    bindings the reconciliation verified, the same builder the MCP door stamps from, so neither door
-    can put a producer name into a delivered CSV that nothing outside the bucket answers for.
+    Delegates to ``write_phenology_csv``/``write_phenology_curve_csv``, the same writer(s)
+    ``compute_phenology`` calls: the gate, the provenance cells and the recorded delivery event are
+    all theirs, so a web-delivered CSV and the MCP door's cannot disagree about what a phenology
+    delivery carries. The response body is the file read back as bytes, never a second composition
+    of the same rows.
     """
     measurement = _measure_phenology(payload)
     if measurement.gate.unvalidated:
@@ -561,64 +563,36 @@ def export_csv(payload: ExportCsvPayload) -> Response:
             "classifier first.",
         )
 
-    # Stamp the provenance the canonical schemas declare, from the same reconciliation the gate just
-    # used: a delivered phenotype must name the operating point and the checkpoint behind it, and a
-    # column a schema declares but nothing fills is a phantom that must not reach the delivered CSV.
-    # Both payloads are the same measurement, so both carry the same chain. Uses phenology_tools'
-    # own resolver rather than re-reading the sidecars here.
-    from tcip_mcp.operationalization import STATE_CROSSING_DATES
-    from tcip_mcp.pipelines.resolution import record_delivery_binding_event
-    from tcip_mcp.tools.phenology_tools import _resolve_producer_identity
-
-    producer = _resolve_producer_identity(measurement.predictions_by_date)
-    stamp = {
-        "operating_point_conf": measurement.validity["operating_point_conf"],
-        "operating_point_validated": measurement.gate.stamp["operating_point"],
-        "positive_state_classifier_validated": measurement.gate.stamp["classifier"],
-        **phenology.delivered_provenance_cells(
-            {"producer_model_sha256": producer.get("sha256"),
-             "experiment_id": producer.get("experiment_id")},
-            measurement.bindings),
-    }
     if payload.payload == "milestones":
-        provisional_column = phenology.majority_provisional_column(measurement.spec)
-        if provisional_column:
-            stamp[provisional_column] = (
-                "true" if measurement.spec.majority_provisional else "false")
-        rows = [{**row, **stamp} for row in measurement.milestone_rows()]
-        keys = phenology.phenology_csv_columns(measurement.spec)
+        rows = measurement.milestone_rows()
+        write_csv = phenology.write_phenology_csv
     else:
-        rows = [{**row, **stamp} for row in measurement.curve_rows()]
-        keys = phenology.curve_csv_columns()
+        rows = measurement.curve_rows()
+        write_csv = phenology.write_phenology_curve_csv
     if not rows:
         raise HTTPException(400, "no rows to export")
 
-    buf = StringIO()
-    writer = csv.DictWriter(buf, fieldnames=keys, extrasaction="ignore")
-    writer.writeheader()
-    for row in rows:
-        writer.writerow(row)
-    body = buf.getvalue()
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
     _still_stated(measurement, payload.trait)
+    from tcip_mcp.tools.phenology_tools import _resolve_producer_identity
+
+    producer = _resolve_producer_identity(measurement.predictions_by_date)
     # The browser download lands wherever the breeder's browser puts it; the delivery itself
     # belongs to the project, so the same bytes are written to <project>/results_export/, audited.
     saved_path = measurement.project_root / "results_export" / Path(filename).name
-    saved_path.parent.mkdir(parents=True, exist_ok=True)
-    saved_path.write_text(body, encoding="utf-8", newline="")
+    write_csv(
+        "results.export_csv", rows, saved_path, measurement.spec,
+        flags=measurement.flags, acknowledge_unvalidated=False, basis=measurement.basis,
+        operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
+        bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
+        project_root=measurement.project_root)
+    body = saved_path.read_bytes()
     _audit(str(measurement.project_root), "results.export_csv", {
         "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),
         "rows": len(rows),
     })
-    record_delivery_binding_event("results.export_csv", str(saved_path),
-                                  measurement.pred_dirs, measurement.bindings,
-                                  measurement_documents=["operating_point",
-                                                         "classifier_operating_point"],
-                                  scale_document=None,
-                                  trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
-                                  project_root=measurement.project_root)
     headers["X-TCIP-Saved-To"] = str(saved_path)
     return Response(content=body, media_type="text/csv", headers=headers)
 

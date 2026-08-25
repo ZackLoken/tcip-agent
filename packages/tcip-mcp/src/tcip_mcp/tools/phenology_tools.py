@@ -874,7 +874,6 @@ def compute_phenology(
         reconcile_classifier_validity,
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
-        record_delivery_binding_event,
     )
 
     # The count operating point's validity is read from each prediction bucket's operating_point.json
@@ -951,53 +950,38 @@ def compute_phenology(
             "n_plants": len(rows),
         }
 
-    # What the sidecars assert about the producer, corroborated below against the verified bindings.
+    # What the sidecars assert about the producer, corroborated by the writer against the verified
+    # bindings.
     producer = _resolve_producer_identity(predictions_by_date)
 
-    # Carry the majority-date read-semantics marker with the delivery: whether the trait's "most in
-    # state" mapping to a milestone crossing is still provisional (breeders to confirm), read from the
-    # spec. The column name comes from majority_provisional_column, the same owner the schema reads.
-    stamp = {
-        "operating_point_conf": operating_point_conf,
-        "operating_point_validated": gate.column_stamp(
-            "operating_point", own_column=("classifier",)),
-        "positive_state_classifier_validated": gate.stamp["classifier"],
-        **phenology.delivered_provenance_cells(
-            {"producer_model_sha256": producer.get("sha256"),
-             "experiment_id": producer.get("experiment_id")},
-            recon["bindings"]),
-    }
-    provisional_column = phenology.majority_provisional_column(spec)
-    if provisional_column:
-        stamp[provisional_column] = "true" if spec.majority_provisional else "false"
     # A confirmation withdrawn or a field moved while this ran refuses here, with nothing written.
     spec_now, record_now, _ = resolve_trait_and_record(trait, STATE_CROSSING_DATES)
     still_stated = check_operationalization(
         spec_now, record_now, STATE_CROSSING_DATES, basis=stated.basis)
     if not still_stated.ok:
         return {"error": still_stated.message, "n_plants": len(rows)}
-    csv_path = phenology.write_phenology_csv(
-        rows, Path(output_csv_path), spec, stamp=stamp, basis=still_stated.basis)
-    record_delivery_binding_event("compute_phenology", str(csv_path),
-                                  list(predictions_by_date.values()), recon["bindings"],
-                                  measurement_documents=["operating_point",
-                                                         "classifier_operating_point"],
-                                  scale_document=None,
-                                  trait=trait, delivery_kind=STATE_CROSSING_DATES)
-    # Per-milestone summary: report reached-counts for each milestone the spec actually declares,
-    # not a single hardcoded "50per" key, a trait authored with different milestone fractions has
-    # no fabricated zero for a crossing it was never asked to report.
+
+    from tcip_mcp.project_paths import project_root as platform_project_root
+
+    # write_phenology_csv re-runs the same gate over these flags, composes every provenance cell
+    # (including the majority-provisional marker) and records the delivery.
+    cells = phenology.write_phenology_csv(
+        "compute_phenology", rows, Path(output_csv_path), spec,
+        flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,
+        operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
+        pred_dirs=list(predictions_by_date.values()), project_root=platform_project_root())
+    # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
     n_reached: dict[str, int] = {}
     for key in phenology._milestone_targets(spec):
         col = f"{spec.phenology_prefix}_{key}_date"
         n_reached[key] = sum(1 for r in rows if r.get(col))
     return {
-        "csv_path": csv_path,
+        "csv_path": output_csv_path,
         "n_plants": len(rows),
         "n_plants_reached_milestone": n_reached,
         "positive_class_assessed": True,
-        "positive_state_classifier_validated": stamp["positive_state_classifier_validated"],
-        "operating_point_validated": stamp["operating_point_validated"],
+        "positive_state_classifier_validated": cells["positive_state_classifier_validated"],
+        "operating_point_validated": cells["operating_point_validated"],
         "tile_size_validated": gate.stamp.get("tile_size"),
         "n_images_unmapped": result["n_images_unmapped"],
         "columns": phenology.phenology_csv_columns(spec),

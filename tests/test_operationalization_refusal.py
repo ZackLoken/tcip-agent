@@ -344,8 +344,8 @@ def test_the_record_is_read_from_the_project_the_caller_names(project: Path, mon
 def delivered_golden(body: dict) -> bytes:
     """What a confirmed crossing delivery writes, byte for byte, for the golden inputs below.
 
-    Both writers produce this: the tool's ``write_phenology_csv`` and the web door's own DictWriter.
-    A precondition in front of a door must leave what the door delivers untouched, so this is
+    Both doors produce this through the one writer they share (``write_phenology_csv``). A
+    precondition in front of a door must leave what the door delivers untouched, so this is
     asserted as bytes rather than as the absence of an error.
 
     The one cell no constant can hold is ``validation_record``: a record's digest covers the buckets
@@ -612,16 +612,19 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
     """The canonical writer is a ninth entry point, and it demands proof its caller ran the check.
 
     It holds a spec rather than a project, so it cannot read the record itself without becoming a
-    second resolver. Its refusal names the primitive that produces a basis.
+    second resolver. Its refusal names the primitives that produce a basis.
     """
     from tcip_mcp.pipelines.postprocessing import phenology
 
     from tests._trait_fixtures import CATKIN
 
     with pytest.raises(ValueError) as excinfo:
-        phenology.write_phenology_csv([], tmp_path / "out.csv", CATKIN, basis=None)
+        phenology.write_phenology_csv(
+            "test", [], tmp_path / "out.csv", CATKIN, flags={}, acknowledge_unvalidated=False,
+            basis=None, operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
+            project_root=tmp_path)
 
-    assert "compute_phenology produces one" in str(excinfo.value)
+    assert "compute_phenology and export_csv produce one" in str(excinfo.value)
     assert not (tmp_path / "out.csv").exists()
 
 
@@ -642,7 +645,7 @@ def test_a_confirmed_delivery_writes_the_bytes_it_wrote_before_the_precondition(
 def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
     client: TestClient, tmp_path: Path,
 ):
-    """The other writer of the same schema, byte for byte, through its own DictWriter."""
+    """The other door onto the same writer, byte for byte, reading its own saved file back."""
     body = _delivery(tmp_path, validated=True, **GOLDEN_INPUTS)
 
     resp = client.post("/api/results/export_csv",
@@ -654,20 +657,33 @@ def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
 
 
 def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: Path):
-    """The rail admits the call it was built to admit: a basis in hand, the writer writes."""
+    """The rail admits the call it was built to admit: a basis and cleared flags in hand, the
+    writer writes, with the flags coming from a real reconciliation over the fixture's own
+    validated buckets rather than a hand-typed dict."""
     from tcip_mcp.pipelines.postprocessing import phenology
+    from tcip_mcp.pipelines.resolution import (
+        bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
+    )
 
     from tests._trait_fixtures import CATKIN
 
-    _delivery(tmp_path, validated=True)
+    body = _delivery(tmp_path, validated=True)
     spec, record, _ = fx.resolve(tmp_path, "catkin", op.STATE_CROSSING_DATES)
     check = op.check_operationalization(spec, record, op.STATE_CROSSING_DATES)
+    pred_dirs = list(body["predictions_by_date"].values())
+    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    classifier_recon = reconcile_classifier_validity(pred_dirs)
+    classifier_state, _note = bind_classifier_validity(
+        classifier_recon["validated"], pred_dirs, pred_dirs, trait="catkin")
+    flags = {"classifier": classifier_state, "operating_point": recon["validated"]}
     row = {"plant_id": "P1", "accession": "acc-9", "n_dates": 2, "n_observed_dates": 2}
 
-    out = phenology.write_phenology_csv(
-        [row], tmp_path / "out.csv", CATKIN, basis=check.basis)
+    phenology.write_phenology_csv(
+        "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=check.basis, operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
+        pred_dirs=pred_dirs, project_root=tmp_path)
 
-    header = Path(out).read_text(encoding="utf-8").splitlines()[0].split(",")
+    header = (tmp_path / "out.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
     assert header == phenology.phenology_csv_columns(CATKIN)
 
 

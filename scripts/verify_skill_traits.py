@@ -82,7 +82,8 @@ NON_TRAIT_ALLOW = {
     "save_annotations", "in_chans", "num_channels", "num_classes",
     "det_type", "gt_type", "pred_type", "count_by_class", "per_plant_phenology",
     "crossing_date", "positive_onset_date", "plant_milestones", "write_phenology_csv",
-    "boxes_from_polygons", "phenology_tools", "results.py", "aggregation.py",
+    "write_phenology_curve_csv", "boxes_from_polygons", "phenology_tools", "results.py",
+    "aggregation.py",
 }
 
 # Multi-segment only (deliberate, see module docstring): first segment lowercase, later

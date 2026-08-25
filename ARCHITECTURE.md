@@ -779,20 +779,20 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:176` |
-| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:234` |  <!-- queued: P5-129 delete -->
+| POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:174` |
+| POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:232` |  <!-- queued: P5-129 delete -->
 | POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:469` |  <!-- queued: P5-130 merge-or-split -->
 | POST | `/onset_dates` | `onset_dates` | `routes/results.py:502` |  <!-- queued: P5-131 merge-or-split -->
 | POST | `/export_csv` | `export_csv` | `routes/results.py:535` |
-| GET | `/traits` | `list_traits` | `routes/results.py:980` |
-| GET | `/operationalization` | `get_operationalization` | `routes/results.py:679` |
-| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:695` |
-| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:733` |
-| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:835` |
-| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:851` |
-| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:893` |
-| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:959` |
-| GET | `/models/registered` | `registered_models` | `routes/results.py:1009` |
+| GET | `/traits` | `list_traits` | `routes/results.py:954` |
+| GET | `/operationalization` | `get_operationalization` | `routes/results.py:653` |
+| GET | `/operationalizations` | `list_operationalizations` | `routes/results.py:669` |
+| POST | `/operationalization/confirm` | `confirm_operationalization` | `routes/results.py:707` |
+| GET | `/trait-spec-statement` | `get_trait_spec_statement` | `routes/results.py:809` |
+| GET | `/trait-spec-statements` | `list_trait_spec_statements` | `routes/results.py:825` |
+| POST | `/trait-spec-statement/confirm` | `confirm_trait_spec_statement` | `routes/results.py:867` |
+| GET | `/delivery-events` | `list_delivery_events` | `routes/results.py:933` |
+| GET | `/models/registered` | `registered_models` | `routes/results.py:983` |
 
 ### routes/review.py, prefix `/api/review` (11 routes)
 
@@ -1721,7 +1721,7 @@ Phase 3 verdict: single.
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:51` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
-Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1008` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
+Side B: `packages/tcip-web/src/tcip_web/routes/results.py:982` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:14` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
 ## S28. operating_point.json prediction-bucket sidecar

@@ -99,13 +99,15 @@ dimensions, held-out GT or a breeder-confirmed output sample, see the `evaluatio
 measurement, and no kind stands in for another), read from the predictions' own
 `operating_point.json` sidecar, not a caller-asserted string.
 
-- `compute_phenology` gates both the elongation classifier (reconciled from
-  `classifier_operating_point.json`, see `calibrate_classifier_operating_point`) and the count
-  operating point; the web `/export_csv` phenology branch gates the same, per row. The phenology
-  CSV's own schema (`phenology_csv_columns`, not the per-plant table above) carries the same
-  producer tail: `producer_model_sha256`, `producer_experiment_id` and `validation_record`, filled
-  from the verified bindings, so a bucket whose claim no record answers for delivers those cells
-  blank rather than repeating the names its stamp asserted.
+- `compute_phenology` and the web `/export_csv` phenology branch both reconcile the positive-state
+  classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`)
+  and the count operating point, then hand the reconciled state to `write_phenology_csv` /
+  `write_phenology_curve_csv` (`phenology.py`), the one writer both doors share: it runs the gate
+  itself, composes every provenance cell and records the delivery event, so a CSV from either door
+  carries the same schema and the same cells. The producer tail (`producer_model_sha256`,
+  `producer_experiment_id`, `validation_record`) is filled from the verified bindings, so a bucket
+  whose claim no record answers for delivers those cells blank rather than repeating the names its
+  stamp asserted.
 - `tabulate_counts` gates the count operating point on the run's resolved bundle and hands
   `export_detection_csv` the already-reconciled state, plus the bucket it persisted when it was
   given a `predictions_dir` to persist one into.
