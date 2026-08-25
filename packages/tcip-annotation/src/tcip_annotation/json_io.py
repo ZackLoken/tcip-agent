@@ -161,11 +161,13 @@ def _coerce_point(pt) -> tuple[float, float] | None:
         return None
 
 
-def _ring_vertex(vertex) -> tuple[float, float]:
+def ring_vertex(vertex) -> tuple[float, float]:
     """A polygon ring vertex as ``(x, y)``, from an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping.
 
     The producers of ring data disagree on the vertex shape (a canvas round-trip sends pairs, a
-    segmentation prompt sends mappings), so the one conversion door takes either.
+    segmentation prompt sends mappings), so the one conversion door takes either. Public: every
+    door that stages a multi-ring polygon proposal (not just the ground-truth save path here)
+    parses its vertices through this one function, never a second unpacking of its own.
     """
     if isinstance(vertex, Mapping):
         return float(vertex["x"]), float(vertex["y"])
@@ -191,9 +193,9 @@ def annotation_from_payload(payload: Mapping, *, author: str | None, now: str) -
     """
     geometry: BBox | Polygon | Point | None = None
     if payload.get("rings"):
-        geometry = Polygon(rings=[[_ring_vertex(v) for v in ring] for ring in payload["rings"]])
+        geometry = Polygon(rings=[[ring_vertex(v) for v in ring] for ring in payload["rings"]])
     elif payload.get("points"):
-        geometry = Polygon(rings=[[_ring_vertex(v) for v in payload["points"]]])
+        geometry = Polygon(rings=[[ring_vertex(v) for v in payload["points"]]])
     elif payload.get("bbox") is not None:
         x1, y1, x2, y2 = (float(v) for v in payload["bbox"])
         geometry = BBox(x1, y1, x2, y2)
