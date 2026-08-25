@@ -159,6 +159,27 @@ def test_materialize_creates_experiment_when_absent(tmp_path, monkeypatch):
     assert "review_session" in lineage
 
 
+def test_a_second_curation_against_a_completed_experiment_refuses_before_writing(tmp_path, monkeypatch):
+    """A pointer is checked before its write, not after: a second curation against an experiment
+    whose curated_dataset pointer is already populated and terminal refuses by name, with no
+    directory written for it to orphan."""
+    import tcip_mcp.experiments as experiments
+    monkeypatch.setattr(experiments, "EXPERIMENTS_DIR", tmp_path / "exp")
+    experiments.create_experiment("exp2", {"x": 1})
+    experiments.update_status("exp2", "running")
+
+    dataset_root, src = _setup(tmp_path)
+    out1 = tmp_path / "out1"
+    r1 = materialize_review_dataset(str(dataset_root), str(src), str(out1), experiment_id="exp2")
+    assert "error" not in r1
+    experiments.update_status("exp2", "completed")
+
+    out2 = tmp_path / "out2"
+    r2 = materialize_review_dataset(str(dataset_root), str(src), str(out2), experiment_id="exp2")
+    assert "error" in r2
+    assert not out2.exists()
+
+
 def test_materialize_invalid_inputs_error(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()  # a dataset root whose own store holds no shards

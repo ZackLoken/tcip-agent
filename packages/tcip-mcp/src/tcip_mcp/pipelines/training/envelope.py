@@ -319,6 +319,19 @@ class TrainContext:
         return str(path)
 
     def record_artifact(self, name: str, path: str) -> None:
+        """Record a named artifact against this run, except the reserved name
+        ``"model_weights"``: a loop that recorded under that name meant the run's deliverable,
+        so it is routed to :meth:`set_final_weights` instead of being written under a name only
+        ``_finalize_run``'s own completion write is allowed to populate. Every other name behaves
+        as documented: recorded, with a failure logged rather than raised.
+        """
+        if name == "model_weights":
+            logger.warning(
+                "record_artifact(%r/'model_weights', %s) routed to set_final_weights: that "
+                "name is the run's deliverable, and only completing the run records it.",
+                self.experiment_id, path)
+            self.set_final_weights(str(path))
+            return
         if self.experiment_id is None:
             return
         try:
@@ -455,15 +468,24 @@ def _finalize_run(ctx: TrainContext) -> None:
         return
     try:
         from tcip_mcp.experiments import (
-            record_artifact,
+            complete_run,
             register_model_from_experiment,
             update_status,
         )
 
         if run.status == "completed" and ctx.final_weights is not None:
-            update_status(exp_id, "completed")
-            register_model_from_experiment(exp_id, ctx.final_weights)
-            record_artifact(exp_id, "model_weights", ctx.final_weights)
+            result = complete_run(exp_id, ctx.final_weights)
+            if "error" in result:
+                # completed is the last durable write of a run: a refusal here means the record
+                # was already terminal (e.g. the wall-clock watchdog raced it to failed first).
+                logger.warning("Run %s: completion refused (%s); weights at %s were not "
+                               "registered.", run.run_id, result["error"], ctx.final_weights)
+            else:
+                try:
+                    register_model_from_experiment(exp_id, ctx.final_weights)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Run %s: model registration failed for weights at %s: %s",
+                                   run.run_id, ctx.final_weights, exc)
         elif run.status == "completed":
             # "completed" with no discoverable weights (no model_best.pt/model_final.pt,
             # and ctx.set_final_weights() was never called) is a phantom deliverable, not a

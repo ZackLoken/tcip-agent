@@ -189,6 +189,36 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
     assert m["metrics_source"] == "trainer"  # config carries no training_source
 
 
+def test_register_model_from_experiment_twice_on_a_completed_record_is_idempotent(tmp_path, monkeypatch):
+    """The remedy _finalize_run's own docstring names for a registration that fails after
+    complete_run succeeded: call register_model_from_experiment again. A second call on an
+    already-completed record, with the same checkpoint path, must not be a second failure mode
+    of its own: it succeeds again rather than refusing, since ModelRegistry.register_model
+    replaces by name and update_lineage's additive lock only refuses a *changed* value."""
+    monkeypatch.chdir(tmp_path)
+    import torch
+
+    from tcip_mcp.experiments import (
+        complete_run, create_experiment, register_model_from_experiment, update_status,
+    )
+    from tcip_mcp.model_registry import ModelRegistry
+
+    create_experiment("exp", {"model_source": {"builder": "x:y"}}, data_source="imgs")
+    update_status("exp", "running")
+    ckpt = tmp_path / "model_best.pt"
+    torch.save({"model_state_dict": {}, "metrics": {"val_map50": 0.60}}, ckpt)
+    complete_run("exp", str(ckpt))
+
+    first = register_model_from_experiment("exp", str(ckpt))
+    assert "error" not in first
+    second = register_model_from_experiment("exp", str(ckpt))
+    assert "error" not in second
+
+    entries = [e for e in ModelRegistry(str(tmp_path)).list_models() if e["name"] == "exp"]
+    assert len(entries) == 1
+    assert entries[0]["checkpoint_path"] == str(ckpt)
+
+
 def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(tmp_path):
     """Config and metrics arrive from a caller, an agent's own dict or a checkpoint's stamp,
     so the field that will not encode is named before anything reaches the registry.

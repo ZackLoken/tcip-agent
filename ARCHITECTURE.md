@@ -559,7 +559,7 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `materialize_review_dataset` | `feedback_tools.py:74` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:180` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+| `prioritize_review_queue` | `feedback_tools.py:189` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
 
 ### inference_tools.py (4 tools)
 
@@ -567,8 +567,8 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `force_redraw_cal_holdout_split` | `inference_tools.py:408` | yes | Deliberately redraw a locked calibration/holdout split. |
 | `run_inference` | `inference_tools.py:537` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1452` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1734` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `export_predictions` | `inference_tools.py:1460` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1751` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -637,14 +637,14 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:40` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:367` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:574` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:628` | yes | List all training runs in this session. |  <!-- queued: P5-29 unify -->
-| `cancel_training` | `training_tools.py:654` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:683` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1053` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2003` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:43` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:385` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:607` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:661` | yes | List all training runs in this session. |  <!-- queued: P5-29 unify -->
+| `cancel_training` | `training_tools.py:687` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:716` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1086` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2038` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -1249,21 +1249,21 @@ declared; the numbered range 10-15 carries six of them, and `env.json` and `vali
 are listed here with the rest rather than taking numbers of their own.
 
 - `config.json` (`config_key`, `experiments.py:114`): written by `create_experiment`,
-  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:432` (rewrites only
+  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:433` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:942`, and `compare_experiments`, `experiments.py:1084`.
+  `experiments.py:942`, and `compare_experiments`, `experiments.py:1166`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (332), `update_status`
-  (`experiments.py:413`), `stamp_run_identity` (`experiments.py:510`), `_touch_heartbeat`
+  (`experiments.py:413`), `stamp_run_identity` (`experiments.py:549`), `_touch_heartbeat`
   (`experiments.py:593`). Read by `get_experiment` (942), `reconstruct_run_status`
-  (`experiments.py:538`), `resolve_experiment_dir_for_run` (`experiments.py:534`). `state` is
+  (`experiments.py:538`), `resolve_experiment_dir_for_run` (`experiments.py:573`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (332) and
-  `update_lineage`, `experiments.py:913`. Read by `get_experiment` (942) and
-  `get_experiment_lineage`, `experiments.py:1128`.
+  `update_lineage`, `experiments.py:994`. Read by `get_experiment` (942) and
+  `get_experiment_lineage`, `experiments.py:1210`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (332) and
-  `record_artifact`, `experiments.py:881`. Read by `get_experiment` (942).
+  `record_artifact`, `experiments.py:961`. Read by `get_experiment` (942).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
-  `log_metrics`, `experiments.py:686`. Read by `read_metrics`, `experiments.py:673`, which
+  `log_metrics`, `experiments.py:725`. Read by `read_metrics`, `experiments.py:712`, which
   `get_experiment` (942, paginated) and `reconstruct_run_status` (538, last row only) go through.
 - `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
@@ -1274,13 +1274,13 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:768`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:818`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:722`),
+  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:772`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
   documents whose gate runs the check, `null` for `resolve_scale`. Read by `read_validations`,
-  `experiments.py:803`, `find_validation`, `experiments.py:818` (matching rows by recomputed
-  `validation_digest`, `experiments.py:758`), and included whole by `get_experiment` (942). The
+  `experiments.py:803`, `find_validation`, `experiments.py:868` (matching rows by recomputed
+  `validation_digest`, `experiments.py:808`), and included whole by `get_experiment` (942). The
   one member appendable after a terminal state, because a validation is a statement made about a
   run after it ended.
 
@@ -1317,7 +1317,7 @@ transaction on the key `registry_index_key` mints, same file, line 36, so a conc
 entries are not clobbered. `register_model` takes `metrics_source` as a required keyword,
 `"trainer"` / `"training_source"` / `"caller"` / `None`, naming which path produced `metrics`
 without claiming anyone verified it; only the two production callers set it,
-`register_model_from_experiment` (`experiments.py:955`, reading whether the run's config carries
+`register_model_from_experiment` (`experiments.py:1037`, reading whether the run's config carries
 `training_source`) and the `register_model` tool's explicit mode (`tools/model_tools.py:18`,
 `"caller"` when `metrics` is non-empty). `register_model_from_experiment` no longer falls back to
 the run's `metrics.jsonl` log for a checkpoint with no metrics dict; such a registration carries
@@ -1640,7 +1640,7 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:686` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:725` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -1801,7 +1801,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1149` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1231` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
@@ -1830,7 +1830,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2503` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:529` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1932` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:529` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1949` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall

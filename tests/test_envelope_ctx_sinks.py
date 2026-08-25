@@ -149,6 +149,40 @@ def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
     assert torch.load(tmp_path / "out" / "model_best.pt", weights_only=False)["experiment_id"] == "expTagged"
 
 
+def test_record_artifact_of_model_weights_routes_to_set_final_weights(tmp_path, caplog):
+    """The reserved name means the run's deliverable: a bespoke loop that recorded weights under
+    it must still finish registered, so it is routed to set_final_weights rather than recorded
+    under that name (which a completed run's own completion write would then find already
+    populated and refuse) or raised (costing a trained run over a naming mistake)."""
+    from tcip_mcp.experiments import artifacts_key, create_experiment, read_member
+
+    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    create_experiment("expWeights", dict(CONFIG))
+    ctx = TrainContext(run=run, train_loader=None, experiment_id="expWeights")
+
+    with caplog.at_level("WARNING"):
+        ctx.record_artifact("model_weights", str(tmp_path / "model_best.pt"))
+
+    assert ctx.final_weights == str(tmp_path / "model_best.pt")
+    assert "set_final_weights" in caplog.text
+    assert "model_weights" not in read_member(artifacts_key("expWeights"), {})
+
+
+def test_record_artifact_of_any_other_name_still_records_normally(tmp_path):
+    """A rail must admit valid work: every name besides the reserved one behaves as documented."""
+    from tcip_mcp.experiments import artifacts_key, create_experiment, read_member
+
+    run = create_run(dict(CONFIG), str(tmp_path / "out"))
+    create_experiment("expOther", dict(CONFIG))
+    ctx = TrainContext(run=run, train_loader=None, experiment_id="expOther")
+
+    ctx.record_artifact("failure_log", str(tmp_path / "stderr.txt"))
+
+    assert ctx.final_weights is None
+    recorded = read_member(artifacts_key("expOther"), {})
+    assert recorded["failure_log"]["path"] == str(tmp_path / "stderr.txt")
+
+
 def test_cancellation_is_seen_through_the_cross_process_sentinel(tmp_path):
     """A stop requested by another process must reach a loop polling ``ctx.should_cancel()``."""
     out = tmp_path / "out"

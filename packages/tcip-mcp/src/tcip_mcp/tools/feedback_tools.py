@@ -126,6 +126,15 @@ def materialize_review_dataset(
     if not Path(source_images_dir).is_dir():
         return {"error": f"Source images dir not found: {source_images_dir}"}
 
+    if experiment_id:
+        # Checked before the curated directory is written: a blob write cannot join the record's
+        # own transaction, so this is the one chance to refuse before anything lands on disk.
+        from tcip_mcp.experiments import pointer_frozen
+
+        frozen = pointer_frozen(experiment_id, "artifacts", "curated_dataset")
+        if frozen is not None:
+            return {"error": frozen}
+
     from tcip_annotation.review_engine import ReviewEngine
     engine = ReviewEngine(str(store_dir))
     resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
