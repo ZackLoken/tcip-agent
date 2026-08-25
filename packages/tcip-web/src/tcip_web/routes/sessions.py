@@ -25,13 +25,8 @@ A per-image annotation timer + session aggregate at
                 }
             },
             ...
-        ],
-        "image_status": { "IMG_0001.JPG": "complete", ... }
+        ]
     }
-
-The image_status dict is co-owned with the classes-route's image_status.json
-endpoint and is duplicated here only for the annotation-stats file shape.
-The class-route file is canonical.
 """
 
 from __future__ import annotations
@@ -99,7 +94,7 @@ def _guarded_dataset_root(dataset_root: str) -> str:
 
 def _normalized(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
-        return {"sessions": [], "image_status": {}}
+        return {"sessions": []}
     return data
 
 

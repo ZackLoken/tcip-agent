@@ -1544,8 +1544,7 @@ REGISTERED = {
         "labels/.original/a_1.json", root_of=_generic_label_dir),
     "annotation_stats": Registered(
         {"sessions": [{"user": "ü", "images_annotated": 1, "total_annotations": 3,
-                       "total_time_seconds": 42.5}],
-         "image_status": {"a_1.jpg": "complete"}},
+                       "total_time_seconds": 42.5}]},
         lambda root: sessions.annotation_stats_key(str(root)), ".tcip/state/annotation_stats.json"),
     "band_group_manifest": Registered(
         BAND_GROUP_MANIFEST_BYTES,

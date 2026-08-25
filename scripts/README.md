@@ -29,6 +29,10 @@ reaching for again versus one built narrowly for a specific past investigation.
   `null`), for an entry registered before the field existed. `--plan` previews; an
   experiment-tagged entry is refused until the operator states its source with
   `--source NAME=VALUE`, since the tag alone can't be trusted to say which path produced it.
+- `drop_annotation_stats_image_status.py` - drops the dead `image_status` key from a project's
+  `annotation_stats` record, which every writer put there empty and nothing read. `--plan`
+  previews; a record whose `image_status` is not empty is refused, since that would mean a writer
+  the grounding did not find.
 - `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
   `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
   `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
