@@ -117,7 +117,10 @@ def test_register_dataset_reconciles_a_move_by_id(tmp_path: Path):
     assert same[0]["fingerprint"] == reg["fingerprint"]  # unchanged content -> same fingerprint
 
 
-def test_init_project(tmp_path: Path):
+def test_init_project(tmp_path: Path, monkeypatch):
+    # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
+    # init_project's naming rail (which only holds under the workspace) doesn't apply here.
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     result = init_project(str(tmp_path))
     assert (tmp_path / ".tcip").is_dir()
     assert (tmp_path / ".tcip" / "artifacts").is_dir()
@@ -125,7 +128,8 @@ def test_init_project(tmp_path: Path):
     assert ".tcip/" in result["created"]
 
 
-def test_inspect_project(tmp_path: Path):
+def test_inspect_project(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     status = inspect_project(str(tmp_path))
     assert status["initialized"] is False
 
@@ -134,7 +138,8 @@ def test_inspect_project(tmp_path: Path):
     assert status["initialized"] is True
 
 
-def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
+def test_inspect_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.tools.meta_tools import claude_reports
 
     init_project(str(tmp_path))
@@ -146,7 +151,8 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path):
     assert status["recent_activity"]["reports_since_last_retrospective"] == 1
 
 
-def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path):
+def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.project_status import project_status_key, record_report
 
     init_project(str(tmp_path))
@@ -170,11 +176,118 @@ def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch
     # backend happens to be listening on this machine (matches test_set_active_project.py).
     monkeypatch.setattr(web_client, "post_panel_event", lambda *a, **k: {"delivered": False})
 
-    init_project(str(project_path("proj_a")))
+    # A directory made outside the platform (init_project itself now refuses a non-conforming
+    # name under the workspace); set_active_project must still adopt it by its existing name.
+    (project_path("proj_a") / ".tcip").mkdir(parents=True)
     claude_reports(str(project_path("proj_a")), category="missing_tool", detail="a")
 
     result = set_active_project("proj_a")
     assert result["recent_activity"]["reports_since_last_retrospective"] == 1
+
+
+def test_inspect_project_reports_platform_root_divergence_from_marker(tmp_path: Path, monkeypatch):
+    """Adoption repins only the adopting process; a stale process's own root can keep naming a
+    different project than the marker until it deliberately adopts too, and inspect_project must
+    say so rather than answering as if the two agreed."""
+    from tcip_mcp import workspace
+
+    ws = tmp_path / "ws"
+    proj = ws / "hazelnut_catkin_valley"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    workspace.set_active_project("hazelnut_catkin_valley")
+
+    stale_root = tmp_path / "stale"
+    stale_root.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(stale_root))
+
+    status = inspect_project(str(proj))
+    divergence = status["platform_root_diverges_from_marker"]
+    assert divergence["marker_project"] == str(proj)
+    assert divergence["platform_root"] == str(stale_root)
+    assert divergence["action"] == "set_active_project"
+
+
+def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
+    tmp_path: Path, monkeypatch
+):
+    from tcip_mcp import workspace
+
+    ws = tmp_path / "ws"
+    proj = ws / "hazelnut_catkin_valley"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    workspace.set_active_project("hazelnut_catkin_valley")  # also repins TCIP_PROJECT_ROOT
+
+    status = inspect_project(str(proj))
+    assert "platform_root_diverges_from_marker" not in status
+
+
+def test_init_project_refuses_a_non_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    result = init_project(str(ws / "two_segments"))
+
+    assert "error" in result
+    assert not (ws / "two_segments").exists()
+
+
+def test_init_project_admits_a_conforming_name_under_the_workspace(tmp_path: Path, monkeypatch):
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    result = init_project(str(ws / "hazelnut_catkin_elongation"))
+
+    assert "error" not in result
+    assert (ws / "hazelnut_catkin_elongation" / ".tcip").is_dir()
+
+
+def test_init_project_admits_a_non_conforming_name_outside_the_workspace(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+
+    result = init_project(str(tmp_path / "two_segments"))
+
+    assert "error" not in result
+    assert (tmp_path / "two_segments" / ".tcip").is_dir()
+
+
+def test_import_project_refuses_a_non_conforming_destination_under_the_workspace(
+    tmp_path: Path, monkeypatch
+):
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    src = tmp_path / "src_project"
+    init_project(str(src))
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path))
+    assert "error" not in exported
+
+    dest = ws / "two_segments"
+    imported = import_project(str(zip_path), str(dest))
+
+    assert "error" in imported
+    assert not dest.exists()
+
+
+def test_import_project_admits_a_conforming_destination_under_the_workspace(
+    tmp_path: Path, monkeypatch
+):
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    src = tmp_path / "src_project"
+    init_project(str(src))
+    zip_path = tmp_path / "export.zip"
+    exported = archive_project(str(src), str(zip_path))
+    assert "error" not in exported
+
+    dest = ws / "hazelnut_catkin_elongation"
+    imported = import_project(str(zip_path), str(dest))
+
+    assert "error" not in imported
+    assert dest.is_dir()
 
 
 def test_export_import_roundtrip(tmp_path: Path):

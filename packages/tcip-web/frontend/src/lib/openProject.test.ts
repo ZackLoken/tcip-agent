@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { openProjectByName } from "@/lib/openProject";
+import { adoptProjectByName, adoptWorkspaceProject, openProjectByName } from "@/lib/openProject";
+import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => ({
-  api: { projects: { list: vi.fn() }, dataset: { select: vi.fn() } },
+  api: {
+    projects: { list: vi.fn(), setActive: vi.fn() },
+    dataset: { select: vi.fn() },
+  },
 }));
 
 import { api } from "@/api/client";
@@ -31,6 +35,7 @@ beforeEach(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     selection: {} as any,
   });
+  vi.mocked(api.projects.setActive).mockResolvedValue({ name: "x", path: "/x" });
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -48,6 +53,7 @@ describe("openProjectByName", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: [p],
     });
 
@@ -72,6 +78,7 @@ describe("openProjectByName", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: [p],
     });
 
@@ -94,6 +101,7 @@ describe("openProjectByName", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: [p],
     });
 
@@ -116,6 +124,7 @@ describe("openProjectByName", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: [p],
     });
 
@@ -130,9 +139,75 @@ describe("openProjectByName", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: [],
     });
     expect(await openProjectByName("nope")).toBeNull();
     expect(api.dataset.select).not.toHaveBeenCalled();
+  });
+
+  it("writes no active-project marker", async () => {
+    const p = project({ name: "hz", dates: ["2026-02-11"] });
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [p],
+    });
+
+    await openProjectByName("hz");
+
+    expect(api.projects.setActive).not.toHaveBeenCalled();
+  });
+});
+
+describe("adoptProjectByName", () => {
+  it("opens the project and writes the active-project marker", async () => {
+    const p = project({ name: "hz", dates: ["2026-02-11"] });
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [p],
+    });
+
+    await adoptProjectByName("hz");
+
+    expect(api.dataset.select).toHaveBeenCalledTimes(1);
+    expect(api.projects.setActive).toHaveBeenCalledWith("hz");
+  });
+
+  it("returns null for an unknown project and writes no marker", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: [],
+    });
+
+    expect(await adoptProjectByName("nope")).toBeNull();
+    expect(api.projects.setActive).not.toHaveBeenCalled();
+  });
+});
+
+describe("adoptWorkspaceProject", () => {
+  it("opens the project and adopts it", async () => {
+    const p = project({ name: "hz", dates: ["2026-02-11"] });
+
+    await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
+
+    expect(api.dataset.select).toHaveBeenCalledTimes(1);
+    expect(api.projects.setActive).toHaveBeenCalledWith("hz");
+  });
+
+  it("still returns the selection and pushes a toast when the marker write is rejected", async () => {
+    const p = project({ name: "hz", dates: ["2026-02-11"] });
+    vi.mocked(api.projects.setActive).mockRejectedValue(new Error("locked"));
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    const selection = await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
+
+    expect(selection).toBeDefined();
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("hz"));
   });
 });

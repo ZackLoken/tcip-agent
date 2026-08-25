@@ -41,24 +41,64 @@ export async function openWorkspaceProject(
   return res.selection;
 }
 
+/** Open a project like `openWorkspaceProject`, and also write the active-project marker: a
+ *  human-initiated open should be what the GUI/ritual find active next time. */
+export async function adoptWorkspaceProject(
+  p: ProjectSummary,
+  date: string,
+  subject: string | null,
+  modelName: string | null,
+): Promise<DatasetSelection> {
+  const selection = await openWorkspaceProject(p, date, subject, modelName);
+  // A rejected write is a toast, never a failed open: the project is open either way.
+  try {
+    await api.projects.setActive(p.name);
+  } catch (e) {
+    useStore
+      .getState()
+      .pushToast(
+        `Opened ${p.name}, but could not set it as the active project: ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+  }
+  return selection;
+}
+
 /** The most-recent date that actually has a labelled subject, or null if none do. */
 function newestLabelledDate(p: ProjectSummary): string | null {
   const labelled = p.dates.filter((d) => (p.subjects_by_date[d] ?? []).length > 0);
   return labelled.length ? defaultDate(labelled) : null;
 }
 
-/** Look a project up by name and open it on sensible defaults; null if it's gone. */
-export async function openProjectByName(name: string): Promise<DatasetSelection | null> {
+/** The project (by name) plus the default date/subject/model to open it on; null if the name
+ *  is not in the workspace. Prefers the newest date that actually has labels. */
+async function resolveDefaultOpen(name: string): Promise<{
+  p: ProjectSummary;
+  date: string;
+  subject: string | null;
+  model: string | null;
+} | null> {
   const { projects } = await api.projects.list();
   const p = projects.find((x) => x.name === name);
   if (!p) return null;
-  // Open on the most-recent date that actually has labels (not merely the newest date), and
-  // scope subject/model to that date's per-date availability; otherwise an agent that just
-  // ingested a still-unlabelled newer date would jump the human past their annotations onto a
-  // blank canvas (there's no date selector inside the Annotate tab to recover). Falls back to
-  // the newest date only when nothing is labelled yet (a genuinely empty project).
   const date = newestLabelledDate(p) ?? defaultDate(p.dates);
   const subject = (p.subjects_by_date[date] ?? [])[0] ?? null;
   const model = (p.models_by_date[date] ?? [])[0] ?? null;
-  return openWorkspaceProject(p, date, subject, model);
+  return { p, date, subject, model };
+}
+
+/** Look a project up by name and open it on sensible defaults; null if it's gone. Writes no
+ *  marker (the agent's own `active_project_changed` event uses this). */
+export async function openProjectByName(name: string): Promise<DatasetSelection | null> {
+  const resolved = await resolveDefaultOpen(name);
+  if (!resolved) return null;
+  return openWorkspaceProject(resolved.p, resolved.date, resolved.subject, resolved.model);
+}
+
+/** Same as `openProjectByName`, but adopts (writes the marker): for a human-initiated open,
+ *  e.g. the breadcrumb's recent-projects list. */
+export async function adoptProjectByName(name: string): Promise<DatasetSelection | null> {
+  const resolved = await resolveDefaultOpen(name);
+  if (!resolved) return null;
+  return adoptWorkspaceProject(resolved.p, resolved.date, resolved.subject, resolved.model);
 }

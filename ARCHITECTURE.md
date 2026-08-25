@@ -618,11 +618,11 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `register_dataset` | `project_tools.py:94` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
 | `init_project` | `project_tools.py:184` | yes | Initialise a TCIP project directory. |
-| `set_active_project` | `project_tools.py:248` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:236` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:283` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:387` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:513` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `set_active_project` | `project_tools.py:208` | yes | Set the workspace's active project so the GUI opens it. |
+| `view_gui_state` | `project_tools.py:278` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:325` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:437` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:563` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### training_tools.py (8 tools)
 
@@ -743,11 +743,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `serve_image` | `routes/images.py:469` |
-| GET | `/dimensions` | `get_dimensions` | `routes/images.py:663` |
-| GET | `/bands` | `get_bands` | `routes/images.py:683` |
-| POST | `/overviews` | `build_image_overviews` | `routes/images.py:816` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:840` |
+| GET | `` (root) | `serve_image` | `routes/images.py:467` |
+| GET | `/dimensions` | `get_dimensions` | `routes/images.py:661` |
+| GET | `/bands` | `get_bands` | `routes/images.py:681` |
+| POST | `/overviews` | `build_image_overviews` | `routes/images.py:814` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:838` |
 
 ### routes/inference.py, prefix `/api/inference` (5 HTTP + 1 WS)
 
@@ -767,13 +767,12 @@ registered at HEAD.
 | GET | `/reports` | `get_reports` | `routes/meta.py:36` |
 | GET | `/retrospectives` | `get_retrospectives` | `routes/meta.py:58` |
 
-### routes/projects.py, prefix `/api/projects` (3 routes)  <!-- queued: P5-88 unify -->
+### routes/projects.py, prefix `/api/projects` (2 routes)  <!-- queued: P5-88 unify -->
 
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `` (root) | `list_projects` | `routes/projects.py:76` |
-| GET | `/active` | `get_active_project` | `routes/projects.py:97` |  <!-- queued: P5-89 unify -->
-| POST | `/active` | `set_active_project` | `routes/projects.py:117` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| POST | `/active` | `set_active_project` | `routes/projects.py:104` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
 ### routes/results.py, prefix `/api/results` (14 routes)
 
@@ -1475,9 +1474,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:121`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:194`.
 
-Readers: `read_active_project`, `workspace.py:102`; `resolve_project_path`, `workspace.py:113`.
+Readers: `read_active_project`, `workspace.py:152`; `resolve_project_path`, `workspace.py:186`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -1534,19 +1533,19 @@ the primary implementation. Both fields are
 reported as-is below; the Phase 3 verdict is the one used for the seam count at the
 end.
 
-## S01. Platform state root pin (TCIP_PROJECT_ROOT)  <!-- queued: P5-298 unify -->
+## S01. Platform state root pin (TCIP_PROJECT_ROOT)
 
 Must agree: all three processes resolve `.tcip/` against the same directory.
 Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:30` (`ENV_VAR = "TCIP_PROJECT_ROOT"`).
-Side B: `packages/tcip-web/src/tcip_web/routes/images.py:154` (`root = os.environ.get("TCIP_PROJECT_ROOT")`, a direct read bypassing the shared resolver).
-Phase 3 verdict: duplicated.
+Side B: `packages/tcip-web/src/tcip_web/routes/images.py:152` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
+Phase 3 verdict: single.
 
-## S02. Workspace root and the .active project marker  <!-- queued: P5-282 unify -->
+## S02. Workspace root and the .active project marker
 
 Must agree: every process names the same workspace directory and the same active project.
-Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:28` (`ACTIVE_MARKER = ".active"`).
-Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:42` (`raw = os.environ.get("TCIP_WORKSPACE", "").strip()`, a direct read bypassing `workspace.py`).
-Phase 3 verdict: duplicated.
+Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:29` (`ACTIVE_MARKER = ".active"`).
+Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:71` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
+Phase 3 verdict: single.
 
 ## S03. Backend port discovery file .tcip/state/web_port.txt
 
@@ -1601,7 +1600,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:97` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:252` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:294` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
@@ -1896,7 +1895,7 @@ Phase 3 verdict: duplicated.
 ## S52. Image-serve response headers  <!-- queued: P5-301 unify -->
 
 Must agree: header names and value encodings match.
-Side A: `packages/tcip-web/src/tcip_web/routes/images.py:646` (`extra = {"X-TCIP-Stats-Source": stats_source, "X-TCIP-Served-Size": f"{out_w}x{out_h}"}`).
+Side A: `packages/tcip-web/src/tcip_web/routes/images.py:642` (`extra = {"X-TCIP-Stats-Source": stats_source, "X-TCIP-Served-Size": f"{out_w}x{out_h}"}`).
 Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:42` (`servedSize: parseServedSize(headers.get("X-TCIP-Served-Size")),`).
 Phase 3 verdict: duplicated.
 
@@ -2010,10 +2009,10 @@ Phase 3 verdict: duplicated.
 67 of 67 seams from the Phase 0 inventory carry a Phase 3 `single_implementation` verdict.
 By verdict:
 
-- `duplicated`: 24 seams.
-- `single`: 41 seams (S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21,
-  S22, S23, S26, S27, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S39, S40, S44,
+- `duplicated`: 22 seams.
+- `single`: 43 seams (S01, S02, S03, S06, S07, S08, S12, S13, S14, S15, S16, S17, S18, S19, S20,
+  S21, S22, S23, S26, S27, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S39, S40, S44,
   S45, S46, S53, S58, S59, S60, S61, S62, S66).
 - `restated-in-test`: 2 seams (S25, S57).
 
-41 of 67 seams (61%) hold their agreement in a single implementation.
+43 of 67 seams (64%) hold their agreement in a single implementation.

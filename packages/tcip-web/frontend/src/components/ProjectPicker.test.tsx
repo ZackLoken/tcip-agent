@@ -59,6 +59,7 @@ beforeEach(() => {
   // the module is overkill; instead each test controls `active` so auto-open is inert.
   useStore.getState().clearDataset();
   vi.mocked(api.dataset.select).mockReset();
+  vi.mocked(api.projects.setActive).mockReset();
   vi.mocked(api.projects.setActive).mockResolvedValue({ name: "x", path: "/x" });
 });
 
@@ -67,6 +68,7 @@ describe("ProjectPicker", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: PROJECTS,
     });
     render(<ProjectPicker />);
@@ -80,6 +82,7 @@ describe("ProjectPicker", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: PROJECTS,
     });
     render(<ProjectPicker />);
@@ -97,6 +100,7 @@ describe("ProjectPicker", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: [],
     });
     render(<ProjectPicker />);
@@ -107,6 +111,7 @@ describe("ProjectPicker", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: PROJECTS,
     });
     vi.mocked(api.dataset.select).mockResolvedValue({
@@ -138,12 +143,49 @@ describe("ProjectPicker", () => {
     await waitFor(() =>
       expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/crop_a_subject_a_valley-farm"),
     );
+    // Opening from the picker adopts the project (writes the active-project marker).
+    expect(api.projects.setActive).toHaveBeenCalledWith("crop_a_subject_a_valley-farm");
+  });
+
+  it("still opens the project when the marker write is rejected, and surfaces a toast", async () => {
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: PROJECTS,
+    });
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: {
+        project_root: "/ws/crop_a_subject_a_valley-farm",
+        dataset_root: "/ws/crop_a_subject_a_valley-farm",
+        subject: "subject_a",
+        date: "2026-03-01",
+        image_list: [],
+        current_image_index: 0,
+        annotations_dir: null,
+        predictions_dir: null,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(api.projects.setActive).mockRejectedValue(new Error("locked"));
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    render(<ProjectPicker />);
+    fireEvent.click(await screen.findByText("crop_a_subject_a_valley-farm"));
+    fireEvent.click(screen.getByText("Open project"));
+
+    await waitFor(() =>
+      expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/crop_a_subject_a_valley-farm"),
+    );
+    expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("crop_a_subject_a_valley-farm"));
   });
 
   it("filters the subject options to the selected date's labelled subjects", async () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: PROJECTS,
     });
     render(<ProjectPicker />);
@@ -166,6 +208,7 @@ describe("ProjectPicker", () => {
     vi.mocked(api.projects.list).mockResolvedValue({
       workspace: "/ws",
       active: null,
+      active_path: null,
       projects: PROJECTS,
     });
     render(<ProjectPicker />);

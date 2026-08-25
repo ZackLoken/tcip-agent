@@ -21,28 +21,35 @@ Start the session with `load_project_memory` (kind='reports' and kind='retrospec
 on any project you're handed. Surface friction with `claude_reports` the moment you hit
 it (missing site, ambiguous goal, unconfirmed format).
 
-## 1. Name the project: `{crop}_{trait}_{site}`
+## 1. Name the project: `crop_subject_phenotype`
 
 Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`), one
-folder per project. The name is a controlled slug: lowercase; hyphens within a segment,
-underscores between segments:
+folder per project. The shape is declared once, in `workspace.format_project_name`/
+`parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
+within a segment. Neither function checks a segment against a vocabulary (provisional,
+per the owner's naming ruling); `ingest_images`, `init_project` and `import_project`
+refuse a non-conforming name when the directory they create lands under the workspace.
 
-    {crop}_{trait}_{site}
-    hazelnut_catkin-05-50-95-per-date_valley-farm
+    crop_subject_phenotype
 
 - `crop`: one of the six controlled crops (verify in `.github/skills/crops/`).
-- `trait`: the phenotype being measured (see `.github/skills/crop-science`).
-- `site`: the field/orchard. If the goal doesn't name a site, ask the human; don't
-  invent one. A wrong site name fragments a breeder's data across seasons.
+- `subject`: the object the annotations isolate (see step 3 below).
+- `phenotype`: what is being measured (see `.github/skills/crop-science`), never a
+  `crops.yml` trait name.
 
-Scales across 6 crops × many traits × sites, and sorts sensibly on disk.
+The site (field/orchard) is no longer part of the name; where a project's site identity
+gets recorded instead is an open question, filed for the owner. Ask the human for the
+site when the goal doesn't name one and record it wherever the project ends up carrying
+it, rather than folding it back into the directory name.
+
+Scales across 6 crops × subjects × phenotypes, and sorts sensibly on disk.
 
 ## 2. Ingest: `ingest_images`
 
 Structure the raw pile into the canonical layout. One auditable primitive:
 
 ```
-ingest_images(source="<raw folder or glob>", name="{crop}_{trait}_{site}")
+ingest_images(source="<raw folder or glob>", name="crop_subject_phenotype")
 ```
 
 - Copies by default (originals are left byte-identical); pass `copy=False` only when

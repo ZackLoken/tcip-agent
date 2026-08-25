@@ -1,23 +1,32 @@
 """SessionStart ritual hook: inject the session-start ritual directive naming the active project.
 
-Fast and stdlib-only by design (Anthropic guidance: SessionStart hooks must be quick, they are for
-context loading, never slow work). It spawns no subprocess and imports nothing heavy: it reads the
-active-project marker and injects an ``additionalContext`` directive telling the agent to run the
-ritual (``load_project_memory``/``inspect_project``/``doctor.py``) as its first actions. A shell
-hook has no MCP client, so it cannot run those calls itself, it makes them salient and dynamic,
-which prose in a large always-on file does not. ``additionalContext`` lands as a fresh
-session-start reminder at the top of context.
+Fast by design (Anthropic guidance: SessionStart hooks must be quick, they are for context
+loading, never slow work). It spawns no subprocess and imports nothing costly: it reads the
+active-project marker through the platform's own storage seam (``tcip_mcp.workspace``,
+``tcip_store.binding``), not a loose file that the default backend may not even write, and
+injects an ``additionalContext`` directive telling the agent to run the ritual
+(``load_project_memory``/``inspect_project``/``doctor.py``) as its first actions. A shell hook
+has no MCP client, so it cannot run those calls itself, it makes them salient and dynamic, which
+prose in a large always-on file does not. ``additionalContext`` lands as a fresh session-start
+reminder at the top of context.
 
 It once also counted open reports/retrospectives by globbing the project's own directories, which
 undercounts to zero once a project's state moves to a database backend. Re-pointing that count
 through the storage seam was tried and rejected: the seam's own enumeration of those two record
 kinds lives in ``tcip_mcp.tools.meta_tools``, and importing it pulls in the MCP server's full tool
 registration (measured at several seconds, not the milliseconds a SessionStart hook gets), the
-same regression this module's own stdlib-only import test stands guard against. Calling
-``tcip_store.keys`` directly needs a store descriptor only that same module registers, so doing it
-here without that import would mean re-declaring the report/retrospective file layout a second
-time, the drift this platform's own seam discipline forbids. So the count is dropped rather than
-served wrong or duplicated: this hook now only names the active project.
+same regression this module's own import test stands guard against. Calling ``tcip_store.keys``
+directly needs a store descriptor only that same module registers, so doing it here without that
+import would mean re-declaring the report/retrospective file layout a second time, the drift this
+platform's own seam discipline forbids. So the count is dropped rather than served wrong or
+duplicated: this hook now only names the active project.
+
+Measured on this machine: importing ``tcip_mcp.workspace`` (plus the ``tcip_store`` imports it
+pulls in) costs ~57ms; a fresh process that imports it, binds the backend and reads the marker
+costs 152-168ms wall clock over five runs, against 38-42ms for this hook with no seam read and
+22-28ms for a bare interpreter. The lock timeout below is held well under the store's own
+30-second default for the same reason: a store a writer is holding must not hold session start
+for anywhere near that long.
 
 Best-effort: every path swallows its error and exits 0. A session-start hook must never break the
 session, and (the reason the earlier subprocess version was reverted) must never slow its spawn.
@@ -30,21 +39,63 @@ import os
 import sys
 from pathlib import Path
 
+_LOCK_TIMEOUT_S = 2.0
+"""Bounds how long a locked store can hold this hook, well under the store's own 30s default."""
 
-def _active_project() -> str:
-    """Active project's root via the workspace ``.active`` marker (stdlib only); "" when none.
 
-    Deliberately does not import tcip_mcp or spawn anything: the hook must stay fast. The inherited
-    ``TCIP_PROJECT_ROOT`` is not a reliable signal (tcip-web pins it to the repo root and the spawned
-    terminal keeps that stale value), so the live marker is the trustworthy source.
+def _resolve_active() -> tuple[str, str]:
+    """What the workspace's active-project marker says, as ``(outcome, detail)``.
+
+    ``outcome`` is one of:
+      - ``"active"``: the marker names a project whose ``.tcip`` exists; ``detail`` is its root.
+      - ``"none"``: no marker is set; ``detail`` is empty.
+      - ``"unreadable"``: the marker could not be read (a store refusal, e.g. a workspace still
+        holding loose files under the database backend) or names a project whose ``.tcip`` is
+        gone; ``detail`` names why.
+      - ``"import_error"``: the platform packages could not be imported from this interpreter;
+        ``detail`` is the error.
+
+    Imports ``tcip_mcp.workspace`` and ``tcip_store.binding`` inside this function, never at
+    module scope, so an interpreter that cannot see those packages still reports that fact
+    rather than a false no-project state. Binds the environment's own backend (the same rule
+    every process follows) with a short lock timeout, and reads the marker with
+    ``create=False`` so a bare read cannot bring a workspace directory into existence.
     """
     try:
-        raw = os.environ.get("TCIP_WORKSPACE", "").strip()
-        ws = Path(raw).expanduser() if raw else Path.home() / "tcip-projects"
-        name = (ws / ".active").read_text(encoding="utf-8").strip()
-        return str(ws / name) if name else ""
-    except Exception:
+        from tcip_mcp import workspace
+        from tcip_store.binding import bind_default
+    except ImportError as exc:
+        return "import_error", str(exc)
+    try:
+        bind_default(lock_timeout_s=_LOCK_TIMEOUT_S)
+        found = workspace.active_project_if_present(create=False)
+    except Exception as exc:  # noqa: BLE001, a store refusal or lock timeout is reported, not raised
+        return "unreadable", str(exc)
+    if found is not None:
+        _, path = found
+        return "active", str(path)
+    try:
+        name = workspace.read_active_project(create=False)
+    except Exception as exc:  # noqa: BLE001, same as above
+        return "unreadable", str(exc)
+    if not name:
+        return "none", ""
+    return "unreadable", f"the marker names {name!r}, whose .tcip is not a directory"
+
+
+def _root_divergence_note(proj: str) -> str:
+    """States it when this session's inherited ``TCIP_PROJECT_ROOT`` names a different
+    project than the active marker: that env var is inherited, not a live read (this
+    module's own docstring already calls it unreliable on its own), so the two can disagree.
+    """
+    inherited = os.environ.get("TCIP_PROJECT_ROOT")
+    if not inherited or str(Path(inherited)) == str(Path(proj)):
         return ""
+    return (
+        f"This session's inherited TCIP_PROJECT_ROOT ({inherited}) names a different project "
+        f"than the active marker ({proj}); adopt the marker's project explicitly "
+        "(set_active_project) before running the ritual.\n\n"
+    )
 
 
 def _active_context(proj: str) -> str:
@@ -52,6 +103,7 @@ def _active_context(proj: str) -> str:
     return (
         "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
         f"Active project: {name} ({proj}).\n\n"
+        f"{_root_divergence_note(proj)}"
         "If this session continues work on that project, run the ritual first: load_project_memory "
         "(kind='reports' and kind='retrospectives'), inspect_project, then python scripts/doctor.py <project_root>.\n"
         "If the user's task is to create or switch to a different project, do that first (init_project "
@@ -74,6 +126,26 @@ def _no_project_context() -> str:
     )
 
 
+def _unreadable_context(detail: str) -> str:
+    return (
+        "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
+        f"The active-project marker could not be adopted: {detail}\n"
+        "This is a mandated action that failed, so file it with claude_reports once an MCP client "
+        "is available, rather than treating it as no active project. If the detail names a "
+        "workspace holding loose files with no database, conform it with "
+        "python scripts/adopt_store.py before trusting the marker again."
+    )
+
+
+def _import_error_context(detail: str) -> str:
+    return (
+        "[TCIP session-start ritual, auto-injected by the SessionStart hook]\n"
+        f"The active-project marker could not be read from this interpreter: {detail}\n"
+        "This session cannot see whether a project is active; do not assume there is none. "
+        "File this with claude_reports once an MCP client is available."
+    )
+
+
 def main() -> None:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -82,8 +154,15 @@ def main() -> None:
     try:
         if payload.get("source") == "compact":
             return  # mid-session compaction; re-running the ritual is noise
-        proj = _active_project()
-        ctx = _active_context(proj) if proj else _no_project_context()
+        outcome, detail = _resolve_active()
+        if outcome == "active":
+            ctx = _active_context(detail)
+        elif outcome == "unreadable":
+            ctx = _unreadable_context(detail)
+        elif outcome == "import_error":
+            ctx = _import_error_context(detail)
+        else:
+            ctx = _no_project_context()
         print(json.dumps({
             "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}
         }))

@@ -76,7 +76,9 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
 def list_projects() -> dict:
     """List workspace projects (directories containing ``.tcip/``), newest first."""
     root = workspace.workspace_root()
-    active = workspace.read_active_project()
+    found = workspace.active_project_if_present()
+    active = found[0] if found else None
+    active_path = str(found[1]) if found else None
     projects: list[ProjectSummary] = []
     for child in root.iterdir():
         if child.is_dir() and (child / ".tcip").is_dir():
@@ -89,24 +91,9 @@ def list_projects() -> dict:
     return {
         "workspace": str(root),
         "active": active,
+        "active_path": active_path,
         "projects": [p.model_dump() for p in projects],
     }
-
-
-@router.get("/active")
-def get_active_project() -> ActiveProject:
-    """Return the active project's name + resolved path (or nulls when unset/missing)."""
-    name = workspace.read_active_project()
-    if not name:
-        return ActiveProject()
-    try:
-        path = workspace.project_path(name)
-    except ValueError:
-        return ActiveProject()
-    if not (path / ".tcip").is_dir():
-        # Marker points at a project that no longer exists: report unset.
-        return ActiveProject()
-    return ActiveProject(name=name, path=str(path))
 
 
 class SetActiveRequest(BaseModel):
@@ -116,12 +103,13 @@ class SetActiveRequest(BaseModel):
 @router.post("/active")
 def set_active_project(req: SetActiveRequest) -> ActiveProject:
     """Set the active project (the marker the GUI auto-opens). Name must be a workspace
-    project; traversal/separators are rejected."""
+    project; traversal/separators are rejected, and its ``.tcip`` must already exist."""
     try:
         path = workspace.project_path(req.name)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if not (path / ".tcip").is_dir():
-        raise HTTPException(404, f"no such workspace project: {req.name}")
-    workspace.set_active_project(req.name)
+    try:
+        workspace.set_active_project(req.name)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return ActiveProject(name=req.name, path=str(path))

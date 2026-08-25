@@ -79,6 +79,9 @@ def test_project_path_under_workspace(_isolate_workspace):
 
 
 def test_active_marker_round_trip(_isolate_workspace):
+    (workspace.project_path("hazelnut_catkin_valley-farm") / ".tcip").mkdir(parents=True)
+    (workspace.project_path("chestnut_burr_site-b") / ".tcip").mkdir(parents=True)
+
     assert workspace.read_active_project() is None
     workspace.set_active_project("hazelnut_catkin_valley-farm")
     assert workspace.read_active_project() == "hazelnut_catkin_valley-farm"
@@ -194,7 +197,7 @@ def test_ingest_still_ingests_a_file_whose_capture_date_cannot_be_read(tmp_path,
     src.mkdir(parents=True)
     (src / name).write_bytes(b"this is not an image at all")
 
-    manifest = ingest_images(source=str(src), name="proj_unreadable")
+    manifest = ingest_images(source=str(src), name="proj_unreadable_case")
 
     assert manifest["copied"] == 1
     assert manifest["total"] == 1
@@ -247,7 +250,7 @@ def test_ingest_copies_leave_originals_byte_identical(tmp_path):
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
     before = (src / "a.jpg").read_bytes()
 
-    manifest = ingest_images(source=str(src), name="proj_copy")
+    manifest = ingest_images(source=str(src), name="proj_copy_mode")
 
     assert (src / "a.jpg").is_file()  # original still there
     assert (src / "a.jpg").read_bytes() == before  # byte-identical
@@ -259,7 +262,7 @@ def test_ingest_move_removes_originals(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
 
-    manifest = ingest_images(source=str(src), name="proj_move", copy=False)
+    manifest = ingest_images(source=str(src), name="proj_move_mode", copy=False)
 
     assert manifest["moved"] == 1
     assert manifest["move"] is True
@@ -273,7 +276,7 @@ def test_ingest_no_overwrite_reports_stem_collision(tmp_path):
     _make_image(src / "sub1" / "dup.png")
     _make_image(src / "sub2" / "dup.png")
 
-    manifest = ingest_images(source=str(src), name="proj_collision")
+    manifest = ingest_images(source=str(src), name="proj_collision_case")
 
     assert manifest["undated"] == 1  # exactly one placed
     assert len(manifest["skipped_collisions"]) == 1
@@ -291,7 +294,7 @@ def test_ingest_same_stem_different_ext_is_a_collision(tmp_path):
     _make_image(src / "IMG_1.jpg", exif_date="2026:02:11 10:00:00")
     _make_image(src / "IMG_1.png")  # different ext; PNG has no EXIF → but force same bucket
 
-    manifest = ingest_images(source=str(src), name="proj_stem", date_from="2026-02-11")
+    manifest = ingest_images(source=str(src), name="proj_stem_case", date_from="2026-02-11")
 
     assert manifest["copied"] == 1
     assert len(manifest["skipped_collisions"]) == 1
@@ -315,7 +318,7 @@ def test_ingest_survives_a_bad_file_mid_batch(tmp_path, monkeypatch):
 
     monkeypatch.setattr(it.store, "put_blob", flaky_put)
 
-    manifest = ingest_images(source=str(src), name="proj_resilient")
+    manifest = ingest_images(source=str(src), name="proj_resilient_case")
 
     assert manifest["copied"] == 2  # the two good files still landed
     assert len(manifest["errors"]) == 1
@@ -325,9 +328,9 @@ def test_ingest_survives_a_bad_file_mid_batch(tmp_path, monkeypatch):
 def test_ingest_reingest_is_idempotent_via_collision_skip(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
-    ingest_images(source=str(src), name="proj_reingest")
+    ingest_images(source=str(src), name="proj_reingest_case")
     # Second run: dest already exists → skipped, nothing copied.
-    second = ingest_images(source=str(src), name="proj_reingest")
+    second = ingest_images(source=str(src), name="proj_reingest_case")
     assert second["copied"] == 0
     assert len(second["skipped_collisions"]) == 1
 
@@ -337,7 +340,7 @@ def test_ingest_date_from_none_all_undated(tmp_path):
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")  # has EXIF but ignored
     _make_image(src / "b.png")
 
-    manifest = ingest_images(source=str(src), name="proj_none", date_from="none")
+    manifest = ingest_images(source=str(src), name="proj_none_mode", date_from="none")
 
     assert manifest["undated"] == 2
     assert manifest["buckets"] == {}
@@ -348,7 +351,7 @@ def test_ingest_date_from_literal_bucket(tmp_path):
     _make_image(src / "a.png")
     _make_image(src / "b.png")
 
-    manifest = ingest_images(source=str(src), name="proj_literal", date_from="2026-05-15")
+    manifest = ingest_images(source=str(src), name="proj_literal_mode", date_from="2026-05-15")
 
     assert manifest["buckets"] == {"2026-05-15": 2}
     assert manifest["undated"] == 0
@@ -358,17 +361,17 @@ def test_ingest_date_from_literal_bucket(tmp_path):
 def test_ingest_literal_bucket_rejects_traversal(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.png")
-    manifest = ingest_images(source=str(src), name="proj_bad", date_from="../escape")
+    manifest = ingest_images(source=str(src), name="proj_bad_mode", date_from="../escape")
     assert "error" in manifest
 
 
 def test_ingest_no_images_found(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
-    manifest = ingest_images(source=str(empty), name="proj_empty")
+    manifest = ingest_images(source=str(empty), name="proj_empty_case")
     assert "error" in manifest
     # No project should be scaffolded when there's nothing to ingest.
-    assert not (workspace.project_path("proj_empty")).exists()
+    assert not (workspace.project_path("proj_empty_case")).exists()
 
 
 def test_ingest_explicit_project_path_overrides_workspace(tmp_path):
@@ -382,12 +385,55 @@ def test_ingest_explicit_project_path_overrides_workspace(tmp_path):
     assert (dest / "images" / "undated" / "a.png").is_file()
 
 
+def test_ingest_refuses_a_non_conforming_name_under_the_workspace(tmp_path, _isolate_workspace):
+    src = tmp_path / "raw"
+    _make_image(src / "a.png")
+
+    manifest = ingest_images(source=str(src), name="two_segments")
+
+    assert "error" in manifest
+    assert not workspace.project_path("two_segments").exists()
+
+
+def test_ingest_admits_a_conforming_name_under_the_workspace(tmp_path):
+    src = tmp_path / "raw"
+    _make_image(src / "a.png")
+
+    manifest = ingest_images(source=str(src), name="proj_conforms_case")
+
+    assert "error" not in manifest
+
+
+def test_ingest_refuses_a_non_conforming_override_basename_under_the_workspace(
+    tmp_path, _isolate_workspace
+):
+    src = tmp_path / "raw"
+    _make_image(src / "a.png")
+    dest = _isolate_workspace / "two_segments"
+
+    manifest = ingest_images(source=str(src), name="ignored", project_path=str(dest))
+
+    assert "error" in manifest
+    assert not dest.exists()
+
+
+def test_ingest_admits_a_non_conforming_override_outside_the_workspace(tmp_path):
+    src = tmp_path / "raw"
+    _make_image(src / "a.png")
+    dest = tmp_path / "two_segments"
+
+    manifest = ingest_images(source=str(src), name="ignored", project_path=str(dest))
+
+    assert "error" not in manifest
+    assert Path(manifest["project_path"]) == dest
+
+
 def test_ingest_non_recursive_skips_subfolders(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "top.png")
     _make_image(src / "sub" / "deep.png")
 
-    manifest = ingest_images(source=str(src), name="proj_flat", recursive=False)
+    manifest = ingest_images(source=str(src), name="proj_flat_case", recursive=False)
 
     assert manifest["total"] == 1  # only top.png
 
@@ -400,7 +446,7 @@ def test_ingest_writes_audit_entry(tmp_path, monkeypatch):
 
     src = tmp_path / "raw"
     _make_image(src / "a.png")
-    ingest_images(source=str(src), name="proj_audit")
+    ingest_images(source=str(src), name="proj_audit_case")
 
     entries = ts.read_log(audit_mod.audit_log_key(tmp_path)).records
     assert any(e["tool"] == "ingest_images" and e["status"] == "ok" for e in entries)
@@ -412,7 +458,7 @@ def test_inspect_project_counts_canonical_images(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
     _make_image(src / "b.png")
-    manifest = ingest_images(source=str(src), name="proj_status")
+    manifest = ingest_images(source=str(src), name="proj_status_case")
     proj = manifest["project_path"]
 
     status = inspect_project(proj)
