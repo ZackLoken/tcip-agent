@@ -1197,6 +1197,11 @@ def run_hpo(
     ``trial_<id>/`` directory per trial, and Ray's own experiment store (also the
     TensorBoard logdir). The full result is written alongside as ``<study_name>.json``.
 
+    Refuses (``{"error": ..., "issues": [...]}``, nothing minted) an unimportable builder or
+    training source, or a config with no ``data`` section, at the config a trial would actually
+    train under (``base_config`` with the search space's first sampled point applied), rather
+    than reporting as the losing side in every trial.
+
     Args:
         base_config: Base training config each trial modifies.
         param_space: Param-space dict (see ``hpo.get_default_space``); default when omitted.
@@ -1224,6 +1229,13 @@ def run_hpo(
     # every trial's resolved config once a sampled point is applied to it.
     check_json_value(param_space, path="param_space")
     check_json_value(base_config, path="base_config")
+
+    # Structural preflight, before anything is minted, over the base config with the search
+    # space's first sampled point applied: a placeholder axis is checked as a trial would see it.
+    preflight_cfg = _apply_hpo_params(base_config, _first_sampled_point(param_space))
+    preflight = preflight_config(preflight_cfg)
+    if not preflight["valid"]:
+        return {"error": "the sweep's base config fails preflight", "issues": preflight["issues"]}
 
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
@@ -1364,9 +1376,42 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
             training["batch_size"] = value
         elif key == "weight_decay":
             cfg.setdefault("optimizer", {})["weight_decay"] = value
+        elif "." in key:
+            # A dotted path (e.g. "model_source.builder") reaches the nested field it names,
+            # rather than landing as a literal top-level key nothing reads.
+            *path, leaf = key.split(".")
+            node = cfg
+            for part in path:
+                node = node.setdefault(part, {})
+            node[leaf] = value
         else:
             cfg[key] = value
     return cfg
+
+
+def _first_sampled_point(param_space: dict) -> dict:
+    """One deterministic point from ``param_space``, spanning its declared range or choices.
+
+    Not a real trial's sample (Ray Tune's own samplers are what a trial actually draws from),
+    but enough structure to resolve what ``_apply_hpo_params`` would apply to any given trial's
+    config, so a structural preflight run over it sees the same shape a trial would.
+    """
+    point: dict = {}
+    for key, spec in param_space.items():
+        if not isinstance(spec, dict):
+            # Not this platform's own {"type": ...} shape (a caller-composed space bypassing
+            # get_default_space): take a value outright rather than guess a range from it.
+            point[key] = spec[0] if isinstance(spec, list) and spec else spec
+            continue
+        kind = spec.get("type")
+        if kind == "categorical":
+            choices = spec.get("choices") or [None]
+            point[key] = choices[0]
+        elif kind in ("loguniform", "uniform", "int"):
+            point[key] = spec["low"] if "low" in spec else spec.get("high", 0)
+        else:
+            point[key] = spec.get("low", spec.get("choices", [None])[0])
+    return point
 
 
 def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:

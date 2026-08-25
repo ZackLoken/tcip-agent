@@ -12,6 +12,19 @@ from pathlib import Path
 import tcip_store as ts
 
 
+def _real_base_config(tmp_path: Path) -> dict:
+    """A base config the door's own structural preflight admits: an importable builder and a
+    data section whose directories exist."""
+    imgs, lbls = tmp_path / "images", tmp_path / "labels"
+    imgs.mkdir(exist_ok=True)
+    lbls.mkdir(exist_ok=True)
+    return {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+    }
+
+
 def _stub_sweep(monkeypatch, observed: dict):
     """Run the sweep body without Ray: the search stub drives one trial through the objective."""
     import tcip_mcp.tools.training_tools as tt
@@ -36,7 +49,7 @@ def test_a_sweeps_manifest_records_the_directory_that_holds_it(tmp_path: Path, m
     tt = _stub_sweep(monkeypatch, observed)
     sweeps_root = tmp_path / "sweeps"
 
-    result = tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1,
+    result = tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1,
                         output_dir=str(sweeps_root))
     study_name = result["study_name"]
 
@@ -55,7 +68,7 @@ def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
     observed: dict = {}
     tt = _stub_sweep(monkeypatch, observed)
 
-    result = tt.run_hpo(base_config={"model_source": {"builder": "x:y"}}, n_trials=1)
+    result = tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1)
 
     study_name = result["study_name"]
     manifest = ts.read(tt.sweep_manifest_key(study_name))

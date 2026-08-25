@@ -927,7 +927,8 @@ def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
 
 
 def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
-    """The refusal above must not cost a legitimate sweep its search."""
+    """The refusal above must not cost a legitimate sweep its search: admits valid work through
+    the sweep door's structural preflight (an importable builder, a real data section)."""
     from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools import training_tools
 
@@ -940,8 +941,15 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
 
     monkeypatch.setattr(hpo, "tune_search", fake_search)
 
-    result = training_tools.run_hpo({"model_source": {"builder": "m:f"}},
-                                    param_space={"lr": [0.1, 0.01]}, n_trials=1)
+    imgs, lbls = tmp_path / "images", tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    base_config = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+    }
+    result = training_tools.run_hpo(base_config, param_space={"lr": [0.1, 0.01]}, n_trials=1)
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
