@@ -6,13 +6,17 @@
 import type { ImageStatus } from "@/api/classes";
 import { asJson } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import {
+  RENDER_CACHE_VERSION,
+  type CoveragePayload,
+  type CoverageRecord,
+} from "@/api/types.generated";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import type {
   CompletenessRecord,
   CompletenessTogglePostBody,
   CoverageGridResponse,
 } from "@/lib/coverage";
-import type { CoveragePostBody, CoverageRecord } from "@/lib/coverageTracker";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type {
   Annotation,
@@ -211,7 +215,9 @@ export const api = {
   images: {
     /** An image serve URL. The served width is the server's own display bound unless a caller
      *  names a narrower max_width; x0/y0/x1/y1 (all four or none) request a half-open
-     *  native-pixel region of the raster. */
+     *  native-pixel region of the raster. Every URL carries the render cache's own version, so a
+     *  browser cache entry from before a version bump is never the response to a request built
+     *  after it. */
     url: (
       path: string,
       opts: {
@@ -224,7 +230,7 @@ export const api = {
         x1?: number;
         y1?: number;
       } = {},
-    ) => `${ROUTES.getImages}?${q({ path, ...opts })}`,
+    ) => `${ROUTES.getImages}?${q({ path, ...opts, v: RENDER_CACHE_VERSION })}`,
 
     // Per-band symbology plus the one fact that gates the band picker's visibility
     // (band_count > 3), never shown for a standard RGB dataset.
@@ -255,7 +261,7 @@ export const api = {
       ).then((body) => body.coverage),
 
     // Union-merged server-side on a matching grid; a mismatched grid replaces the record.
-    push: (body: CoveragePostBody) =>
+    push: (body: CoveragePayload) =>
       call<{ status: string }>(ROUTES.postCoverage, { method: "POST", body: JSON.stringify(body) }),
 
     // Every subject's region-completeness record for the raster at `path`, so the minimap can

@@ -89,7 +89,9 @@ def test_recording_view_coverage_leaves_the_confirmed_negatives_untouched(
         "grid": {k: grid[k] for k in ("width", "height", "tile_size", "overlap", "cols", "rows")},
         "cells_served_at_native": [cell],
         "cells_swept": [],
-        "viewing": {"stretch": "minmax"},
+        "viewing": {"stretch": "minmax", "stats_source": {"read": "none"},
+                   "display_bounds": None, "base_served_size": None,
+                   "working_scale_bar": None},
     })
     assert resp.status_code == 200, resp.text
 

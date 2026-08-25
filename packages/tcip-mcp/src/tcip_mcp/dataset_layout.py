@@ -350,13 +350,15 @@ def view_coverage_path(dataset_root: str | Path) -> Path:
     cells swept in the viewport at or above the breeder's own working scale (a sweep fact).
     Neither is a claim about what the breeder examined.
 
-    Shape: ``{bucket: {image_name: {grid, cells_served_at_native, cells_swept, viewing,
-    updated_at}}}``, bucket via :func:`status_bucket`; ``viewing`` carries the display context
-    including ``working_scale_bar`` as ``{value, source}``. Each record carries the grid geometry
-    it was accumulated against, so a derivation change can never silently misread an old cell
-    list. Advisory only: training never reads this store, and a Complete with unswept cells warns
-    in the GUI rather than blocks. The negative definition (:func:`image_status_path`) is
-    untouched by anything recorded here.
+    Shape: ``{bucket: {image_name: record}}``, bucket via :func:`status_bucket`; the record's own
+    shape is declared once, as ``tcip_web.routes._coverage_models.CoverageRecord`` (``grid``,
+    ``cells_served_at_native``, ``cells_swept``, ``viewing``, ``updated_at``), with ``viewing`` the
+    display context that model's own ``CoverageViewing`` declares (bands, stretch, stats_source,
+    display_bounds, base_served_size, and working_scale_bar as ``{value, source}``). Each record
+    carries the grid geometry it was accumulated against, so a derivation change can never silently
+    misread an old cell list. Advisory only: training never reads this store, and a Complete with
+    unswept cells warns in the GUI rather than blocks. The negative definition
+    (:func:`image_status_path`) is untouched by anything recorded here.
     """
     return _entry_path(_STATE_DOC, dataset_root, _VIEW_COVERAGE_PARTS)
 

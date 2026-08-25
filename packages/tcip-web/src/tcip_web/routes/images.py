@@ -31,8 +31,17 @@ from pydantic import BaseModel
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, DISPLAY_MAX_PIXELS
 from tcip_web.paths import assert_path_allowed
+from tcip_web.routes._coverage_models import StatsSource
 
 router = APIRouter(prefix="/api/images", tags=["images"])
+
+RENDER_CACHE_VERSION = 1
+"""Bumped whenever the render cache key's inputs or the served headers' shape changes, so a
+warm entry written under the old shape is served by neither the disk cache nor conditional
+revalidation. Read by ``scripts/generate_frontend_types.py`` and carried on every image URL the
+browser builds (``api.images.url``), so a browser cache entry from before the bump is never the
+response to a request built after it either.
+"""
 
 _CACHE_BUDGET_DIVISOR = 20
 """The rendered-variant cache's byte budget is the cache volume's free space divided by this.
@@ -137,12 +146,11 @@ class _RasterStats:
         """Whether these bounds describe part of the raster's pixels rather than all of them."""
         return self.pixel_fraction is not None and self.pixel_fraction < 1.0
 
-    @property
-    def source_label(self) -> str:
-        """How a response names where its stretch bounds came from."""
+    def stats_source(self) -> StatsSource:
+        """The structured ``StatsSource`` a response reports these bounds under."""
         if self.overview_scale is not None:
-            return f"overview(scale={self.overview_scale:.6g})"
-        return f"sampled(seed={self.seed}, pixel_fraction={self.pixel_fraction:.6f})"
+            return StatsSource(read="overview", overview_scale=self.overview_scale)
+        return StatsSource(read="window_sample", seed=self.seed, pixel_fraction=self.pixel_fraction)
 
 
 _stats_cache: "OrderedDict[tuple, _RasterStats]" = OrderedDict()
@@ -544,7 +552,7 @@ def serve_image(
     # Requested params only: the scale a read is served at depends on the raster's own size and on
     # whether an overview level exists, neither known at lookup time, so it returns as a header.
     key = hashlib.md5(
-        f"{_source_identity(source, open_channels)}:"
+        f"{RENDER_CACHE_VERSION}:{_source_identity(source, open_channels)}:"
         f"{target_width}:{quality}:{bands}:{stretch}:{corners}".encode()
     ).hexdigest()
     etag = f'W/"{key}"'
@@ -609,15 +617,16 @@ def serve_image(
 
         if composite and stretch == "none" and integer:
             rgb = composite_display_rgb(pixels, idxs, stretch, None)
-            stats_source, applied = "dtype_full_scale", []
+            stats_source, applied = StatsSource(read="dtype_full_scale"), []
         elif composite:
             applied = (_served_array_bounds(pixels, idxs, stretch) if sampled is None
                        else _sampled_bounds(sampled, idxs, stretch))
             rgb = composite_display_rgb(pixels, idxs, stretch, applied)
-            stats_source = "served_array" if sampled is None else sampled.source_label
+            stats_source = (
+                StatsSource(read="served_array") if sampled is None else sampled.stats_source())
         elif integer:
             rgb = _plain_rgb(pixels, dtype, None)
-            stats_source = "none" if dtype == np.uint8 else "dtype_full_scale"
+            stats_source = StatsSource(read="none" if dtype == np.uint8 else "dtype_full_scale")
             applied = []
         else:
             # Only the bands a plain serve displays: a fourth band is dropped before the viewer
@@ -625,7 +634,8 @@ def serve_image(
             ranges = band_ranges(pixels) if sampled is None else sampled.ranges
             applied = [(0.0, max(ranges[i].maximum for i in idxs))]
             rgb = _plain_rgb(pixels, dtype, applied[0])
-            stats_source = "served_array" if sampled is None else sampled.source_label
+            stats_source = (
+                StatsSource(read="served_array") if sampled is None else sampled.stats_source())
 
         buf = io.BytesIO()
         Image.fromarray(np.ascontiguousarray(rgb), mode="RGB").save(buf, "JPEG", quality=quality)
@@ -639,9 +649,12 @@ def serve_image(
     except Exception as exc:
         raise HTTPException(500, f"could not process image: {exc}") from exc
 
-    extra = {"X-TCIP-Stats-Source": stats_source, "X-TCIP-Served-Size": f"{out_w}x{out_h}"}
+    extra = {
+        "X-TCIP-Stats-Source": stats_source.model_dump_json(),
+        "X-TCIP-Served-Size": f"{out_w}x{out_h}",
+    }
     if applied:
-        extra["X-TCIP-Display-Bounds"] = ";".join(f"{lo:g},{hi:g}" for lo, hi in applied)
+        extra["X-TCIP-Display-Bounds"] = json.dumps(applied)
 
     try:
         tmp = cache_dir / f"{key}.{threading.get_ident()}.tmp"

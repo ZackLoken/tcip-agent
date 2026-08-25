@@ -377,9 +377,7 @@ export function AnnotateTab() {
       stretch: composite.stretch,
       stats_source: baseFacts?.statsSource ?? null,
       display_bounds: baseFacts?.displayBounds ?? null,
-      base_served_size: baseFacts?.servedSize
-        ? `${baseFacts.servedSize.w}x${baseFacts.servedSize.h}`
-        : null,
+      base_served_size: baseFacts?.servedSizeRaw ?? null,
     }),
     [composite.bands, composite.stretch, baseFacts],
   );

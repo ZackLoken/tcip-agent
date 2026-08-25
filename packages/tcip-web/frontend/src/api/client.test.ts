@@ -100,7 +100,7 @@ describe("query string assembly", () => {
     await api.images.bands("mosaic.tif");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/images/bands?path=mosaic.tif");
     expect(api.images.url("mosaic.tif", { x0: 0, y0: 4067 })).toBe(
-      "/api/images?path=mosaic.tif&x0=0&y0=4067",
+      "/api/images?path=mosaic.tif&x0=0&y0=4067&v=1",
     );
   });
 });

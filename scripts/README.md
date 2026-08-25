@@ -29,6 +29,14 @@ reaching for again versus one built narrowly for a specific past investigation.
   `null`), for an entry registered before the field existed. `--plan` previews; an
   experiment-tagged entry is refused until the operator states its source with
   `--source NAME=VALUE`, since the tag alone can't be trusted to say which path produced it.
+- `conform_view_coverage_viewing.py` - conforms a dataset's stored `view_coverage` records'
+  `viewing` sub-object to the current `CoverageViewing` shape, mapping the old string forms of
+  `stats_source` and `display_bounds` to the new structured ones. `--plan` previews; a `viewing`
+  it cannot parse is refused by image name and the dataset left untouched.
+- `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
+  models that declare the view-coverage record's shape, so the browser's types are a projection
+  of the backend's rather than hand-transcribed. Run after changing a declared model;
+  `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
 - `distill_learnings.py` - gathers one project's (or, with `--workspace`, every project's)
   `claude_reports` and `project_retrospective` records into one Markdown worksheet of
   recurring themes, for human review before calling `record_distillation_pass`.

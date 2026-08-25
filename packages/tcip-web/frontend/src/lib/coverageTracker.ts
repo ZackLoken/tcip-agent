@@ -13,6 +13,7 @@
  * derives a single trivially-covered cell and gets no tracking).
  */
 
+import type { CoveragePayload, CoverageRecord, CoverageViewing } from "@/api/types.generated";
 import {
   rectFullyInside,
   rectsOverlap,
@@ -23,6 +24,12 @@ import {
   type GridGeometry,
 } from "@/lib/coverage";
 import type { PixelRect } from "@/lib/viewGeometry";
+
+export type { CoveragePayload, CoverageRecord, CoverageViewing };
+
+/** The viewing context the tracker accumulates before ``working_scale_bar`` joins it at post
+ *  time (see ``postNow``): the caller supplies the rest, the tracker supplies the bar. */
+export type CoverageViewingInput = Omit<CoverageViewing, "working_scale_bar">;
 
 /**
  * Sub-cell grain for the union-of-visibility sweep predicate (see `subdivideCell`): a cell
@@ -49,35 +56,6 @@ export interface CoverageKeyParts {
   date: string | null;
 }
 
-/** Display context the record carries so a reviewer can reconstruct what was on screen. */
-export interface CoverageViewing {
-  bands?: string;
-  stretch?: string;
-  stats_source?: string | null;
-  display_bounds?: string | null;
-  base_served_size?: string | null;
-}
-
-export interface CoveragePostBody {
-  image_path: string;
-  dataset_root: string | null;
-  subject: string;
-  date: string | null;
-  grid: GridGeometry;
-  cells_served_at_native: string[];
-  cells_swept: string[];
-  viewing: CoverageViewing & {
-    working_scale_bar: { value: number; source: string } | null;
-  };
-}
-
-/** The stored per-image record, as GET /api/coverage returns it (null when none exists yet). */
-export interface CoverageRecord {
-  grid: GridGeometry;
-  cells_served_at_native?: string[];
-  cells_swept?: string[];
-}
-
 const BAR_SOURCE =
   "minimum view scale at annotation commits on this image and subject this session";
 
@@ -96,12 +74,16 @@ export class CoverageTracker {
   // not a bar exists yet, so a bar arriving late still credits every earlier viewport moment.
   private subCellScale = new Map<string, number>();
   private barValue: number | null = null;
-  private viewing: CoverageViewing = {};
+  private viewing: CoverageViewingInput = {
+    stats_source: null,
+    display_bounds: null,
+    base_served_size: null,
+  };
   private dirty = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    private postFn: (body: CoveragePostBody) => Promise<unknown>,
+    private postFn: (body: CoveragePayload) => Promise<unknown>,
     private opts: { debounceMs?: number; onChange?: () => void } = {},
   ) {}
 
@@ -209,7 +191,7 @@ export class CoverageTracker {
     this.markDirty();
   }
 
-  setViewing(viewing: CoverageViewing): void {
+  setViewing(viewing: CoverageViewingInput): void {
     this.viewing = viewing;
   }
 
@@ -263,7 +245,7 @@ export class CoverageTracker {
   private postNow(): void {
     if (!this.dirty || !this.keyParts || !this.grid) return;
     this.dirty = false;
-    const body: CoveragePostBody = {
+    const body: CoveragePayload = {
       image_path: this.keyParts.imagePath,
       dataset_root: this.keyParts.datasetRoot,
       subject: this.keyParts.subject,
