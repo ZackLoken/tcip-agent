@@ -532,6 +532,104 @@ def test_resolve_selection_metric_allows_coherent_explicit_choice():
     assert resolve_selection_metric("detection", None, "map50") == "map50"  # no trait -> no gate
 
 
+def test_resolve_selection_metric_rejects_a_metric_with_no_declared_direction():
+    with pytest.raises(ValueError, match="no declared ranking direction"):
+        resolve_selection_metric("detection", None, "not_a_real_metric")
+
+
+# HIGHER_IS_BETTER_BY_METRIC held against what evaluate()/governing_counts really return.
+
+def _detection_batch(num_images: int = 2, img_size: int = 64):
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+
+    items = []
+    boxes = [[10.0, 10.0, 40.0, 40.0], [5.0, 5.0, 25.0, 30.0]]
+    for i in range(num_images):
+        img = torch.rand(3, img_size, img_size)
+        target = {"boxes": torch.tensor([boxes[i % len(boxes)]]),
+                  "labels": torch.ones((1,), dtype=torch.long), "image_id": i}
+        items.append((img, target))
+    return task_collate("detection")(items)
+
+
+def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
+    """The declaration is exactly the numeric keys these two producers return: nothing declared
+    that neither ever produces, nothing either produces that the declaration leaves unaccounted
+    for (declared, or named in the not-a-ranking list below, or a ``_state`` companion)."""
+    pytest.importorskip("torchvision")
+    from tcip_store.values import NOT_FINITE_SUFFIX
+
+    from tcip_mcp.pipelines.model_contract import _SYNTHESIZABLE_TASKS
+    from tcip_mcp.pipelines.training.evaluation import (
+        HIGHER_IS_BETTER_BY_METRIC,
+        evaluate,
+        governing_counts,
+    )
+    from tests import bespoke_models
+
+    device = torch.device("cpu")
+    img_size = 64
+    returned: set[str] = set()
+
+    for task in sorted(_SYNTHESIZABLE_TASKS):
+        if task == "detection":
+            model = bespoke_models.build_bespoke_detection(num_classes=1)
+            images, targets = _detection_batch(img_size=img_size)
+            loader = [(images, targets)]
+        elif task == "instance_seg":
+            model = bespoke_models.build_bespoke_instance_seg(num_classes=1)
+            images, targets = _detection_batch(img_size=img_size)
+            for t in targets:
+                mask = torch.zeros((1, img_size, img_size), dtype=torch.uint8)
+                mask[0, 10:40, 10:40] = 1
+                t["masks"] = mask
+            loader = [(images, targets)]
+        elif task == "classification":
+            model = bespoke_models.build_bespoke_classifier(num_classes=2)
+            imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
+            loader = [(imgs, {"labels": torch.tensor([0, 1])})]
+        elif task == "ordinal":
+            model = bespoke_models.build_bespoke_ordinal(num_ranks=3)
+            imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
+            loader = [(imgs, {"ranks": torch.tensor([0, 2]), "num_ranks": torch.tensor(3)})]
+        elif task == "regression":
+            model = bespoke_models.build_bespoke_regressor()
+            imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
+            loader = [(imgs, {"values": torch.tensor([0.2, 0.8])})]
+        else:
+            model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
+            imgs = torch.stack([torch.rand(3, img_size, img_size) for _ in range(2)])
+            m0 = torch.zeros((img_size, img_size), dtype=torch.long)
+            m0[:, : img_size // 2] = 1
+            m1 = 1 - m0
+            loader = [(imgs, {"masks": torch.stack([m0, m1])})]
+
+        result = evaluate(model, loader, device, task)
+        returned.update(result)
+
+    per_image = [
+        {"width": 64, "height": 64,
+         "gt": [{"category_id": 1, "bbox": [10.0, 10.0, 30.0, 30.0]}],
+         "dt": [{"category_id": 1, "bbox": [11.0, 11.0, 29.0, 29.0], "score": 0.9}]},
+        {"width": 64, "height": 64, "gt": [], "dt": []},
+    ]
+    returned.update(governing_counts(
+        per_image, {"kind": "center_match", "tolerance": 5.0}, conf_threshold=0.25))
+
+    not_a_ranking = {
+        "per_class", "count_bias", "per_class_iou", "per_class_dice", "tp", "fp", "fn",
+        "criterion",
+    }
+    ranking_returned = {k for k in returned if not k.endswith(NOT_FINITE_SUFFIX)}
+    declared = set(HIGHER_IS_BETTER_BY_METRIC)
+
+    undeclared = (ranking_returned - not_a_ranking) - declared
+    assert not undeclared, f"returned but no declared direction: {sorted(undeclared)}"
+    never_produced = declared - ranking_returned
+    assert not never_produced, f"declared but neither producer ever returns it: {sorted(never_produced)}"
+    assert ranking_returned - declared == not_a_ranking
+
+
 # --------------------------------------------------------------------------
 # Effective iou_type: evaluate() scoring and run_test_evaluation metadata
 # --------------------------------------------------------------------------

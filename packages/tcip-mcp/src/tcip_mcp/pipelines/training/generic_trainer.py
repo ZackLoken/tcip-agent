@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_store import Key, StoreDescriptor, register_store, store
+from tcip_store import Key, StoreDescriptor, register_store, store, stored_numbers
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_mcp.pipelines.model_contract import TCIPModel
@@ -36,7 +36,7 @@ from tcip_mcp.pipelines.model_build import (
     stamp_model_ref,
 )
 from tcip_mcp.pipelines.resolution import DEFAULT_CONF
-from tcip_mcp.pipelines.training.evaluation import evaluate
+from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC, evaluate
 from tcip_mcp.pipelines.training.optimizer_factory import (
     build_optimizer,
     compute_lr_scale,
@@ -206,7 +206,8 @@ class TrainRun:
     status: str = "created"
     current_epoch: int = 0
     current_stage: int = 0
-    best_metric: float = float("inf")  # best selection objective (composite for detection/instance_seg, else val_loss; lower=better)
+    best_metric: float = float("inf")  # best selection value so far; train() resets this to the
+    # losing-side infinity for the run's resolved selection_metric before the first epoch
     metrics_history: list[dict] = field(default_factory=list)
     start_time: float = 0.0
     end_time: float = 0.0
@@ -389,6 +390,14 @@ def write_checkpoint(payload: dict, key: Key) -> Path:
     return store.blob_path(key)
 
 
+def _checkpoint_metrics(metrics: dict) -> dict:
+    """One epoch's metrics as a checkpoint's own ``metrics`` field carries them, normalized
+    exactly as the run's metrics log stores the same dict (:func:`stored_numbers`): a diverged
+    run's ``nan`` reads back as ``null`` plus a state companion on both, never as a value the log
+    accepted and the checkpoint refused."""
+    return stored_numbers(metrics)
+
+
 def _save_checkpoint(
     key: Key, *, model, optimizer, scheduler, scaler, config: dict,
     stage_idx: int, stage_epoch: int, run: "TrainRun",
@@ -413,7 +422,7 @@ def _save_checkpoint(
         "es_counter": es_counter,
         "global_step": global_step,
         "seed": seed,
-        "metrics": metrics,
+        "metrics": _checkpoint_metrics(metrics),
         # Full RNG state at save time, so a resume can pick the streams up exactly where
         # they were rather than silently re-seeding from stream position zero.
         "python_rng_state": random.getstate(),
@@ -524,10 +533,22 @@ def resolve_selection_metric(task: str, trait: str | None, requested: str | None
     trait never yet calibrated/evaluated against real data) means nothing is known yet, so no
     metric is rejected here; ``resolve_match_criterion`` is what fills the recording in the first
     time real GT is available, and every later preflight call sees it.
+
+    A ``requested`` metric with no declared ranking direction
+    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected too: ``model_best.pt`` and early
+    stopping both compare by whichever direction this metric improves, and a direction guessed
+    from the key's spelling is exactly the defect this declaration exists to remove.
     """
     default = "objective" if task in ("detection", "instance_seg") else "loss"
     if not requested:
         return default
+    if requested not in HIGHER_IS_BETTER_BY_METRIC:
+        raise ValueError(
+            f"evaluation.selection_metric={requested!r} has no declared ranking direction "
+            "(evaluation.HIGHER_IS_BETTER_BY_METRIC names no entry for it), so model_best.pt "
+            f"and early stopping would have to guess which way it improves. Choose one of "
+            f"{sorted(HIGHER_IS_BETTER_BY_METRIC)}."
+        )
     if trait:
         from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
         from tcip_mcp.traits import CENTER_MATCH, get_trait
@@ -549,6 +570,14 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str)
     if key in val_metrics:
         return val_metrics[key]
     return val_metrics.get("val_loss", avg_loss)
+
+
+def _improves(candidate: float, incumbent: float, *, higher_is_better: bool) -> bool:
+    """Whether ``candidate`` beats ``incumbent`` as a selection value, in the direction the run's
+    selection metric actually improves in. The one comparison ``model_best.pt``, the per-stage
+    optimizer-state handoff, and early stopping all make, so a higher-is-better metric (``f1``)
+    and a lower-is-better one (``loss``) are never compared the same way by accident."""
+    return candidate > incumbent if higher_is_better else candidate < incumbent
 
 
 def apply_stage_freeze(
@@ -719,6 +748,11 @@ def train(
         eval_cfg = config.get("evaluation", {})  # metric / selection params
         trait = eval_cfg.get("trait")
         selection_metric = resolve_selection_metric(task, trait, eval_cfg.get("selection_metric"))
+        # The losing-side sentinel for this run's own direction: any real value beats it.
+        higher_is_better = HIGHER_IS_BETTER_BY_METRIC[selection_metric]
+        losing_side = float("-inf") if higher_is_better else float("inf")
+        run.best_metric = losing_side
+        es_best = losing_side
 
         global_step = 0
         stopped_early = False
@@ -822,7 +856,7 @@ def train(
             sched_epochs = max(1, stage_epochs - warmup_n)
             scheduler = _build_scheduler(optimizer, sched_cfg, sched_epochs)
             is_plateau = isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
-            stage_best = float("inf")
+            stage_best = losing_side
             stage_snapshot = None
 
             # For the resumed stage, restore optimizer/scheduler/scaler and start
@@ -951,25 +985,24 @@ def train(
                     run.current_epoch, stage_idx, avg_loss, val_metrics.get("val_loss", 0), current_lr)
 
                 # Best model checkpoint, selected by the selection objective.
-                if sel < run.best_metric:
+                if _improves(sel, run.best_metric, higher_is_better=higher_is_better):
                     run.best_metric = sel
                     try:
                         write_checkpoint(stamp_model_ref({
                             STATE_DICT_KEY: model.state_dict(),
                             "config": config,
-                            "metrics": epoch_metrics,
+                            "metrics": _checkpoint_metrics(epoch_metrics),
                             "stage": stage_idx, "epoch": run.current_epoch,
                         }, config), checkpoint_key(out_dir, "model_best"))
                     except PermissionError:
-                        # Windows: a concurrent reader (GUI inference / evaluate_model)
-                        # holding model_best.pt open can outlast the replace retries.
-                        # Keep the previous best on disk rather than failing the run.
+                        # Windows: a concurrent reader can hold model_best.pt open past the
+                        # replace retries; keep the previous best rather than failing the run.
                         logger.warning(
                             "model_best.pt held open by a reader; keeping previous best "
                             "(epoch %d not persisted).", run.current_epoch)
 
                 # Remember this stage's best optimizer state for the handoff.
-                if sel < stage_best:
+                if _improves(sel, stage_best, higher_is_better=higher_is_better):
                     stage_best = sel
                     stage_snapshot = snapshot_optimizer_state(optimizer, model)
 
@@ -982,9 +1015,11 @@ def train(
                         seed=seed, metrics=epoch_metrics,
                     )
 
-                # Early stopping, on the same selection objective.
+                # Early stopping, on the same selection objective; the margin applies on the
+                # same side of es_best that higher_is_better says an improvement lands on.
                 if es_enabled and val_loader is not None:
-                    if sel < es_best - es_min_delta:
+                    margin = es_min_delta if higher_is_better else -es_min_delta
+                    if _improves(sel, es_best + margin, higher_is_better=higher_is_better):
                         es_best = sel
                         es_counter = 0
                     else:
@@ -1000,11 +1035,13 @@ def train(
             if run.should_cancel():
                 break  # stop before starting the next stage
 
-        # Final checkpoint (saved even on cancellation so partial progress is recoverable).
+        # Final checkpoint (saved even on cancellation so partial progress is recoverable). Its
+        # weights are the last completed epoch's, so metrics is that epoch's dict, or {} when none completed.
+        last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
         write_checkpoint(stamp_model_ref({
             STATE_DICT_KEY: model.state_dict(),
             "config": config,
-            "metrics": run.metrics_history,
+            "metrics": _checkpoint_metrics(last_epoch_metrics),
         }, config), checkpoint_key(out_dir, "model_final"))
 
         if run.should_cancel():
