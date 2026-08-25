@@ -35,7 +35,7 @@ from tcip_web.routes._coverage_models import StatsSource
 
 router = APIRouter(prefix="/api/images", tags=["images"])
 
-RENDER_CACHE_VERSION = 1
+RENDER_CACHE_VERSION = 2
 """Bumped whenever the render cache key's inputs or the served headers' shape changes, so a
 warm entry written under the old shape is served by neither the disk cache nor conditional
 revalidation. Read by ``scripts/generate_frontend_types.py`` and carried on every image URL the
@@ -398,6 +398,15 @@ def _raster_stats(source, num_channels: int, key: tuple) -> _RasterStats:
     return stats
 
 
+def _finite_display_bounds(applied: "list[tuple[float, float]]"
+                           ) -> "list[tuple[float | None, float | None]]":
+    """``applied`` with every non-finite low/high (a NaN or an infinity, from a raster whose
+    sampled or served pixels held one) mapped to ``None``, so the header this feeds never carries
+    a JSON token a strict parser refuses."""
+    return [(lo if math.isfinite(lo) else None, hi if math.isfinite(hi) else None)
+            for lo, hi in applied]
+
+
 def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
                     ) -> "list[tuple[float, float]]":
     """The ``(low, high)`` pair per selected band a region render stretches between, in the same
@@ -504,7 +513,8 @@ def serve_image(
     shared display stretch instead. Whole-view stretch bounds come from the served pixels
     themselves; a region's come from the raster's seeded per-band sample, so two regions of one
     raster render alike. Both are reported back in ``X-TCIP-Stats-Source`` and, where bounds were
-    applied, ``X-TCIP-Display-Bounds``.
+    applied, ``X-TCIP-Display-Bounds``; a bound the raster's own pixels left non-finite (a NaN or
+    an infinity) reports as ``null`` rather than a JSON token no client parses.
 
     A scaled read of a raster larger than the display area bound needs the reduced-resolution
     overviews GDAL serves it from; without them the request is refused, naming
@@ -650,11 +660,12 @@ def serve_image(
         raise HTTPException(500, f"could not process image: {exc}") from exc
 
     extra = {
-        "X-TCIP-Stats-Source": stats_source.model_dump_json(),
+        "X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),
         "X-TCIP-Served-Size": f"{out_w}x{out_h}",
     }
     if applied:
-        extra["X-TCIP-Display-Bounds"] = json.dumps(applied)
+        extra["X-TCIP-Display-Bounds"] = json.dumps(
+            _finite_display_bounds(applied), allow_nan=False)
 
     try:
         tmp = cache_dir / f"{key}.{threading.get_ident()}.tmp"

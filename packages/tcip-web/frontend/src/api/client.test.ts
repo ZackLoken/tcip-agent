@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { RENDER_CACHE_VERSION } from "@/api/types.generated";
 import { api } from "@/api/client";
 
 function stubFetch(status: number, body: unknown = {}) {
@@ -100,7 +101,7 @@ describe("query string assembly", () => {
     await api.images.bands("mosaic.tif");
     expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/images/bands?path=mosaic.tif");
     expect(api.images.url("mosaic.tif", { x0: 0, y0: 4067 })).toBe(
-      "/api/images?path=mosaic.tif&x0=0&y0=4067&v=1",
+      `/api/images?path=mosaic.tif&x0=0&y0=4067&v=${RENDER_CACHE_VERSION}`,
     );
   });
 });

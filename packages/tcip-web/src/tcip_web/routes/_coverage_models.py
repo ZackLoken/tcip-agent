@@ -13,14 +13,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from tcip_mcp.pipelines.band_stats import STRETCH_MODES
-
-_STRETCH_LITERAL = ("minmax", "percent_clip", "none")
-if _STRETCH_LITERAL != STRETCH_MODES:
-    raise AssertionError(
-        "CoverageViewing.stretch's literal vocabulary has drifted from band_stats.STRETCH_MODES; "
-        "update both together"
-    )
+from tcip_mcp.pipelines.band_stats import StretchMode
 
 
 class GridGeometry(BaseModel):
@@ -85,15 +78,17 @@ class CoverageViewing(BaseModel):
     ``bands`` and ``stretch`` are the two keys a plain RGB view (no composite selected) legitimately
     omits. The other four are always present, ``None`` where nothing applies: ``display_bounds`` is
     positional against the displayed bands, in the same order ``bands`` names them, and a
-    one-element list is one bound applied to every displayed band.
+    one-element list is one bound applied to every displayed band. Each low/high value in a pair is
+    a finite number or ``null``; a ``null`` bound means the stretch found no finite value for that
+    half of that band's range (a raster whose sampled or served pixels held a NaN or an infinity).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     bands: Optional[str] = None
-    stretch: Optional[Literal["minmax", "percent_clip", "none"]] = None
+    stretch: Optional[StretchMode] = None
     stats_source: Optional[StatsSource]
-    display_bounds: Optional[list[tuple[float, float]]]
+    display_bounds: Optional[list[tuple[Optional[float], Optional[float]]]]
     base_served_size: Optional[str]
     working_scale_bar: Optional[WorkingScaleBar]
 

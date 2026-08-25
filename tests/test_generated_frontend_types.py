@@ -11,6 +11,10 @@ from __future__ import annotations
 import importlib.util
 import re
 from pathlib import Path
+from typing import Literal, Optional
+
+import pytest
+from pydantic import BaseModel
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
@@ -39,6 +43,36 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> Non
         "packages/tcip-web/frontend/src/api/types.generated.ts is out of date; "
         "run python scripts/generate_frontend_types.py"
     )
+
+
+class _OneMemberLiteral(BaseModel):
+    """A scratch model whose one field is a single-value ``Literal``, which pydantic's own JSON
+    schema renders as ``const`` rather than ``enum``."""
+
+    kind: Literal["only"]
+
+
+class _NullableStringList(BaseModel):
+    """A scratch model whose one field is an array of a nullable union, exercising the mapper's
+    array-of-union case independently of any declared coverage model."""
+
+    values: list[Optional[str]]
+
+
+def test_a_one_member_literal_refuses_rather_than_render_the_wrapping_type() -> None:
+    """A ``const`` schema is a shape the mapper does not cover; it must say so by name instead of
+    silently rendering the primitive type underneath and dropping the literal value."""
+    generator = _generator()
+    schema = _OneMemberLiteral.model_json_schema()
+    with pytest.raises(SystemExit):
+        generator._ts_type(schema["properties"]["kind"], "_OneMemberLiteral.kind")
+
+
+def test_a_union_used_as_an_array_item_is_parenthesized() -> None:
+    generator = _generator()
+    schema = _NullableStringList.model_json_schema()
+    assert (generator._ts_type(schema["properties"]["values"], "_NullableStringList.values")
+            == "(string | null)[]")
 
 
 def _generated_field_sets() -> list[set[str]]:

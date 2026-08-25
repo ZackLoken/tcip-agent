@@ -3,7 +3,7 @@
  * (routes/_coverage_models.py, routes/coverage.py, routes/review.py). Do not edit by hand.
  */
 
-export const RENDER_CACHE_VERSION = 1;
+export const RENDER_CACHE_VERSION = 2;
 
 export interface GridGeometry {
   width: number;
@@ -30,7 +30,7 @@ export interface CoverageViewing {
   bands?: string | null;
   stretch?: "minmax" | "percent_clip" | "none" | null;
   stats_source: StatsSource | null;
-  display_bounds: [number, number][] | null;
+  display_bounds: [number | null, number | null][] | null;
   base_served_size: string | null;
   working_scale_bar: WorkingScaleBar | null;
 }
@@ -51,7 +51,7 @@ export interface CoveragePayload {
   grid: GridGeometry;
   cells_served_at_native?: string[];
   cells_swept?: string[];
-  viewing?: CoverageViewing;
+  viewing: CoverageViewing;
 }
 
 export interface VerdictActionField {

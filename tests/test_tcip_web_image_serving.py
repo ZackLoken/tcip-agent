@@ -79,18 +79,28 @@ def _served(resp) -> np.ndarray:
     return np.asarray(Image.open(io.BytesIO(resp.content)))
 
 
+def _reject_non_finite_token(token: str) -> float:
+    """``json.loads``'s ``parse_constant`` hook: raises on ``NaN``/``Infinity``/``-Infinity``, the
+    three tokens Python's own JSON extension accepts and a browser's ``JSON.parse`` refuses, so a
+    header that parses here is one a real browser would parse too."""
+    raise ValueError(f"header carries a JSON token no strict parser accepts: {token!r}")
+
+
 def _stats_source(resp) -> dict:
-    """``X-TCIP-Stats-Source`` parsed as the ``StatsSource`` JSON it now carries."""
+    """``X-TCIP-Stats-Source`` parsed as the ``StatsSource`` JSON it now carries, under a strict
+    parser that rejects what ``JSON.parse`` rejects (see ``_reject_non_finite_token``)."""
     import json
 
-    return json.loads(resp.headers["x-tcip-stats-source"])
+    return json.loads(resp.headers["x-tcip-stats-source"], parse_constant=_reject_non_finite_token)
 
 
 def _display_bounds(resp) -> list[list[float]]:
-    """``X-TCIP-Display-Bounds`` parsed as the JSON list of pairs it now carries."""
+    """``X-TCIP-Display-Bounds`` parsed as the JSON list of pairs it now carries, under the same
+    strict parser as ``_stats_source``."""
     import json
 
-    return json.loads(resp.headers["x-tcip-display-bounds"])
+    return json.loads(
+        resp.headers["x-tcip-display-bounds"], parse_constant=_reject_non_finite_token)
 
 
 # ── Regions ──────────────────────────────────────────────────────────────────────────────
@@ -421,6 +431,36 @@ def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
     reported = [v for pair in _display_bounds(resp) for v in pair]
     expected = [v for i in range(3) for v in stats.clip_bounds[i]]
     assert reported == pytest.approx(expected, rel=1e-5)
+
+
+def _five_band_float_with_one_nan(path: Path, *, height: int = 24, width: int = 40) -> np.ndarray:
+    """A 5-band float32 raster whose band 0 holds one NaN pixel among otherwise ordinary values:
+    ``.min()``/``.max()`` propagate that single NaN across the whole band, so band 0's bounds have
+    no finite value to report while bands 1 and 2 (not touched) still do."""
+    rng = np.random.default_rng(7)
+    arr = rng.uniform(0, 1000, size=(height, width, 5)).astype(np.float32)
+    arr[0, 0, 0] = np.nan
+    tifffile.imwrite(str(path), arr)
+    return arr
+
+
+def test_a_nan_pixel_reports_a_null_bound_under_a_strict_parser(
+    client: TestClient, tmp_path: Path,
+):
+    """A NaN pixel would otherwise poison ``X-TCIP-Display-Bounds`` with Python's own ``NaN``
+    token, a JSON extension a browser's ``JSON.parse`` refuses outright, which is what left the
+    canvas blank on a raster the server had in fact rendered. The route still serves (200), the
+    poisoned band's bound comes back ``null`` rather than that token, and the header parses under
+    the same strict parser ``_display_bounds`` uses (refusing exactly what ``JSON.parse`` refuses).
+    """
+    path = tmp_path / "nan.tif"
+    arr = _five_band_float_with_one_nan(path)
+    resp = client.get("/api/images", params={"path": str(path), "bands": "0,1,2"})
+    assert resp.status_code == 200, resp.text
+    bounds = _display_bounds(resp)
+    assert bounds[0] == [None, None]
+    assert bounds[1] == [float(arr[:, :, 1].min()), float(arr[:, :, 1].max())]
+    assert bounds[2] == [float(arr[:, :, 2].min()), float(arr[:, :, 2].max())]
 
 
 # ── /api/images/bands ────────────────────────────────────────────────────────────────────
