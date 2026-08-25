@@ -69,3 +69,13 @@ def test_set_active_refuses_a_name_with_no_tcip_and_leaves_no_directory():
     assert "error" in result
     assert workspace.read_active_project() is None
     assert not workspace.project_path("no_such_project").exists()
+
+
+def test_active_project_if_present_treats_a_traversal_marker_as_no_project(tmp_path):
+    """set_active_project refuses a traversal name, so this writes the marker directly
+    through the store, the shape a corrupted or hand-edited marker would take. A real
+    .tcip sits where the traversal points, so an unsafe reader would actually find it."""
+    (tmp_path / "escapee" / ".tcip").mkdir(parents=True)
+    tcip_store.replace(workspace.active_project_key(), "../escapee")
+
+    assert workspace.active_project_if_present() is None

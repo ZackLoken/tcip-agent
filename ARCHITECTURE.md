@@ -627,10 +627,10 @@ Docstring is the function's docstring first line, verbatim.
 | `register_dataset` | `project_tools.py:94` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
 | `init_project` | `project_tools.py:184` | yes | Initialise a TCIP project directory. |
 | `set_active_project` | `project_tools.py:208` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:278` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:325` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:437` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:563` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `view_gui_state` | `project_tools.py:288` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:335` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:447` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:573` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### training_tools.py (8 tools)
 
@@ -1487,19 +1487,24 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:194`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:202`.
 
-Readers: `read_active_project`, `workspace.py:152`; `resolve_project_path`, `workspace.py:186`.
+Readers: `read_active_project`, `workspace.py:155`; `resolve_project_path`, `workspace.py:194`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
 `tests/test_ingest_images.py:77,82`, `tests/test_set_active_project.py:16`,
 `tests/test_agent_fence.py:142`, `tests/test_agent_ritual_hooks.py:41`,
-`tests/test_active_context.py:33`. Gap: `agent_session_start.py` (the SessionStart hook process)
-deliberately does not import `workspace.py` and re-implements the `TCIP_WORKSPACE` plus marker
-read itself; its tests write the `.active` marker as a hand-typed literal file rather than through
-`workspace.set_active_project`, so a change to the real writer's format would not be caught by any
-test that also exercises the hook.
+`tests/test_active_context.py:33`. `agent_session_start.py`'s `_resolve_active` reads through
+`workspace.py` itself, not a re-implementation:
+`packages/tcip-web/src/tcip_web/agent_session_start.py:68` (`from tcip_mcp import workspace`)
+imports it lazily inside the function, and
+`packages/tcip-web/src/tcip_web/agent_session_start.py:74`
+(`workspace.active_project_if_present(create=False)`) reads the marker through the same seam
+`set_active_project` writes. Its tests write the marker through `workspace.set_active_project`,
+`tests/test_agent_ritual_hooks.py:58`; `test_session_start_hook_runs_as_a_real_subprocess`,
+`tests/test_agent_ritual_hooks.py:115`, runs the hook as a real subprocess against a marker
+written that way, so the fresh-interpreter claim is measured rather than inferred.
 
 ## 24. Formats named but not exhaustively enumerated in phase0
 
@@ -1557,7 +1562,7 @@ Phase 3 verdict: single.
 
 Must agree: every process names the same workspace directory and the same active project.
 Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:29` (`ACTIVE_MARKER = ".active"`).
-Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:71` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
+Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:74` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
 Phase 3 verdict: single.
 
 ## S03. Backend port discovery file .tcip/state/web_port.txt
@@ -1613,7 +1618,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:97` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:294` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:304` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->

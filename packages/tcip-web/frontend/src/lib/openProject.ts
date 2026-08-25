@@ -50,17 +50,15 @@ export async function adoptWorkspaceProject(
   modelName: string | null,
 ): Promise<DatasetSelection> {
   const selection = await openWorkspaceProject(p, date, subject, modelName);
-  // A rejected write is a toast, never a failed open: the project is open either way.
-  try {
-    await api.projects.setActive(p.name);
-  } catch (e) {
+  // Fire-and-forget: a rejected write is a toast, never a failed or delayed open.
+  void api.projects.setActive(p.name).catch((e) => {
     useStore
       .getState()
       .pushToast(
         `Opened ${p.name}, but could not set it as the active project: ` +
           (e instanceof Error ? e.message : String(e)),
       );
-  }
+  });
   return selection;
 }
 
@@ -81,6 +79,8 @@ async function resolveDefaultOpen(name: string): Promise<{
   const { projects } = await api.projects.list();
   const p = projects.find((x) => x.name === name);
   if (!p) return null;
+  // Prefers a labelled date: an agent ingesting a still-unlabelled newer date would
+  // otherwise land the human on a blank canvas with no date selector to recover.
   const date = newestLabelledDate(p) ?? defaultDate(p.dates);
   const subject = (p.subjects_by_date[date] ?? [])[0] ?? null;
   const model = (p.models_by_date[date] ?? [])[0] ?? null;

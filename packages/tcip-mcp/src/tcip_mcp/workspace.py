@@ -98,7 +98,7 @@ def parse_project_name(name: str) -> tuple[str, str, str]:
     return crop, subject, phenotype
 
 
-def project_path(name: str) -> Path:
+def project_path(name: str, *, create: bool = True) -> Path:
     """Absolute path for a named project under the workspace.
 
     ``name`` is a single path segment; path separators and traversal are rejected so a
@@ -108,10 +108,13 @@ def project_path(name: str) -> Path:
     platform did not create is opened by the name it already has. Only the doors that
     create a workspace directory (``ingest_images``, ``init_project``, ``import_project``)
     hold a new name to the shape.
+
+    ``create`` threads through to :func:`workspace_root`; a caller that must not bring the
+    workspace root into existence on a bare resolve passes ``create=False``.
     """
     if not is_valid_name(name):
         raise ValueError(f"invalid project name: {name!r}")
-    return workspace_root() / name.strip()
+    return workspace_root(create=create) / name.strip()
 
 
 def active_marker_path() -> Path:
@@ -172,12 +175,17 @@ def active_project_if_present(*, create: bool = True) -> Optional[tuple[str, Pat
     :func:`read_active_project` itself first. One check shared by every reader that must not
     report a name whose project has vanished: the workspace projects list route's
     ``active``/``active_path`` fields and the session-start hook's directive both read this.
+
+    Resolves through :func:`project_path`, so a marker holding a traversal name (``../escapee``)
+    names no adoptable project rather than a path outside the workspace.
     """
-    root = workspace_root(create=create)
     name = read_active_project(create=create)
     if not name:
         return None
-    path = root / name
+    try:
+        path = project_path(name, create=create)
+    except ValueError:
+        return None
     if not (path / ".tcip").is_dir():
         return None
     return name, path

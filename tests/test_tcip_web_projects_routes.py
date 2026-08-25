@@ -175,6 +175,21 @@ def test_wrong_encoding_marker_does_not_break_the_front_door(client, workspace_d
     assert body["active_path"] is None
 
 
+def test_active_returns_null_when_marker_names_a_traversal(client, workspace_dir):
+    """set_active_project refuses a traversal name, so this writes the marker directly
+    through the store, the shape a corrupted or hand-edited marker would take. A real
+    .tcip sits where the traversal points, so an unsafe reader would actually find it."""
+    import tcip_store
+    from tcip_mcp import workspace
+
+    (workspace_dir.parent / "escapee" / ".tcip").mkdir(parents=True)
+    tcip_store.replace(workspace.active_project_key(), "../escapee")
+
+    body = client.get("/api/projects").json()
+    assert body["active"] is None
+    assert body["active_path"] is None
+
+
 def test_active_returns_null_when_marker_points_at_missing_project(client, workspace_dir):
     from tcip_mcp import workspace
 

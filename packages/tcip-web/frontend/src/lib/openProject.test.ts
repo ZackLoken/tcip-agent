@@ -206,8 +206,10 @@ describe("adoptWorkspaceProject", () => {
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");
 
     const selection = await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
-
     expect(selection).toBeDefined();
+
+    // The marker write is fire-and-forget: await a microtask for its rejection to settle.
+    await Promise.resolve();
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("hz"));
   });
 });
