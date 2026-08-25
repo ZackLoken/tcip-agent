@@ -92,7 +92,7 @@ class TestPostPanelEventRoute:
             },
         )
         assert resp.status_code == 200
-        state = client.get("/api/dataset/state").json()
+        state = client.get("/api/state").json()
         assert state["active_tab"] == "review"
         assert state["review"]["filter_type"] == "fp"
         assert state["review"]["detection_idx"] == 7
@@ -110,20 +110,20 @@ class TestPostPanelEventRoute:
             },
         )
         assert resp.status_code == 200
-        state = client.get("/api/dataset/state").json()
+        state = client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "polygon"
         assert state["active_subject"] == "catkin"
 
     def test_annotate_focus_with_an_unknown_mode_answers_400(self, client: TestClient) -> None:
-        before = client.get("/api/dataset/state").json()["mode"]
+        before = client.get("/api/state").json()["mode"]
         resp = client.post(
             "/api/events/app",
             json={"event_type": "annotate_focus", "data": {"mode": "lasso"}},
         )
         assert resp.status_code == 400
         assert "lasso" in resp.json()["detail"]
-        assert client.get("/api/dataset/state").json()["mode"] == before
+        assert client.get("/api/state").json()["mode"] == before
 
     def test_the_focus_tools_own_annotate_event_reaches_the_advisory_state(
         self, client: TestClient, data_dir: Path, monkeypatch,
@@ -153,32 +153,18 @@ class TestPostPanelEventRoute:
                            json={"event_type": posted["event_type"], "data": posted["data"]})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
-        state = client.get("/api/dataset/state").json()
+        state = client.get("/api/state").json()
         assert state["active_tab"] == "annotate"
         assert state["mode"] == "point"
         assert state["active_subject"] == "catkin"
 
-    def test_the_browser_tabs_and_the_backend_agree_on_the_panel_names(self) -> None:
-        """Every GUI tab subscribes to the panel of its own name.
+    def test_valid_panels_is_the_tabs_plus_app(self) -> None:
+        """``VALID_PANELS`` derives from the same ``TAB_NAMES`` tuple ``ActiveTab`` produces, so
+        the panel set and the tab vocabulary cannot drift apart; the frontend's own tab list and
+        panel subscriptions are generated from ``TAB_NAMES`` in turn (types.generated.ts)."""
+        from tcip_mcp.web_client import TAB_NAMES
 
-        The vocabulary is written down in three places, one Python set and two TypeScript
-        literals, so a panel renamed or dropped in one of them leaves either a tab with no live
-        subscription or a subscription no tab is listening on. ``app`` is the app-level channel
-        and has no tab of its own.
-        """
-        app_tsx = (FRONTEND_SRC / "App.tsx").read_text(encoding="utf-8")
-        types_ts = (FRONTEND_SRC / "store" / "types.ts").read_text(encoding="utf-8")
-
-        subscribed = re.search(r"const TAB_PANELS: TabName\[\] = \[(.*?)\];", app_tsx, re.S)
-        declared = re.search(r"export type TabName =(.*?);", types_ts, re.S)
-        assert subscribed is not None, "TAB_PANELS is no longer where this test reads it"
-        assert declared is not None, "TabName is no longer where this test reads it"
-
-        subscribed_names = set(re.findall(r'"([^"]+)"', subscribed.group(1)))
-        declared_names = set(re.findall(r'"([^"]+)"', declared.group(1)))
-        assert subscribed_names, "no panel names parsed out of TAB_PANELS"
-        assert subscribed_names == declared_names
-        assert subscribed_names == set(VALID_PANELS) - {"app"}
+        assert VALID_PANELS == frozenset(TAB_NAMES) | {"app"}
 
 
 class TestPushPanelDataTool:

@@ -280,9 +280,3 @@ async def set_current_image(req: NavRequest) -> dict:
         raise HTTPException(400, f"index {index} out of range for {n} images")
     await store.mutate({"dataset": dataset.model_copy(update={"current_image_index": index})})
     return {"status": "ok", "current_image_index": index}
-
-
-@router.get("/state")
-def get_state_snapshot() -> dict:
-    """Return a JSON snapshot of the full :class:`GuiState` (debugging / replay)."""
-    return store.snapshot()
