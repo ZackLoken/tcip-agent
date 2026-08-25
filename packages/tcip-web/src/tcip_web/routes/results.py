@@ -386,9 +386,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
         "tile_size": tile_recon["validated"],
         "unvalidated_tile_size_buckets": tile_recon["unvalidated_buckets"],
     }
-    flags = {"classifier": classifier_state, "operating_point": recon["validated"]}
-    if tile_recon["operative"]:
-        flags["tile_size"] = tile_recon["validated"]
+    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     gate = check_delivery_gate(flags, acknowledge_unvalidated=payload.acknowledge_unvalidated)
     plants = phenology.per_plant_phenology(
         mapping_raw, predictions_by_date,

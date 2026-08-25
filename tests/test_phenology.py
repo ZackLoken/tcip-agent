@@ -375,9 +375,10 @@ def test_resolve_positive_class_id_no_bucket_has_it_refuses(tmp_path):
 
 def _real_delivery_flags(tmp_path: Path):
     """Two validated buckets, plus the flags and bindings a real reconciliation produces over them,
-    the way ``compute_phenology`` builds its own before calling this writer."""
+    the way both phenology delivery doors build their own before calling this writer."""
     from tcip_mcp.pipelines.resolution import (
         bind_classifier_validity, reconcile_classifier_validity, reconcile_operating_point_validity,
+        reconcile_tile_size_validity,
     )
     from tests.test_phenology_tools import _delivery_setup
 
@@ -388,7 +389,8 @@ def _real_delivery_flags(tmp_path: Path):
     classifier_recon = reconcile_classifier_validity([str(d1)])
     classifier_state, _note = bind_classifier_validity(
         classifier_recon["validated"], [str(d1)], pred_dirs, trait="catkin")
-    flags = {"classifier": classifier_state, "operating_point": recon["validated"]}
+    tile_recon = reconcile_tile_size_validity(pred_dirs)
+    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
     return flags, recon["bindings"], pred_dirs
 
 
@@ -396,13 +398,79 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
     """The writer runs its own delivery gate before opening the file, the way its sibling writers
     (``export_aggregated_csv``, ``export_detection_csv``) do; a call whose flags do not clear
     refuses rather than delivering a silent bare number."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unvalidated measurement dimension"):
         phenology.write_phenology_csv(
             "test", [], tmp_path / "out.csv", CATKIN,
             flags={"classifier": None, "operating_point": None}, acknowledge_unvalidated=False,
             basis=schema_basis(), operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
             project_root=tmp_path)
     assert not (tmp_path / "out.csv").exists()
+
+
+def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tmp_path):
+    """``gate.stamp['classifier']`` is a public entry point's own index into the caller's flags: a
+    caller composing them some other way, one that leaves the key out, refuses naming what's
+    missing rather than raising a bare ``KeyError``. The same flags, classifier included, still
+    deliver, so the guard costs nothing on the call it was built to admit."""
+    flags, bindings, pred_dirs = _real_delivery_flags(tmp_path)
+    incomplete = {k: v for k, v in flags.items() if k != "classifier"}
+
+    with pytest.raises(ValueError, match="classifier"):
+        phenology.write_phenology_csv(
+            "test", [], tmp_path / "out.csv", CATKIN, flags=incomplete, acknowledge_unvalidated=False,
+            basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+            pred_dirs=pred_dirs, project_root=tmp_path)
+    assert not (tmp_path / "out.csv").exists()
+
+    cells = phenology.write_phenology_csv(
+        "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
+        pred_dirs=pred_dirs, project_root=tmp_path)
+    assert cells["positive_state_classifier_validated"]
+
+
+def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_and_unvalidated(
+    tmp_path,
+):
+    """A tiled bucket with no persisted training geometry floors the delivery's whole
+    operating-point column even though the count operating point itself cleared:
+    ``column_stamp`` floors any gated dimension outside its own column, and the tile dimension has
+    no column of its own. Built from a real reconciliation over real sidecars, through
+    ``phenology_delivery_flags``, the way both delivery doors build their own flags."""
+    from tcip_mcp.pipelines.resolution import (
+        VALIDATED_FALSE, bind_classifier_validity, reconcile_classifier_validity,
+        reconcile_operating_point_validity, reconcile_tile_size_validity,
+    )
+    from tests.test_phenology_tools import (
+        ID_MAP, _bucket, _ds_root, _tiled, _write_classifier_sidecar, _write_op_sidecar, _write_preds,
+    )
+
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["dormant"])
+    _write_preds(d2, "P1_b", ["elongated"])
+    for d in (d1, d2):
+        _write_op_sidecar(d, dataset_root=root, validated=True, id_map=ID_MAP,
+                          tile_size_prov=_tiled(VALIDATED_FALSE))
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    pred_dirs = [str(d1), str(d2)]
+
+    recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")
+    classifier_recon = reconcile_classifier_validity([str(d1)])
+    classifier_state, _note = bind_classifier_validity(
+        classifier_recon["validated"], [str(d1)], pred_dirs, trait="catkin")
+    tile_recon = reconcile_tile_size_validity(pred_dirs)
+    assert tile_recon["operative"] and tile_recon["validated"] == VALIDATED_FALSE
+    assert recon["validated"] != VALIDATED_FALSE  # the count operating point itself cleared
+
+    flags = phenology.phenology_delivery_flags(classifier_state, recon["validated"], tile_recon)
+
+    cells = phenology.write_phenology_csv(
+        "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=True,
+        basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
+        pred_dirs=pred_dirs, project_root=tmp_path)
+
+    assert cells["operating_point_validated"] == VALIDATED_FALSE
 
 
 def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_it(tmp_path):
@@ -511,7 +579,7 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
     produced = set(phenology.plant_milestones(series, spec))
     schema = set(phenology.phenology_csv_columns(spec))
     prefixed = {c for c in schema if c.startswith(spec.phenology_prefix + "_")}
-    # The provisional marker is stamped by the delivery tool rather than computed here, and exists
+    # The provisional marker is stamped by the writer rather than computed here, and exists
     # only when the spec names a majority alias for it to qualify.
     marker = phenology.majority_provisional_column(spec)
     stamped = {marker} if marker else set()
