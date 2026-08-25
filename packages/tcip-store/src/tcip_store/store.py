@@ -10,7 +10,7 @@ storage itself to the bound backend, so each operation has exactly one implement
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
@@ -230,7 +230,7 @@ def delete(key: Key, *, expect: Version | None = None) -> None:
 
 
 @contextmanager
-def transaction(*keys: Key, timeout_s: float | None = None) -> Iterator[Txn]:
+def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
     """Serialize a read-modify-write over exactly ``keys``, across threads and processes.
 
     Name every key the body will touch, up front. Locks are acquired in an order derived

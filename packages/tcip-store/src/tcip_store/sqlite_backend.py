@@ -33,7 +33,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -739,7 +739,7 @@ class SqliteBackend:
         return StoreError(f"the store database under {root} refused the operation: {exc}")
 
     @contextmanager
-    def _mapped(self, keys: tuple[Key, ...], waited_s: float | None = None) -> Iterator[None]:
+    def _mapped(self, keys: tuple[Key, ...], waited_s: float | None = None) -> Generator[None]:
         """Turn a driver error raised inside into this layer's own refusal.
 
         The wait it reports is measured here rather than taken from the caller's configured
@@ -762,7 +762,7 @@ class SqliteBackend:
     @contextmanager
     def _write(
         self, keys: tuple[Key, ...], *, timeout_s: float | None = None
-    ) -> Iterator[sqlite3.Connection]:
+    ) -> Generator[sqlite3.Connection]:
         """One ``begin immediate`` transaction over the single root a call names.
 
         The write lock is taken up front rather than upgraded from a read, which is what keeps
@@ -894,7 +894,7 @@ class SqliteBackend:
     @contextmanager
     def transaction(
         self, keys: Sequence[Key], *, timeout_s: float | None = None
-    ) -> Iterator["_SqliteTxn"]:
+    ) -> Generator["_SqliteTxn"]:
         named = tuple(keys)
         with self._write(named, timeout_s=timeout_s) as conn:
             txn = _SqliteTxn(self, conn, named)

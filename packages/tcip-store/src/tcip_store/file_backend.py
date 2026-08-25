@@ -21,7 +21,7 @@ import random
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -202,7 +202,7 @@ def lock_file_for(path: Path | str) -> Path:
 
 
 @contextmanager
-def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
+def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
     """Hold this process's one lock pair for a filesystem path, across threads and processes.
 
     Anything that guards the same path this backend guards has to acquire through here, or
@@ -241,7 +241,7 @@ def database_file(root: str) -> Path:
 
 
 @contextmanager
-def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Iterator[None]:
+def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
     """Hold the one lock that decides whether a root's records live in files or in a database.
 
     Taken by whatever is about to publish a database (creation, adoption) and by a file-backend
@@ -333,7 +333,7 @@ class FileBackend:
     # ── locking ─────────────────────────────────────────────────────────────────
 
     @contextmanager
-    def _locked(self, keys: Sequence[Key], timeout_s: float | None = None) -> Iterator[None]:
+    def _locked(self, keys: Sequence[Key], timeout_s: float | None = None) -> Generator[None]:
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         requested = tuple(keys)
         items = []
@@ -358,7 +358,7 @@ class FileBackend:
             yield
 
     @contextmanager
-    def _conform_rail(self, keys: Sequence[Key]) -> Iterator[None]:
+    def _conform_rail(self, keys: Sequence[Key]) -> Generator[None]:
         """The file backend's half of the conform rail: hold each root's transition lock and
         refuse record and log writes to a conformed root, whose records live in its database.
 
@@ -398,7 +398,7 @@ class FileBackend:
             yield
 
     @contextmanager
-    def _blob_conform_rail(self, key: Key) -> Iterator[None]:
+    def _blob_conform_rail(self, key: Key) -> Generator[None]:
         """Refuse a blob write onto a record's own path beside the database that owns it.
 
         A blob write is not a record write, but a public path exists that writes a blob to a
@@ -569,7 +569,7 @@ class FileBackend:
             raise VersionConflict(key, expect, current)
 
     @contextmanager
-    def transaction(self, keys: Sequence[Key], *, timeout_s: float | None = None) -> Iterator["_FileTxn"]:
+    def transaction(self, keys: Sequence[Key], *, timeout_s: float | None = None) -> Generator["_FileTxn"]:
         named = tuple(keys)
         with self._conform_rail(named), self._locked(named, timeout_s):
             txn = _FileTxn(self, named)
@@ -716,7 +716,7 @@ class FileBackend:
         return _version_of(data)
 
     @contextmanager
-    def write_blob(self, key: Key, *, expect: Version | None = None) -> Iterator[BinaryIO]:
+    def write_blob(self, key: Key, *, expect: Version | None = None) -> Generator[BinaryIO]:
         descriptor = get_descriptor(key.store)
         path = self.path_for(key)
         with self._blob_conform_rail(key), self._locked([key]):
@@ -738,7 +738,7 @@ class FileBackend:
             self._apply_staged(temp, path, durable=descriptor.durable)
 
     @contextmanager
-    def open_blob(self, key: Key) -> Iterator[BinaryIO]:
+    def open_blob(self, key: Key) -> Generator[BinaryIO]:
         path = self.path_for(key)
         try:
             handle = _retry_while_denied(lambda: open(path, "rb"), self.lock_timeout_s)
