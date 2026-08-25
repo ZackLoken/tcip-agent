@@ -10,6 +10,8 @@ Provenance is re-snapshotted after the body ran, so ``env.json`` carries the rea
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import tcip_store as ts
@@ -175,3 +177,31 @@ def test_env_provenance_carries_an_outcome_only_known_after_the_body_ran(tmp_pat
     assert env["rng_state_restored"] is True
     assert env["run_id"] == ctx.run.run_id
     assert env["seed"] == ctx.run.config["seed"]
+
+
+def _train_races_the_wall_clock_watchdog(ctx):
+    """A loop that finishes normally in-process while a separate watchdog thread has already
+    marked the stored record failed, the one reachable complete_run refusal: the record was
+    already terminal by the time the child reached its own finalize step."""
+    from tcip_mcp.experiments import update_status
+
+    path = ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.3}}, "model_best")
+    ctx.set_final_weights(path)
+    update_status(ctx.experiment_id, "failed", error="killed by the wall-clock watcher")
+
+
+def test_a_wall_clock_failed_record_reached_by_finalize_run_registers_nothing(tmp_path):
+    """The behaviour change this row states: after the change, a run whose stored record turned
+    terminal out from under it stays failed with no pointer and no registry entry, rather than
+    ending completed and registered."""
+    from tcip_mcp.experiments import artifacts_key
+    from tcip_mcp.model_registry import ModelRegistry
+
+    ctx = _start(tmp_path, "expWallClock", "_train_races_the_wall_clock_watchdog")
+
+    assert ctx.run.status == "completed"  # the body itself finished normally
+    assert ctx.final_weights.endswith("model_best.pt")
+    assert Path(ctx.final_weights).is_file()
+    assert ModelRegistry(str(tmp_path)).get_model("expWallClock") is None
+    assert _experiment_state(tmp_path, "expWallClock") == "failed"
+    assert "model_weights" not in ts.read(artifacts_key("expWallClock"))

@@ -156,6 +156,39 @@ def test_export_predictions_raster_writes_bucket_with_explicit_tile_size(tmp_pat
     assert isinstance(data["annotations"], list)
 
 
+def test_a_second_orthomosaic_export_against_a_completed_experiment_refuses_before_writing(
+        tmp_path, monkeypatch):
+    """A pointer is checked before its write: a second export against an experiment whose
+    lineage.predictions is already populated and terminal refuses by name, before the raster
+    pass runs, so no second bucket is written to orphan."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "proj"))
+    (tmp_path / "proj" / ".tcip" / "state").mkdir(parents=True, exist_ok=True)
+
+    from tcip_mcp.experiments import create_experiment, update_status
+    create_experiment("expOrtho", {"model_source": {"builder": "x:y"}})
+    update_status("expOrtho", "running")
+
+    raster_path = tmp_path / "mosaic.tif"
+    _write_geo_raster(raster_path)
+    ckpt = _bespoke_detection_checkpoint(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out1 = tmp_path / "preds1"
+    r1 = export_predictions(ckpt, output_dir=str(out1), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2,
+                            experiment_id="expOrtho")
+    assert "error" not in r1, r1
+    update_status("expOrtho", "completed")
+
+    out2 = tmp_path / "preds2"
+    r2 = export_predictions(ckpt, output_dir=str(out2), raster_path=str(raster_path),
+                            conf_threshold=0.0, tile_size=TILE, overlap=0.2,
+                            experiment_id="expOrtho")
+    assert "error" in r2
+    assert not out2.exists()
+
+
 def test_export_predictions_raster_refuses_missing_checkpoint_cleanly(tmp_path, monkeypatch):
     """A missing checkpoint must return an honest {"error": ...}, the same shape every other
     refusal in this door uses, never an uncaught FileNotFoundError out of the MCP tool: the

@@ -159,3 +159,98 @@ def test_cancelled_run_record_stays_writable_and_reopenable(tmp_path):
     assert [r["epoch"] for r in rows] == [6, 7]
     assert _record(tmp_path, eid, "status.json")["state"] == "running"
     assert _audit_refusals(tmp_path) == []
+
+
+def test_pointer_frozen_admits_an_absent_or_running_pointer(tmp_path):
+    """A rail must admit valid work: pointer_frozen answers None (write admitted) both for a
+    field that has never been written and for a populated field on a still-running record."""
+    from tcip_mcp.experiments import create_experiment, record_artifact, update_status, pointer_frozen
+
+    eid = "exp-020-chestnut-burr-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:burr_det"}})
+    update_status(eid, "running")
+
+    assert pointer_frozen(eid, "artifacts", "model_final") is None
+
+    record_artifact(eid, "model_final", "/runs/020/model_final.pt")
+    assert pointer_frozen(eid, "artifacts", "model_final") is None
+
+
+def test_pointer_frozen_names_a_populated_pointer_on_a_terminal_record(tmp_path):
+    """The same predicate record_artifact's own transactional refusal uses, read standalone: a
+    populated artifact on a terminal record answers with the refusal text, not None."""
+    from tcip_mcp.experiments import create_experiment, record_artifact, update_status, pointer_frozen
+
+    eid = "exp-021-currant-cluster-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:cluster_det"}})
+    update_status(eid, "running")
+    record_artifact(eid, "model_final", "/runs/021/model_final.pt")
+    update_status(eid, "completed")
+
+    frozen = pointer_frozen(eid, "artifacts", "model_final")
+    assert frozen is not None and eid in frozen and "model_final" in frozen
+
+
+def test_complete_run_writes_the_pointer_and_completes_in_one_call(tmp_path):
+    from tcip_mcp.experiments import create_experiment, update_status, complete_run
+
+    eid = "exp-022-elderberry-umbel-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:umbel_det"}})
+    update_status(eid, "running")
+
+    result = complete_run(eid, "/runs/022/model_best.pt")
+    assert "error" not in result
+    assert result["state"] == "completed"
+
+    status = _record(tmp_path, eid, "status.json")
+    assert status["state"] == "completed" and status.get("ended")
+    artifacts = _record(tmp_path, eid, "artifacts.json")
+    assert artifacts["model_weights"]["path"] == "/runs/022/model_best.pt"
+
+
+def test_complete_run_refuses_a_run_already_terminal_naming_the_weights_file(tmp_path):
+    """The reachable refusal case: the wall-clock watchdog's failed landed while the child was
+    inside its own finalize step. complete_run refuses, names the weights file on disk, and
+    writes neither the pointer nor completed onto the already-failed record."""
+    from tcip_mcp.experiments import create_experiment, update_status, complete_run
+
+    eid = "exp-023-persimmon-fruit-det"
+    create_experiment(eid, {"model_source": {"builder": "my_models:fruit_det"}})
+    update_status(eid, "running")
+    update_status(eid, "failed", error="killed by the wall-clock watcher")
+
+    result = complete_run(eid, "/runs/023/model_best.pt")
+    assert "error" in result
+    assert "/runs/023/model_best.pt" in result["error"]
+
+    status = _record(tmp_path, eid, "status.json")
+    assert status["state"] == "failed"
+    artifacts = _record(tmp_path, eid, "artifacts.json")
+    assert "model_weights" not in artifacts
+
+
+def test_complete_run_transaction_names_artifacts_before_status(tmp_path, monkeypatch):
+    """Structural: a probe on the transaction's key order, not a behavior it produces. A
+    file-backend transaction applies its writes in named-key order and is not crash-atomic
+    across keys, so naming the pointer's key first is what keeps a crash mid-write detectably
+    stale (a pointer with no completed) rather than the reverse."""
+    import tcip_mcp.experiments as exp
+
+    eid = "exp-024-black_locust-raceme-det"
+    exp.create_experiment(eid, {"model_source": {"builder": "my_models:raceme_det"}})
+    exp.update_status(eid, "running")
+
+    seen: list[tuple] = []
+    real_transaction = exp.store.transaction
+
+    def spy(*keys, **kwargs):
+        seen.append(keys)
+        return real_transaction(*keys, **kwargs)
+
+    monkeypatch.setattr(exp.store, "transaction", spy)
+    exp.complete_run(eid, "/runs/024/model_best.pt")
+
+    assert seen, "complete_run never opened a transaction"
+    named = seen[0]
+    assert named[0].parts[1] == "artifacts"
+    assert named[1].parts[1] == "status"

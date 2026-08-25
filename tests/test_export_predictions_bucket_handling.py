@@ -61,6 +61,37 @@ def _fake_predictor(monkeypatch):
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
 
 
+def test_a_second_image_regime_export_against_a_completed_experiment_refuses_before_writing(
+        tmp_path, monkeypatch):
+    """A pointer is checked before its write: a second images_dir export against an experiment
+    whose lineage.predictions is already populated and terminal refuses by name, before the
+    publisher writes a second bucket."""
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.png")
+    _fake_predictor(monkeypatch)
+
+    from tcip_mcp.experiments import create_experiment, update_status
+    create_experiment("expImg", {"model_source": {"builder": "x:y"}})
+    update_status("expImg", "running")
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    out1 = tmp_path / "out1"
+    r1 = export_predictions(str(ckpt), str(images_dir), str(out1), tile=False,
+                            experiment_id="expImg")
+    assert "error" not in r1, r1
+    update_status("expImg", "completed")
+
+    out2 = tmp_path / "out2"
+    r2 = export_predictions(str(ckpt), str(images_dir), str(out2), tile=False,
+                            experiment_id="expImg")
+    assert "error" in r2
+    assert not out2.exists()
+
+
 def test_export_predictions_redirects_a_bespoke_bucket_against_its_own_datasets_verdicts(
     tmp_path, monkeypatch,
 ):

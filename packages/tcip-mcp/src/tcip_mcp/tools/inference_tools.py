@@ -1211,6 +1211,14 @@ def _export_predictions_raster(
         nms_iou=applied_nms_iou, max_dets=applied_max_dets,
     )
     identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+    if identity["experiment_id"]:
+        # Checked before the raster pass, not after: a blob write cannot join the record's own
+        # transaction, so this is the one chance to refuse before the export writes anything.
+        from tcip_mcp.experiments import pointer_frozen
+
+        frozen = pointer_frozen(identity["experiment_id"], "lineage", "predictions")
+        if frozen is not None:
+            return {"error": frozen}
 
     # Resolved (resize included) before the raster is opened: an unreadable recorded augmentation
     # config, or a stated edge contradicting the checkpoint, refuses here, not mid-pass.
@@ -1695,13 +1703,22 @@ def export_predictions(
     if refusal is not None:
         return refusal
 
+    exp_id = result.get("experiment_id")
+    if exp_id:
+        # Checked before the publisher writes the bucket: a blob write cannot join the record's
+        # own transaction, so this is the one chance to refuse before anything lands on disk.
+        from tcip_mcp.experiments import pointer_frozen
+
+        frozen = pointer_frozen(exp_id, "lineage", "predictions")
+        if frozen is not None:
+            return {"error": frozen}
+
     written, op_stamp = _publish_image_predictions(
         out, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
         tile_size_validated=tile_size_validated, draft=draft)
 
     # Close the data→model→predictions chain: link this bucket into the producing run's lineage.
     # Additive first-write, the terminal-state lock permits it into a still-empty predictions field.
-    exp_id = result.get("experiment_id")
     if exp_id:
         try:
             from tcip_mcp.experiments import update_lineage
