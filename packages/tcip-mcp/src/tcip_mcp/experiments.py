@@ -1354,11 +1354,8 @@ def compare_experiments(experiment_ids: list[str]) -> dict[str, Any]:
 
         comparisons.append(summary)
 
-    # Whether every compared run trained on the same dataset content, a metric comparison across
-    # different data is not apples-to-apples, so surface it rather than let the caller assume.
-    # A run with no recorded fingerprint (bespoke/imageless) makes the comparison's data identity
-    # unknown, not "same" by default, so an unset fingerprint must not be filtered out before the
-    # equality check the way an errored comparison is.
+    # Whether every compared run trained on the same dataset content, so a caller doesn't assume
+    # apples-to-apples; an unset fingerprint (bespoke/imageless) makes it unknown, not "same".
     fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
     same_dataset = None if (not fps or None in fps) else len(fps) == 1
     return {"experiments": comparisons, "count": len(comparisons), "same_dataset_fingerprint": same_dataset}

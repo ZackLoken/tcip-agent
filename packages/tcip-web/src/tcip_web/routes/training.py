@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -24,101 +22,6 @@ from tcip_web.routes._metrics_common import metrics_response
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/training", tags=["training"])
-
-_TERMINAL_STATES = {"completed", "failed", "cancelled", "interrupted"}
-
-# A reconstructed non-terminal run is only "interrupted" if its heartbeat is stale; a fresh
-# heartbeat means a training process (possibly the MCP agent) is still updating it. Generous
-# default so a slow epoch between per-epoch heartbeats doesn't flap the status.
-_HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600"))
-
-
-def _heartbeat_fresh(hb_iso: str | None) -> bool:
-    """True if ``hb_iso`` (ISO-8601) is within the staleness window: i.e. a process is
-    still actively updating this run. Missing/unparseable → not fresh (treat as dead)."""
-    if not hb_iso:
-        return False
-    try:
-        hb = datetime.fromisoformat(hb_iso)
-    except (ValueError, TypeError):
-        return False
-    if hb.tzinfo is None:
-        hb = hb.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - hb).total_seconds() <= _HEARTBEAT_STALE_SECONDS
-
-
-def _historical_training_runs() -> list[dict]:
-    """Reconstruct past training runs from the immutable ``.tcip/experiments/`` records.
-
-    Every ``launch_training`` (standalone drift-retrain, GUI, or agent) writes an
-    experiment, so this recovers runs the in-memory registry lost on restart, with no
-    second persistence file. Only genuine *training* experiments are included (a
-    ``model_source`` in the config); review-feedback / ad-hoc experiments are skipped, and
-    HPO trials never create experiments so they can't appear here. A non-terminal state
-    on a run that isn't live means the process died -> surfaced as ``interrupted``.
-
-    The experiments come from ``tcip_mcp.experiments.experiment_ids_with_status``, the store's own
-    enumeration: what names an experiment is a record, so this lists the same set whichever backend
-    holds it rather than only the ones a backend happens to keep a directory for.
-
-    Delegates the actual state/current_epoch reconstruction to
-    ``tcip_mcp.experiments.reconstruct_run_status``, the single implementation of
-    experiment-id-to-``run_id`` resolution. A fresh-id relaunch's experiment id does not
-    necessarily equal the real ``run_id``; an experiment whose status record never stamped
-    ``run_id`` still resolves correctly through the shared resolver's exact-match strategy:
-    defaulting to the experiment id here means the lookup is for that id, which trivially matches
-    itself, and ``current_epoch`` is populated from the run's metrics log via that same resolver.
-    The inline fallback below is reached only when ``reconstruct_run_status`` itself returns
-    ``None`` or resolves to a *different* experiment than the one being iterated (a
-    malformed/unreadable status record, or a genuine identity anomaly), a narrower, degenerate
-    case, not the common case of a status record that never stamped ``run_id``.
-    """
-    from tcip_store import DecodeError, store
-
-    from tcip_mcp.experiments import (
-        config_key,
-        experiment_ids_with_status,
-        reconstruct_run_status,
-        status_key,
-    )
-    from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY
-
-    runs: list[dict] = []
-    for experiment_id in experiment_ids_with_status():
-        try:
-            config = store.read(config_key(experiment_id), default={})
-            status = store.read(status_key(experiment_id), default={})
-        except DecodeError:
-            # One unreadable record must not cost the breeder the whole run listing.
-            logger.warning("experiment %s has a member that does not decode", experiment_id,
-                           exc_info=True)
-            continue
-        if not isinstance(config, dict) or not config.get(MODEL_SOURCE_KEY):
-            continue  # not a training experiment (e.g. review-feedback lineage)
-        run_id = status.get("run_id", experiment_id)  # the real run_id when stamped, else the
-                                                       # experiment_id itself as the fallback
-        reconstructed = reconstruct_run_status(run_id, stale_seconds=_HEARTBEAT_STALE_SECONDS)
-        if reconstructed is not None and reconstructed["experiment_id"] == experiment_id:
-            runs.append({
-                "run_id": run_id,
-                "status": reconstructed["status"],
-                "current_epoch": reconstructed["current_epoch"],
-                "best_metric": reconstructed["best_metric"],
-                "external": True,  # reconstructed → not managed by this web process
-            })
-            continue
-        # Reached only when the shared resolver answers with nothing, or with another experiment.
-        state = status.get("state", "unknown")
-        if state not in _TERMINAL_STATES:
-            state = "running" if _heartbeat_fresh(status.get("heartbeat")) else "interrupted"
-        runs.append({
-            "run_id": run_id,
-            "status": state,
-            "current_epoch": None,
-            "best_metric": None,
-            "external": True,
-        })
-    return runs
 
 
 def _metrics_key(project_root: str, run_id: str) -> "Key | None":
@@ -183,18 +86,15 @@ def launch_training_route(payload: LaunchPayload) -> dict:
 
 @router.get("/runs")
 def list_runs_route() -> dict:
-    """Live in-memory training runs, backfilled with past runs from experiment records.
+    """Every training run the platform can currently account for.
 
-    ``list_training_runs`` already excludes HPO trials (they stay in the Tuning view);
-    historical runs come from ``.tcip/experiments/`` so they survive a restart without a
-    separate persistence file. Live runs win over a historical entry by run_id.
+    A pass-through to ``list_training_runs``, which already merges this process's live runs
+    with every launched run's own record on disk (surviving a restart with no second
+    persistence file) and excludes HPO trials (they stay in the Tuning view).
     """
     from tcip_mcp.tools.training_tools import list_training_runs
 
-    live = list_training_runs().get("runs", [])
-    live_ids = {r.get("run_id") for r in live}
-    historical = [h for h in _historical_training_runs() if h.get("run_id") not in live_ids]
-    return {"runs": list(live) + historical}
+    return list_training_runs()
 
 
 @router.get("/runs/{run_id}")

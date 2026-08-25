@@ -414,6 +414,74 @@ def test_check_training_status_falls_back_to_disk_for_delegated_run(tmp_path, mo
     assert result["status"] == "running"
 
 
+def test_list_training_runs_reconstructs_without_the_full_scan_resolver(tmp_path, monkeypatch):
+    """Each row is reconstructed from the record the enumeration already holds; it must never
+    round-trip a custom-named (id != run_id) experiment through resolve_experiment_for_run's
+    full-scan fallback the way the old per-run reconstruct_run_status call did."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    import tcip_mcp.experiments as exp_mod
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.tools.training_tools import list_training_runs
+
+    create_experiment("exp-001-chestnut-burr-det", {"model_source": {"builder": "my_models:burr_det"}})
+    update_status("exp-001-chestnut-burr-det", "running")
+
+    calls = {"n": 0}
+    real = exp_mod.resolve_experiment_for_run
+
+    def _counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(exp_mod, "resolve_experiment_for_run", _counting)
+
+    runs = list_training_runs()["runs"]
+    assert any(r["run_id"] == "exp-001-chestnut-burr-det" for r in runs)
+    assert calls["n"] == 0
+
+
+def test_list_training_runs_lists_a_launched_experiment_this_process_never_held(tmp_path, monkeypatch):
+    """A run another process launched (never in this process's _RUNS at all, not merely
+    pid-bearing) still lists, reconstructed straight from its own disk record."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.tools.training_tools import list_training_runs
+
+    create_experiment("exp-no-stamp", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    update_status("exp-no-stamp", "running")
+
+    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    assert "exp-no-stamp" in by_id
+    assert by_id["exp-no-stamp"]["external"] is True
+
+
+def test_list_training_runs_overlays_a_pid_bearing_entry_from_disk(tmp_path, monkeypatch):
+    """A pid-bearing in-memory entry (subprocess-delegated) takes the disk overlay for its
+    status/current_epoch: its own in-memory copy is a stale launch-time placeholder once the
+    child starts mutating its own separate copy on disk. It still carries external=False, unlike
+    a run this process never held at all."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import create_experiment, log_metrics, stamp_run_identity, update_status
+    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.tools.training_tools import list_training_runs
+
+    run = attach_run("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}}, "out_dir")
+    run.pid = 4242
+
+    create_experiment("run_pid_overlay", {"model_source": {"builder": "my_models:burr_det"}})
+    stamp_run_identity("run_pid_overlay", "run_pid_overlay", "out_dir")
+    update_status("run_pid_overlay", "running")
+    log_metrics("run_pid_overlay", 9, {"loss": 0.1})
+
+    by_id = {r["run_id"]: r for r in list_training_runs()["runs"]}
+    assert by_id["run_pid_overlay"]["status"] == "running"
+    assert by_id["run_pid_overlay"]["current_epoch"] == 9
+    assert by_id["run_pid_overlay"]["external"] is False
+
+
 def test_list_training_runs_leaves_in_process_runs_untouched(tmp_path, monkeypatch):
     """A run with no pid (every existing synchronous test) is reported from the live in-memory
     record exactly as before. The disk overlay must never touch it."""
