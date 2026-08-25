@@ -128,3 +128,21 @@ class DataScaledGradientModel(nn.Module):
 def build_data_scaled_gradient_model() -> DataScaledGradientModel:
     """``model_source`` builder for :class:`DataScaledGradientModel`."""
     return DataScaledGradientModel()
+
+
+class AlwaysDivergedModel(nn.Module):
+    """Reports a non-finite loss unconditionally, for exercising a diverged run end to end."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(1))
+
+    def forward(self, images, targets=None):
+        if self.training and targets is not None:
+            return {"nan_loss": self.weight * float("nan")}
+        return {"head0_values": self.weight * images.mean(dim=(1, 2, 3))}
+
+
+def build_always_diverged_model() -> AlwaysDivergedModel:
+    """``model_source`` builder for :class:`AlwaysDivergedModel`."""
+    return AlwaysDivergedModel()

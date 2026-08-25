@@ -980,7 +980,7 @@ def register_model_from_experiment(
 
     config = read_member(config_key(experiment_id), {})
 
-    # Metrics stored IN the checkpoint describe the epoch it was saved at, so a best-checkpoint
+    # Metrics stored in the checkpoint describe the epoch it was saved at, so a best-checkpoint
     # is never mislabelled with a later, worse epoch's numbers.
     final_metrics: dict[str, Any] = {}
     kind: str | None = None
@@ -1026,6 +1026,7 @@ def register_model_from_experiment(
         "registered": entry["name"],
         "checkpoint": checkpoint_path,
         "metrics": final_metrics,
+        "metrics_source": metrics_source,
     }
 
 

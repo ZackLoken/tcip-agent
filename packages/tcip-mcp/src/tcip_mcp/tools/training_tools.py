@@ -269,12 +269,12 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 "change it."
             )
 
-    # Fail fast on an incoherent explicit selection_metric (a metric a center-match trait's
-    # own criterion demotes to comparability-only) at validation time, not mid-run.
+    # Fail fast on an explicit selection_metric that is undeclared or, with a center-match trait,
+    # comparability-only, at validation time rather than mid-run.
     eval_cfg = train_cfg.get("evaluation") or config.get("evaluation") or {}
     sel_metric = eval_cfg.get("selection_metric")
     trait_name = eval_cfg.get("trait")
-    if sel_metric and trait_name:
+    if sel_metric:
         from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
 
         task_for_check = (model_source.get("task") if isinstance(model_source, dict) else None) \
@@ -917,41 +917,67 @@ def trial_metrics_key_for_dir(trial_dir: Path | str) -> Key:
 
 
 def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> None:
-    """Train one HPO trial and ``report`` its composite objective (lower=better).
+    """Train one HPO trial and ``report`` its resolved selection metric, in whatever direction
+    that metric's own declaration says is better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, via
+    :func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_selection_metric`), never a fixed
+    minimize convention.
 
-    ``report(value)`` feeds the Ray Tune searcher/scheduler; call it each epoch (so a
-    scheduler can prune) and once at the end. Failures report ``+inf`` so a dead trial can
-    never win a minimize sweep. Trials train under the final run's regime, same augmentation,
-    imbalance handling, and dispatch: a ``training_source`` in ``base_config`` actually
-    runs under that loop here too, not always the stock trainer, or the selected
-    hyperparameters won't transfer.
+    ``report(value)`` feeds the Ray Tune searcher/scheduler; call it each epoch (so a scheduler
+    can prune) and once at the end with the best value this trial actually reached (Tune's default
+    ``get_best_result`` scope reads only the last value each trial reported, so the run's best
+    epoch would otherwise be lost behind a worse later one). A trial that never reports a real
+    value, before training starts or on any failure, reports the losing side of its own direction
+    as that final value instead of leaving Tune with nothing for it, so a trial with nothing real
+    to say can never win either a minimize or a maximize sweep. Trials train under the final run's
+    regime, same augmentation, imbalance handling, and dispatch: a ``training_source`` in
+    ``base_config`` actually runs under that loop here too, not always the stock trainer, or the
+    selected hyperparameters won't transfer.
     """
     merged = _apply_hpo_params(base_config, config)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
+    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import (
-        create_run, task_collate, seeded_loader_kwargs, stamp_effective_data_geometry,
+        _improves, create_run, resolve_selection_metric, task_collate, seeded_loader_kwargs,
+        stamp_effective_data_geometry,
     )
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from torch.utils.data import DataLoader
 
     model_source = merged.get("model_source")
-    if not model_source:
-        report(float("inf"))
-        return
-
     # setdefault, not get: the geometry stamp below mutates this dict and must land in the
     # resolved-config snapshot written from merged.
     data_cfg = merged.setdefault("data", {})
     train_cfg = merged.get("training", {})
-    task = model_source.get("task") or data_cfg.get("task", "detection")
+    task = (model_source.get("task") if model_source else None) or data_cfg.get("task", "detection")
+    eval_cfg = merged.get("evaluation") or {}
+    try:
+        higher_is_better = HIGHER_IS_BETTER_BY_METRIC[resolve_selection_metric(
+            task, eval_cfg.get("trait"), eval_cfg.get("selection_metric"))]
+    except Exception:
+        # Undeclared direction, an unregistered trait, or any other resolution failure; the
+        # trial fails below either way, this only decides which sentinel that failure reports.
+        higher_is_better = False
+    losing_side = float("-inf") if higher_is_better else float("inf")
 
-    # Track which top-level keys the trial actually reads, so a swept param that never
-    # reaches any consumer is caught by observation rather than gated by a whitelist that would
-    # forbid a bespoke training_source from sweeping its own custom axes.
+    if not model_source:
+        report(losing_side)
+        return
+
+    # Track which top-level keys the trial reads, so an unconsumed swept param is caught by
+    # observation, not a whitelist that would forbid a bespoke training_source's own axes.
     tracked_config = _AccessTrackingConfig(merged)
-    # Tag as an HPO trial so it stays out of the Training-tab run list.
-    run = create_run(tracked_config, trial_dir, origin="hpo_trial")
+    run = create_run(tracked_config, trial_dir, origin="hpo_trial")  # kept off the Training tab
+
+    # The best value this trial has actually reported, in the resolved direction; call_report is
+    # what every reporting path below goes through, so this is the one place that tracks it.
+    best = {"value": losing_side}
+
+    def call_report(value: float) -> None:
+        value = float(value)
+        if _improves(value, best["value"], higher_is_better=higher_is_better):
+            best["value"] = value
+        report(value)
 
     try:
         transforms = None
@@ -988,27 +1014,21 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             )
 
         def epoch_cb(epoch: int, metrics: dict) -> None:
-            # resolve_selection_metric governs which key actually decides checkpoint
-            # choice once evaluation.trait/evaluation.selection_metric are set, prefer it over
-            # the raw composite so pruning ranks trials on the same criterion selection uses.
+            # resolve_selection_metric governs which key decides checkpoint choice once
+            # evaluation.trait/selection_metric are set; prefer it over the raw composite.
             value = metrics.get("selection", metrics.get("val_objective", metrics.get("val_loss")))
             if value is not None:
-                report(value)  # composite lower=better; mode='min' keeps improving trials
+                call_report(value)
 
-        # Dispatch through the same training_source-or-default_train() decision the full
-        # audited envelope uses. experiment_id=None is deliberate, dispatch_train_body never
-        # reaches _finalize_run/register_model_from_experiment, so a trial stays isolated from
-        # the registry (origin="hpo_trial") while still actually training under a bespoke loop
-        # when base_config carries one, instead of silently falling back to the stock trainer.
-        # trial_report wires ctx.report_objective(value) for a bespoke loop whose own metrics
-        # don't share the stock trainer's key names, so it can still report progress for pruning.
+        # Same training_source-or-default_train dispatch the full envelope uses; experiment_id=None
+        # isolates a trial from the registry, and trial_report feeds a bespoke loop's own progress.
         ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader, task=task,
-                           experiment_id=None, epoch_hook=epoch_cb, trial_report=report)
+                           experiment_id=None, epoch_hook=epoch_cb, trial_report=call_report)
         dispatch_train_body(ctx)
-        report(run.best_metric)  # final composite (inf if train() never produced a metric)
+        report(best["value"])  # the trial's best reported value, or the losing side if it reported none
     except Exception as e:
         logger.warning("HPO trial failed: %s", e)
-        report(float("inf"))
+        report(losing_side)
     finally:
         # Surface any swept param no consumer touched. Warn-only, never gates the trial.
         unconsumed = sorted((set(config.keys()) - _HPO_KNOWN_KEYS) - tracked_config.accessed)
@@ -1055,8 +1075,11 @@ def run_hpo(
       - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or
         ``none`` to run every trial to completion.
 
-    Trials minimize the composite selection objective (lower=better); each trains under the
-    base config's regime so the chosen hyperparameters transfer to ``launch_training``.
+    Trials optimize ``base_config``'s own resolved selection metric, in whatever direction that
+    metric's declaration says is better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, resolved once
+    for the whole sweep via ``resolve_selection_metric``), not a fixed minimize convention; each
+    trains under the base config's regime so the chosen hyperparameters transfer to
+    ``launch_training``.
 
     Everything one sweep writes lands under ``<output_dir or .tcip/hpo>/<study_name>/``: a
     ``manifest.json`` stamped ``running`` before the first trial starts (so a sweep is
@@ -1091,6 +1114,20 @@ def run_hpo(
     # every trial's resolved config once a sampled point is applied to it.
     check_json_value(param_space, path="param_space")
     check_json_value(base_config, path="base_config")
+
+    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+    from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
+
+    # Ray forbids setting metric/mode anywhere but the Tuner, so the direction is resolved once
+    # here, from base_config, and every trial's own resolution (_run_hpo_trial) must agree with it.
+    hpo_model_source = base_config.get("model_source") or {}
+    hpo_eval_cfg = (base_config.get("training") or {}).get("evaluation") \
+        or base_config.get("evaluation") or {}
+    hpo_task = hpo_model_source.get("task") \
+        or (base_config.get("data") or {}).get("task", "detection")
+    hpo_metric = resolve_selection_metric(
+        hpo_task, hpo_eval_cfg.get("trait"), hpo_eval_cfg.get("selection_metric"))
+    hpo_mode = "max" if HIGHER_IS_BETTER_BY_METRIC[hpo_metric] else "min"
 
     import uuid
     from datetime import datetime, timezone
@@ -1127,7 +1164,7 @@ def run_hpo(
             objective_fn=objective_fn,
             param_space=param_space,
             metric="objective",
-            mode="min",
+            mode=hpo_mode,
             num_samples=n_trials,
             search_alg=search_alg,
             scheduler=scheduler,

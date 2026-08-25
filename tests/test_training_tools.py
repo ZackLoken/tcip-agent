@@ -201,6 +201,12 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     cfg["training"] = dict(cfg["training"], evaluation={"selection_metric": "map50"})
     assert preflight_config(cfg)["valid"] is True
 
+    # An undeclared direction is caught here even with no trait at all: it would otherwise
+    # surface only as a failed run once resolve_selection_metric runs mid-training.
+    cfg["training"] = dict(cfg["training"], evaluation={"selection_metric": "not_a_real_metric"})
+    r = preflight_config(cfg)
+    assert any("no declared ranking direction" in i for i in r["issues"])
+
 
 # preflight_config's reserve_calibration_fraction feasibility check (N7): a training-launch-time
 # refusal through this module's own validation surface, never review_calibration._FAILURE_MESSAGES.
@@ -485,6 +491,75 @@ def test_run_hpo_trial_failed_or_empty_reports_inf(monkeypatch, tmp_path):
     empty: list = []
     _run_hpo_trial({"lr": 3e-4}, empty.append, {"data": {}}, str(tmp_path / "trial_1"))  # no model_source
     assert empty == [float("inf")]
+
+
+def test_run_hpo_trial_reports_the_highest_value_for_a_higher_is_better_metric(monkeypatch, tmp_path):
+    """A higher-is-better selection metric (accuracy) must report the trial's best epoch as the
+    highest reported value, not a minimize convention that would instead prefer the lowest."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    def fake_train(run, train_loader, val_loader, task="classification",
+                   epoch_callback=None, resume_from=""):
+        for epoch, value in enumerate([0.5, 0.9, 0.6]):
+            if epoch_callback:
+                epoch_callback(epoch, {"selection": value})
+        # run.best_metric is left at its dataclass default (+inf), as a bespoke loop that never
+        # sets it would leave it; the trial's own tracking must supply the real final value.
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    base = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+        "data": {"images_dir": "imgs"},
+        "training": {"batch_size": 2},
+        "evaluation": {"selection_metric": "accuracy"},
+    }
+    reported: list = []
+    _run_hpo_trial({"lr": 3e-4}, reported.append, base, str(tmp_path / "trial_0"))
+    assert reported == [0.5, 0.9, 0.6, 0.9]  # per-epoch trace, then the highest, not +inf
+
+
+def test_a_trial_with_no_metric_never_outranks_a_real_one_under_a_maximize_direction(
+    monkeypatch, tmp_path,
+):
+    """A trial that never reports a real value must report the losing side of the metric's own
+    direction (here, -inf, since accuracy is higher-is-better), so it can never be mistaken for
+    the sweep's best trial even under a maximize (mode='max') sweep."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial
+
+    base = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_classifier",
+                         "builder_kwargs": {"num_classes": 2}, "task": "classification"},
+        "data": {"images_dir": "imgs"},
+        "training": {"batch_size": 2},
+        "evaluation": {"selection_metric": "accuracy"},
+    }
+
+    def fake_train_ok(run, train_loader, val_loader, task="classification",
+                      epoch_callback=None, resume_from=""):
+        if epoch_callback:
+            epoch_callback(0, {"selection": 0.7})
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train_ok)
+    real: list = []
+    _run_hpo_trial({"lr": 3e-4}, real.append, base, str(tmp_path / "trial_real"))
+
+    def fake_train_fails(run, train_loader, val_loader, task="classification",
+                         epoch_callback=None, resume_from=""):
+        raise RuntimeError("boom")
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train_fails)
+    failed: list = []
+    _run_hpo_trial({"lr": 3e-4}, failed.append, base, str(tmp_path / "trial_failed"))
+
+    assert failed == [float("-inf")]
+    assert failed[-1] < real[-1]  # strictly loses under mode='max' too
 
 
 def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):

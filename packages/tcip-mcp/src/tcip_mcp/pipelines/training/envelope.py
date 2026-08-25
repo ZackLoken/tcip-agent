@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tcip_store import stored_number, stored_numbers
+from tcip_store import stored_number
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,9 @@ class TrainContext:
         """
         if self.epoch_hook is not None:
             self.epoch_hook(epoch, metrics)
-        stored = stored_numbers(metrics)
+        from tcip_mcp.pipelines.training.generic_trainer import _checkpoint_metrics
+
+        stored = _checkpoint_metrics(metrics)
         try:
             if self.experiment_id is None:
                 from tcip_store import append
@@ -272,7 +274,8 @@ class TrainContext:
         ``log_metrics``/``_epoch_sink``) only recognizes the stock trainer's own metric keys
         (``selection``/``val_objective``/``val_loss``); call this instead from a bespoke
         ``train(ctx)`` whose metrics use different names, with whatever value your loop knows
-        represents trial progress (lower=better, matching the platform's minimize convention)."""
+        represents trial progress, in the direction the sweep's resolved selection metric
+        declares as better (``evaluation.HIGHER_IS_BETTER_BY_METRIC``), not a fixed convention."""
         if self.trial_report is not None:
             self.trial_report(float(value))
 

@@ -148,3 +148,38 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
     assert best["epoch"] == best_epoch
     assert best["metrics"]["val_f1"] == pytest.approx(f1_by_epoch[best_epoch], abs=1e-6)
     assert run.best_metric == pytest.approx(f1_by_epoch[best_epoch], abs=1e-6)
+
+
+def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both(tmp_path):
+    """``f1`` is declared (a detection/classification metric) but regression's own ``evaluate()``
+    never produces it; the run must fail naming the requested metric and the keys validation did
+    produce, not silently fall back to the training loss under a name nobody chose."""
+    train_loader, val_loader = _loaders()
+    run = create_run(_config({"selection_metric": "f1"}), str(tmp_path / "out"))
+    run = train(run, train_loader, val_loader=val_loader, task="regression")
+
+    assert run.status == "failed"
+    assert "'f1'" in run.error
+    assert "'val_f1'" in run.error
+    assert "val_loss" in run.error and "val_mae" in run.error
+
+
+def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selects_its_lowest_loss(
+    tmp_path,
+):
+    """No validation loader means no metric but the training loss exists; a run selecting on the
+    default (loss) metric must still complete and choose the lowest-loss epoch."""
+    train_loader, _ = _loaders()
+    run = create_run(_config(), str(tmp_path / "out"))
+    run = train(run, train_loader, val_loader=None, task="regression")
+
+    assert run.status == "completed", run.error
+    history = run.metrics_history
+    assert len(history) == 3
+    for record in history:
+        assert record["selection_metric"] == "loss"
+        assert "val_loss" not in record
+    assert run.best_metric == pytest.approx(min(r["selection"] for r in history), abs=1e-6)
+
+    best = torch.load(tmp_path / "out" / "model_best.pt", weights_only=False)
+    assert best["metrics"]["selection"] == pytest.approx(run.best_metric, abs=1e-6)

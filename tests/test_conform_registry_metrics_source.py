@@ -75,11 +75,46 @@ def test_a_stated_source_conforms_the_experiment_tagged_entry(tmp_path):
         _entry("trained", metrics={"val_map50": 0.5}, tags=["experiment:exp1"]),
     ])
 
-    applied = script._apply(root, {"trained": "training_source"})
+    applied, refused = script._apply(root, {"trained": "training_source"})
     assert "metrics_source='training_source'" in applied[0]
+    assert refused == []
 
     index = ts.read(registry_index_key(root))
     assert index[0]["metrics_source"] == "training_source"
+
+
+def test_apply_called_directly_does_not_silently_conform_a_refused_entry(tmp_path):
+    """A caller that reaches ``_apply`` without going through ``_plan`` first (the path
+    ``main`` always takes) must still learn which entries it could not conform, by name,
+    rather than have them written back unchanged and reported as if they succeeded."""
+    script = _load_script()
+    root = tmp_path / "proj"
+    _seed_index(root, [
+        _entry("trained", metrics={"val_map50": 0.5}, tags=["experiment:exp1"]),
+    ])
+
+    applied, refused = script._apply(root, {})
+    assert refused == ["trained"]
+
+    index = ts.read(registry_index_key(root))
+    assert "metrics_source" not in index[0]
+
+
+def test_main_refuses_source_given_with_more_than_one_root(tmp_path):
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    _seed_index(root_a, [_entry("trained", metrics={"val_map50": 0.5}, tags=["experiment:exp1"])])
+    _seed_index(root_b, [])
+
+    script = _load_script()
+    import sys
+    old_argv = sys.argv
+    try:
+        sys.argv = ["conform_registry_metrics_source.py", str(root_a), str(root_b),
+                   "--source", "trained=training_source"]
+        assert script.main() == 2
+    finally:
+        sys.argv = old_argv
 
 
 def test_an_already_conformed_root_has_nothing_to_conform(tmp_path):

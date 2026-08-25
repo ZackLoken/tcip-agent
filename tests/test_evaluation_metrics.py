@@ -509,7 +509,13 @@ def test_concordance_correlation_coefficient_zero_variance_is_none():
 def test_selection_value_prefers_objective_for_detection():
     assert _selection_value("detection", {"val_loss": 0.1, "val_objective": 5.0}, 0.2, "objective") == 5.0
     assert _selection_value("classification", {"val_loss": 0.1}, 0.2, "loss") == 0.1
-    assert _selection_value("detection", {"val_loss": 0.1}, 0.2, "objective") == 0.1  # no objective -> val_loss
+    # No validation loader ran (val_metrics empty): selecting on loss falls back to the training loss.
+    assert _selection_value("detection", {}, 0.2, "loss") == 0.2
+
+
+def test_selection_value_raises_when_the_metric_is_not_among_this_epochs_val_metrics():
+    with pytest.raises(ValueError, match="not among this epoch's validation metrics"):
+        _selection_value("detection", {"val_loss": 0.1}, 0.2, "objective")
 
 
 def test_resolve_selection_metric_defaults():
@@ -517,6 +523,16 @@ def test_resolve_selection_metric_defaults():
     assert resolve_selection_metric("instance_seg", None, None) == "objective"
     assert resolve_selection_metric("classification", None, None) == "loss"
     assert resolve_selection_metric("semantic_seg", None, None) == "loss"
+
+
+def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
+    assert resolve_selection_metric("classification", None, None, has_val_loader=False) == "loss"
+    assert resolve_selection_metric(
+        "classification", None, "loss", has_val_loader=False) == "loss"
+    with pytest.raises(ValueError, match="needs a validation loader"):
+        resolve_selection_metric("detection", None, None, has_val_loader=False)
+    with pytest.raises(ValueError, match="needs a validation loader"):
+        resolve_selection_metric("classification", None, "accuracy", has_val_loader=False)
 
 
 def test_resolve_selection_metric_rejects_incoherent_explicit_choice():
@@ -604,7 +620,9 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
             m1 = 1 - m0
             loader = [(imgs, {"masks": torch.stack([m0, m1])})]
 
-        result = evaluate(model, loader, device, task)
+        # "catkin" (seeded center_match) exercises evaluate()'s center-match branch for detection.
+        trait = "catkin" if task == "detection" else None
+        result = evaluate(model, loader, device, task, trait=trait)
         returned.update(result)
 
     per_image = [
@@ -618,7 +636,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts():
 
     not_a_ranking = {
         "per_class", "count_bias", "per_class_iou", "per_class_dice", "tp", "fp", "fn",
-        "criterion",
+        "criterion", "governing_criterion", "map50_role",
     }
     ranking_returned = {k for k in returned if not k.endswith(NOT_FINITE_SUFFIX)}
     declared = set(HIGHER_IS_BETTER_BY_METRIC)

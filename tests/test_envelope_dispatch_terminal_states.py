@@ -89,6 +89,20 @@ def test_an_explicit_deliverable_outranks_the_filename_convention(tmp_path):
     assert entry["metrics"]["val_loss"] == 0.2
 
 
+def test_registered_metrics_source_is_training_source_for_a_bespoke_loop(tmp_path):
+    """``save_checkpoint``'s own contract (envelope.py): a ``metrics`` key in the saved state
+    becomes the registered entry's metrics with ``metrics_source='training_source'``, since the
+    platform wrote what the loop chose into the artifact and never measured it itself."""
+    from tcip_mcp.model_registry import ModelRegistry
+
+    _start(tmp_path, "expTrainingSource", "_train_saves_best_then_final")
+
+    entry = ModelRegistry(str(tmp_path)).get_model("expTrainingSource")
+    assert entry is not None
+    assert entry["metrics_source"] == "training_source"
+    assert entry["metrics"]["val_loss"] == 0.2
+
+
 def _train_stops_on_cancel(ctx):
     """A loop that checkpoints, then honours a cancellation request and returns."""
     ctx.save_checkpoint({"model_state_dict": {}, "metrics": {"val_loss": 0.4}}, "model_final")
