@@ -306,24 +306,14 @@ def check_project_record(root: Path, findings: list) -> None:
     """
     from tcip_store import StoreError
 
-    from tcip_mcp.project_record import (
-        ProjectRecordInvalid,
-        ProjectRecordMissing,
-        read_record,
-        site_fields,
-    )
+    from tcip_mcp.project_record import ProjectRecordInvalid, ProjectRecordMissing, read_record
 
     try:
         read_record(root)
-    except ProjectRecordMissing:
-        level = "warn"
-    except (ProjectRecordInvalid, StoreError, OSError):
-        level = "error"
-    else:
-        return
-    problem = site_fields(root)["site_problem"]
-    if problem:
-        findings.append((level, problem))
+    except ProjectRecordMissing as exc:
+        findings.append(("warn", str(exc)))
+    except (ProjectRecordInvalid, StoreError, OSError) as exc:
+        findings.append(("error", str(exc)))
 
 
 def gated_stores(root: Path) -> dict[str, tuple[tuple[Path, str], ...]]:

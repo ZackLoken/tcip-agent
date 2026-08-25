@@ -72,3 +72,28 @@ def test_conform_script_replaces_a_conflicting_site(tmp_path: Path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "replaced" in result.stdout
     assert read_record(str(project))["site"] == "south orchard"
+
+
+def test_conform_script_replaces_a_damaged_record_naming_it_replaced_not_written(
+    tmp_path: Path,
+):
+    """A prior record that existed but could not be read as a site is a replacement, not a
+    fresh write: the breeder's earlier value existed and this call is what corrected it."""
+    import tcip_store
+
+    from tcip_mcp.project_record import project_record_key, read_record
+    from tcip_mcp.tools.project_tools import init_project
+
+    project = tmp_path / "proj"
+    init_project(str(project), site="north orchard")
+    key = project_record_key(str(project))
+    current = tcip_store.read_versioned(key).version
+    tcip_store.replace(key, {"not_site": "x"}, expect=current)
+
+    result = _run_script(str(project), "south orchard", "--replace")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "replaced" in result.stdout
+    assert "written:" not in result.stdout
+    assert "does not hold a site" in result.stdout
+    assert read_record(str(project))["site"] == "south orchard"

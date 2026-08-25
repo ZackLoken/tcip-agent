@@ -53,7 +53,9 @@ const PROJECTS: ProjectSummary[] = [
     image_count: 7,
     is_active: false,
     site: null,
-    site_problem: "no project record yet; site it with init_project",
+    site_problem:
+      "No site recorded yet: record it with init_project(<path>, site=<site>) or " +
+      "scripts/conform_project_site.py, for /ws/crop_b_burr_site-b",
   },
 ];
 
@@ -122,7 +124,10 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker />);
 
     expect(
-      await screen.findByText("no project record yet; site it with init_project"),
+      await screen.findByText(
+        "No site recorded yet: record it with init_project(<path>, site=<site>) or " +
+          "scripts/conform_project_site.py, for /ws/crop_b_burr_site-b",
+      ),
     ).toBeInTheDocument();
   });
 

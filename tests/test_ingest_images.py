@@ -420,16 +420,16 @@ def test_ingest_refuses_a_non_conforming_override_basename_under_the_workspace(
 def test_ingest_a_second_date_into_an_existing_non_conforming_project_opens_it_by_name(
     tmp_path, _isolate_workspace
 ):
+    from tcip_store.binding import bind_default
+
+    # A bound process holds a root's database open, so a project directory is renamed only
+    # with the backend closed and rebound.
+    backend = bind_default()
     src1 = tmp_path / "raw1"
     _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
     ingest_images(source=str(src1), name="proj_reused_case", site="north orchard")
 
-    # The project record's write cached an open database connection for this root; Windows
-    # refuses to rename a directory holding one open, so it has to be released first.
-    from tcip_store.binding import bind_default
-    from tcip_store.store import _backend
-
-    _backend().close()
+    backend.close()
     bind_default()
 
     # Rename to a name that doesn't fit crop_subject_phenotype: what an existing project made
@@ -540,51 +540,140 @@ def test_ingest_refuses_an_empty_site(tmp_path):
     src = tmp_path / "raw"
     _make_image(src / "a.jpg")
 
-    manifest = ingest_images(source=str(src), name="proj_empty_site_case", site="   ")
+    manifest = ingest_images(source=str(src), name="proj_empty_site", site="   ")
 
     assert "error" in manifest
-    assert not (workspace.project_path("proj_empty_site_case")).exists()
+    assert "empty" in manifest["error"]
+    assert not (workspace.project_path("proj_empty_site")).exists()
+
+
+def test_ingest_refuses_a_present_but_invalid_record(tmp_path):
+    """The door surfaces the reader's own refusal rather than the store's raw exception."""
+    import tcip_store
+
+    from tcip_mcp.project_record import project_record_key
+
+    src = tmp_path / "raw"
+    _make_image(src / "a.jpg")
+    dest = tmp_path / "custom_dest"
+    tcip_store.replace(
+        project_record_key(str(dest)), {"not_site": "whatever"}, expect=tcip_store.Version.ABSENT
+    )
+
+    manifest = ingest_images(
+        source=str(src), name="ignored", site="north orchard", project_path=str(dest)
+    )
+
+    assert "error" in manifest
+    assert "does not hold a site" in manifest["error"]
+
+
+def test_ingest_refuses_an_undecodable_record(tmp_path):
+    """The store's own DecodeError is a StoreError, caught and returned as the door's error."""
+    import tcip_store
+
+    from tcip_mcp.project_record import project_record_key
+    from tests._record_damage_fixtures import damage_record
+
+    src = tmp_path / "raw"
+    _make_image(src / "a.jpg")
+    dest = tmp_path / "custom_dest"
+    key = project_record_key(str(dest))
+    tcip_store.replace(key, {"site": "north orchard"}, expect=tcip_store.Version.ABSENT)
+    damage_record(key, b"{not valid json")
+
+    manifest = ingest_images(
+        source=str(src), name="ignored", site="north orchard", project_path=str(dest)
+    )
+
+    assert "error" in manifest
+    assert "does not decode" in manifest["error"]
+
+
+def test_ingest_refuses_an_unadopted_root(tmp_path):
+    """A root imported from an archive holds loose record files and no database: the store's
+    conform rail refuses ingest_images's site write there until scripts/adopt_store.py has run.
+    Bound to the database backend explicitly, since the loose-files-with-no-database state this
+    proves is a fact about that backend's conform rail, not about whichever backend the suite
+    happens to run this file on."""
+    import tcip_store
+    from tcip_store.sqlite_backend import SqliteBackend
+    from tcip_store.store import _backend
+
+    from tcip_mcp.tools.project_tools import archive_project, import_project, init_project
+
+    previous = _backend()
+    backend = SqliteBackend()
+    tcip_store.bind(backend)
+    try:
+        src = tmp_path / "src_project"
+        init_project(str(src), site="north orchard")
+        zip_path = tmp_path / "export.zip"
+        exported = archive_project(str(src), str(zip_path))
+        assert "error" not in exported
+        dest = tmp_path / "unadopted"
+        imported = import_project(str(zip_path), str(dest))
+        assert "error" not in imported
+
+        src2 = tmp_path / "raw2"
+        _make_image(src2 / "b.jpg")
+        manifest = ingest_images(
+            source=str(src2), name="ignored", site="north orchard", project_path=str(dest)
+        )
+    finally:
+        tcip_store.bind(previous)
+        backend.close()
+
+    assert "error" in manifest
+    assert "scripts/adopt_store.py" in manifest["error"]
 
 
 def test_ingest_after_import_and_adopt_admits_a_second_date(tmp_path, _isolate_workspace):
     """The store's own standing rule surfaces one door earlier: an imported root extracts
     loose files and no database, so ``ingest_images`` refuses there until
     ``scripts/adopt_store.py`` has run, the same as every other record store under that root.
-    Import, adopt, ingest is the admit case."""
+    Import, adopt, ingest is the admit case. Bound to the database backend explicitly, since
+    adoption builds that backend's database and means nothing under the file backend."""
+    import tcip_store
     from tcip_store.adoption import adopt_root
-    from tcip_store.file_backend import database_file
     from tcip_store.layout_claims import ROOT
+    from tcip_store.sqlite_backend import SqliteBackend
+    from tcip_store.store import _backend
 
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import archive_project, import_project
 
-    src1 = tmp_path / "raw1"
-    _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
-    first = ingest_images(source=str(src1), name="proj_import_case", site="north orchard")
-    assert "error" not in first
-    original_root = Path(first["project_path"])
+    previous = _backend()
+    backend = SqliteBackend()
+    tcip_store.bind(backend)
+    try:
+        src1 = tmp_path / "raw1"
+        _make_image(src1 / "a.jpg", exif_date="2026:02:11 10:30:00")
+        first = ingest_images(source=str(src1), name="proj_import_case", site="north orchard")
+        assert "error" not in first
+        original_root = Path(first["project_path"])
 
-    from tcip_store.export import export_root
+        zip_path = tmp_path / "export.zip"
+        exported = archive_project(str(original_root), str(zip_path))
+        assert "error" not in exported
 
-    if database_file(str(original_root)).is_file():
-        export_root(str(original_root))
-    zip_path = tmp_path / "export.zip"
-    exported = archive_project(str(original_root), str(zip_path))
-    assert "error" not in exported
+        dest = _isolate_workspace / "proj_reopened_case"
+        imported = import_project(str(zip_path), str(dest))
+        assert "error" not in imported
 
-    dest = _isolate_workspace / "proj_reopened_case"
-    imported = import_project(str(zip_path), str(dest))
-    assert "error" not in imported
+        adopt_root(str(dest.absolute()), ROOT, report=lambda line: None)
 
-    dest_abs = str(dest.absolute())
-    adopt_root(dest_abs, ROOT, report=lambda line: None)
+        src2 = tmp_path / "raw2"
+        _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
+        second = ingest_images(
+            source=str(src2), name="proj_reopened_case", site="north orchard",
+            project_path=str(dest),
+        )
+        assert "error" not in second
+        assert read_record(str(dest))["site"] == "north orchard"
+    finally:
+        tcip_store.bind(previous)
+        backend.close()
 
-    src2 = tmp_path / "raw2"
-    _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
-    second = ingest_images(
-        source=str(src2), name="proj_reopened_case", site="north orchard", project_path=str(dest),
-    )
-
-    assert "error" not in second
     assert (dest / "images" / "2026-03-01" / "b.jpg").is_file()
     assert read_record(str(dest))["site"] == "north orchard"

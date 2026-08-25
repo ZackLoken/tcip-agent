@@ -626,12 +626,12 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_dataset` | `project_tools.py:94` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
-| `init_project` | `project_tools.py:192` | yes | Initialise a TCIP project directory. |
-| `set_active_project` | `project_tools.py:224` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:304` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:351` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:472` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:598` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `init_project` | `project_tools.py:196` | yes | Initialise a TCIP project directory. |
+| `set_active_project` | `project_tools.py:230` | yes | Set the workspace's active project so the GUI opens it. |
+| `view_gui_state` | `project_tools.py:310` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:357` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:478` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:605` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### training_tools.py (8 tools)
 
@@ -1539,16 +1539,16 @@ placeholder entry since it names no single format.
 ## 25. `.tcip/project.json`, per-project record (site)
 
 Path: `<project_path>/.tcip/project.json`, addressed by `project_record_key`,
-`packages/tcip-mcp/src/tcip_mcp/project_record.py:68`, on the store `PROJECT_RECORD_STORE`,
-`project_record.py:37`; `project_record_path`, `project_record.py:78`, is the same address as a
+`packages/tcip-mcp/src/tcip_mcp/project_record.py:67`, on the store `PROJECT_RECORD_STORE`,
+`project_record.py:36`; `project_record_path`, `project_record.py:77`, is the same address as a
 path for a caller that needs one.
 
-Writer: `record_site`, `project_record.py:178`, a create-only write: an absent record is written,
+Writer: `record_site`, `project_record.py:168`, a create-only write: an absent record is written,
 a present record with the same site is left as is, and a present record with a different or
 unreadable site raises. The one deliberate overwrite is `scripts/conform_project_site.py
 --replace`.
 
-Readers: `read_record`, `project_record.py:130`; `site_fields`, `project_record.py:233`, is the
+Readers: `read_record`, `project_record.py:116`; `site_fields`, `project_record.py:229`, is the
 one reader every surface (the picker, `inspect_project`, the doctor) calls, and never raises.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: the record is new.
@@ -1655,7 +1655,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:97` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:320` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:326` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
