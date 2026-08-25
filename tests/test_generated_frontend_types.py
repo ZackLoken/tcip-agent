@@ -1,10 +1,11 @@
 """The browser's coverage-record types are a projection of the pydantic models that declare them.
 
 ``scripts/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
-``routes/_coverage_models.py``, ``routes/coverage.py`` and ``tcip_web.state.GuiVocabulary``;
-these tests hold that projection to what the models produce now, and keep another frontend
-module from declaring an interface with the same field set as a generated one, or a bare union
-alias with the same members as one of a generated interface's own literal-union fields.
+``routes/_coverage_models.py``, ``routes/coverage.py``, ``routes/review.py``,
+``tcip_web.state.GuiVocabulary``, ``tcip_mcp.web_client`` and ``tcip_web.jobstore``; these tests
+hold that projection to what the models produce now, and keep another frontend module from
+declaring an interface with the same field set as a generated one, or a bare union alias with
+the same members as one of a generated interface's own literal-union fields.
 """
 
 from __future__ import annotations
