@@ -256,3 +256,14 @@ def test_export_predictions_writes_a_canonical_bucket_with_no_verdicts_in_place(
     assert res["bucket_redirected"] is False
     assert Path(res["output_dir"]) == out
     assert (out / "img.json").is_file()
+
+
+def test_a_producer_string_is_refused_without_the_checkpoints_hash():
+    """A prediction's producer is spelled only from a resolved checkpoint identity: a missing
+    hash is refused by name rather than stamped as a hash-less producer, and a present hash
+    yields the one spelling every checkpoint-backed door writes."""
+    from tcip_mcp.pipelines.resolution import prediction_producer
+
+    with pytest.raises(ValueError, match="no checkpoint hash for .*m.pt"):
+        prediction_producer("m.pt", None)  # type: ignore[arg-type]
+    assert prediction_producer("m.pt", "725c546b990dabcdef") == "model:m@725c546b990d"

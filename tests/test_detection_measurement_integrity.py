@@ -978,18 +978,21 @@ def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_ca
     from tests._binding_fixtures import calibrated_run_fields
 
     img = _one_image(tmp_path)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
 
     def _fake_run_inference(**kw):
+        from tcip_mcp.model_registry import checkpoint_sha256
+
         return {
             "results": [{"image": img, "width": 100, "height": 100,
                          "boxes": [], "scores": [], "labels": [], "count": 0}],
+            "checkpoint_sha256": checkpoint_sha256(ckpt),
             **calibrated_run_fields(labels_dir=tmp_path, tiled=False),
         }
 
     monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
     out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
     r = itools.export_predictions(str(ckpt), str(tmp_path), str(out_dir), trait="catkin",
                                   calibration_labels_dir=str(tmp_path))
     assert "error" not in r, r

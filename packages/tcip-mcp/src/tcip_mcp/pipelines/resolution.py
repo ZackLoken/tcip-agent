@@ -996,8 +996,13 @@ def prediction_producer(checkpoint_path: str, sha256: str) -> str:
     Every checkpoint-backed door (the image and raster export regimes, the web inference worker)
     resolves a checkpoint's identity before it writes anything, so the hash is always in hand by
     the time this is called; the parameter is required rather than defaulted so the bare,
-    hash-less form cannot be spelled through it.
+    hash-less form cannot be spelled through it, and a caller that reaches here without the hash
+    is refused by name rather than stamping a producer with no identity.
     """
+    if not sha256:
+        raise ValueError(
+            f"no checkpoint hash for {checkpoint_path}: a prediction's producer is stamped only "
+            "from a resolved checkpoint identity (resolve_model_identity)")
     return f"model:{Path(checkpoint_path).stem}@{sha256[:12]}"
 
 
