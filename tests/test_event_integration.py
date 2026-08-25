@@ -188,13 +188,25 @@ class TestPushPanelDataTool:
 
 
 class TestPortDiscovery:
-    """Port + host discovery honor env vars and port-file snapshots."""
+    """The record (the port actually bound) outranks the env var (a request), which outranks
+    the default."""
 
-    def test_env_port_wins(self, monkeypatch) -> None:
+    def test_record_wins_over_the_env_var(self, tmp_path: Path, monkeypatch) -> None:
+        """The record names the port actually bound, so it outranks a request for a different one."""
+        import tcip_store as ts
+        from tcip_mcp.web_client import backend_port_key, resolve_web_port
+
+        monkeypatch.setenv("TCIP_WEB_PORT", "12345")
+        ts.replace(backend_port_key(root=tmp_path), "34567")
+        assert resolve_web_port(project_root=tmp_path) == 34567
+
+    def test_env_var_used_when_no_record_exists(self, tmp_path: Path, monkeypatch) -> None:
+        """A failed publication or a bare ``uvicorn`` launch leaves no record: with none to trust,
+        the request is the best information there is."""
         from tcip_mcp.web_client import resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
-        assert resolve_web_port() == 12345
+        assert resolve_web_port(project_root=tmp_path) == 12345
 
     def test_port_file_used_when_env_absent(self, tmp_path: Path, monkeypatch) -> None:
         import tcip_store as ts

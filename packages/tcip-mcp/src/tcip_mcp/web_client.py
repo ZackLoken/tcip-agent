@@ -15,12 +15,16 @@ The tab vocabulary (``ActiveTab``/``TAB_NAMES``) lives here for the same reason:
 ``tcip_web.state`` imports it rather than declaring its own.
 
 Port discovery order:
-  1. ``TCIP_WEB_PORT`` environment variable.
-  2. The port record under the pinned platform root.
-  3. The same record under the repo root: the backend writes it at its startup root (the repo,
+  1. The port record under the pinned platform root: the port actually bound, so a substituted
+     port (the requested one was taken) is still the one found.
+  2. The same record under the repo root: the backend writes it at its startup root (the repo,
      pre-adoption), so after ``set_active_project`` repins this process's root to a project the
      pinned location no longer holds the record; without this fallback the ping silently degraded
      to the default port whenever the backend ran on a non-default one.
+  3. ``TCIP_WEB_PORT`` environment variable: a request, read only once no record parses. The
+     record can fail to exist (a failed publication, or a backend started as bare ``uvicorn
+     tcip_web.app:app --port N``, which never writes one), and the launcher keeps serving either
+     way, so with no record the request is the best information there is.
   4. Default: 8765.
 
 Host discovery:
@@ -176,17 +180,15 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
         (``$TCIP_PROJECT_ROOT`` or cwd), the same place the web backend writes it, so the port
         is found regardless of the reader's cwd.
 
-    An absent record and an unparseable one both fall through to the next candidate root and
-    then to the default, rather than raising: this runs before the backend is known to be up,
-    so a missing handoff is an ordinary state, not a failure.
+    The record is the answer: it names the port the backend actually bound, which can differ
+    from any request when the requested one was taken and a free one substituted. ``TCIP_WEB_PORT``
+    is only ever a request, read when no record parses: the record can be absent (a failed
+    publication, or a backend started as bare ``uvicorn tcip_web.app:app --port N``, which writes
+    none), and the launcher serves either way, so with no record the request is the best
+    information there is. An absent record and an unparseable one both fall through to the next
+    candidate root, then to the env var, then to the default, rather than raising: this runs
+    before the backend is known to be up, so a missing handoff is an ordinary state, not a failure.
     """
-    env = os.environ.get("TCIP_WEB_PORT")
-    if env:
-        try:
-            return int(env)
-        except ValueError:
-            logger.warning("TCIP_WEB_PORT=%r is not an integer; falling back", env)
-
     roots = [Path(project_root)] if project_root else [_platform_root(), _repo_root()]
     for root in roots:
         recorded = tcip_store.read(backend_port_key(root), default=None)
@@ -196,6 +198,13 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
             return int(recorded.strip())
         except ValueError:
             logger.warning("Cannot parse port recorded under %s; using default", root)
+
+    env = os.environ.get("TCIP_WEB_PORT")
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            logger.warning("TCIP_WEB_PORT=%r is not an integer; falling back", env)
 
     return DEFAULT_PORT
 
