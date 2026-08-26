@@ -684,8 +684,8 @@ Docstring is the function's docstring first line, verbatim.
 | `set_active_project` | `project_tools.py:230` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:310` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:357` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:478` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:605` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `archive_project` | `project_tools.py:491` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:618` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### scale_tools.py (1 tool)
 
@@ -751,14 +751,14 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:138` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:147` |
-| WS | `/ws/state` | `state_ws` | `app.py:155` |
-| GET | `/health` | `health` | `app.py:249` |
-| GET | `/` | `index` | `app.py:257` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:280` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:324` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:333` |
+| GET | `/api/state` | `get_state` | `app.py:143` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:152` |
+| WS | `/ws/state` | `state_ws` | `app.py:160` |
+| GET | `/health` | `health` | `app.py:254` |
+| GET | `/` | `index` | `app.py:262` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:285` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:329` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:338` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -842,7 +842,7 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `` (root) | `list_projects` | `routes/projects.py:100` |
-| POST | `/active` | `set_active_project` | `routes/projects.py:136` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| POST | `/active` | `set_active_project` | `routes/projects.py:141` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
 ### routes/results.py, prefix `/api/results` (14 routes)
 
@@ -1009,16 +1009,21 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:51`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:64`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
 `@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
 
 `python -m tcip_web`: `packages/tcip-web/src/tcip_web/__main__.py` defines `main()`
-(line 59) which pins the platform state root via `tcip_mcp.project_paths.pin_project_root`
-(line 65), reads `TCIP_WEB_HOST` / `TCIP_WEB_PORT` (default `127.0.0.1:8765`, lines 22-23,
-71-72), writes the bound port to `.tcip/state/web_port.txt` (`_write_port_file`, line 43),
-and starts the app via `uvicorn.run("tcip_web.app:app", ...)` (line 76). Exposure is a property
+(line 61), reads `TCIP_WEB_HOST` / `TCIP_WEB_PORT` (default `127.0.0.1:8765`, lines 22-23,
+67-68), writes the bound port under the workspace root's `.tcip/state/web_port.txt`
+(`_write_port_file`, line 43), and starts the app via `uvicorn.run("tcip_web.app:app", ...)`
+(line 72). The port write resolves under the workspace root, not the platform-state root, so
+it needs no pin first; the app itself pins the platform-state root at import, from the
+workspace's active-project marker (`tcip_mcp.project_paths.pin_project_root(from_marker=True)`,
+`packages/tcip-web/src/tcip_web/app.py`), so every way the app is served (this entry point, a
+bare `uvicorn tcip_web.app:app`, `--lifespan off`, the reloader's child) pins the same root
+before anything resolves a `.tcip` path. Exposure is a property
 of the accepted connection rather than the configured bind host, so this entry point always
 binds the requested host and port; whether an arrival through a non-loopback address is served
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
@@ -1507,7 +1512,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:259`.
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:110`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:115`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1580,9 +1585,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:203`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:224`.
 
-Readers: `read_active_project`, `workspace.py:156`; `resolve_project_path`, `workspace.py:195`.
+Readers: `read_active_project`, `workspace.py:160`; `resolve_project_path`, `workspace.py:216`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -1664,14 +1669,14 @@ end.
 ## S01. Platform state root pin (TCIP_PROJECT_ROOT)
 
 Must agree: all three processes resolve `.tcip/` against the same directory.
-Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:30` (`ENV_VAR = "TCIP_PROJECT_ROOT"`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:44` (`ENV_VAR = "TCIP_PROJECT_ROOT"`).
 Side B: `packages/tcip-web/src/tcip_web/routes/images.py:168` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
 Phase 3 verdict: single.
 
 ## S02. Workspace root and the .active project marker
 
 Must agree: every process names the same workspace directory and the same active project.
-Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:29` (`ACTIVE_MARKER = ".active"`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:33` (`ACTIVE_MARKER = ".active"`).
 Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:74` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
 Phase 3 verdict: single.
 
@@ -1685,7 +1690,7 @@ Phase 3 verdict: single.
 ## S04. Panel-event panel vocabulary (VALID_PANELS)  <!-- queued: P5-324 unify -->
 
 Must agree: sender and receiver accept the same set of panel names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:166` (`VALID_PANELS = frozenset(`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:165` (`VALID_PANELS = frozenset(`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:33` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
@@ -1727,14 +1732,14 @@ Phase 3 verdict: duplicated.
 ## S10. Live GUI state .tcip/state/gui.json  <!-- queued: P5-284 unify -->
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:105` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:104` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:326` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:140` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:139` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1104` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
 Phase 3 verdict: single.
 
@@ -2001,7 +2006,7 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:154` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:159` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:175` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2044,20 +2049,20 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:213` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:218` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:154` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:159` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
-Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:158` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
+Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:157` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
 Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:14` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
@@ -2086,7 +2091,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:157` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:162` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets

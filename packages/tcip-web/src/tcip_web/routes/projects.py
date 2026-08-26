@@ -98,7 +98,15 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
 
 @router.get("")
 def list_projects() -> dict:
-    """List workspace projects (directories containing ``.tcip/``), newest first."""
+    """List workspace projects (directories containing ``.tcip/``), newest first.
+
+    Carries ``platform_root``/``platform_root_source`` when this backend has bound one
+    (:func:`tcip_mcp.project_paths.root_binding`, always populated once the app has been
+    imported): the backend's own platform-state root, so the GUI can show it disagreeing
+    with ``active``/``active_path`` in the window before a repin lands.
+    """
+    from tcip_mcp.project_paths import root_binding
+
     root = workspace.workspace_root()
     found = workspace.active_project_if_present()
     active = found[0] if found else None
@@ -112,12 +120,17 @@ def list_projects() -> dict:
                 # A project deleted/renamed mid-listing must not 500 the whole list.
                 continue
     projects.sort(key=lambda p: p.modified, reverse=True)
-    return {
+    result = {
         "workspace": str(root),
         "active": active,
         "active_path": active_path,
         "projects": [p.model_dump() for p in projects],
     }
+    binding = root_binding()
+    if binding is not None:
+        result["platform_root"] = str(binding.root)
+        result["platform_root_source"] = binding.source
+    return result
 
 
 class SetActiveRequest(BaseModel):

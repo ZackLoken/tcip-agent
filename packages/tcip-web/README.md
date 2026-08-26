@@ -47,7 +47,11 @@ python -m tcip_web
 On startup, the backend:
 
 - Binds to `TCIP_WEB_HOST:TCIP_WEB_PORT` (defaults `127.0.0.1:8765`).
-- Writes `.tcip/state/web_port.txt` so MCP tools can discover it.
+- Writes the workspace root's `.tcip/state/web_port.txt` so MCP tools can discover it, the
+  one location every process on the machine resolves the same way regardless of which
+  project each has open.
+- Pins its own platform-state root from the workspace's active-project marker, so it starts
+  on the project the GUI has open.
 - Replays the last `.tcip/state/gui.json` snapshot if present.
 
 Set `TCIP_WEB_RELOAD=1` to run under uvicorn auto-reload during development.
@@ -80,9 +84,9 @@ npm run build      # emits into ../static/
 MCP tools HTTP POST to `POST /api/events/{panel}` on the backend, which broadcasts those
 events to any browser subscribed to `/ws/panel/{panel}`.
 
-Port discovery inside MCP tools: `.tcip/state/web_port.txt` (the port actually bound) >
-`TCIP_WEB_PORT` env (read only when no record parses) > 8765. Host defaults to `127.0.0.1`
-unless `TCIP_WEB_HOST` is set.
+Port discovery inside MCP tools: the workspace root's `.tcip/state/web_port.txt` (the port
+actually bound) > `TCIP_WEB_PORT` env (read only when no record parses) > 8765. Host
+defaults to `127.0.0.1` unless `TCIP_WEB_HOST` is set.
 
 ## Keyboard map
 

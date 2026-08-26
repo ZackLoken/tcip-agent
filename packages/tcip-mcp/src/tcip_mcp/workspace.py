@@ -8,8 +8,12 @@ there is one source of truth for the workspace location, the same spirit as
 :mod:`tcip_mcp.dataset_layout` for the in-project layout.
 
 The active-project marker (``<workspace>/.active``) records which workspace project
-the GUI should open. The agent sets it after ingesting a project so the breeder flow
-("I structured your images, opening ``<crop>_<subject>_<phenotype>``") closes the loop.
+is the startup root of a process that opts in (``tcip_mcp.project_paths.pin_project_root``,
+``from_marker=True``) and which one the GUI should open. The agent sets it after ingesting
+a project so the breeder flow ("I structured your images, opening
+``<crop>_<subject>_<phenotype>``") closes the loop; adopting it also repins the adopting
+process's own platform-state root at once, the web backend on the agent's adopt signal, and
+the MCP server on its next start inside the platform's own agent terminal.
 """
 
 from __future__ import annotations
@@ -168,26 +172,43 @@ def read_active_project(*, create: bool = True) -> Optional[str]:
     return (val.strip() or None) if val is not None else None
 
 
+def adoptable_project_root(name: str) -> Path:
+    """The path a workspace project's name resolves to, when it is safe to open.
+
+    Raises ``ValueError``, naming which check failed: an unsafe name (path separators, ``..``,
+    empty) or a safely-named path whose ``.tcip`` is not a directory (nothing there to open).
+    The one predicate every reader that must tell "no marker" apart from "the marker names a
+    project that is not adoptable" calls: :func:`set_active_project`, :func:`
+    active_project_if_present` (folding the raise to ``None``), and
+    ``tcip_mcp.project_paths.pin_project_root`` when binding from the marker.
+    """
+    if not is_valid_name(name):
+        raise ValueError(f"invalid project name: {name!r}")
+    root = project_path(name, create=False)
+    if not (root / ".tcip").is_dir():
+        raise ValueError(f"no such workspace project (missing .tcip): {name!r}")
+    return root
+
+
 def active_project_if_present(*, create: bool = True) -> Optional[tuple[str, Path]]:
     """The active marker's project, only when its ``.tcip`` still exists on disk; else ``None``.
 
     Collapses "no marker" and "marker names a project that is gone" into the same ``None``:
-    a caller that must tell those two apart (the session-start hook's directive) reads
-    :func:`read_active_project` itself first. One check shared by every reader that must not
+    a caller that must tell those two apart (the session-start hook's directive,
+    ``project_paths.pin_project_root``) reads :func:`read_active_project` and
+    :func:`adoptable_project_root` itself. One check shared by every reader that must not
     report a name whose project has vanished: the workspace projects list route's
     ``active``/``active_path`` fields and the session-start hook's directive both read this.
 
-    Resolves through :func:`project_path`, so a marker holding a traversal name (``../escapee``)
-    names no adoptable project rather than a path outside the workspace.
+    Resolves through :func:`adoptable_project_root`, so a marker holding a traversal name
+    (``../escapee``) names no adoptable project rather than a path outside the workspace.
     """
     name = read_active_project(create=create)
     if not name:
         return None
     try:
-        path = project_path(name, create=create)
+        path = adoptable_project_root(name)
     except ValueError:
-        return None
-    if not (path / ".tcip").is_dir():
         return None
     return name, path
 
@@ -204,24 +225,23 @@ def set_active_project(name: str) -> Path:
     """Adopt a workspace project: write the marker atomically and repin platform state to it.
 
     ``name`` must name an existing workspace project (its ``.tcip`` must already be a
-    directory); adoption opens what is there, it does not create anything. Any safely-named
-    directory is adoptable, conforming to ``crop_subject_phenotype`` or not: only the doors
-    that create a workspace directory hold a new name to that shape. The marker is replaced
-    whole under its own lock, so two concurrent writers can't tear the file.
+    directory, :func:`adoptable_project_root`); adoption opens what is there, it does not
+    create anything. Any safely-named directory is adoptable, conforming to
+    ``crop_subject_phenotype`` or not: only the doors that create a workspace directory hold
+    a new name to that shape. The marker is replaced whole under its own lock, so two
+    concurrent writers can't tear the file.
 
-    Adopting also repins this process's ``TCIP_PROJECT_ROOT`` to the project, so the
+    Adopting also repins this process's platform-state root to the project, so the
     ``@audited`` log, the experiment store, and the model registry all resolve under
-    ``<project>/.tcip/``, one self-contained ``.tcip`` per project. The repin is an
-    explicit action (not a passive marker read), so an in-flight training run keeps writing
-    to the project it started under until the agent deliberately adopts a different one.
+    ``<project>/.tcip/``, one self-contained ``.tcip`` per project. The repin is an explicit
+    action (not a passive marker read) and reaches only this process: the web backend repins
+    on the agent's adopt signal, and the MCP server the next time it starts inside the
+    platform's own agent terminal, so a training run in flight keeps writing to the project
+    it started under until it is deliberately adopted.
     """
-    if not is_valid_name(name):
-        raise ValueError(f"invalid project name: {name!r}")
-    root = project_path(name)
-    if not (root / ".tcip").is_dir():
-        raise ValueError(f"no such workspace project (missing .tcip): {name!r}")
-    from tcip_mcp.project_paths import ENV_VAR
+    root = adoptable_project_root(name)
+    from tcip_mcp.project_paths import repin_platform_root
 
     replace(active_project_key(), name.strip())
-    os.environ[ENV_VAR] = str(root)
+    repin_platform_root(root)
     return active_marker_path()

@@ -75,3 +75,25 @@ def test_no_adoption_keeps_cwd_default(tmp_path, monkeypatch):
     from tcip_mcp.project_paths import project_root
 
     assert project_root() == tmp_path
+
+
+def test_app_import_pins_the_platform_root_from_the_marker(tmp_path, monkeypatch):
+    """Every way ``tcip_web.app`` is served pins the same way, at import: a fresh interpreter
+    that only imports the module, with no ``TCIP_PROJECT_ROOT`` inherited, ends up on the
+    workspace marker's project rather than its own cwd."""
+    import subprocess
+    import sys
+
+    proj = _adopt(tmp_path, monkeypatch)
+    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+
+    code = (
+        "import tcip_web.app\n"
+        "from tcip_mcp.project_paths import project_root\n"
+        "print(project_root())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(proj)

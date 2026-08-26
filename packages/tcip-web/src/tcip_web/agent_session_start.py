@@ -88,8 +88,14 @@ def _resolve_active() -> tuple[str, str]:
 
 def _root_divergence_note(proj: str) -> str:
     """States it when this session's inherited platform-state root names a different
-    project than the active marker: that env var is inherited, not a live read (this
-    module's own docstring already calls it unreliable on its own), so the two can disagree.
+    project than the active marker: that env var is a copy taken when this terminal was
+    spawned, not a live read (this module's own docstring already calls it unreliable on its
+    own), so the two can disagree until a process that binds from the marker converges.
+
+    The web backend already binds from the marker at its own startup; an MCP server this
+    terminal launches binds from it too, but only the next time that process starts, so a
+    server already running in this terminal keeps the root it inherited until then, and
+    ``inspect_project`` reports that server's actual disagreement in the meantime.
 
     Reads the variable's name from ``tcip_mcp.project_paths.ENV_VAR`` rather than a literal,
     since that module is what declares it.
@@ -101,8 +107,10 @@ def _root_divergence_note(proj: str) -> str:
         return ""
     return (
         f"This session's inherited {ENV_VAR} ({inherited}) names a different project "
-        f"than the active marker ({proj}); adopt the marker's project explicitly "
-        "(set_active_project) before running the ritual.\n\n"
+        f"than the active marker ({proj}). The web backend already binds from the marker at "
+        "its own startup; an MCP server launched in this terminal binds from it only at its "
+        "next start, so restart it, or adopt the marker's project explicitly "
+        "(set_active_project) now, before running the ritual.\n\n"
     )
 
 
