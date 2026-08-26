@@ -423,10 +423,11 @@ def force_redraw_cal_holdout_split(
     after the fact. Redrawing one is a real, audited decision, never automatic, never a hidden
     kwarg on a high-traffic tool like ``run_inference``, so it is its own small tool. ``reason``
     is required and non-empty, and every redraw (this one included) is appended to the lock's
-    ``redraw_history`` with its policy, timestamp, and the old split's membership captured before
-    it is overwritten, so a redraw-until-it-passes pattern is visible on review even though
-    nothing here enforces that a reason differ from a prior one; the defense is a reviewable
-    audit trail, not an automatic block.
+    ``redraw_history`` with its policy, seed, and the old and new split's content hashes, so a
+    redraw-until-it-passes pattern is visible on review even though nothing here enforces that a
+    reason differ from a prior one; the old and new split membership itself is recorded in the
+    audit log alongside the reason, not in ``redraw_history``; the defense is a reviewable audit
+    trail, not an automatic block.
 
     Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and
     its stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash, in
