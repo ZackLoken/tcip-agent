@@ -11,12 +11,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tcip_web.app import _static_dir_candidates
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = REPO_ROOT / "packages" / "tcip-web" / "frontend"
 VITE_CONFIG = FRONTEND_DIR / "vite.config.ts"
 GITIGNORE = REPO_ROOT / ".gitignore"
 PRETTIERIGNORE = FRONTEND_DIR / ".prettierignore"
-PACKAGE_DIR = REPO_ROOT / "packages" / "tcip-web"
 
 _OUT_DIR_RE = re.compile(r'outDir:\s*["\']([^"\']+)["\']')
 
@@ -29,14 +30,12 @@ def _vite_out_dir() -> Path:
     return (FRONTEND_DIR / match.group(1)).resolve()
 
 
-def _src_layout_static_dir() -> Path:
-    """``_find_static_dir``'s src-layout candidate, ``packages/tcip-web/static``."""
-    return (PACKAGE_DIR / "static").resolve()
-
-
 def _packaged_static_dir() -> Path:
-    """``_find_static_dir``'s packaged candidate, ``tcip_web/static`` inside the installed package."""
-    return (PACKAGE_DIR / "src" / "tcip_web" / "static").resolve()
+    return _static_dir_candidates()[0].resolve()
+
+
+def _src_layout_static_dir() -> Path:
+    return _static_dir_candidates()[-1].resolve()
 
 
 def test_vite_outdir_is_the_src_layout_static_candidate():
@@ -44,16 +43,18 @@ def test_vite_outdir_is_the_src_layout_static_candidate():
 
 
 def test_gitignores_frontend_build_entries_resolve_to_the_same_static_dir():
+    static_dir = _src_layout_static_dir()
     text = GITIGNORE.read_text(encoding="utf-8")
-    entries = [
+    candidates = [
         line.strip() for line in text.splitlines()
-        if line.strip().startswith("packages/tcip-web/static/")
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    entries = [
+        entry for entry in candidates
+        if (resolved := (REPO_ROOT / entry.rstrip("/")).resolve()) == static_dir
+        or static_dir in resolved.parents
     ]
     assert len(entries) == 4, entries
-    static_dir = _src_layout_static_dir()
-    for entry in entries:
-        resolved = (REPO_ROOT / entry).resolve()
-        assert resolved == static_dir or static_dir in resolved.parents, entry
 
 
 def test_prettierignore_static_entry_resolves_to_the_same_static_dir():

@@ -201,6 +201,15 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
     for ws in dead:
         _panel_subscribers[panel].discard(ws)
 
+def _static_dir_candidates() -> list[Path]:
+    """The install-layout candidates ``_find_static_dir`` checks, in preference order: the
+    packaged copy inside an installed wheel, then the src-layout checkout."""
+    return [
+        Path(__file__).parent / "static",
+        Path(__file__).parent.parent.parent / "static",
+    ]
+
+
 def _find_static_dir() -> Path:
     """Locate the built frontend across install layouts.
 
@@ -209,10 +218,7 @@ def _find_static_dir() -> Path:
     (``packages/tcip-web/static/``). Returns the src-layout path if neither is built yet,
     so ``/`` can render build instructions rather than 404.
     """
-    candidates = [
-        Path(__file__).parent / "static",  # packaged in a wheel
-        Path(__file__).parent.parent.parent / "static",  # src-layout checkout
-    ]
+    candidates = _static_dir_candidates()
     for c in candidates:
         if (c / "index.html").exists():
             return c
