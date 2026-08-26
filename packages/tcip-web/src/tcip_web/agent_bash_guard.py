@@ -22,7 +22,12 @@ the file it writes inside its own command script (an `-c 'w <path>'` argument, o
 fed through a heredoc or a pipe), never as a plain positional argument, so no argument-reading
 rule can see the target. A non-interactive agent terminal has no legitimate reason to open a
 line editor at all, which is why the rule denies the verb rather than trying to classify a
-target it cannot find.
+target it cannot find. The delete and editor verbs are read from the same stripped, redirect-free
+token list the writer checks use, so a wrapped invocation (`env rm -rf`, `busybox ed`, `command
+ed`) is caught the same way a wrapped writer is; `xargs`/`find` still route their own verb
+through a raw-string regex, since their verb sits inside `xargs`'s own flags or a `-exec`/
+`-delete` clause rather than as a segment's leading token, which a segment-level check cannot
+express.
 
 What is protected, how a target is normalized, and what a refusal says come from
 ``agent_fence_rules``, shared with the PowerShell guard so the two shells fence one boundary.
@@ -48,26 +53,70 @@ _STMT = fence_rules.STMT
 
 # ── tokenizing one command into statement segments ──────────────────────────
 
-# The default shlex punctuation set plus a literal newline, so with newline removed from
-# whitespace below it becomes its own token (a statement separator) instead of dropped whitespace.
-_PUNCTUATION = "();<>|&\n"
+# bash's own separators, a subshell's ()/{}, and a literal newline (removed from whitespace
+# below so it survives as its own statement-separator token instead of being dropped).
+_PUNCTUATION = "(){};<>|&\n"
 
 # A statement/pipeline boundary: any of these chars alone, or merged (shlex glues adjacent
 # punctuation into one token, e.g. ``"&\n"``). A token built from ``<``/``>`` is a redirect instead.
-_SEG_CHARS = set(";&|()\n")
+_SEG_CHARS = set(";&|(){}\n")
+
+_CONTINUATION = re.compile(r"\\\r?\n")
 
 
 class TokenizeError(Exception):
     """Raised when a command cannot be tokenized (an unclosed quote, a trailing
-    backslash inside quotes); the caller denies rather than guessing at a partial parse."""
+    backslash inside quotes, an unbalanced ``$(``); the caller denies rather than guessing
+    at a partial parse."""
+
+
+def _mask_substitutions(cmd: str) -> str:
+    """Replace each balanced ``$( ... )`` command substitution with one opaque word token.
+
+    Without this, shlex reads a substitution's own parentheses as segment boundaries, splitting
+    the statement that encloses it apart and hiding whatever token follows. Masking keeps the
+    substitution as one harmless token in its enclosing segment, so a destination that follows it
+    is still read and classified. Raises :class:`TokenizeError` naming a ``$(`` this scan cannot
+    pair with a closing parenthesis, rather than guessing where it would have ended.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(cmd)
+    count = 0
+    while i < n:
+        if cmd[i] == "$" and i + 1 < n and cmd[i + 1] == "(":
+            start = i
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if cmd[j] == "(":
+                    depth += 1
+                elif cmd[j] == ")":
+                    depth -= 1
+                j += 1
+            if depth:
+                raise TokenizeError(f"an unbalanced $( at position {start} has no closing )")
+            out.append(f"subst{count}token")
+            count += 1
+            i = j
+        else:
+            out.append(cmd[i])
+            i += 1
+    return "".join(out)
 
 
 def tokenize(cmd: str) -> "list[str]":
     """``cmd`` as shlex tokens: a quoted separator or redirect character stays inside its
     own token instead of splitting the command apart, and an unquoted command tokenizes to
-    the same words a plain whitespace split would produce. Raises :class:`TokenizeError`
-    naming what shlex refused rather than letting its ``ValueError`` reach the caller unlabeled.
+    the same words a plain whitespace split would produce. A backslash immediately before a
+    newline is a line continuation, stripped before tokenizing so it is not read as a
+    statement break, and a ``$( ... )`` substitution is masked to one opaque token so its
+    internal parentheses stay inside the segment that encloses it. Raises
+    :class:`TokenizeError` naming what shlex refused, or what this function could not pair,
+    rather than letting a ``ValueError`` reach the caller unlabeled.
     """
+    cmd = _CONTINUATION.sub("", cmd)
+    cmd = _mask_substitutions(cmd)
     lexer = shlex.shlex(cmd, posix=True, punctuation_chars=_PUNCTUATION)
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -85,8 +134,8 @@ def _is_boundary(tok: str) -> bool:
 def _segments(cmd: str) -> "list[list[str]]":
     """Statement/pipeline segments as token lists, split on the operator tokens the
     tokenizer emits rather than on a raw character, so a quoted separator or redirect
-    character never breaks a segment apart; a subshell's ``(``/``)`` are boundaries too, so
-    the verb inside one is read as a verb rather than hidden behind the paren.
+    character never breaks a segment apart; a subshell's or brace group's delimiters are
+    boundaries too, so the verb inside one is read as a verb rather than hidden behind it.
     """
     segments: list[list[str]] = []
     current: list[str] = []
@@ -120,20 +169,43 @@ def _before_redirect(tokens: "list[str]") -> "list[str]":
     return out
 
 
-# A leading wrapper the shell runs the real command through unchanged: ``env`` may carry
-# ``NAME=value`` assignments and ``stdbuf`` its own flags before the real verb.
+# A leading wrapper the shell runs the real command through unchanged, and the flags each
+# consumes first (env, nice, command, time, stdbuf); an unrecognised flag stops the strip there.
 _TRANSPARENT_PREFIX = ("busybox", "command", "env", "nice", "time", "stdbuf")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=.*")
+_NICE_ATTACHED = re.compile(r"^-n\d+$")
+_NICE_BARE_ADJUSTMENT = re.compile(r"^-\d+$")
 
 
 def _strip_transparent_prefix(argv: "list[str]") -> "list[str]":
-    """Drop a leading transparent wrapper so the verb underneath is what gets classified."""
+    """Drop a leading transparent wrapper, and the options it consumes, so the verb
+    underneath is what gets classified."""
     i = 0
     while i < len(argv) and argv[i] in _TRANSPARENT_PREFIX:
         wrapper = argv[i]
         i += 1
         if wrapper == "env":
-            while i < len(argv) and _ASSIGNMENT.fullmatch(argv[i]):
+            while i < len(argv):
+                tok = argv[i]
+                if _ASSIGNMENT.fullmatch(tok):
+                    i += 1
+                elif tok == "-i":
+                    i += 1
+                elif tok == "-u" and i + 1 < len(argv):
+                    i += 2
+                else:
+                    break
+        elif wrapper == "nice":
+            tok = argv[i] if i < len(argv) else ""
+            if tok == "-n" and i + 1 < len(argv) and re.fullmatch(r"-?\d+", argv[i + 1]):
+                i += 2
+            elif _NICE_ATTACHED.match(tok) or _NICE_BARE_ADJUSTMENT.match(tok):
+                i += 1
+        elif wrapper == "command":
+            while i < len(argv) and argv[i] in ("-p", "-v"):
+                i += 1
+        elif wrapper == "time":
+            while i < len(argv) and argv[i] == "-p":
                 i += 1
         elif wrapper == "stdbuf":
             while i < len(argv) and argv[i].startswith("-"):
@@ -147,17 +219,17 @@ _FIND_WRITE_ACTION = re.compile(r"-f(?:print0?|printf|ls)\s+(?P<target>[^\s;|&<>
 # ``dd of=FILE`` names its output through a key=value argument, not a positional one.
 _DD_OF = re.compile(r"\bdd\b[\s\S]*?\bof=(?P<target>[^\s;|&<>()]+)")
 
-# Deletes / truncates: blocked unconditionally, mirroring the PowerShell fence, since the agent
-# mutates data through audited MCP tools, not raw shell deletion.
-_DELETE_OP = re.compile(_STMT + r"(?:rm|rmdir|unlink|shred|truncate)\b")
+# Deletes/truncates and the line editors are blocked unconditionally (an editor's write target
+# lives inside its own command script); read as a segment's leading token, not a raw-string regex.
+_DELETE_VERBS = frozenset({"rm", "rmdir", "unlink", "shred", "truncate"})
+_EDITOR_VERBS = frozenset({"ed", "ex"})
+# xargs/find route their verb through their own flags or a -exec/-delete clause, not a leading
+# token, so they stay matched by a raw-string regex instead of the segment-level check above.
 _XARGS_DELETE = re.compile(r"\bxargs\b\s+(?:-\S+\s+)*(?:rm|rmdir|unlink|shred)\b")
 _FIND_DELETE = re.compile(
     r"\bfind\b[\s\S]*?\s-delete\b"
     r"|\bfind\b[\s\S]*?-exec\s+(?:rm|rmdir|unlink|shred|truncate)\b"
 )
-# A line editor names its write target inside its own command script, never as a plain
-# argument, so it joins the delete rule's class rather than being classified by target.
-_EDITOR_OP = re.compile(_STMT + r"(?:ed|ex)\b")
 
 _BREEDER_DATA_TARGET = fence_rules.BREEDER_DATA_TARGET
 # ``mv`` relocates a breeder-data path (as source or destination) the way ``rm`` removes it, so it
@@ -173,17 +245,25 @@ _NESTED_SHELL = re.compile(r"\b(?:bash|sh|zsh)\b\s+-\w*c\b")
 _DEST_VERBS = ("cp", "mv", "install", "rsync", "ln")
 
 
-def _tee_targets(cmd: str) -> "list[str]":
+def _leading_verb(tokens: "list[str]") -> "str | None":
+    """The verb one segment would run: its leading token once a redirect tail and a
+    transparent wrapper (``env``, ``nice``, ...) are stripped away, the same path the writer
+    checks read a destination through."""
+    argv = _strip_transparent_prefix(_before_redirect(tokens))
+    return argv[0] if argv else None
+
+
+def _tee_targets(segments: "list[list[str]]") -> "list[str]":
     """Every file ``tee`` writes to (it accepts multiple output files)."""
     out: list[str] = []
-    for tokens in _segments(cmd):
+    for tokens in segments:
         argv = _strip_transparent_prefix(_before_redirect(tokens))
         if argv and argv[0] == "tee":
             out.extend(t for t in argv[1:] if not t.startswith("-"))
     return out
 
 
-def _inplace_dests(cmd: str) -> "list[str]":
+def _inplace_dests(cmd: str, segments: "list[list[str]]") -> "list[str]":
     """The file each in-place writer would write.
 
     For cp/mv/install/rsync/ln this is the destination (the last non-flag token), so a copy or move
@@ -191,7 +271,7 @@ def _inplace_dests(cmd: str) -> "list[str]":
     elsewhere is not. touch/sed/patch/dd name the file directly.
     """
     out: list[str] = []
-    for tokens in _segments(cmd):
+    for tokens in segments:
         argv = _strip_transparent_prefix(_before_redirect(tokens))
         if not argv:
             continue
@@ -210,11 +290,11 @@ def _inplace_dests(cmd: str) -> "list[str]":
     return out
 
 
-def _write_targets(cmd: str) -> "list[str]":
+def _write_targets(cmd: str, segments: "list[list[str]]") -> "list[str]":
     """Redirect, ``tee``, and ``find``-write targets: the airtight set, checked for both harms."""
     return (
         fence_rules.redirect_targets(cmd)
-        + _tee_targets(cmd)
+        + _tee_targets(segments)
         + [m.group("target") for m in _FIND_WRITE_ACTION.finditer(cmd)]
     )
 
@@ -233,23 +313,26 @@ def main() -> None:
 
     if fence_rules.inline_exec(cmd) or _NESTED_SHELL.search(cmd):
         fence_rules.deny(fence_rules.INLINE_EXECUTION_MSG)
-    if (
-        _DELETE_OP.search(cmd)
-        or _XARGS_DELETE.search(cmd)
-        or _FIND_DELETE.search(cmd)
-        or _EDITOR_OP.search(cmd)
-    ):
-        fence_rules.deny(fence_rules.DELETE_MSG)
 
     try:
-        write_targets = _write_targets(cmd)
-        inplace_targets = _inplace_dests(cmd)
+        segments = _segments(cmd)
     except TokenizeError as exc:
         fence_rules.deny(
             f"This command could not be parsed ({exc}), so the guard denies rather than "
             "guessing at what it would write. Rephrase it, or use the TCIP tools."
         )
         return
+
+    leading_verbs = {_leading_verb(seg) for seg in segments}
+    if (
+        leading_verbs & (_DELETE_VERBS | _EDITOR_VERBS)
+        or _XARGS_DELETE.search(cmd)
+        or _FIND_DELETE.search(cmd)
+    ):
+        fence_rules.deny(fence_rules.DELETE_MSG)
+
+    write_targets = _write_targets(cmd, segments)
+    inplace_targets = _inplace_dests(cmd, segments)
 
     for target in write_targets:
         kind = fence_rules.classify(fence_rules.resolve_token(target, cmd), root=root, mode=mode)

@@ -15,6 +15,13 @@ airtight; the in-place writer enumeration is deliberately not exhaustive, since 
 backs it. Real isolation from a determined agent is the OS sandbox, the platform's stated next
 step.
 
+The redirect grammar (``REDIRECT`` below, and ``redirect_targets``) reads the raw command
+string rather than a quote-aware token list, so a quoted ``>`` inside an earlier, unrelated
+argument can be misread as a second redirect operator: ``cat 'text>packages' > scratch.txt``
+denies falsely, reading the quoted fragment ``>packages`` as a second target. This is an
+accepted residual (a false deny, never a missed one), since the source argument's content is
+not something either shell guard needs to parse correctly to keep the redirect path airtight.
+
 Two protected-set modes exist. In development the guard runs inside a source checkout and
 protects the repo tree plus the breeder's project data. In production the platform is an
 installed package with no repo tree and an OS sandbox, so only the breeder's project data
