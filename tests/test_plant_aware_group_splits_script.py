@@ -177,20 +177,29 @@ def test_refuses_on_empty_plant_list(tmp_path: Path) -> None:
 # ── make_splits(group_key_map=...) admits the derived map (rail-admits-valid-work) ─────────────
 
 
+SUBJECT = "leaf"
+
+
 def _write_dataset_stem(dataset_root: Path, date: str, stem: str, tiepoint: tuple[float, float]) -> None:
     from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
 
     images_dir = dataset_root / "images" / date
     labels_dir = dataset_root / "annotations" / date
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
     _write_geotiff(images_dir / f"{stem}.tif", *tiepoint)
-    json_io.write_annotations(labels_dir / f"{stem}.json", [], SHAPE[1], SHAPE[0])
+    json_io.write_annotations(
+        labels_dir / f"{stem}.json",
+        [Annotation(subject=SUBJECT, geometry=BBox(0, 0, 2, 2))], SHAPE[1], SHAPE[0],
+    )
 
 
 def test_make_splits_keeps_every_plants_stems_on_one_split_side(
     tmp_path: Path, two_plant_csv: Path,
 ) -> None:
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.tools.data_tools import _scan_dataset, make_splits, split_manifest_key
 
     dataset_root = tmp_path / "dataset"
@@ -201,27 +210,30 @@ def test_make_splits_keeps_every_plants_stems_on_one_split_side(
         _write_dataset_stem(dataset_root, date, f"p2_{date}", tiepoint)
 
     scan = _scan_dataset(str(dataset_root))
-    stem_to_raster = {Path(p).stem: Path(p) for p in scan["images"]}
+    stem_to_raster = {}
+    for p in scan["images"]:
+        _root, date, stem = parse_image_path(p)
+        stem_to_raster[member_identity(date, stem)] = Path(p)
     group_key_map = derive_plant_group_key_map(stem_to_raster, _plants(two_plant_csv))
 
     out_dir = tmp_path / "splits_out"
     result = make_splits(
         folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.5, test_ratio=0.0,
-        seed=0, group_key_map=group_key_map, output_path=str(out_dir),
+        seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
     )
 
     assert "error" not in result
     assert result["group_by"] == "explicit_map"
 
     manifest = ts.read(split_manifest_key(out_dir))
-    stem_side = {s: side for side, stems in manifest["splits"].items() for s in stems}
-    # Every group's stems (same plot_name) land on the identical side.
-    for group_stems in (
-        [f"p1_{d}" for d in ("2026-02-01", "2026-03-01")],
-        [f"p2_{d}" for d in ("2026-02-01", "2026-03-01")],
+    identity_side = {s: side for side, identities in manifest["splits"].items() for s in identities}
+    # Every group's members (same plot_name) land on the identical side.
+    for group_identities in (
+        [f"{d}/p1_{d}" for d in ("2026-02-01", "2026-03-01")],
+        [f"{d}/p2_{d}" for d in ("2026-02-01", "2026-03-01")],
     ):
-        sides = {stem_side[s] for s in group_stems}
-        assert len(sides) == 1, f"{group_stems} split across sides: {stem_side}"
+        sides = {identity_side[s] for s in group_identities}
+        assert len(sides) == 1, f"{group_identities} split across sides: {identity_side}"
 
 
 # ── CLI end to end ───────────────────────────────────────────────────────
@@ -238,7 +250,7 @@ def test_main_cli_end_to_end(tmp_path: Path, two_plant_csv: Path) -> None:
 
     out_dir = tmp_path / "cli_splits_out"
     rc = main([
-        str(dataset_root), "--plant-csv", str(two_plant_csv),
+        str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
         "--train-ratio", "0.5", "--val-ratio", "0.5", "--test-ratio", "0.0",
         "--seed", "0", "--output-path", str(out_dir),
     ])
@@ -261,7 +273,8 @@ def test_main_cli_default_invocation_writes_its_two_partitions(
         _write_dataset_stem(dataset_root, date, f"p2_{date}", tiepoint)
 
     out_dir = tmp_path / "cli_defaults_out"
-    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--output-path", str(out_dir)])
+    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
+              "--output-path", str(out_dir)])
 
     assert rc == 0
     assert ts.exists(split_stem_list_key(out_dir, "train"))
@@ -274,6 +287,6 @@ def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, two_plant_csv
     dataset_root = tmp_path / "dataset"
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)
 
-    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv)])
+    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT])
 
     assert rc == 1

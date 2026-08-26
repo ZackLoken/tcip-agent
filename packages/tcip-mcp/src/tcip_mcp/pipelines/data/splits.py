@@ -283,6 +283,37 @@ def resolve_group_key_fn(
     return GROUP_KEY_FNS[group_by]
 
 
+def member_identity(date: str | None, stem: str) -> str:
+    """A split manifest's member identity for one image: ``<date>/<stem>``, or the bare ``stem``
+    under a flat, dateless tree.
+
+    A stem is unique only within one capture date (cameras reuse names across dates), so a
+    manifest spanning more than one date needs this to keep two same-named images from two dates
+    apart; :func:`~tcip_mcp.tools.data_tools.make_splits` and
+    ``scripts/plant_aware_group_splits.py`` both key their members this way, through this one
+    function.
+    """
+    return f"{date}/{stem}" if date else stem
+
+
+def member_identity_parts(identity: str) -> tuple[str | None, str]:
+    """The inverse of :func:`member_identity`: ``(date, stem)`` for one member identity."""
+    date, sep, stem = identity.partition("/")
+    return (date, stem) if sep else (None, identity)
+
+
+def manifest_date_key(date: str | None) -> str:
+    """The ``members`` dict key a split manifest records one capture date's block under: the
+    date itself, or the empty string for a flat, dateless tree (a real capture date is never
+    empty), since a JSON object's keys must be strings."""
+    return date or ""
+
+
+def date_of_manifest_key(key: str) -> str | None:
+    """The inverse of :func:`manifest_date_key`."""
+    return key or None
+
+
 # -- spatial (within-image) strip split ---------------------------------------
 
 _SPATIAL_IDENTITY_SEP = "::"

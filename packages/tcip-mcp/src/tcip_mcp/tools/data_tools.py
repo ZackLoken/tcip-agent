@@ -337,6 +337,28 @@ def validate_data_quality(folder_path: str) -> dict:
     }
 
 
+def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Path]]:
+    """Every ``(date, labels_dir, images_dir)`` a dataset's per-image label tree holds: one entry
+    per ``annotations/<date>/`` beside its ``images/<date>/`` under a canonical date-nested
+    layout, or one dateless entry for a flat ``annotations/`` beside a flat ``images/``.
+
+    Empty when the dataset holds no per-image label tree at all (a root-level assembled COCO
+    only, which :func:`_scan_dataset` counts as a label but this never walks): the platform's own
+    admission for the tasks a split manifest can bind to draws through the per-image tree, never
+    that document.
+    """
+    from tcip_mcp.dataset_layout import annotation_dir, annotation_root, image_dir, is_bucket_name
+
+    root = Path(folder_path)
+    ann_root = annotation_root(root)
+    if not ann_root.is_dir():
+        return []
+    subdirs = sorted(d.name for d in ann_root.iterdir() if d.is_dir() and is_bucket_name(d.name))
+    if subdirs:
+        return [(d, annotation_dir(root, d), image_dir(root, d)) for d in subdirs]
+    return [(None, ann_root, image_dir(root, None))]
+
+
 @mcp.tool()
 @audited
 def make_splits(
@@ -352,22 +374,37 @@ def make_splits(
     materialize: bool = False,
     copy_files: bool = True,
     subject: str | None = None,
-    spatial: bool = False,
-    tile_size: int | None = None,
-    overlap: float | None = None,
-    buffer: int | None = None,
+    attribute: str | None = None,
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val split.
 
     Non-destructive by default: emits ``{train,val}.json`` stem manifests plus a stats
     dict. Sibling tiles of one source image are kept in the same split (no tree-/canopy-level
     leakage), and, when ``stratify_foreground`` is set, splits are balanced by annotation
-    count so dense and sparse sources are proportionally represented.
+    count so dense and sparse sources are proportionally represented. Groups whole source images;
+    a within-image split for a folder holding a single source is a training run's own automatic
+    route (``data.tiling`` in the run config), not this tool.
+
+    Writing a manifest (``output_path`` given, or ``materialize=True``) draws its members
+    through the platform's own admission for the tasks a manifest can bind to
+    (``tcip_mcp.pipelines.data.datasets.trainable_stems``, the same function a training run's own
+    draw uses): for each capture date the dataset holds, every image carrying an annotation of
+    ``subject`` (with every instance assessed for ``attribute``, when one is given) or a human's
+    negative confirmation for it. ``subject`` is therefore required to write a manifest; a call
+    with neither ``output_path`` nor ``materialize`` answers over every image in the tree instead,
+    no subject needed, unchanged from before this admission rule existed. Each admitted member's
+    identity is ``<date>/<stem>`` (the bare ``<stem>`` under a flat, dateless tree), since a stem
+    is unique only within one capture date. ``stratify_foreground`` only toggles the
+    annotation-count balancing now; it no longer changes which images are eligible to enter the
+    split.
 
     With ``materialize=True`` it additionally lays out a
     ``{train,val}/{images,labels}/`` tree under ``output_path`` (defaulting to
     ``folder_path/splits``), copying (or symlinking, ``copy_files=False``) each stem's image and
-    label, and adds ``output_dir`` / ``structure`` to the return.
+    label, and adds ``output_dir`` / ``structure`` to the return. Refused when the drawn
+    membership spans more than one capture date: the materialized tree is a flat, undated
+    ``{split}/{images,labels}/`` layout keyed by file name, and its negative carry writes one
+    undated status bucket, so two dates sharing a file name would collide silently.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -379,49 +416,30 @@ def make_splits(
             partition nothing downstream can consume.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing
-            ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image). Ignored when
+            ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per member). Ignored when
             ``group_key_map`` is given.
-        group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by``;
-            must cover every stem in the dataset. Recorded as ``group_by="explicit_map"`` in
-            the result and manifest (the resolved policy, not the raw ``group_by`` string).
+        group_key_map: An agent-derived ``{identity: group_key}`` map overriding ``group_by``,
+            keyed the same way the members are (``<date>/<stem>``, the bare ``<stem>`` under a
+            flat tree); must cover every member. Recorded as ``group_by="explicit_map"`` in the
+            result and manifest (the resolved policy, not the raw ``group_by`` string).
         stratify_foreground: Balance splits by foreground annotation count.
         output_path: Where to write manifests (and, when materializing, the file tree).
             Defaults to ``folder_path/splits`` when materializing, else manifests are
             written only if this is set.
         materialize: Also copy/symlink files into a {train,val}/{images,labels}/ tree.
         copy_files: Copy files (True) or create symlinks (False) when materializing.
-        subject: The object the confirmed negatives are keyed under. A materialized split tree
-            can't recover the subject from its own path, so an image a human confirmed negative
-            is silently dropped from the materialized set (reads as an unconfirmed empty label)
-            unless this is passed. Only relevant with `materialize=True`.
-        spatial: Derive a within-image train/val split over one source's own tile lattice
-            (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`) instead of grouping
-            whole source images. Requires ``tile_size``/``overlap`` and a folder holding exactly
-            one labeled image; refuses otherwise, naming a training run's own automatic route
-            (``data.tiling`` in the run config, which derives this the same way when a run's
-            dataset turns out to be single-source) as the alternative for the common multi-source
-            case. Ignores ``group_by``/``group_key_map``/``stratify_foreground``/``copy_files``/
-            ``subject``, and is not compatible with ``materialize`` (there is one source image,
-            not a set of files to lay out into a split tree); ``train_ratio``/``val_ratio`` still
-            apply, a zero ratio drops that side entirely, and ``test_ratio`` is refused the same
-            way as the non-spatial path.
-        tile_size: Tile edge in pixels, required when ``spatial=True``.
-        overlap: Tile overlap fraction, required when ``spatial=True``.
-        buffer: Minimum pixel gap kept at every boundary between two differently-assigned
-            regions, ``spatial=True`` only. Defaults to ``tile_size`` (see
-            :func:`spatial_strip_split`).
+        subject: The object class the split is drawn for. Required to write a manifest
+            (``output_path`` given, or ``materialize=True``): it governs both which images the
+            draw admits and which of the source dataset's confirmed negatives a materialized
+            split tree carries, since that tree can't recover the subject from its own path.
+        attribute: Scope the draw to instances already assessed for this attribute of
+            ``subject``; an image carrying an instance never assessed for it is excluded
+            entirely, the same rail a training run applies. ``None`` draws over every instance of
+            ``subject`` regardless of attribute state.
     """
     if test_ratio != 0:
         return {"error": "test_ratio must be 0: no launch path honours a held-out test list, so "
                          "make_splits writes train and val only."}
-
-    if spatial:
-        return _make_spatial_split(
-            folder_path, tile_size=tile_size, overlap=overlap,
-            fractions=(train_ratio, val_ratio),
-            seed=seed, buffer=buffer, output_path=output_path, materialize=materialize,
-        )
-
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
         return {"error": "test_ratio must be 0 and train_ratio + val_ratio must sum to 1.0."}
     if not Path(folder_path).is_dir():
@@ -429,33 +447,124 @@ def make_splits(
 
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.splits import (
-        group_balanced_split,
         count_label_lines,
+        group_balanced_split,
+        member_identity,
+        member_identity_parts,
         resolve_group_key_fn,
     )
+    from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
+    # make_splits emits no test partition (see test_ratio, refused above); train and val are the
+    # only two names carried into the stem lists, the manifest and this call's own summary.
+    kept_splits = ("train", "val")
+    out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
+
+    if out_dir is None:
+        # A stats-only call writes no manifest, so the draw stays the plain image/label scan it
+        # has always been: no subject required, every image eligible.
+        try:
+            scan = _scan_dataset(folder_path)
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
+        image_map = {Path(p).stem: p for p in scan["images"]}
+        label_map = {Path(p).stem: p for p in scan["labels"]}
+
+        stratified = bool(stratify_foreground and label_map)
+        stems = sorted(set(image_map) & set(label_map)) if stratified else sorted(image_map)
+        if not stems:
+            return {"error": "No images found to split"}
+
+        annotation_counts = None
+        if stratified:
+            # count_label_lines is JSON-aware; raw count_lines would count pretty-printed JSON
+            # lines as annotations (a {objects: []} negative reads as ~5 foreground objects).
+            try:
+                annotation_counts = {
+                    s: count_label_lines(Path(label_map[s]).parent, s) for s in stems
+                }
+            except UnreadableLabelDocument as exc:
+                return {"error": str(exc)}
+
+        try:
+            group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        resolved_group_by = "explicit_map" if group_key_map else group_by
+        parts = group_balanced_split(
+            stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
+            splits=(train_ratio, val_ratio, test_ratio), seed=seed,
+        )
+        counts = annotation_counts or {}
+        return {
+            "splits": {k: len(parts[k]) for k in kept_splits},
+            "foreground_annotations": {
+                k: sum(int(counts.get(s, 0)) for s in parts[k]) for k in kept_splits
+            },
+            "total_stems": len(stems),
+            "total_annotations": sum(int(v) for v in counts.values()),
+            "groups": len({group_key_fn(s) for s in stems}),
+            "seed": seed,
+            "group_by": resolved_group_by,
+            "stratified": stratified,
+            "manifest_dir": None,
+        }
+
+    # Writing a manifest: the draw is the platform's own per-subject admission.
+    if not subject:
+        return {"error": "make_splits needs subject to write a split manifest (output_path given, "
+                         "or materialize=True): pass the object class the run will admit under, "
+                         "or drop both output_path and materialize for a stats-only call."}
+
+    from tcip_mcp.pipelines.data.datasets import (
+        _resolve_registry_id_map, image_name_map, trainable_stems,
+    )
+    from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
+
+    date_dirs = _split_date_dirs(folder_path)
+    if not date_dirs:
+        return {"error": f"{folder_path} holds no per-image label tree (annotations/<date>/ or a "
+                         "flat annotations/) for make_splits to draw a subject-scoped split from; "
+                         "a dataset-level assembled COCO at the root is not walked here."}
     try:
-        scan = _scan_dataset(folder_path)
+        _, id_map = _resolve_registry_id_map(date_dirs[0][1], subject, attribute)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    members: dict[str, Any] = {}
+    identity_locations: dict[str, tuple[str | None, str]] = {}  # identity -> (date, bare stem)
+    admission_counts: dict[str, int] = {}
+    try:
+        for date, labels_dir, images_dir in date_dirs:
+            admitted, counts = trainable_stems(
+                labels_dir, images_dir, subject=subject, date=date, attribute=attribute,
+                id_map=id_map,
+            )
+            for key, value in counts.items():
+                admission_counts[key] = admission_counts.get(key, 0) + value
+            for stem in admitted:
+                identity_locations[member_identity(date, stem)] = (date, stem)
+            members[date or ""] = {
+                "labels_root": str(labels_dir),
+                "images_root": str(images_dir),
+                "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
+            }
     except UnreadableLabelDocument as exc:
         return {"error": str(exc)}
-    image_map = {Path(p).stem: p for p in scan["images"]}
-    label_map = {Path(p).stem: p for p in scan["labels"]}
 
-    stratified = bool(stratify_foreground and label_map)
-    if stratified:
-        stems = sorted(set(image_map) & set(label_map))
-    else:
-        stems = sorted(image_map)
+    stems = sorted(identity_locations)
     if not stems:
-        return {"error": "No images found to split"}
+        return {"error": f"no sample of subject {subject!r} was admitted under {folder_path} "
+                         f"(attribute={attribute!r}): {admission_counts}. Annotate an instance or "
+                         "confirm a negative before splitting."}
 
     annotation_counts = None
-    if stratified:
-        # count_label_lines is JSON-aware; raw count_lines would count pretty-printed JSON
-        # lines as annotations (a {objects: []} negative reads as ~5 foreground objects).
+    if stratify_foreground:
+        labels_dir_of = {date: labels_dir for date, labels_dir, _ in date_dirs}
         try:
             annotation_counts = {
-                s: count_label_lines(Path(label_map[s]).parent, s) for s in stems
+                identity: count_label_lines(labels_dir_of[date], stem)
+                for identity, (date, stem) in identity_locations.items()
             }
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
@@ -466,55 +575,61 @@ def make_splits(
         return {"error": str(exc)}
     resolved_group_by = "explicit_map" if group_key_map else group_by
     parts = group_balanced_split(
-        stems,
-        annotation_counts=annotation_counts,
-        group_key_fn=group_key_fn,
-        splits=(train_ratio, val_ratio, test_ratio),
-        seed=seed,
+        stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
+        splits=(train_ratio, val_ratio, test_ratio), seed=seed,
     )
+
+    distinct_dates = {date for date, _ in identity_locations.values()}
+    if materialize and len(distinct_dates) > 1:
+        named = sorted(d for d in distinct_dates if d is not None)
+        return {"error": f"materialize=True refuses a manifest spanning more than one capture "
+                         f"date ({named}): its flat {{train,val}}/{{images,labels}}/ tree is "
+                         "keyed by file name and its negative carry writes one undated bucket, "
+                         "so two dates sharing a name would collide silently. Write the manifest "
+                         "without materializing, or scope this call to one capture date."}
 
     negative_carry: "_NegativeCarry | None" = None
     if materialize:
+        (only_date,) = distinct_dates
+        labels_dir_for_date = next(d for date, d, _ in date_dirs if date == only_date)
+        images_dir_for_date = next(d for date, _, d in date_dirs if date == only_date)
+        names = image_name_map(images_dir_for_date)
+        image_map = {stem: images_dir_for_date / fname for stem, fname in names.items()}
+        label_map = {
+            stem: labels_dir_for_date / f"{stem}.json" for stem in names
+            if (labels_dir_for_date / f"{stem}.json").is_file()
+        }
+        bare_parts = {
+            split_name: sorted(member_identity_parts(identity)[1] for identity in identities)
+            for split_name, identities in parts.items() if split_name in kept_splits
+        }
         # Read every confirmed negative this split will carry before anything (a stem list, the
         # manifest, the split tree) is written: a refusal here must leave nothing persisted.
         try:
-            negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)
+            negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject)
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
 
-    # Content hash of the labels this split partitions: two runs with the same seed still yield
-    # different splits over different GT, so the hash + seed together identify the partition.
-    dataset_hash = None
-    labels_root: Path | None = None
-    if label_map:
-        from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
-        labels_root = Path(next(iter(label_map.values()))).parent
-        dataset_hash = _dataset_hash(labels_root, stems=stems)
+    manifest: dict[str, Any] = {
+        "seed": seed,
+        "group_by": resolved_group_by,
+        "dataset_fingerprint": dataset_fingerprint(folder_path),
+        "subject": subject,
+        "attribute": attribute,
+        "id_map": id_map,
+        "members": members,
+        "splits": {k: sorted(parts[k]) for k in kept_splits},
+        "admission_counts": admission_counts,
+    }
+    if group_key_map:
+        manifest["group_key_map"] = group_key_map
 
-    # make_splits emits no test partition (see test_ratio, refused above); train and val are the
-    # only two names carried into the stem lists, the manifest and this call's own summary.
-    kept_splits = ("train", "val")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for split_name in kept_splits:
+        tcip_store.replace(split_stem_list_key(out_dir, split_name), sorted(parts[split_name]))
+    tcip_store.replace(split_manifest_key(out_dir), manifest)
 
     counts = annotation_counts or {}
-    out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
-    manifest_dir = None
-    if out_dir is not None:
-        from tcip_mcp.pipelines.resolution import dataset_fingerprint
-
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for split_name in kept_splits:
-            tcip_store.replace(split_stem_list_key(out_dir, split_name), sorted(parts[split_name]))
-        manifest: dict[str, Any] = {
-            "seed": seed, "dataset_hash": dataset_hash, "group_by": resolved_group_by,
-            "labels_root": str(labels_root) if labels_root is not None else None,
-            "dataset_fingerprint": dataset_fingerprint(folder_path),
-            "splits": {k: sorted(parts[k]) for k in kept_splits},
-        }
-        if group_key_map:
-            manifest["group_key_map"] = group_key_map
-        tcip_store.replace(split_manifest_key(out_dir), manifest)
-        manifest_dir = str(out_dir)
-
     result = {
         "splits": {k: len(parts[k]) for k in kept_splits},
         "foreground_annotations": {
@@ -524,16 +639,18 @@ def make_splits(
         "total_annotations": sum(int(v) for v in counts.values()),
         "groups": len({group_key_fn(s) for s in stems}),
         "seed": seed,
-        "dataset_hash": dataset_hash,
         "group_by": resolved_group_by,
-        "stratified": stratified,
-        "manifest_dir": manifest_dir,
+        "stratified": bool(stratify_foreground),
+        "subject": subject,
+        "attribute": attribute,
+        "admission_counts": admission_counts,
+        "manifest_dir": str(out_dir),
     }
 
     if materialize:
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name in kept_splits:
-            split_stems = parts[split_name]
+            split_stems = bare_parts[split_name]
             img_dir = out_dir / split_name / "images"
             lbl_dir = out_dir / split_name / "labels"
             img_dir.mkdir(parents=True, exist_ok=True)
@@ -555,106 +672,6 @@ def make_splits(
         result["structure"] = f"{out_dir}/{{train,val}}/{{images,labels}}/"
 
     return result
-
-
-def _make_spatial_split(
-    folder_path: str, *, tile_size: int | None, overlap: float | None,
-    fractions: tuple[float, float], seed: int, buffer: int | None,
-    output_path: str | None, materialize: bool,
-) -> dict:
-    """``make_splits(spatial=True)``'s body: a within-image train/val split for one source.
-
-    No dataset is constructed here (this tool never builds a ``TiledDetectionDataset``), so the
-    tile lattice is the pure geometry :func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`
-    describes; a training run's own manifest (``_persist_split_manifest``) instead reads the
-    identities off its actually-constructed datasets, which can differ when the run also drops
-    tiles for reasons this tool has no way to apply (e.g. ``skip_empty``).
-    """
-    if tile_size is None or overlap is None:
-        return {"error": "spatial=True requires tile_size and overlap; a training run's own "
-                         "automatic route (data.tiling in the run config) derives these from the "
-                         "run's tiling geometry instead."}
-    if materialize:
-        return {"error": "spatial=True does not support materialize: there is one source image, "
-                         "not a set of files to lay out into a split tree."}
-    if not Path(folder_path).is_dir():
-        return {"error": f"Directory not found: {folder_path}"}
-
-    from tcip_annotation.json_io import UnreadableLabelDocument
-    from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
-    from tcip_mcp.pipelines.data.tiling import tile_positions, tile_within_extent
-
-    try:
-        scan = _scan_dataset(folder_path)
-    except UnreadableLabelDocument as exc:
-        return {"error": str(exc)}
-    image_map = {Path(p).stem: p for p in scan["images"]}
-    label_map = {Path(p).stem: p for p in scan["labels"]}
-    stems = sorted(set(image_map) & set(label_map))
-    if len(stems) != 1:
-        return {"error": f"spatial=True requires a single-stem folder ({len(stems)} found); use "
-                         "the non-spatial grouped split for a multi-source folder, or a training "
-                         "run's own automatic route."}
-    stem = stems[0]
-    labels_root = Path(label_map[stem]).parent
-    try:
-        extent = image_extent_from_labels(labels_root, stem)
-    except UnreadableLabelDocument as exc:
-        return {"error": str(exc)}
-    if extent is None:
-        return {"error": f"{stem}'s label file carries no width/height; cannot derive a spatial "
-                         "split without the image extent."}
-    width, height = extent
-
-    try:
-        split = spatial_strip_split(
-            width, height, tile_size, overlap, fractions=fractions, split_names=("train", "val"),
-            seed=seed, buffer=buffer,
-        )
-    except ValueError as exc:
-        return {"error": str(exc)}
-
-    lattice = tile_positions(height, width, split.tile_size, split.stride)
-    in_extent = [(tx, ty) for tx, ty in lattice
-                if tile_within_extent(tx, ty, split.tile_size, width, height)]
-    ids: dict[str, set[str]] = {name: set() for name in split.regions}
-    for tx, ty in in_extent:
-        name = split.split_name_for(tx, ty)
-        if name is not None:
-            ids[name].add(split.identity_for(stem, tx, ty))
-
-    spatial_manifest: dict[str, Any] = {
-        f"{name}_identities": sorted(ids[name]) for name in split.regions
-    }
-    spatial_manifest.update({
-        "width": split.width, "height": split.height, "tile_size": split.tile_size,
-        "overlap": split.overlap, "axis": split.axis, "buffer": split.buffer,
-        "seed": split.seed,
-        "requested_fractions": dict(zip(split.split_names, split.requested_fractions)),
-        "realized_fractions": split.realized_fractions,
-        "realized_discard_fraction": split.realized_discard_fraction,
-        "kept_tiles": split.kept_tiles,
-        "tiles_dropped_past_extent": split.tiles_dropped_past_extent,
-        "tiles_dropped_outside_regions": split.tiles_dropped_outside_regions,
-    })
-
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
-
-    out_dir = Path(output_path) if output_path else Path(folder_path) / "splits"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for name in split.regions:
-        tcip_store.replace(split_stem_list_key(out_dir, name), sorted(ids[name]))
-    tcip_store.replace(split_manifest_key(out_dir), {
-        "seed": seed, "group_by": "spatial_strip", "spatial": spatial_manifest,
-        "labels_root": str(labels_root), "dataset_fingerprint": dataset_fingerprint(folder_path)})
-
-    return {
-        "splits": {name: len(ids[name]) for name in split.regions},
-        "seed": seed,
-        "group_by": "spatial_strip",
-        "spatial": spatial_manifest,
-        "manifest_dir": str(out_dir),
-    }
 
 
 class _NegativeCarry:

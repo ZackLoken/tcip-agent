@@ -91,7 +91,7 @@ def test_scan_and_validate_report_a_reserved_stem_the_census_still_counted(tmp_p
 
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     out = tmp_path / "splits"
-    result = make_splits(str(data_dir), output_path=str(out), materialize=True)
+    result = make_splits(str(data_dir), output_path=str(out), materialize=True, subject="catkin")
     assert result["total_stems"] == 3
     assert sum(result["splits"].values()) == 3
     assert result["output_dir"] == str(out)
@@ -109,7 +109,7 @@ def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
 def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     out = tmp_path / "manifests"
     # The 3 fixture stems (img_001..003) are 3 distinct foreground groups.
-    result = make_splits(str(data_dir), output_path=str(out))
+    result = make_splits(str(data_dir), output_path=str(out), subject="catkin")
     assert result["total_stems"] == 3
     assert result["groups"] == 3
     assert sum(result["splits"].values()) == 3
@@ -119,8 +119,11 @@ def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     assert "test" not in result["splits"]
 
     manifest = ts.read(split_manifest_key(out))
-    assert manifest["labels_root"] is not None
-    assert Path(manifest["labels_root"]).is_dir()
+    assert manifest["subject"] == "catkin"
+    assert manifest["attribute"] is None
+    date_block = manifest["members"]["2-11-26"]
+    assert Path(date_block["labels_root"]).is_dir()
+    assert date_block["dataset_hash"]
     assert manifest["dataset_fingerprint"] is not None
     assert "test" not in manifest["splits"]
 
@@ -139,7 +142,7 @@ def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     bad = next((data_dir / "annotations" / "2-11-26").glob("*.json"))
     bad.write_bytes(b"{not json")
 
-    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"))
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin")
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -197,7 +200,7 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), seed=1)
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
     # No source prefix may appear in more than one split.
@@ -210,22 +213,22 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 
 
 def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
-    """An agent-derived group_key_map (3 stems, 2 groups) is honored: the two same-group stems
-    never land in different splits."""
+    """An agent-derived group_key_map (3 members, 2 groups) is honored: the two same-group
+    members never land in different splits."""
     root = _multi_source_dataset(tmp_path / "ds", prefixes=("x", "y", "z"), tiles=1)
     out = tmp_path / "m"
-    group_key_map = {"x_0_0": "gA", "y_0_0": "gA", "z_0_0": "gB"}
+    group_key_map = {"2-11-26/x_0_0": "gA", "2-11-26/y_0_0": "gA", "2-11-26/z_0_0": "gB"}
     result = make_splits(str(root), output_path=str(out), seed=1,
                          train_ratio=0.5, val_ratio=0.5, test_ratio=0.0,
-                         group_by="tile_prefix", group_key_map=group_key_map)
+                         group_by="tile_prefix", group_key_map=group_key_map, subject="catkin")
     assert "error" not in result
     assert result["group_by"] == "explicit_map"
 
     membership: dict[str, str] = {}
     for split in ("train", "val"):
-        for stem in ts.read(split_stem_list_key(out, split)):
-            membership[stem] = split
-    assert membership["x_0_0"] == membership["y_0_0"]  # gA never straddles
+        for identity in ts.read(split_stem_list_key(out, split)):
+            membership[identity] = split
+    assert membership["2-11-26/x_0_0"] == membership["2-11-26/y_0_0"]  # gA never straddles
     manifest = ts.read(split_manifest_key(out))
     assert manifest["group_by"] == "explicit_map"
     assert manifest["group_key_map"] == group_key_map
@@ -236,105 +239,139 @@ def test_make_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     dataset without anyone noticing; it must refuse loudly and write nothing instead."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key")
+    result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="catkin")
     assert "error" in result
     assert not out.exists() or not (out / "split_manifest.json").is_file()
 
 
-def _single_source_dataset(root: Path, width: int, height: int) -> Path:
+def test_make_splits_refuses_to_write_a_manifest_with_no_subject(tmp_path: Path):
+    """A manifest with no subject would be a partition of images, not of a run's admissible
+    samples; make_splits refuses to write one rather than guessing what a run would admit."""
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out))
+    assert "error" in result and "subject" in result["error"]
+    assert not out.exists()
+
+
+def _two_date_collision_dataset(root: Path, subject: str) -> Path:
+    """One stem name, ``shared``, present under two capture dates with different content: a
+    manifest keyed by bare stem could only ever hold one of the two."""
     from PIL import Image
 
-    images_dir = root / "images"
-    labels_dir = root / "annotations"
+    for date, box_x in (("2-11-26", 4), ("2-12-01", 40)):
+        images_dir = root / "images" / date
+        labels_dir = root / "annotations" / date
+        images_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "shared.jpg")
+        json_io.write_annotations(
+            labels_dir / "shared.json",
+            [Annotation(subject=subject, geometry=BBox(box_x, 4, box_x + 8, 12))], 100, 80,
+        )
+    return root
+
+
+def test_two_dates_sharing_a_filename_produce_two_members(tmp_path: Path):
+    root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
+    assert "error" not in result
+    assert result["total_stems"] == 2
+    manifest = ts.read(split_manifest_key(out))
+    members = {identity for identities in manifest["splits"].values() for identity in identities}
+    assert members == {"2-11-26/shared", "2-12-01/shared"}
+    assert set(manifest["members"]) == {"2-11-26", "2-12-01"}
+
+
+def _two_subject_dataset(root: Path) -> Path:
+    """Four stems on one date: two carry ``leaf``, two carry the unrelated subject ``bud``, no
+    stem carries both."""
+    from PIL import Image
+
+    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+
+    date = "2-11-26"
+    images_dir = root / "images" / date
+    labels_dir = root / "annotations" / date
     images_dir.mkdir(parents=True)
     labels_dir.mkdir(parents=True)
-    Image.new("RGB", (width, height), (128, 128, 128)).save(images_dir / "mosaic.jpg")
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name="leaf"), Subject(name="bud"),
+    )))
+    for stem, subject in (("leaf_a", "leaf"), ("leaf_b", "leaf"),
+                         ("bud_a", "bud"), ("bud_b", "bud")):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    return root
+
+
+def test_make_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Path):
+    root = _two_subject_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
+    assert "error" not in result
+    assert result["total_stems"] == 2
+    manifest = ts.read(split_manifest_key(out))
+    members = {identity for identities in manifest["splits"].values() for identity in identities}
+    assert members == {"2-11-26/leaf_a", "2-11-26/leaf_b"}
+
+
+def _attribute_scoped_dataset(root: Path) -> Path:
+    """Three stems on one date, one subject: two have their instance assessed for ``condition``,
+    one carries an instance never assessed for it."""
+    from PIL import Image
+
+    from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
+
+    date = "2-11-26"
+    images_dir = root / "images" / date
+    labels_dir = root / "annotations" / date
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name="leaf", attributes=(
+            Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
+        )),
+    )))
+    for stem, condition in (("assessed_a", "healthy"), ("assessed_b", "damaged")):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12),
+                       attributes={"condition": condition})], 100, 80,
+        )
+    Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "unassessed.jpg")
     json_io.write_annotations(
-        labels_dir / "mosaic.json", [Annotation(subject="catkin", geometry=BBox(19, 13, 45, 51))],
-        width, height,
+        labels_dir / "unassessed.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
     )
     return root
 
 
-def test_make_splits_spatial_requires_tile_size_and_overlap(tmp_path: Path):
-    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
-    result = make_splits(str(root), spatial=True)
-    assert "error" in result and "tile_size" in result["error"]
-
-
-def test_make_splits_spatial_refuses_multi_source_folder(tmp_path: Path):
-    root = _multi_source_dataset(tmp_path / "ds")
-    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2)
-    assert "error" in result and "single-stem" in result["error"]
-
-
-def test_make_splits_spatial_refuses_materialize(tmp_path: Path):
-    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
-    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2, materialize=True)
-    assert "error" in result and "materialize" in result["error"]
-
-
-def test_make_splits_spatial_reports_an_unreadable_label_by_name(tmp_path: Path):
-    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
-    bad = root / "annotations" / "mosaic.json"
-    bad.write_bytes(b"{not json")
-
-    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2)
-
-    assert "error" in result
-    assert str(bad) in result["error"]
-
-
-def test_make_splits_spatial_reports_an_unreadable_label_reached_only_through_the_extent_read(
-    tmp_path: Path,
-):
-    """An extra, readable label with no matching image sorts before the real stem's own label, so
-    the scan's format probe succeeds and the single-stem check still admits one stem; the corrupt
-    label is then reached only when the extent is read, a different site than the first-sorted
-    case above, and it must answer the same error dict, never a raw raise."""
-    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
-    (root / "annotations" / "aaa_extra.json").write_text('{"annotations": []}', encoding="utf-8")
-    bad = root / "annotations" / "mosaic.json"
-    bad.write_bytes(b"{not json")
-
-    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2)
-
-    assert "error" in result
-    assert str(bad) in result["error"]
-
-
-def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):
-    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+def test_make_splits_attribute_scoped_manifest_holds_only_assessed_samples(tmp_path: Path):
+    root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
-                         train_ratio=0.75, val_ratio=0.25, test_ratio=0.0,
-                         seed=1, output_path=str(out))
+    result = make_splits(str(root), output_path=str(out), subject="leaf", attribute="condition",
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
     assert "error" not in result
-    assert result["group_by"] == "spatial_strip"
-    assert result["splits"]["train"] > 0 and result["splits"]["val"] > 0
-
-    train_ids = ts.read(split_stem_list_key(out, "train"))
-    val_ids = ts.read(split_stem_list_key(out, "val"))
-    assert train_ids and val_ids
-    assert set(train_ids).isdisjoint(set(val_ids))
-    assert all(i.startswith("mosaic::strip_") for i in train_ids + val_ids)
-
+    assert result["total_stems"] == 2
     manifest = ts.read(split_manifest_key(out))
-    assert manifest["group_by"] == "spatial_strip"
-    assert manifest["spatial"]["train_identities"] == train_ids
-    assert manifest["labels_root"] is not None
-    assert manifest["dataset_fingerprint"] is not None
-    assert set(manifest["spatial"]["requested_fractions"]) == {"train", "val"}
+    assert manifest["attribute"] == "condition"
+    members = {identity for identities in manifest["splits"].values() for identity in identities}
+    assert members == {"2-11-26/assessed_a", "2-11-26/assessed_b"}
 
 
-def test_make_splits_spatial_refuses_a_nonzero_test_ratio(tmp_path: Path):
-    """The spatial branch refuses a held-out test fraction the same way the grouped path does:
-    no launch path honours a held-out test list."""
-    root = _single_source_dataset(tmp_path / "ds", 4000, 3000)
-    out = tmp_path / "m3"
-    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
-                         train_ratio=0.7, val_ratio=0.2, test_ratio=0.1,
-                         seed=1, output_path=str(out))
+def test_make_splits_refuses_to_materialize_a_multi_date_manifest(tmp_path: Path):
+    root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
     assert "error" in result
-    assert "test_ratio" in result["error"]
+    assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
     assert not out.exists()

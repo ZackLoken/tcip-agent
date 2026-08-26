@@ -74,11 +74,12 @@ def test_make_splits_stats_golden(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), seed=1)
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
     result.pop("manifest_dir")
-    # dataset_hash is a content hash of the labels, present and stable, but not pinned in the golden.
-    dh = result.pop("dataset_hash")
-    assert isinstance(dh, str) and len(dh) == 16
+    assert result.pop("subject") == "catkin"
+    assert result.pop("attribute") is None
+    admission_counts = result.pop("admission_counts")
+    assert admission_counts["annotated"] == 12
     assert result == GOLDEN_MAKE_SPLITS
 
 
@@ -93,7 +94,7 @@ def test_make_splits_materialize_tree_golden(tmp_path: Path):
     ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
-    result = make_splits(str(root), output_path=str(out), seed=1, materialize=True)
+    result = make_splits(str(root), output_path=str(out), seed=1, materialize=True, subject="catkin")
     assert result["splits"] == {"train": 9, "val": 3}
     assert result["total_stems"] == 12
     assert result["seed"] == 1
