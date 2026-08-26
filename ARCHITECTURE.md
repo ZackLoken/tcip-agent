@@ -1077,7 +1077,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:426`;
 `tcip_annotation.format_io.load_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:311`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:323`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:978`.
 
@@ -1099,14 +1099,14 @@ different consumer path in the same test.
 Path: caller-supplied, single dataset-level `.json` file, not per-image.
 
 Writers: `tcip_annotation.format_io.write_coco`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:241`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:253`;
 `tcip_annotation.format_io.save_annotations` (`fmt="coco"`), `format_io.py:283`;
 `tcip_annotation.json_io.to_coco_dataset` (returns dict, performs no file I/O),
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:413`.
 
-Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:199`;
+Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:204`;
 `tcip_annotation.format_io.load_annotations` (`fmt="coco"` or auto-detected via `detect_format`,
-`format_io.py:61`), `format_io.py:263`.
+`format_io.py:66`), `format_io.py:263`.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names the COCO write/read agreement
 directly. S19 ("Annotation format detection scope (json, coco)") is the nearest seam but covers
@@ -1793,7 +1793,7 @@ Phase 3 verdict: single.
 ## S19. Annotation format detection scope (json, coco)
 
 Must agree: every reader refuses rather than guesses when a file's format is undetermined.
-Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:61` (`def detect_format(path: str) -> AnnotFormat:`).
+Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:66` (`def detect_format(path: str) -> AnnotFormat:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:117` (`file_fmt = fmt or detect_format(str(gt_path))`).
 Phase 3 verdict: single.
 

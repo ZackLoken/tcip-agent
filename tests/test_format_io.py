@@ -65,6 +65,32 @@ def test_parse_coco_detect_missing_image():
     assert len(anns) == 0
 
 
+def test_parse_coco_raises_on_a_category_id_that_will_not_coerce():
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    coco = _sample_coco_detect()
+    coco["annotations"][0]["category_id"] = "not-a-number"
+    with pytest.raises(UnreadableLabelDocument, match="record 0"):
+        parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+
+
+def test_parse_coco_raises_on_a_category_id_with_no_name_in_the_document():
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    coco = _sample_coco_detect()
+    coco["annotations"][0]["category_id"] = 99
+    with pytest.raises(UnreadableLabelDocument, match="record 0"):
+        parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+
+
+def test_parse_coco_admits_every_record_whose_category_resolves():
+    """The refusal is per-record, not a document-wide reflex: a document whose every category
+    resolves reads in full, the same shape ``test_parse_coco_detect`` already covers."""
+    coco = _sample_coco_detect()
+    anns = parse_coco_annotations(coco, file_name="IMG_0001.jpg")
+    assert len(anns) == 2
+
+
 def test_parse_coco_matches_a_manifest_named_logical_image_by_stem():
     """A ``.bandgroup`` manifest's own on-disk name never appears verbatim in an externally
     authored COCO document; looking it up ties by stem to the one recorded image that shares it."""
