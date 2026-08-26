@@ -102,9 +102,10 @@ acknowledgement. The count/date/value is the phenotype, so each door reconciles 
 dimension the deliverable rests on against a reference of that dimension's own kind (for the
 count/measurement/classifier dimensions, held-out GT or a breeder-confirmed output sample, see the
 `evaluation` and `cv-research` skills; a tile scale needs a geometry basis, a physical scale a
-physical measurement, and no kind stands in for another), reading the predictions' own sidecar
-(`operating_point.json`, `ordinal_operating_point.json` or `regression_operating_point.json`)
-rather than trusting a caller-asserted string, then hands the resolved states to one shared
+physical measurement, and no kind stands in for another), reading the predictions' own sidecar,
+one of the five measurement-document kinds a bucket can carry (`operating_point.json`,
+`classifier_operating_point.json`, `ordinal_operating_point.json`, `regression_operating_point.json`,
+`resolve_scale.json`), rather than trusting a caller-asserted string, then hands the resolved states to one shared
 `check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict, ships
 only when every dimension it was handed clears, and otherwise refuses (or, with
 `acknowledge_unvalidated=True`, stamps the unvalidated dimension(s) false).

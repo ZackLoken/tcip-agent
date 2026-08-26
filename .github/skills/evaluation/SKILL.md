@@ -10,9 +10,9 @@ description: "Model evaluation methods, metrics interpretation, failure triage, 
 | Task | Comparability metric (labeled) | Other metrics |
 |------|---------------|-------------------|
 | Detection | mAP@50 | mAP@50:95, precision, recall |
-| Instance Segmentation | mask mAP@50 | box mAP, mask quality (IoU distribution) |
+| Instance Segmentation | mask mAP@50 | box mAP, mask mAP@50:95, precision, recall |
 | Classification | Accuracy | F1 (macro), per-class precision/recall |
-| Regression | RMSE | R², MAE |
+| Regression | RMSE | R², MAE, concordance correlation coefficient (a selectable regression operating-point criterion, see `operating_point`) |
 | Ordinal | Quadratic weighted κ | MAE, rank accuracy |
 
 These are labeled comparability metrics: a fixed-convention number (mAP@50 = AP at IoU 0.5) that

@@ -11,7 +11,7 @@ The on-disk default for both GT and predictions is one per-image, COCO-shaped `.
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
 `accepted_at` provenance per object. `stage_proposals` and `accept_proposals` write this
 schema without reading any label document (`accept_proposals` reads back the proposal
-record its own prior run staged, not a label file); `export_predictions` reads it only
+record `propose_annotations` staged in a prior run, not a label file); `export_predictions` reads it only
 when it calibrates a confidence operating point, through `run_inference`. A dataset-level
 COCO training set is assembled from these per-image files (`datasets.py`'s
 `to_coco_dataset`), not authored directly. An unspecified format resolves to `.json`
