@@ -367,6 +367,27 @@ def test_write_predictions_json_drops_a_degenerate_box_and_reports_the_count(tmp
     assert len(saved["annotations"]) == 1
 
 
+def test_write_predictions_json_drops_a_box_that_rounds_to_zero_extent(tmp_path):
+    """A box with real pre-round extent that collapses to nothing at the document's stored
+    2-decimal quantum is dropped here, the same as an already-zero-extent box: the writer must
+    never be handed a box it would refuse and fail the whole run over."""
+    from tcip_annotation.json_io import read_annotations
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    out = tmp_path / "preds.json"
+    result = {
+        "width": 200, "height": 150,
+        "boxes": [[10, 10, 20, 20], [30, 30, 30.003, 30.003]],
+        "scores": [0.9, 0.8],
+        "labels": [1, 1],
+    }
+
+    dropped = write_predictions_json(out, result, id_map={"leaf": 0})
+
+    assert dropped == 1
+    assert len(read_annotations(out)) == 1
+
+
 def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
     from tcip_mcp.tools.annotation_tools import stage_proposals
 
