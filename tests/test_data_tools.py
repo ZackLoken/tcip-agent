@@ -145,6 +145,21 @@ def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     assert str(bad) in result["error"]
 
 
+def test_make_splits_reports_an_unreadable_label_reached_only_through_stratification(
+    data_dir: Path, tmp_path: Path,
+):
+    """A corrupt label sorted after the scan's own format-probe file is caught by the
+    stratification count, not the scan: a different site than the first-sorted case above, and
+    it must answer the same error dict, never a raw raise."""
+    bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
+    bad.write_bytes(b"{not json")
+
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"))
+
+    assert "error" in result
+    assert str(bad) in result["error"]
+
+
 def test_make_splits_bad_ratios(data_dir: Path):
     result = make_splits(str(data_dir), train_ratio=0.5, val_ratio=0.5, test_ratio=0.5)
     assert "error" in result
@@ -261,6 +276,24 @@ def test_make_splits_spatial_refuses_materialize(tmp_path: Path):
 
 def test_make_splits_spatial_reports_an_unreadable_label_by_name(tmp_path: Path):
     root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+    bad = root / "annotations" / "mosaic.json"
+    bad.write_bytes(b"{not json")
+
+    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2)
+
+    assert "error" in result
+    assert str(bad) in result["error"]
+
+
+def test_make_splits_spatial_reports_an_unreadable_label_reached_only_through_the_extent_read(
+    tmp_path: Path,
+):
+    """An extra, readable label with no matching image sorts before the real stem's own label, so
+    the scan's format probe succeeds and the single-stem check still admits one stem; the corrupt
+    label is then reached only when the extent is read, a different site than the first-sorted
+    case above, and it must answer the same error dict, never a raw raise."""
+    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+    (root / "annotations" / "aaa_extra.json").write_text('{"annotations": []}', encoding="utf-8")
     bad = root / "annotations" / "mosaic.json"
     bad.write_bytes(b"{not json")
 

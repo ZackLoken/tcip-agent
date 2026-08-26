@@ -588,16 +588,16 @@ Docstring is the function's docstring first line, verbatim.
 | `segment_prompt` | `annotation_tools.py:482` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
 | `push_panel_data` | `annotation_tools.py:578` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
 | `focus` | `annotation_tools.py:612` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
-| `stage_proposals` | `annotation_tools.py:821` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:1010` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `stage_proposals` | `annotation_tools.py:837` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+| `write_class_map` | `annotation_tools.py:1026` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `scan_dataset` | `data_tools.py:148` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
-| `validate_data_quality` | `data_tools.py:209` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:322` | yes | Compute a leakage-free, annotation-stratified train/val/test split. |
+| `scan_dataset` | `data_tools.py:159` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
+| `validate_data_quality` | `data_tools.py:225` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:342` | yes | Compute a leakage-free, annotation-stratified train/val/test split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -620,15 +620,15 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `force_redraw_cal_holdout_split` | `inference_tools.py:409` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:539` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1480` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1772` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `run_inference` | `inference_tools.py:545` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1486` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1778` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `ingest_images` | `ingest_tools.py:176` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
+| `ingest_images` | `ingest_tools.py:172` | yes | Copy raw images into a structured project, bucketed by the capture date each file states. |
 
 ### meta_tools.py (4 tools)
 
@@ -698,13 +698,13 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:48` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:410` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:628` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:764` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:778` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:807` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1176` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2226` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:426` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:644` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:780` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:794` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:823` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1192` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2242` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -1066,7 +1066,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:580`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:607`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1075,7 +1075,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:426`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:442`;
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:323`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
@@ -1121,7 +1121,7 @@ Path: `<dataset_root>/classes.json`.
 Writer: `tcip_mcp.class_registry.replace_registry`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`, the one write both registry doors call
 (the GUI's `save_classes` and the tool's `write_class_map`,
-`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1010`).
+`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1026`).
 
 Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:190`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
@@ -1163,8 +1163,11 @@ Path: `<dataset_root>/.tcip/state/image_status.json`.
 Writers: `set_image_status`,
 `packages/tcip-web/src/tcip_web/routes/classes.py:306`; `set_image_status_bulk`,
 `routes/classes.py:337`; `tcip_mcp.tools.data_tools._apply_negative_carry`
-(split-materialized copy, computed by `_compute_negative_carry` at `data_tools.py:558` before
-the split tree is written), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:625`.
+(split-materialized copy; every confirmed negative is read before the split's stem lists,
+manifest or file tree are written, by `negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)`
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:481`, then applied by
+`_apply_negative_carry(negative_carry, out_dir, subject)`
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:551`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:470`; `_status_bucket_for`,
@@ -1420,7 +1423,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:580` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:607` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:223`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:191`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -1446,7 +1449,7 @@ bucket.
 
 Path: `<prediction_bucket_dir>/operating_point.json`, sibling of the bucket's per-image files,
 one of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
-(`packages/tcip-annotation/src/tcip_annotation/json_io.py:163`) names and every bucket
+(`packages/tcip-annotation/src/tcip_annotation/json_io.py:167`) names and every bucket
 enumeration excludes (format 17).
 
 Writer: `write_sidecar`, `resolution.py:897`, the one write, under the stamp's own lock;
@@ -1689,9 +1692,9 @@ Phase 3 verdict: duplicated.
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:744` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:759` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:303` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
-Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:881`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
+Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:897`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 
@@ -1779,7 +1782,7 @@ Phase 3 verdict: single.
 ## S17. Canonical per-image annotation JSON schema
 
 Must agree: every writer produces, and every reader accepts, the same name-based record shape.
-Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:318` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
+Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:334` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:191`, `packages/tcip-web/src/tcip_web/routes/review.py:667` and `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:179` (every save door converts through it rather than assembling records of its own).
 Phase 3 verdict: single.
 
@@ -1787,7 +1790,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:41` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:532` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:548` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
@@ -1900,7 +1903,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2498` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1973` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1979` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall

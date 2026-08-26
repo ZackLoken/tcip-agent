@@ -132,6 +132,24 @@ def test_flat_layout_does_not_collide_with_a_subdir_literally_named_annotations(
     assert resolution._labels_term(flat / "annotations") != resolution._labels_term(nested / "annotations")
 
 
+def test_labels_term_excludes_a_bucket_sidecar(tmp_path):
+    """A bucket's own provenance stamp beside a real label does not change the dir's labels
+    term, and a dir holding only one has no labels term at all."""
+    d = tmp_path / "annotations"
+    d.mkdir(parents=True)
+    json_io.write_annotations(
+        d / "A.json", [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
+    without_sidecar = resolution._labels_term(d)
+
+    (d / "operating_point.json").write_text("{}", encoding="utf-8")
+    assert resolution._labels_term(d) == without_sidecar
+
+    sidecar_only = tmp_path / "sidecar_only"
+    sidecar_only.mkdir()
+    (sidecar_only / "operating_point.json").write_text("{}", encoding="utf-8")
+    assert resolution._labels_term(sidecar_only) is None
+
+
 def test_rgb_nested_dataset_fingerprints_byte_identically_before_and_after_the_extension_widening(
         tmp_path):
     """The images term's extension set widened from a photographic-only set to

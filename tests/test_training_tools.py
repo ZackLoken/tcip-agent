@@ -243,9 +243,10 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 # preflight_config's training_source seam: a bare "module:function" string
 # --------------------------------------------------------------------------
 
-def test_preflight_config_warns_rather_than_swallows_an_unreadable_label(tmp_path):
+def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_path):
     """The coverage check's own trainable_stems scan must not fold an unreadable label into a
-    generic build failure it silently drops: the breeder needs to see which file is broken."""
+    generic build failure it silently drops: a run over this labels_dir would fail on the same
+    file, so preflight reports it as a blocking issue, naming the file, not a warning."""
     pytest.importorskip("torch")
     from PIL import Image
     from tcip_annotation import json_io
@@ -269,8 +270,42 @@ def test_preflight_config_warns_rather_than_swallows_an_unreadable_label(tmp_pat
         "training": {"batch_size": 2},
     }
     r = preflight_config(cfg)
-    assert r["valid"] is True  # informational only, never gating
-    assert any("bad.json" in w for w in r["warnings"]), r["warnings"]
+    assert r["valid"] is False
+    assert any("bad.json" in i for i in r["issues"]), r["issues"]
+
+
+def test_preflight_config_blocks_an_unreadable_label_in_val_labels_dir(tmp_path):
+    """An unreadable label under an explicit validation source aborts the launch (the explicit
+    validation build re-raises rather than degrading to no validation), so it blocks here too,
+    even though the training labels_dir it sits beside is entirely readable."""
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "annotations"
+    val_imgs = tmp_path / "val_images"
+    val_lbls = tmp_path / "val_annotations"
+    for d in (imgs, lbls, val_imgs, val_lbls):
+        d.mkdir()
+    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
+    Image.new("RGB", (20, 20)).save(val_imgs / "bad.jpg")
+    json_io.write_annotations(lbls / "ann.json",
+                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+    (val_lbls / "bad.json").write_bytes(b"{not json")
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin",
+                 "val_images_dir": str(val_imgs), "val_labels_dir": str(val_lbls)},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is False
+    assert any("bad.json" in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_config_training_source_shape_and_importability(tmp_path):

@@ -467,6 +467,7 @@ def force_redraw_cal_holdout_split(
 
     from datetime import datetime, timezone
 
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_store import DecodeError, store
 
     from tcip_mcp.audit import dataset_scope_of, record_event
@@ -486,7 +487,10 @@ def force_redraw_cal_holdout_split(
                              "never reads, so state the root those labels' own lock lives under."}
 
     if identity_hash is None:
-        identity_hash = dataset_hash(labels_dir)
+        try:
+            identity_hash = dataset_hash(labels_dir)
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
 
     try:
         old_lock = store.read(cal_holdout_lock_key(identity_hash, scope_root=scope_root),
@@ -501,11 +505,13 @@ def force_redraw_cal_holdout_split(
                        "holdout": old_lock.get("holdout", [])} if old_lock else None)
 
     if labels_dir:
-        # The same labels-intersect-images scan _calibrate_operating_point uses,
-        # not a second independent glob, with images_dir omitted this degrades to the prior
-        # labels-only scan (stem_to_image unused here either way).
+        # The same labels-intersect-images scan _calibrate_operating_point uses, not a second
+        # independent glob (stem_to_image unused here either way).
         stems, _ = label_image_stems(labels_dir, images_dir)
-        annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+        try:
+            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
     elif old_lock:
         stems = sorted(set(old_lock.get("calibration", [])) | set(old_lock.get("holdout", [])))
         annotation_counts = None

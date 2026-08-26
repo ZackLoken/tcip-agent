@@ -253,7 +253,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     date=data_cfg.get("date"), contradicted_out=contradicted_negatives)
             except UnreadableLabelDocument as exc:
                 stems, sample_counts = None, None
-                warnings.append(f"data: {exc}")
+                # A run over this labels_dir fails on the same file, so this blocks, not warns.
+                issues.append(f"data.labels_dir: {exc}")
             except (OSError, ValueError):
                 stems, sample_counts = None, None
             if contradicted_negatives:
@@ -272,6 +273,21 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     warnings.append(
                         f"data: {n_dropped}/{total} candidate images ({n_dropped / total:.0%}) will "
                         f"not train, {dict(sorted(dropped.items()))}. {len(stems)} stem(s) admitted.")
+
+        # A validation build from val_labels_dir (or labels_dir as its fallback) re-raises an
+        # unreadable label instead of degrading to no validation, so it blocks here too.
+        val_images_dir = data_cfg.get("val_images_dir")
+        if val_images_dir:
+            val_labels_dir = data_cfg.get("val_labels_dir") or labels_dir
+            if val_labels_dir and Path(val_labels_dir).is_dir():
+                from tcip_annotation.json_io import (
+                    UnreadableLabelDocument as _ULD, load_label_document, prediction_documents,
+                )
+                for label_path in prediction_documents(val_labels_dir):
+                    try:
+                        load_label_document(label_path)
+                    except _ULD as exc:
+                        issues.append(f"data.val_labels_dir: {exc}")
 
     # Training config validation
     train_cfg = config.get("training", {})

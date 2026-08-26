@@ -16,6 +16,7 @@ from tcip_mcp.dataset_layout import (
     models_with_predictions,
     parse_image_path,
     prediction_dir,
+    subjects_on_date,
     subjects_with_labels,
 )
 
@@ -98,6 +99,30 @@ def test_subjects_with_labels_is_per_date(tmp_path: Path) -> None:
     assert subjects_with_labels(root, "2026-03-02") == ["bush", "catkin"]
     # A date with no labels for any subject → nothing to offer.
     assert subjects_with_labels(root, "2026-03-24") == []
+
+
+def test_subjects_on_date_excludes_a_bucket_sidecar(tmp_path: Path) -> None:
+    """A label whose filename is a bucket's own provenance stamp is neither read nor raised
+    over: it is excluded from the walk the same way every prediction bucket is."""
+    root = tmp_path
+    json_io.write_annotations(
+        str(annotation_dir(root, "2026-02-11") / "IMG_1.json"),
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 100)
+    (annotation_dir(root, "2026-02-11") / "operating_point.json").write_text(
+        '{"not": "a label"}', encoding="utf-8")
+
+    assert subjects_on_date(root, "2026-02-11") == ["catkin"]
+
+
+def test_subjects_on_date_raises_on_an_unreadable_label(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    root = tmp_path
+    (annotation_dir(root, "2026-02-11")).mkdir(parents=True)
+    (annotation_dir(root, "2026-02-11") / "IMG_1.json").write_bytes(b"{not json")
+
+    with pytest.raises(UnreadableLabelDocument):
+        subjects_on_date(root, "2026-02-11")
 
 
 def test_models_with_predictions_is_per_date(tmp_path: Path) -> None:
