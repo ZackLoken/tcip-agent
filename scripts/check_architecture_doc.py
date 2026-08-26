@@ -71,6 +71,43 @@ def check_existence(rows: list[dict], repo_root: Path) -> list[dict]:
     return findings
 
 
+COVERED_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("packages/tcip-mcp/src", (".py",)),
+    ("packages/tcip-annotation/src", (".py",)),
+    ("packages/tcip-web/src", (".py",)),
+    ("packages/tcip-store/src", (".py",)),
+    ("scripts", (".py",)),
+    ("packages/tcip-web/frontend/src", (".ts", ".tsx")),
+)
+"""The trees the module tables claim to cover, with the extensions a table row names."""
+
+_SKIPPED_PARTS = frozenset({"__pycache__", "node_modules"})
+
+
+def check_coverage(rows: list[dict], repo_root: Path) -> list[dict]:
+    """Every source file under a covered root is named by some table row.
+
+    The existence check reads one direction only (a named path exists); this one reads the
+    other, so a module or script that lands with no row fails the gate instead of staying
+    undocumented while both directions of the old check were green.
+    """
+    named = {r["path"].replace("\\", "/") for r in rows if not r.get("unparsed")}
+    findings = []
+    for root, extensions in COVERED_ROOTS:
+        base = repo_root / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in extensions:
+                continue
+            if _SKIPPED_PARTS & set(path.parts):
+                continue
+            rel = path.relative_to(repo_root).as_posix()
+            if rel not in named:
+                findings.append({"kind": "unnamed_path", "path": rel})
+    return findings
+
+
 def check_counts(rows: list[dict], inventory: dict) -> list[dict]:
     by_path = {
         m["path"]: m
@@ -124,6 +161,14 @@ def main() -> int:
     for f in unparsed:
         print(f"UNPARSED ARCHITECTURE.md:{f['line_no']}: {f['raw']!r}")
 
+    unnamed = check_coverage(parsed, repo_root)
+    if unnamed:
+        print(f"UNNAMED in the tables: {len(unnamed)}")
+        for f in unnamed:
+            print(f"  {f['path']}")
+    else:
+        print("coverage: every source file under a covered root is named by a table row")
+
     count_findings: list[dict] = []
     if args.inventory_json and Path(args.inventory_json).exists():
         inventory = json.loads(Path(args.inventory_json).read_text(encoding="utf-8"))
@@ -133,7 +178,7 @@ def main() -> int:
         if not count_findings:
             print("counts: every checkable row matches the regenerated inventory")
 
-    total = len(missing) + len(unparsed) + len(count_findings)
+    total = len(missing) + len(unparsed) + len(unnamed) + len(count_findings)
     print(f"{'FAIL' if total else 'PASS'}: {total} problem(s)")
     return 1 if total else 0
 

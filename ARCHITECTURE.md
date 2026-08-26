@@ -25,21 +25,21 @@ Sections:
 
 ## Module ownership and dependency graph
 
-Source: regenerated module inventory at `docs/audit/phase5/archdoc/module-inventory-head.json` / `.md`, produced by `build_module_inventory.py` (copied from `docs/audit/phase0/module-inventory/` into the scratchpad and run against HEAD 8e21f9df with its output path redirected to `docs/audit/phase5/archdoc/`). Every count in this section is read from that regenerated inventory, not from the Phase 0 inventory at `docs/audit/phase0/module-inventory/module-inventory.json`.
+Source: regenerated module inventory at `docs/audit/phase5/archdoc/module-inventory-head.json` / `.md`, produced by `build_module_inventory.py` (a copy of `docs/audit/phase0/module-inventory/build_module_inventory.py` kept beside its output in `docs/audit/phase5/archdoc/` and run there against HEAD 2670cebf). Every count in this section is read from that regenerated inventory, not from the Phase 0 inventory at `docs/audit/phase0/module-inventory/module-inventory.json`.
 
-HEAD 8e21f9df has 273 modules across the five scanned roots (70369 total lines):
+HEAD 2670cebf has 323 modules across the five scanned roots (93962 total lines):
 
 | Package (root) | Modules | Lines |
 |---|---|---|
-| tcip-mcp | 85 | 31331 |
-| tcip-annotation | 11 | 3177 |
-| tcip-web | 30 | 8140 |
-| tcip-web-frontend | 123 | 23613 |
-| scripts | 24 | 4108 |
+| tcip-mcp | 94 | 42609 |
+| tcip-annotation | 12 | 3879 |
+| tcip-web | 34 | 10570 |
+| tcip-web-frontend | 145 | 29998 |
+| scripts | 38 | 6906 |
 
 `tcip-mcp`, `tcip-annotation`, and `tcip-web` are the three Python packages under `packages/`; `scripts` is `scripts/` at the repo root (not an installed package); `tcip-web-frontend` is the TypeScript/TSX tree under `packages/tcip-web/frontend/src`. These counts are the `counts.python_by_root` and `counts.typescript_total` fields of `module-inventory-head.json`.
 
-differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inventory/module-inventory.json`) recorded python_total 149 (tcip-mcp 85, tcip-annotation 11, tcip-web 30, scripts 23) and typescript_total 123. The regenerated inventory at HEAD 8e21f9df has python_total 150 (tcip-mcp 85, tcip-annotation 11, tcip-web 30, scripts 24) and typescript_total 123. The one added Python module since Phase 0 is `scripts/verify_citations.py`; tcip-mcp, tcip-annotation, tcip-web, and typescript_total are unchanged in count.
+differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inventory/module-inventory.json`) recorded python_total 149 (tcip-mcp 85, tcip-annotation 11, tcip-web 30, scripts 23) and typescript_total 123. The regenerated inventory at the HEAD named above has python_total 178 (tcip-mcp 94, tcip-annotation 12, tcip-web 34, scripts 38) and typescript_total 145; the tables below name every module of both inventories, and `scripts/check_architecture_doc.py` refuses a source file under a covered root that no row names.
 
 ## tcip-mcp
 
@@ -48,18 +48,19 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/__init__.py | TCIP MCP Server: domain tools for the phenotyping platform. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/__main__.py | Entry point: ``python -m tcip_mcp``. | 1 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/agent_identity.py | Which agent harness this MCP server process serves, declared at the handshake, and the session it minted; projected onto every audit line, statement record and HTTP push. | 0 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 3 | 16 |
-| packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 1 | 8 |
-| packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 2 | 22 |
-| packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 4 | 10 |
-| packages/tcip-mcp/src/tcip_mcp/model_registry.py | Model registry, track trained models and their performance. | 3 | 7 |
-| packages/tcip-mcp/src/tcip_mcp/operationalization.py | Per-project trait-operationalization records: what a delivered number means, who confirmed it, and the precondition every crossing delivery door checks. | 5 | 4 |
+| packages/tcip-mcp/src/tcip_mcp/audit.py | Audit logging decorator for MCP tools, the log each event's scope routes it to, and the refusal a call raises when its own entry cannot be appended. | 3 | 28 |
+| packages/tcip-mcp/src/tcip_mcp/class_registry.py | The dataset's class registry, subjects, their attributes, and the deterministic name→id assignment a training run uses (and records, so predictions stay decodable). | 1 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/dataset_layout.py | Canonical dataset-layout resolver: the single source of truth for where an image's ground-truth labels and model predictions live on disk. | 4 | 30 |
+| packages/tcip-mcp/src/tcip_mcp/experiments.py | Experiment tracking for ML training runs. | 4 | 15 |
+| packages/tcip-mcp/src/tcip_mcp/identity.py | The platform's recorded-actor convention, in one place. | 0 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/model_registry.py | Model registry, track trained models and their performance. | 2 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/operationalization.py | Per-project trait-operationalization records: what a delivered number means, who confirmed it, and the precondition every crossing delivery door checks. | 8 | 9 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/__init__.py | Pipeline sub-package: data, models, training, evaluation, inference, postprocessing. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/__init__.py | Active learning pipeline: scorer and selector modules. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/helpers.py | Shared active-learning helpers used by the AL MCP tools. | 2 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/scorer.py | Active learning scorers: rank unlabeled images by informativeness. | 2 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/selector.py | Active learning selector: pick next images to annotate. | 1 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/band_stats.py | Display band statistics, the 8-bit stretch every band render goes through, and the RGB composite it stacks into. | 2 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/band_stats.py | Display band statistics, the 8-bit stretch every band render goes through, and the RGB composite it stacks into. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py | Block-aware calibration/holdout: validate a detection operating point directly against a mosaic's own reserved calibration/test bands (see ``training_tools._spatial_single_source_split``'s four-way split, ``reserve_calibration_fraction``), for a raster training source too large or too singular to hold whole images out from. | 15 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/__init__.py | Components sub-package: composable ML primitives. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/backbones.py | ``BackboneWrapper``: the interface a backbone must expose to the necks and detectors here. | 0 | 0 |
@@ -69,74 +70,75 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/necks.py | Neck modules: adapt backbone features for downstream heads. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/__init__.py | Data pipeline: dataset loading, augmentation, tiling, splitting. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/augmentations.py | Data augmentation transforms for all task types. | 1 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/band_groups.py | Sensor-agnostic band-group correlation: sibling single-band raster files that are really one logical multi-band capture (some multispectral drone sensors write one file per band instead of one multi-band file per image), and the ``.bandgroup`` manifest that records a found group. | 0 | 13 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 11 | 10 |  <!-- queued: P5-224 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/band_groups.py | Sensor-agnostic band-group correlation: sibling single-band raster files that are really one logical multi-band capture (some multispectral drone sensors write one file per band instead of one multi-band file per image), and the ``.bandgroup`` manifest that records a found group. | 0 | 15 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 12 | 10 |  <!-- queued: P5-224 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/samplers.py | Task-aware data samplers: class-imbalance handling plus read-locality ordering. | 2 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val splitting. | 6 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val splitting. | 5 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/tiling.py | Sliding-window tiling geometry for small-object detection (SAHI-style). | 0 | 8 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py | Tier-A data/model derivations, read the artifact in hand, compute the value. | 6 | 9 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py | Tier-A data/model derivations, read the artifact in hand, compute the value. | 7 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/display_bounds.py | Pixel bounds for what the platform serves to a screen or writes as an agent-facing artifact. | 0 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/__init__.py | Review -> retrain feedback: materialize curated datasets (W5) and reconstruct a review-confirmed calibration reference from review verdicts (W1). | 1 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/materialize.py | Materialize a curated detection dataset from human review verdicts. | 7 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/materialize.py | Materialize a curated detection dataset from human review verdicts. | 8 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/review_calibration.py | Reconstruct a calibration reference from human review verdicts. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py | Reading one stored review verdict entry: the action vocabulary and the boxes it carries. | 1 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/image_utils.py | Shared image utilities for the composable ML pipeline (channel-aware). | 3 | 22 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/image_utils.py | Shared image utilities for the composable ML pipeline (channel-aware). | 3 | 28 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/__init__.py | Inference pipeline: model loading and batch prediction. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/inference/generic_predictor.py | Generic predictor for any bespoke ``model_source`` checkpoint. | 9 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/inference/predictor.py | Model-kind contract + the predictor factory. | 4 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/inference/predictor.py | Model-kind contract + the predictor factory. | 5 | 11 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/__init__.py | Measurement primitives: morphology on a *validated* mask (a first-class toolkit primitive). | 1 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/mask_geometry.py | Mask-geometry: dimensional measurements on a validated binary/instance mask. | 3 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/scale_calibration.py | Deriving and validating a physical per-pixel scale against real physical measurements. | 2 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py | ``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``. | 3 | 8 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/model_contract.py | The one model-side contract: the measurement boundary, as a behavioral check, not a mold. | 1 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py | Resolve the detection operating point (conf/NMS/max_dets/tile) per dataset, at runtime. | 7 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/measurement/scale_calibration.py | Deriving and validating a physical per-pixel scale against real physical measurements. | 3 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py | ``build_model``, the one indirection between a config/checkpoint and an ``nn.Module``. | 2 | 12 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/model_contract.py | The one model-side contract: the measurement boundary, as a behavioral check, not a mold. | 2 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py | Resolve the detection operating point (conf/NMS/max_dets/tile) per dataset, at runtime. | 7 | 10 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/overviews.py | External overview pyramids (.ovr sidecars) for large rasters. | 2 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/__init__.py | Postprocessing pipeline: temporal aggregation and CSV export. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/aggregation.py | Per-plant aggregation, temporal/spatial aggregation of per-image results. | 3 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py | CSV export for per-plant phenotyping results. | 5 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/aggregation.py | Per-plant aggregation, temporal/spatial aggregation of per-image results. | 4 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py | CSV export for per-plant phenotyping results. | 7 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/orthomosaic_mapping.py | Georeferencing for a whole-mosaic GeoTIFF. | 1 | 4 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py | Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones. | 3 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 0 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py | Canonical phenology measurement, the one implementation of a trait's positive-fraction milestones. | 4 | 4 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/plant_mapping.py | Plant-ID mapping across image capture dates. | 0 | 9 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/proposal.py | Annotation-proposal engines: a method-neutral seam for auto-labeling. | 2 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/raster_source.py | Raster reading: one open-and-read surface for every image source this platform decodes. | 3 | 17 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/raster_source.py | Raster reading: one open-and-read surface for every image source this platform decodes. | 4 | 18 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/reference_grid.py | Named reference grid over a raster's native pixel frame. | 3 | 4 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py | Per-cell content digest for the region-completeness store (:func:`tcip_mcp.dataset_layout.region_completeness_path`): detects an annotation edited or deleted inside an attested cell after attestation. | 6 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 2 | 24 |  <!-- queued: P5-230 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py | Per-cell content digest for the region-completeness store (:func:`tcip_mcp.dataset_layout.region_completeness_path`): detects an annotation edited or deleted inside an attested cell after attestation. | 5 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py | Runtime parameter resolution, the "derive, don't pin" currency. | 9 | 28 |  <!-- queued: P5-230 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/pipelines/schemas.py | Pydantic v2 config schemas for structural/type validation. | 0 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/__init__.py | Training pipeline: trainer, progressive unfreezing, HPO. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py | The audited training envelope + ``TrainContext``. | 17 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py | Task-aware evaluation metrics + composite selection objective. | 10 | 9 |  <!-- queued: P5-227 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 10 | 5 |  <!-- queued: P5-232 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 2 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py | The audited training envelope + ``TrainContext``. | 16 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py | Task-aware evaluation metrics + composite selection objective. | 11 | 10 |  <!-- queued: P5-227 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 9 | 6 |  <!-- queued: P5-232 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 1 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py | The subprocess entry point ``launch_training`` spawns to run one bespoke training run's actual body, dataset/loader construction, the audited envelope, ``run_training_envelope()``, in an isolated OS process, so a leak/OOM/hang in one run can't take down the launching process or any other concurrent run's process. | 9 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/tensorboard_manager.py | TensorBoard process management for training and HPO runs. | 0 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 3 | 5 |
-| packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 0 | 23 |
-| packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 1 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 1 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 16 | 15 |
+| packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py | Prediction-bucket immutability: never silently overwrite predictions a human reviewed. | 6 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 0 | 24 |
+| packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 0 | 5 |
+| packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 0 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 19 | 19 |
+| packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools, load, save, and evaluate name-based annotations via MCP. | 15 | 1 |  <!-- queued: P5-233 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: load datasets, validate quality, split data. | 10 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 3 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 10 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run models on images, export results. | 21 | 2 |  <!-- queued: P5-225 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: load datasets, validate quality, split data. | 12 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 11 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run models on images, export results. | 22 | 4 |  <!-- queued: P5-225 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 8 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 4 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 4 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 7 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's authoring tool for a trait spec that does not yet exist; it can author, never confirm. | 3 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 9 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline. | 16 | 3 |  <!-- queued: P5-235 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 9 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 12 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline. | 19 | 4 |  <!-- queued: P5-235 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 10 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 25 | 6 |  <!-- queued: P5-223 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 23 | 1 |  <!-- queued: P5-231 merge-or-split -->
-| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 3 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py | Training MCP tools, config validation, launch training, HPO, status. | 24 | 8 |  <!-- queued: P5-223 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py | Vision tools: render annotations and predictions for visual analysis. | 23 | 2 |  <!-- queued: P5-231 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/traits.py | Trait knowledge, the human-defined *semantics* of each measurable trait (Tier C). | 4 | 21 |
 | packages/tcip-mcp/src/tcip_mcp/utils/__init__.py | Shared low-level utilities for tcip-mcp. | 0 | 0 |
-| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 2 | 4 |
-| packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 2 | 9 |
+| packages/tcip-mcp/src/tcip_mcp/web_client.py | HTTP client for MCP tools to push state to the tcip-web backend. | 2 | 9 |
+| packages/tcip-mcp/src/tcip_mcp/workspace.py | Workspace resolver: where TCIP projects live on disk. | 1 | 13 |
 
 ## tcip-annotation
 
@@ -144,13 +146,13 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 |---|---|---|---|
 | packages/tcip-annotation/src/tcip_annotation/__init__.py | Headless annotation library: canonical name-based per-image JSON labels + a single-file COCO. | 8 | 4 |
 | packages/tcip-annotation/src/tcip_annotation/annotation_engine.py | AnnotationEngine: Annotation CRUD, spatial index, undo/redo. | 2 | 1 |
-| packages/tcip-annotation/src/tcip_annotation/format_io.py | Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO. | 2 | 4 |
-| packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 1 | 24 |
+| packages/tcip-annotation/src/tcip_annotation/format_io.py | Annotation I/O for the two on-disk formats: the canonical per-image JSON and a single-file COCO. | 2 | 5 |
+| packages/tcip-annotation/src/tcip_annotation/json_io.py | Per-image JSON: the canonical on-disk label format (ground truth + predictions). | 1 | 32 |
 | packages/tcip-annotation/src/tcip_annotation/mask_contours.py | Mask -> polygon rings: the one contour extractor behind every mask-derived shape. | 0 | 3 |
 | packages/tcip-annotation/src/tcip_annotation/matching.py | Geometry helpers and GT-vs-prediction matching engine. | 1 | 3 |
-| packages/tcip-annotation/src/tcip_annotation/review_engine.py | ReviewEngine: review logic, detection walk-through, accept/reject. | 3 | 5 |
+| packages/tcip-annotation/src/tcip_annotation/review_engine.py | ReviewEngine: review logic, detection walk-through, accept/reject. | 3 | 7 |
 | packages/tcip-annotation/src/tcip_annotation/sam_wrapper.py | SAM2 wrapper for interactive segmentation. | 2 | 6 |
-| packages/tcip-annotation/src/tcip_annotation/state.py | Annotation and review data model. | 0 | 20 |
+| packages/tcip-annotation/src/tcip_annotation/state.py | Annotation and review data model. | 0 | 21 |
 | packages/tcip-annotation/src/tcip_annotation/utils.py | Shared utilities: image orientation, geometry helpers. | 0 | 4 |
 | packages/tcip-annotation/src/tcip_annotation/verdicts.py | The review verdict's action vocabulary, declared once. | 0 | 3 |
 | packages/tcip-annotation/src/tcip_annotation/viz.py | Visualization rendering: draws annotations and predictions on images. | 2 | 1 |
@@ -182,35 +184,35 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/__main__.py | Entry point: ``python -m tcip_web``. | 2 | 0 |
 | packages/tcip-web/src/tcip_web/agent_bash_guard.py | PreToolUse Bash guard for the fenced in-app agent terminal. | 1 | 0 |
 | packages/tcip-web/src/tcip_web/agent_fence_rules.py | What the in-app agent fence protects, declared once for both shell guards. | 0 | 2 |
-| packages/tcip-web/src/tcip_web/agent_learning_capture.py | SessionEnd capture hook: the soft backstop for the self-learning loop. | 1 | 0 |
+| packages/tcip-web/src/tcip_web/agent_learning_capture.py | SessionEnd capture hook: the soft backstop for the self-learning loop. | 1 | 1 |
 | packages/tcip-web/src/tcip_web/agent_powershell_guard.py | PreToolUse PowerShell guard for the fenced in-app agent terminal. | 1 | 0 |
-| packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 0 | 0 |
-| packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 10 | 2 |
-| packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 3 |  <!-- queued: P5-329 unwired -->
-| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 2 | 5 |
-| packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 0 | 15 |
+| packages/tcip-web/src/tcip_web/agent_session_start.py | SessionStart ritual hook: inject the session-start ritual directive naming the active project. | 2 | 0 |
+| packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 10 | 3 |
+| packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 5 |  <!-- queued: P5-329 unwired -->
+| packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 1 | 7 |
+| packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 3 | 13 |
 | packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 16 | 1 |
 | packages/tcip-web/src/tcip_web/routes/_body_common.py | The empty JSON body a route with only path parameters declares, forcing a browser onto a preflighted request instead of a simple one. | 0 | 3 |
 | packages/tcip-web/src/tcip_web/routes/_coverage_models.py | The view-coverage record's viewing context, declared once so `routes/coverage.py` and `routes/images.py` agree on its shape, and so `scripts/generate_frontend_types.py` can render it for the browser instead of the browser hand-transcribing it. | 1 | 4 |
 | packages/tcip-web/src/tcip_web/routes/_metrics_common.py | The shape both metric routes serve, from whichever log the caller resolved. | 0 | 2 |
-| packages/tcip-web/src/tcip_web/routes/annotate.py | Annotation label CRUD routes for the Annotate tab. | 8 | 1 |
-| packages/tcip-web/src/tcip_web/routes/canvas.py | Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back. | 1 | 1 |
-| packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 4 | 2 |
-| packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 11 | 1 |
-| packages/tcip-web/src/tcip_web/routes/dataset.py | Dataset discovery + selection routes. | 4 | 1 |
+| packages/tcip-web/src/tcip_web/routes/annotate.py | Annotation label CRUD routes for the Annotate tab. | 9 | 1 |
+| packages/tcip-web/src/tcip_web/routes/canvas.py | Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back. | 2 | 2 |
+| packages/tcip-web/src/tcip_web/routes/classes.py | Class registry routes. | 6 | 2 |
+| packages/tcip-web/src/tcip_web/routes/coverage.py | View-coverage routes: the reference grid over a raster and the per-image record of two per-cell facts: which cells were served to the browser at native resolution (a delivery fact) and which cells were swept in the viewport at or above the breeder's own working scale (a sweep fact). | 11 | 2 |
+| packages/tcip-web/src/tcip_web/routes/dataset.py | Dataset discovery + selection routes. | 5 | 2 |
 | packages/tcip-web/src/tcip_web/routes/fs.py | Local-filesystem directory browsing for the frontend's folder picker. | 1 | 1 |
-| packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 9 | 2 |  <!-- queued: P5-234 merge-or-split -->
-| packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 14 | 2 |
-| packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 1 | 1 |
-| packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 2 | 1 |
-| packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export, the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 10 | 1 |
+| packages/tcip-web/src/tcip_web/routes/images.py | Image serving: the one path pixels reach the browser through. | 11 | 3 |  <!-- queued: P5-234 merge-or-split -->
+| packages/tcip-web/src/tcip_web/routes/inference.py | Inference routes: async tiled runs + live progress WebSocket. | 15 | 2 |
+| packages/tcip-web/src/tcip_web/routes/meta.py | Meta-loop routes: surface Claude's friction reports and retrospectives. | 2 | 1 |
+| packages/tcip-web/src/tcip_web/routes/projects.py | Workspace project discovery + the active-project marker. | 4 | 1 |
+| packages/tcip-web/src/tcip_web/routes/results.py | Results routes: plant-mapping, per-plant phenology curves, CSV export, the operationalization record surface, the trait-spec statement surface, and the read-only delivery-event list. | 13 | 1 |
 | packages/tcip-web/src/tcip_web/routes/review.py | Review routes: compute matches, walk detections, record actions, save GT. | 17 | 2 |  <!-- queued: P5-228 merge-or-split -->
-| packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 2 | 1 |
-| packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 2 | 4 |
-| packages/tcip-web/src/tcip_web/routes/training.py | Training routes: validate config, launch, list runs, live metrics stream. | 8 | 1 |
+| packages/tcip-web/src/tcip_web/routes/sessions.py | Session-tracking routes: annotation_stats.json equivalent. | 2 | 3 |
+| packages/tcip-web/src/tcip_web/routes/terminal.py | Agent terminal routes: the HTTP/WS surface over :mod:`tcip_web.terminal`. | 3 | 5 |
+| packages/tcip-web/src/tcip_web/routes/training.py | Training routes: validate config, launch, list runs, live metrics stream. | 9 | 2 |
 | packages/tcip-web/src/tcip_web/routes/tuning.py | HPO / Tuning routes: launch + list + per-trial visibility. | 8 | 2 |
-| packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 1 | 3 |
-| packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 8 |
+| packages/tcip-web/src/tcip_web/state.py | In-memory GUI state + debounced persistence to ``.tcip/state/gui.json``. | 1 | 6 |
+| packages/tcip-web/src/tcip_web/trust_boundary.py | The network trust boundary: which connections the backend serves and which names it answers to. | 0 | 5 |
 | packages/tcip-web/src/tcip_web/terminal.py | Embedded agent terminal: run the real Claude Code CLI in a PTY. | 3 | 3 |
 
 ## tcip-web-frontend
@@ -218,33 +220,39 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | packages/tcip-web/frontend/src/App.tsx | (none found) | 28 | 1 |
-| packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 2 | 7 |
-| packages/tcip-web/frontend/src/api/client.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/client.ts | Typed REST client for the tcip-web backend. | 6 | 39 |
+| packages/tcip-web/frontend/src/api/classes.test.ts | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/api/classes.ts | Dataset class-registry + per-image-status API helpers. | 2 | 14 |
+| packages/tcip-web/frontend/src/api/client.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/api/client.ts | Typed REST client for the tcip-web backend. | 6 | 41 |
+| packages/tcip-web/frontend/src/api/devProxy.generated.ts | Dev-server proxy prefixes, generated by scripts/generate_frontend_routes.py from the routes the FastAPI app registers. | 0 | 0 |
 | packages/tcip-web/frontend/src/api/http.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 10 |
-| packages/tcip-web/frontend/src/api/inference.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/inference.ts | Inference + Results API helpers for the Inference and Results tabs. | 4 | 5 |
+| packages/tcip-web/frontend/src/api/http.ts | Shared fetch helpers. | 0 | 13 |
+| packages/tcip-web/frontend/src/api/inference.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/api/inference.ts | Inference + Results API helpers for the Inference and Results tabs. | 4 | 6 |
 | packages/tcip-web/frontend/src/api/meta.ts | Meta-loop API helpers: Claude's friction reports and retrospectives. | 2 | 1 |
 | packages/tcip-web/frontend/src/api/routes.ts | Every backend path the browser calls, generated from the routes the FastAPI app registers. | 0 | 10 |
 | packages/tcip-web/frontend/src/api/sessions.ts | Session-tracking API helpers (annotation_stats.json on disk). | 2 | 4 |
+| packages/tcip-web/frontend/src/api/streams.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/terminal.ts | REST client for the embedded agent terminal (the real Claude Code CLI in a PTY). | 2 | 2 |
 | packages/tcip-web/frontend/src/api/training.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/api/training.ts | Training-tab specific REST + WebSocket helpers. | 3 | 5 |
+| packages/tcip-web/frontend/src/api/training.ts | Training-tab specific REST + WebSocket helpers. | 4 | 6 |
 | packages/tcip-web/frontend/src/api/tuning.ts | Tuning (HPO) API helpers for the Tuning tab. | 3 | 1 |
-| packages/tcip-web/frontend/src/api/types.generated.ts | Types generated by scripts/generate_frontend_types.py from the pydantic models that declare them (routes/_coverage_models.py, routes/coverage.py, routes/review.py, tcip_web.state.GuiVocabulary, tcip_mcp.web_client, tcip_web.jobstore). | 0 | 16 |
-| packages/tcip-web/frontend/src/api/ws.test.ts | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/api/types.generated.ts | Types generated by scripts/generate_frontend_types.py from the pydantic models that declare them (routes/_coverage_models.py, routes/coverage.py, routes/review.py, tcip_web.state.GuiVocabulary, tcip_mcp.web_client, tcip_web.jobstore). | 0 | 18 |
+| packages/tcip-web/frontend/src/api/ws.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/api/ws.ts | WebSocket client that subscribes to GuiState snapshots + panel events. | 5 | 2 |
-| packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx | (none found) | 4 | 0 |
-| packages/tcip-web/frontend/src/components/AnnotateToolbar.tsx | Annotate-tab context toolbar. | 8 | 2 |
+| packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx | (none found) | 7 | 0 |
+| packages/tcip-web/frontend/src/components/AnnotateToolbar.tsx | Annotate-tab context toolbar. | 10 | 2 |
 | packages/tcip-web/frontend/src/components/BandPicker.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/BandPicker.tsx | (none found) | 2 | 3 |
-| packages/tcip-web/frontend/src/components/Canvas/CanvasStage.test.tsx | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/components/Canvas/CanvasStage.test.tsx | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/components/Canvas/CanvasStage.tsx | Shared Konva Stage wrapper with pan + zoom state managed in the store. | 6 | 4 |
-| packages/tcip-web/frontend/src/components/Canvas/CoverageMinimap.tsx | Coverage minimap for a multi-cell raster: a small thumbnail of the whole image with per-cell swept shading, region-completeness markers, in-view cell borders, and the current viewport rectangle; clicking or dragging jumps the canvas to the cell under the pointer, double-clicking toggles that cell's completeness for the active subject. | 3 | 1 |
+| packages/tcip-web/frontend/src/components/Canvas/CoverageMinimap.test.tsx | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/components/Canvas/CoverageMinimap.tsx | Coverage minimap for a multi-cell raster: a small thumbnail of the whole image with per-cell swept shading, region-completeness markers, in-view cell borders, and the current viewport rectangle; clicking or dragging jumps the canvas to the cell under the pointer, double-clicking toggles that cell's completeness for the active subject. | 3 | 2 |
+| packages/tcip-web/frontend/src/components/Canvas/zoom.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/Canvas/zoom.ts | Discrete zoom levels (5% .. | 0 | 3 |
-| packages/tcip-web/frontend/src/components/CollapsibleSection.tsx | The app's collapsible-section primitive: one chevron glyph and one trigger+content unit. | 1 | 5 |
+| packages/tcip-web/frontend/src/components/CollapsibleSection.tsx | The app's collapsible-section primitive: one chevron glyph and one trigger+content unit. | 1 | 6 |
 | packages/tcip-web/frontend/src/components/ColorPickerModal.tsx | Dark color picker: SI palette + basic palette + hex input, resolving to a hex string. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/DeliveryEventsPanel.tsx | What has shipped from this project: one row per completed delivery, read-only. | 1 | 1 |
 | packages/tcip-web/frontend/src/components/EmbeddedTool.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/EmbeddedTool.tsx | A titled chrome bar over an iframe, for the tools the platform runs beside the app (TensorBoard, Ray's dashboard). | 0 | 3 |
 | packages/tcip-web/frontend/src/components/ErrorBoundary.test.tsx | (none found) | 1 | 0 |
@@ -252,91 +260,101 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/HelpOverlay.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/HelpOverlay.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/ProjectBreadcrumb.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/ProjectBreadcrumb.tsx | Status-bar project breadcrumb: three fast-tracks in the lower-right corner: project name → a dropdown of recent projects (jump straight in), date → a dropdown of this project's dates (switch without the workspace), Switch Project → the full workspace (all projects). | 4 | 2 |
+| packages/tcip-web/frontend/src/components/ProjectBreadcrumb.tsx | Status-bar project breadcrumb: three fast-tracks in the lower-right corner: project name → a dropdown of recent projects (jump straight in), date → a dropdown of this project's dates (switch without the workspace), Switch Project → the full workspace (all projects). | 5 | 2 |
 | packages/tcip-web/frontend/src/components/ProjectPicker.test.tsx | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/components/ProjectPicker.tsx | The front door. | 4 | 2 |
 | packages/tcip-web/frontend/src/components/SeasonRail.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/SeasonRail.tsx | Season rail: the app's signature. | 0 | 2 |
-| packages/tcip-web/frontend/src/components/StatusBar.tsx | (none found) | 3 | 1 |
+| packages/tcip-web/frontend/src/components/StatementPanel.tsx | The generalized confirmation surface for a statement record: the agent states, the breeder confirms or withdraws, and a moved/superseded record re-renders what is on file rather than what was last shown. | 4 | 1 |
+| packages/tcip-web/frontend/src/components/StatusBar.test.tsx | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/components/StatusBar.tsx | (none found) | 3 | 2 |
 | packages/tcip-web/frontend/src/components/TabBanner.test.tsx | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/components/TabBanner.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 3 | 2 |
+| packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 4 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 1 |
 | packages/tcip-web/frontend/src/components/TopBar.tsx | (none found) | 3 | 1 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.ts | Mirror the active tab into the backend GUI state so view_gui_state reports the tab the human actually sees. | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts | (none found) | 3 | 0 |
-| packages/tcip-web/frontend/src/hooks/useBandSelection.ts | The breeder's band selection for the image `bandsInfo` describes, held once per band-set signature (the image's band names, in order) rather than per component, so a composite chosen in one tab is the one the other renders over the same band set, and a detour through a differently-banded image (or a plain colour photo) neither applies the old selection nor destroys it. | 3 | 2 |
+| packages/tcip-web/frontend/src/hooks/useBandSelection.ts | The breeder's band selection for the image `bandsInfo` describes, held once per band-set signature (the image's band names, in order) rather than per component, so a composite chosen in one tab is the one the other renders over the same band set, and a detour through a differently-banded image (or a plain colour photo) neither applies the old selection nor destroys it. | 2 | 3 |
 | packages/tcip-web/frontend/src/hooks/useCoverageGrid.ts | The coverage lattice for the open raster, fetched once the base serve shows the raster is larger than one display-bounded serve (Served-Size below the native dims). | 3 | 2 |
-| packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/hooks/useCoverageTracking.test.ts | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/hooks/useCoverageTracking.ts | Wires the CoverageTracker into the Annotate tab: resets on the (image, subject, date, dataset, grid) identity, hydrates from the stored record, feeds it viewport passes and the viewing context, and exposes the swept set for the minimap plus the Complete warning facts. | 6 | 2 |
 | packages/tcip-web/frontend/src/hooks/useDisclosure.ts | Open/closed state for a collapsible region, optionally remembered across sessions. | 0 | 4 |
 | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.test.tsx | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.ts | A staged agent request that follows the dataset selection until the breeder edits it. | 0 | 3 |
+| packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.ts | A staged agent request that follows the dataset selection until the breeder edits it. | 0 | 4 |
 | packages/tcip-web/frontend/src/hooks/useImageBands.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/hooks/useImageBands.ts | (none found) | 1 | 3 |
 | packages/tcip-web/frontend/src/hooks/useImageNav.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/hooks/useImageNav.ts | Single source of truth for image navigation. | 2 | 5 |
+| packages/tcip-web/frontend/src/hooks/useImageStatusHydrate.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/hooks/useImageStatusHydrate.ts | (none found) | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useKeyboardShortcuts.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/hooks/useKeyboardShortcuts.ts | (none found) | 0 | 3 |
-| packages/tcip-web/frontend/src/hooks/useOverviewBuild.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/hooks/useOverviewBuild.ts | (none found) | 1 | 2 |
-| packages/tcip-web/frontend/src/hooks/usePrefetchAdjacentImages.ts | (none found) | 3 | 2 |
+| packages/tcip-web/frontend/src/hooks/useOverviewBuild.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/hooks/useOverviewBuild.ts | (none found) | 2 | 2 |
+| packages/tcip-web/frontend/src/hooks/usePrefetchAdjacentImages.ts | (none found) | 4 | 2 |
 | packages/tcip-web/frontend/src/hooks/useRegionCompleteness.test.ts | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/hooks/useRegionCompleteness.ts | Wires the region-completeness store into the Annotate tab: fetches every subject's attestation record for the open raster, exposes the active subject's own complete cells separate from every other subject's, and posts a double-click toggle. | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useRegionServes.ts | The cell-aligned region serves the current viewport needs when the user zooms past the base bitmap's resolution on a large raster. | 6 | 2 |
 | packages/tcip-web/frontend/src/index.css.test.ts | Compiles index.css through PostCSS + Tailwind (same pipeline as the real build) and asserts the keyboard focus-visible ring rules exist on the shared component classes. | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/annotateFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/annotateFocus.ts | Drive the Annotate tab to a specific (subject, date, image, mode) in response to the agent's `annotate_focus` event. | 3 | 2 |
-| packages/tcip-web/frontend/src/lib/bandSelection.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/lib/bandSelection.ts | (none found) | 1 | 6 |
+| packages/tcip-web/frontend/src/lib/bandSelection.test.ts | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/lib/bandSelection.ts | (none found) | 2 | 7 |
 | packages/tcip-web/frontend/src/lib/canvasSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/canvasSync.ts | Live canvas-state sync: lets the agent see exactly what the canvas shows. | 3 | 4 |
 | packages/tcip-web/frontend/src/lib/coverage.test.ts | (none found) | 0 | 0 |
-| packages/tcip-web/frontend/src/lib/coverage.ts | Pure helpers over the coverage lattice a raster's grid route serves. | 1 | 8 |
+| packages/tcip-web/frontend/src/lib/coverage.ts | Pure helpers over the coverage lattice a raster's grid route serves. | 2 | 9 |
 | packages/tcip-web/frontend/src/lib/coverageTracker.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/lib/coverageTracker.ts | Session accumulator for the per-image view-coverage record. | 1 | 3 |
+| packages/tcip-web/frontend/src/lib/coverageTracker.ts | Session accumulator for the per-image view-coverage record. | 2 | 2 |
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.ts | Stop the browser's own ctrl+wheel page zoom over the app, so the canvas' zoom is the only zoom. | 0 | 2 |
 | packages/tcip-web/frontend/src/lib/datasetUiState.ts | Per-(project, date, subject/model) UI state, so switching dates/projects and returning lands you back where you were. | 3 | 3 |
-| packages/tcip-web/frontend/src/lib/editGeometry.test.ts | (none found) | 0 | 0 |
+| packages/tcip-web/frontend/src/lib/editGeometry.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/editGeometry.ts | Pure geometry for in-place box/polygon editing, shared by the Annotate and Review tabs' editors. | 1 | 2 |
-| packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 0 | 6 |
+| packages/tcip-web/frontend/src/lib/imageLoader.test.ts | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 1 | 7 |
+| packages/tcip-web/frontend/src/lib/imageStatus.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/lib/imageStatus.ts | (none found) | 1 | 4 |
 | packages/tcip-web/frontend/src/lib/labelSerde.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/labelSerde.ts | The single mapping between the unified name-based label file (one Annotation list per image) and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). | 1 | 3 |
-| packages/tcip-web/frontend/src/lib/openProject.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/lib/openProject.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/openProject.ts | Opening a workspace project = pointing the GUI at it (project root = dataset root) via /dataset/select. | 4 | 4 |
 | packages/tcip-web/frontend/src/lib/paths.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/paths.ts | Normalize a user-pasted filesystem path. | 0 | 1 |
+| packages/tcip-web/frontend/src/lib/paths.ts | Normalize a user-pasted filesystem path. | 1 | 6 |
 | packages/tcip-web/frontend/src/lib/polygonGeometry.test.ts | (none found) | 0 | 0 |
 | packages/tcip-web/frontend/src/lib/polygonGeometry.ts | Pure hit-testing helpers for the annotate canvas' geometry (polygons and points). | 0 | 3 |
 | packages/tcip-web/frontend/src/lib/recentProjects.ts | The last few projects the user opened, for the status-bar "project name" fast-track. | 0 | 2 |
 | packages/tcip-web/frontend/src/lib/reconnectingSocket.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/reconnectingSocket.ts | One reconnecting-WebSocket shape, shared by every socket this app opens. | 0 | 4 |
+| packages/tcip-web/frontend/src/lib/reconnectingSocket.ts | One reconnecting-WebSocket shape, shared by every socket this app opens. | 0 | 5 |
 | packages/tcip-web/frontend/src/lib/reviewColors.ts | (none found) | 0 | 4 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.ts | Drive the Review tab to a model's predictions on a specific frame/detection in response to the agent's `review_focus` event. | 2 | 3 |
 | packages/tcip-web/frontend/src/lib/reviewGeometry.ts | The single source of a review detection's geometry. | 1 | 0 |
-| packages/tcip-web/frontend/src/lib/runStatus.ts | Statuses a training run or a sweep never leaves, so a poll keyed on one can stop. | 1 | 2 |
-| packages/tcip-web/frontend/src/lib/viewGeometry.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/lib/runStatus.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/lib/runStatus.ts | Statuses a training run or a sweep never leaves, so a poll keyed on one can stop. | 1 | 3 |
+| packages/tcip-web/frontend/src/lib/statementFields.ts | Breeder-facing labels for every field a statement record carries. | 0 | 2 |
+| packages/tcip-web/frontend/src/lib/viewGeometry.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/viewGeometry.ts | Shared view math for the canvas: fit the view to a pixel rect and clamp pan offsets. | 2 | 7 |
 | packages/tcip-web/frontend/src/main.tsx | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/store/index.ts | (none found) | 2 | 49 |  <!-- queued: P5-238 merge-or-split -->
+| packages/tcip-web/frontend/src/store/guiStateShape.test.ts | (none found) | 2 | 0 |
+| packages/tcip-web/frontend/src/store/index.ts | (none found) | 3 | 54 |  <!-- queued: P5-238 merge-or-split -->
 | packages/tcip-web/frontend/src/store/mergeSnapshot.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/store/store.test.ts | (none found) | 2 | 0 |
-| packages/tcip-web/frontend/src/store/tabRestore.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/store/tabRestore.test.ts | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/store/terminalOpenPolicy.test.ts | (none found) | 1 | 0 |
-| packages/tcip-web/frontend/src/store/types.ts | Types mirroring the Python backend's GuiState and the name-based label schema. | 1 | 27 |
+| packages/tcip-web/frontend/src/store/types.ts | Types mirroring the Python backend's GuiState and the name-based label schema. | 1 | 29 |
 | packages/tcip-web/frontend/src/tabs/AnnotateTab.test.tsx | (none found) | 5 | 0 |
-| packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx | (none found) | 21 | 2 |  <!-- queued: P5-236 merge-or-split -->
+| packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx | (none found) | 26 | 2 |  <!-- queued: P5-236 merge-or-split -->
 | packages/tcip-web/frontend/src/tabs/InferenceTab.test.tsx | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/tabs/InferenceTab.tsx | (none found) | 2 | 2 |
 | packages/tcip-web/frontend/src/tabs/MetaTab.tsx | (none found) | 4 | 1 |
 | packages/tcip-web/frontend/src/tabs/ResultsTab.test.tsx | (none found) | 4 | 0 |
-| packages/tcip-web/frontend/src/tabs/ResultsTab.tsx | (none found) | 3 | 2 |
+| packages/tcip-web/frontend/src/tabs/ResultsTab.tsx | (none found) | 7 | 2 |
 | packages/tcip-web/frontend/src/tabs/ReviewTab.test.tsx | (none found) | 6 | 0 |
-| packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 22 | 2 |  <!-- queued: P5-237 merge-or-split -->
+| packages/tcip-web/frontend/src/tabs/ReviewTab.tsx | (none found) | 24 | 2 |  <!-- queued: P5-237 merge-or-split -->
 | packages/tcip-web/frontend/src/tabs/RunMonitorLayout.tsx | The shell the Training and Tuning tabs share: a fixed-width scrolling sidebar of runs beside a detail region. | 0 | 2 |
 | packages/tcip-web/frontend/src/tabs/TrainingTab.tsx | (none found) | 9 | 1 |
 | packages/tcip-web/frontend/src/tabs/TuningTab.tsx | (none found) | 9 | 1 |
@@ -352,19 +370,27 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
+| scripts/_store_bootstrap.py | The whole store catalogue in one import, and which roots a project's records live in. | 33 | 2 |
+| scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 1 | 0 |
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 7 | 0 |
+| scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
+| scripts/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 3 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
+| scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 1 | 0 |
+| scripts/conform_project_site.py | Write or correct one project's authored site: the record ``init_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 1 | 0 |
 | scripts/conform_registry_metrics_source.py | Conform a project's registry entries to carry ``metrics_source``, for an entry registered before the field existed. | 2 | 0 |
 | scripts/conform_view_coverage_viewing.py | Conform a dataset's stored `view_coverage` records to the current `CoverageViewing` shape. | 2 | 0 |
 | scripts/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
-| scripts/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 1 | 0 |
-| scripts/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 4 | 0 |
+| scripts/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 2 | 0 |
+| scripts/doctor.py | Data-state doctor: scan a live project for state inconsistencies code audits can't see. | 8 | 0 |
+| scripts/drop_annotation_stats_image_status.py | Conform a project's ``annotation_stats`` record to drop its dead ``image_status`` key. | 1 | 0 |
 | scripts/drop_trait_spec_provenance.py | Conform a project's trait-spec records to drop the retired free-text ``provenance`` field, and remove the stale copies an earlier YAML-to-record conform step left behind. | 1 | 0 |
+| scripts/export_store.py | Write a root's database-held records and logs back out as files. | 1 | 0 |
 | scripts/foreground_fn_candidates.py | Compute foreground-only high-confidence FN candidates per image. | 1 | 0 |
 | scripts/gate_baseline.py | Parse ci.yml's jobs and run the steps it declares, so a local pass means CI would pass too. | 0 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
-| scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 4 | 0 |
+| scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
@@ -378,10 +404,11 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/verify_citations.py | Check that literature citations point at real code, real papers, and real sentences. | 0 | 0 |
 | scripts/verify_claims.py | List every claim-shaped sentence this change *adds* to comments and docstrings. | 0 | 0 |
 | scripts/verify_doc_examples.py | Verify that code examples in skills and source docstrings actually work. | 0 | 0 |
-| scripts/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain SKILL.md that is not in crops.yml. | 0 | 0 |
+| scripts/verify_skill_tools.py | Guardrail: hold every tool name in agent-facing prose to the registry. | 1 | 0 |
+| scripts/verify_skill_traits.py | Guardrail: flag every trait-like token in a crop/domain SKILL.md that is not in crops.yml. | 1 | 0 |
 | scripts/watch_agent_chat.py | Read the in-app TCIP agent chat from the orchestrating Claude Code session. | 0 | 0 |
 
-## Package-level dependency rules holding at HEAD 8e21f9df
+## Package-level dependency rules holding at HEAD 2670cebf
 
 The following sentences are checked against every in-repo Python import edge in `module-inventory-head.json` (an edge is counted only when both the importing file and the imported file resolve to a file inside this repo; stdlib and third-party imports are excluded by `build_module_inventory.py`, see docstring at `docs/audit/phase0/module-inventory/build_module_inventory.py:9-20`).
 
@@ -403,7 +430,7 @@ Non-zero cross-package edge counts at HEAD:
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the four Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`docs/audit/phase0/module-inventory/build_module_inventory.py:301-321`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (99)
+## Modules with zero importers (121)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `scripts/` invoked as processes rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -428,23 +455,28 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web | packages/tcip-web/src/tcip_web/__init__.py |
 | tcip-web | packages/tcip-web/src/tcip_web/__main__.py |
 | tcip-web | packages/tcip-web/src/tcip_web/agent_bash_guard.py |
-| tcip-web | packages/tcip-web/src/tcip_web/agent_learning_capture.py |
 | tcip-web | packages/tcip-web/src/tcip_web/agent_powershell_guard.py |
 | tcip-web | packages/tcip-web/src/tcip_web/agent_session_start.py |
+| tcip-web-frontend | packages/tcip-web/frontend/src/api/classes.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/client.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/api/devProxy.generated.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/http.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/inference.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/api/streams.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/training.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/api/ws.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/AnnotateToolbar.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/BandPicker.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/Canvas/CanvasStage.test.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/components/Canvas/CoverageMinimap.test.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/components/Canvas/zoom.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/EmbeddedTool.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/ErrorBoundary.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/HelpOverlay.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/ProjectBreadcrumb.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/ProjectPicker.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/SeasonRail.test.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/components/StatusBar.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TabBanner.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/components/TerminalRail.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts |
@@ -453,6 +485,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useEditableAgentRequest.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useImageBands.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useImageNav.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useImageStatusHydrate.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useKeyboardShortcuts.test.tsx |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useOverviewBuild.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/hooks/useRegionCompleteness.test.ts |
@@ -465,14 +498,18 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/editGeometry.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/imageLoader.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/imageStatus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/labelSerde.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/openProject.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/paths.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/polygonGeometry.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/reconnectingSocket.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewGeometry.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/runStatus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/viewGeometry.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/main.tsx |
+| tcip-web-frontend | packages/tcip-web/frontend/src/store/guiStateShape.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/store/mergeSnapshot.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/store/store.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/store/tabRestore.test.ts |
@@ -484,13 +521,22 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/agentPrompts.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/trainingMetrics.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/test/setup.ts |
+| scripts | scripts/adopt_store.py |
 | scripts | scripts/calibrate_operating_point.py |
+| scripts | scripts/check_architecture_citations.py |
+| scripts | scripts/check_architecture_doc.py |
 | scripts | scripts/check_dataset_identity.py |
 | scripts | scripts/compute_disagreements.py |
+| scripts | scripts/conform_metrics_marker.py |
+| scripts | scripts/conform_project_site.py |
+| scripts | scripts/conform_registry_metrics_source.py |
 | scripts | scripts/conform_view_coverage_viewing.py |
 | scripts | scripts/cross_family_ask.py |
 | scripts | scripts/distill_learnings.py |
 | scripts | scripts/doctor.py |
+| scripts | scripts/drop_annotation_stats_image_status.py |
+| scripts | scripts/drop_trait_spec_provenance.py |
+| scripts | scripts/export_store.py |
 | scripts | scripts/foreground_fn_candidates.py |
 | scripts | scripts/gate_baseline.py |
 | scripts | scripts/generate_frontend_routes.py |
@@ -508,6 +554,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/verify_citations.py |
 | scripts | scripts/verify_claims.py |
 | scripts | scripts/verify_doc_examples.py |
+| scripts | scripts/verify_skill_tools.py |
 | scripts | scripts/verify_skill_traits.py |
 | scripts | scripts/watch_agent_chat.py |
 
