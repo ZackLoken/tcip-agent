@@ -1062,6 +1062,26 @@ def test_read_annotations_versioned_raises_on_invalid_utf8_bytes(tmp_path: Path)
         read_annotations_versioned(key)
 
 
+def test_load_label_document_reads_a_document_carrying_a_utf8_bom(tmp_path: Path) -> None:
+    """A UTF-8 byte-order mark encodes the same text as the same document without one; a document
+    written under a tool that stamps one must still read."""
+    from tcip_annotation.json_io import load_label_document
+
+    path = tmp_path / "a.json"
+    path.write_bytes(b"\xef\xbb\xbf" + b'{"annotations": []}')
+    assert load_label_document(path) == {"annotations": []}
+
+
+def test_read_annotations_versioned_reads_a_document_carrying_a_utf8_bom(tmp_path: Path) -> None:
+    import tcip_store
+    from tcip_annotation.json_io import annotation_record_key, read_annotations_versioned
+
+    key = annotation_record_key(tmp_path, "a")
+    tcip_store.put_blob(key, b"\xef\xbb\xbf" + b'{"annotations": []}')
+    annotations, _ = read_annotations_versioned(key)
+    assert annotations == []
+
+
 def test_read_annotations_versioned_reads_an_absent_document_as_empty(tmp_path: Path) -> None:
     from tcip_store import Version
     from tcip_annotation.json_io import annotation_record_key, read_annotations_versioned
@@ -1103,6 +1123,17 @@ def test_a_box_that_would_round_to_zero_extent_is_refused_at_write(tmp_path: Pat
     document it refuses."""
     path = tmp_path / "a.json"
     sliver = Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 1.003, 1.003))
+    with pytest.raises(ValueError):
+        write_annotations(path, [sliver], 10, 10)
+
+
+def test_a_polygon_that_would_round_to_a_zero_extent_box_is_refused_at_write(tmp_path: Path) -> None:
+    """The polygon branch is checked against its rounded, stored box the same as the box branch:
+    a sliver whose derived box collapses to nothing at the stored grid must never be written."""
+    path = tmp_path / "a.json"
+    sliver = Annotation(subject="catkin", geometry=Polygon(
+        [[(1.0, 1.0), (1.002, 1.0), (1.002, 1.002)]]
+    ))
     with pytest.raises(ValueError):
         write_annotations(path, [sliver], 10, 10)
 
