@@ -36,8 +36,12 @@ def _composite_route_stretch(band, mode, orig_dtype):
     if mode == "none":
         if np.issubdtype(orig_dtype, np.integer):
             denom = float(np.iinfo(orig_dtype).max) or 1.0
+        elif raw.max() > 0:
+            denom = float(raw.max())
+        elif raw.min() < 0:
+            denom = float(-raw.min())
         else:
-            denom = float(raw.max()) or 1.0
+            denom = 1.0
         out = raw / denom * 255.0
     elif mode == "percent_clip":
         lo, hi = np.percentile(raw, [2.0, 98.0])
@@ -80,8 +84,6 @@ BANDS = _bands()
 @pytest.mark.parametrize("mode", STRETCH_MODES)
 @pytest.mark.parametrize("name", sorted(BANDS))
 def test_stretch_band_is_byte_identical_to_the_composite_display_expression(name, mode):
-    if name == "float32_negative" and mode == "none":
-        pytest.skip("covered by its own independent expectation, not the helper's own arithmetic")
     band = BANDS[name]
     assert np.array_equal(stretch_band(band, mode, band.dtype),
                           _composite_route_stretch(band, mode, band.dtype))
@@ -92,12 +94,6 @@ def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
     minimum), so every pixel is negative before the clip and the render is uniformly black."""
     band = BANDS["float32_negative"]
     assert np.array_equal(stretch_band(band, "none", band.dtype), np.zeros_like(band, dtype=np.uint8))
-
-
-def test_a_none_stretch_of_a_mixed_sign_float_band_still_divides_by_its_positive_maximum():
-    band = BANDS["float32_mixed_sign"]
-    assert np.array_equal(stretch_band(band, "none", band.dtype),
-                          _composite_route_stretch(band, "none", band.dtype))
 
 
 @pytest.mark.parametrize("name", sorted(BANDS))
@@ -192,10 +188,15 @@ def test_full_scale_denominator_is_the_dtype_ceiling_for_an_integer_raster():
     assert full_scale_denominator(BANDS["uint8"], np.dtype("uint8")) == 255.0
 
 
-def test_full_scale_denominator_is_a_float_bands_own_maximum():
+def test_full_scale_denominator_is_a_float_bands_own_maximum_when_positive():
     band = BANDS["float32"]
     assert full_scale_denominator(band, band.dtype) == float(band.max())
     assert full_scale_denominator(BANDS["float32_zeros"], np.dtype("float32")) == 1.0
+
+
+def test_full_scale_denominator_is_the_magnitude_of_the_minimum_for_a_non_positive_band():
+    band = BANDS["float32_negative"]
+    assert full_scale_denominator(band, band.dtype) == float(-band.min())
 
 
 def _multiband_strip_tiff(path: Path, *, height: int = 24, width: int = 20,
