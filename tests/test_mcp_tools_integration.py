@@ -79,6 +79,25 @@ class TestReadAnnotations:
         assert ann["rings"] == [[[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]],
                                 [[60.0, 10.0], [80.0, 10.0], [80.0, 30.0]]]
 
+    def test_forcing_fmt_coco_over_a_per_image_document_is_an_error_not_a_silent_zero(self, tmp_path):
+        """A caller-supplied fmt is a claim the document must satisfy: forcing 'coco' over the
+        canonical per-image schema must not answer an empty, error-free read."""
+        from tcip_annotation import json_io
+        from tcip_annotation.state import Annotation, BBox
+        from tcip_mcp.tools.annotation_tools import read_annotations
+
+        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
+        images_dir.mkdir()
+        labels_dir.mkdir()
+        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
+        json_io.write_annotations(
+            str(labels_dir / "a.json"),
+            [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 100, 100)
+
+        result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
+        assert "error" in result
+        assert "labels" not in result
+
 
 # ── Evaluate predictions integration test ───────────────────────────────────
 

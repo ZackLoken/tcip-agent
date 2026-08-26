@@ -85,6 +85,22 @@ def detect_format(path: str) -> AnnotFormat:
     )
 
 
+def _shape_markers(data: dict) -> AnnotFormat | None:
+    """``"coco"`` / ``"json"`` from a document's own keys, or ``None`` if it carries neither.
+
+    A dataset-level COCO carries an ``images`` list and/or ``categories``; a per-image file
+    carries a singular ``image`` string. Both use ``annotations``, so the COCO markers are
+    checked first. The one classification :func:`_detect_json_format` and :func:`load_annotations`
+    both read, so detecting a document's format and checking a caller's claim against it can
+    never disagree about what shape a document is.
+    """
+    if "images" in data or "categories" in data:
+        return "coco"
+    if ANNOTATIONS_KEY in data:
+        return "json"
+    return None
+
+
 def _detect_json_format(path: Path) -> AnnotFormat | None:
     """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if the path is missing or is a
     decodable dict that is neither. Raises on the old ``objects`` shape rather than sniffing it
@@ -103,13 +119,7 @@ def _detect_json_format(path: Path) -> AnnotFormat | None:
             f"to the name-based per-image schema first; reading it as-is would yield zero "
             f"annotations and train on fabricated empty negatives."
         )
-    # A dataset-level COCO carries an ``images`` list and/or ``categories``; a per-image file carries
-    # a singular ``image`` string. Both use ``annotations``, so the COCO markers are checked first.
-    if "images" in data or "categories" in data:
-        return "coco"
-    if ANNOTATIONS_KEY in data:
-        return "json"
-    return None
+    return _shape_markers(data)
 
 
 # ── COCO JSON parsing (names) ───────────────────────────────────────────────
@@ -301,9 +311,25 @@ def load_annotations(
     For COCO, either ``image_id`` or ``file_name`` must identify the target image. A present,
     unreadable document raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, from
     ``detect_format`` when ``fmt`` is omitted or from ``read_annotations`` itself.
+
+    A caller-supplied ``fmt`` is a claim the document must satisfy, not a bypass of detection: a
+    document whose own keys carry the other format's markers (a per-image document's bare
+    ``annotations`` key asked for as ``coco``, or a COCO document's ``images``/``categories`` keys
+    asked for as ``json``) is refused, naming the format asked for and the shape the document's
+    keys actually carry, rather than silently answering an empty read.
     """
     if fmt is None:
         fmt = detect_format(path)
+    else:
+        from tcip_annotation.json_io import load_label_document
+
+        shape = _shape_markers(load_label_document(path))
+        if shape is not None and shape != fmt:
+            raise ValueError(
+                f"{path} was asked to be read as {fmt!r}, but its keys carry the {shape!r} shape "
+                f"({'an images/categories key' if shape == 'coco' else 'a bare annotations key with neither'}): "
+                "a caller-supplied fmt must match what the document's own keys carry."
+            )
     if fmt == "json":
         return read_annotations(path)
     if fmt == "coco":
