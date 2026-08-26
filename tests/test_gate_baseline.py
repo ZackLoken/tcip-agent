@@ -100,7 +100,9 @@ def test_every_stage_key_is_unique_per_job_step_and_leg():
 
 
 def test_resolve_git_bash_prefers_the_derived_path_when_it_exists(tmp_path, monkeypatch):
+    """The Windows derivation, exercised on any host by pinning the platform name."""
     gate_baseline = _load()
+    monkeypatch.setattr(gate_baseline.os, "name", "nt")
     exec_path = tmp_path / "Git" / "mingw64" / "libexec" / "git-core"
     exec_path.mkdir(parents=True)
     bash_exe = exec_path.parent.parent / "bin" / "bash.exe"
