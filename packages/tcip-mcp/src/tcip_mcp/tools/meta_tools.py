@@ -112,6 +112,13 @@ def _report_path(project_path: str, report_id: str) -> Path:
     return root.joinpath(*_REPORT_DOC.relative_path(str(root), (report_id,)).parts)
 
 
+def _path_if_written(path: Path) -> str | None:
+    """The document's file path when the bound backend wrote one (the file backend), else None:
+    under the database backend the record lives in the store and no such file exists, so a path
+    answered regardless would name a file a caller cannot open."""
+    return str(path) if path.is_file() else None
+
+
 def _retrospective_path(project_path: str, project_id: str) -> Path:
     root = Path(project_path)
     return root.joinpath(*_RETROSPECTIVE_DOC.relative_path(str(root), (project_id,)).parts)
@@ -278,14 +285,13 @@ def claude_reports(
     tcip_store.replace(
         friction_report_key(project_path, report_id), entry, expect=Version.ABSENT,
     )
-    report_path = _report_path(project_path, report_id)
-
     from tcip_mcp.project_status import record_report
 
     record_report(project_path)
 
     return {
-        "report_path": str(report_path),
+        "report_id": report_id,
+        "report_path": _path_if_written(_report_path(project_path, report_id)),
         "category": category,
         "timestamp": entry["timestamp"],
         "user_disagreement": user_disagreement,
@@ -361,7 +367,8 @@ def _load_reports(
 
         results.append({
             "file": filename,
-            "path": str(_report_path(project_path, document.name)),
+            "report_id": document.name,
+            "path": _path_if_written(_report_path(project_path, document.name)),
             "timestamp": entry.get("timestamp"),
             "category": entry.get("category", ""),
             "detail": entry.get("detail", ""),
@@ -474,7 +481,7 @@ def project_retrospective(
     record_retrospective(project_path, project_id, retro_path)
 
     return {
-        "retrospective_path": str(retro_path),
+        "retrospective_path": _path_if_written(retro_path),
         "project_id": project_id,
         "timestamp": now.isoformat(),
         "appended_to_existing": appended,
@@ -522,7 +529,7 @@ def _load_retrospectives(
             continue
         results.append({
             "project_id": document.name,
-            "path": str(_retrospective_path(project_path, document.name)),
+            "path": _path_if_written(_retrospective_path(project_path, document.name)),
             "timestamp": document.timestamp,
             "content": content,
         })

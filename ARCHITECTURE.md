@@ -633,10 +633,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `claude_reports` | `meta_tools.py:227` | yes | Log structured friction when you get stuck, confused, or surprised. |
-| `load_project_memory` | `meta_tools.py:297` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
-| `project_retrospective` | `meta_tools.py:383` | yes | Write an end-of-project retrospective to markdown. |
-| `record_distillation_pass` | `meta_tools.py:486` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
+| `claude_reports` | `meta_tools.py:234` | yes | Log structured friction when you get stuck, confused, or surprised. |
+| `load_project_memory` | `meta_tools.py:303` | yes | Read one project-memory corpus into context so context isn't lost between sessions. |
+| `project_retrospective` | `meta_tools.py:390` | yes | Write an end-of-project retrospective to markdown. |
+| `record_distillation_pass` | `meta_tools.py:493` | yes | Record that you reviewed this project's friction/retrospectives (e.g. via |
 
 ### model_tools.py (3 tools)
 
@@ -1737,7 +1737,7 @@ Phase 3 verdict: single.
 ## S12. Friction reports and retrospectives under .tcip/
 
 Must agree: the GUI reader finds, decodes and orders what the MCP writer produced.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:174` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, line 211, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py:181` (`def report_documents(`, the one enumeration, decode and ordering of the friction reports, with `retrospective_documents`, line 211, doing the same for the retrospectives). Both stores are records, enumerated through the seam and ordered by the timestamp each document states (a report's own `timestamp` field, a retrospective's own `## Retrospective:` section headers), never by when the bytes landed. A report is one whole JSON document, not a line of a stream.
 Side B: `packages/tcip-web/src/tcip_web/routes/meta.py:40` and `:62` (both routes import those MCP-side enumerators directly and present the rows they return, rather than walking a directory of their own).
 Phase 3 verdict: single.
 
