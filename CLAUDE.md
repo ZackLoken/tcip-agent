@@ -184,12 +184,11 @@ snapshots, is a global rule now; see global `CLAUDE.md`, not restated here.)
   toolkit, docs that match the code) and must guide the breeder without stranding them. The
   breeder's only surface is the browser GUI, and their clarity and flow through it are the product
   from their side, same weight as the agent's own reasoning surface.
-- A subject is not a trait. `subject` names an object class that must be isolated: old code
-  or docs may still say `campaign` or `annotation_type`, both pre-rename terms for `subject`, backend
-  and web layer alike. On disk, labels are one file per image
-  (`annotations/<date>/<stem>.json`, see `dataset_layout.py`) holding every subject's annotation
-  records by name; `subject` is a field inside each record, resolved through the dataset's
-  `classes.json` registry, not a path segment. Sometimes a subject is a trait's own object
+- A subject is not a trait. `subject` names an object class that must be isolated. On disk,
+  labels are one file per image (`annotations/<date>/<stem>.json`, see `dataset_layout.py`)
+  holding every subject's annotation records by name; `subject` is a field inside each record,
+  resolved through the dataset's `classes.json` registry, not a path segment. Sometimes a
+  subject is a trait's own object
   (catkins, for `catkin_50per_date`); often it is an enabling object no trait names: a *bush*
   isolated so anything can be aggregated per plant, a *leaf* isolated before leaf area is measured.
   So subject names are not governed by `crops.yml` and must not be validated against it.

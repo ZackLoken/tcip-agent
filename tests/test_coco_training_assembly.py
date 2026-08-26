@@ -563,7 +563,7 @@ def test_external_coco_zero_annotation_image_still_needs_a_human_complete(tmp_pa
     assert ds.sample_counts["confirmed_negative"] == 0
 
 
-def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
+def test_a_confirmation_does_not_leak_across_subjects(tmp_path):
     """A Complete is a statement about one trait. Re-applying it elsewhere trains an image full of
     bushes as containing no bushes."""
     from tcip_mcp.pipelines.data.datasets import build_dataset, confirmed_negative_names
@@ -572,7 +572,7 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
     labels = tmp_path / "annotations"
     labels.mkdir(parents=True)
     _make_images(images, ["ann", "shared"])
-    # One per-image file holds every subject now; the campaign is the subject name, not a path segment.
+    # Every subject's annotation records share one per-image file; subject is a field in the record.
     json_io.write_annotations(labels / "ann.json",
                               [_box(4, 4, 12, 12, subject="catkin"),
                                _box(4, 4, 12, 12, subject="bush")], 100, 100, keep_empty=True)
@@ -589,7 +589,7 @@ def test_a_confirmation_does_not_leak_across_trait_campaigns(tmp_path):
                          subject="bush").stems == ["ann"]
 
 
-def test_unresolvable_campaign_refuses_rather_than_dropping_negatives(tmp_path):
+def test_unresolvable_subject_refuses_rather_than_dropping_negatives(tmp_path):
     """Silently returning nothing would discard every hard negative the review loop harvested.
 
     A flat ``labels/`` dir (the shape ``make_splits(materialize=True)`` emits) can't name its
