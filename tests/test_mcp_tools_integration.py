@@ -98,6 +98,44 @@ class TestReadAnnotations:
         assert "error" in result
         assert "labels" not in result
 
+    def test_forcing_fmt_coco_over_a_labelme_shaped_document_is_an_error_not_a_silent_zero(
+        self, tmp_path,
+    ):
+        """A document carrying neither the per-image nor the COCO shape's markers satisfies no
+        stated fmt: it must be refused, not read as a store with zero annotations."""
+        from tcip_mcp.tools.annotation_tools import read_annotations
+
+        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
+        images_dir.mkdir()
+        labels_dir.mkdir()
+        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
+        (labels_dir / "a.json").write_text(
+            '{"shapes": [{"label": "catkin", "points": [[1, 1], [8, 8]]}]}'
+        )
+
+        result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
+        assert "error" in result
+        assert "labels" not in result
+
+    def test_forcing_fmt_coco_over_an_old_objects_schema_document_is_an_error_not_a_silent_zero(
+        self, tmp_path,
+    ):
+        """The old 'objects'-keyed schema carries neither current shape's markers either, and
+        must be refused the same way, never read in place as an empty COCO store."""
+        from tcip_mcp.tools.annotation_tools import read_annotations
+
+        images_dir, labels_dir = tmp_path / "images", tmp_path / "annotations"
+        images_dir.mkdir()
+        labels_dir.mkdir()
+        Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
+        (labels_dir / "a.json").write_text(
+            '{"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}'
+        )
+
+        result = read_annotations(str(images_dir / "a.jpg"), fmt="coco")
+        assert "error" in result
+        assert "labels" not in result
+
 
 # ── Evaluate predictions integration test ───────────────────────────────────
 

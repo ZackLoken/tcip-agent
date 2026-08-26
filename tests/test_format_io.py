@@ -286,3 +286,32 @@ def test_load_annotations_accepts_a_per_image_document_declared_as_json(tmp_path
     anns = load_annotations(str(js), fmt="json")
     assert len(anns) == 1
     assert anns[0].subject == "catkin"
+
+
+def test_load_annotations_refuses_a_document_carrying_neither_shapes_markers(tmp_path):
+    """A document whose keys are neither the per-image nor the COCO shape satisfies no stated
+    fmt: it is refused under every fmt asked of it, not read as an empty store."""
+    odd = tmp_path / "labels.json"
+    odd.write_text(json.dumps({"shapes": [{"label": "catkin", "points": [[1, 1], [8, 8]]}]}))
+    with pytest.raises(ValueError, match="neither"):
+        load_annotations(str(odd), fmt="coco", file_name="a.jpg")
+    with pytest.raises(ValueError, match="neither"):
+        load_annotations(str(odd), fmt="json")
+
+
+def test_load_annotations_refuses_an_old_objects_schema_document_under_a_stated_fmt(tmp_path):
+    """The old 'objects'-keyed schema is refused the same way a format-free read refuses it,
+    rather than answering an empty result because it carries neither current shape's markers."""
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}))
+    with pytest.raises(ValueError, match="objects"):
+        load_annotations(str(old), fmt="json")
+    with pytest.raises(ValueError, match="objects"):
+        load_annotations(str(old), fmt="coco", file_name="a.jpg")
+
+
+def test_load_annotations_a_missing_path_stays_absent_under_a_stated_fmt(tmp_path):
+    """A stated fmt is a claim checked against a present document's own shape; a path that does
+    not exist has no shape to check and reads exactly as an omitted fmt would."""
+    missing = tmp_path / "nothing_here.json"
+    assert load_annotations(str(missing), fmt="json") == []

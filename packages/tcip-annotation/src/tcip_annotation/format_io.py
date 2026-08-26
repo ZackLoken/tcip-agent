@@ -92,8 +92,8 @@ def _shape_markers(data: dict) -> AnnotFormat | None:
 
     A dataset-level COCO carries an ``images`` list and/or ``categories``; a per-image file
     carries a singular ``image`` string. Both use ``annotations``, so the COCO markers are
-    checked first. The one classification :func:`_detect_json_format` and :func:`load_annotations`
-    both read, so detecting a document's format and checking a caller's claim against it can
+    checked first. Read only through :func:`_detect_json_format`, the one classification a
+    format-free detection and a caller's stated-``fmt`` claim both go through, so the two can
     never disagree about what shape a document is.
     """
     if "images" in data or "categories" in data:
@@ -301,6 +301,13 @@ def write_coco(
 # ── dispatch ────────────────────────────────────────────────────────────────
 
 
+_SHAPE_DESCRIPTIONS: dict[AnnotFormat | None, str] = {
+    "coco": "an images/categories key",
+    "json": "a bare annotations key",
+    None: "neither an images/categories key nor an annotations key",
+}
+
+
 def load_annotations(
     path: str,
     *,
@@ -312,25 +319,27 @@ def load_annotations(
 
     For COCO, either ``image_id`` or ``file_name`` must identify the target image. A present,
     unreadable document raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, from
-    ``detect_format`` when ``fmt`` is omitted or from ``read_annotations`` itself.
+    ``detect_format`` when ``fmt`` is omitted or from the claim check or ``read_annotations``
+    below when it is stated.
 
-    A caller-supplied ``fmt`` is a claim the document must satisfy, not a bypass of detection: a
-    document whose own keys carry the other format's markers (a per-image document's bare
-    ``annotations`` key asked for as ``coco``, or a COCO document's ``images``/``categories`` keys
-    asked for as ``json``) is refused, naming the format asked for and the shape the document's
-    keys actually carry, rather than silently answering an empty read.
+    A caller-supplied ``fmt`` is a claim the document must satisfy, not a bypass of detection,
+    checked through the same :func:`_detect_json_format` a format-free call resolves through (the
+    old ``objects`` schema included, refused there rather than sniffed): a present document whose
+    keys carry the other format's markers, or neither format's, is refused, naming the format
+    asked for and the shape its keys actually carry, rather than silently answering an empty
+    read. A missing path is not checked against the claim at all; it stays ``detect_format``'s own
+    absent-not-broken distinction and reaches ``read_annotations``/the COCO parser below exactly
+    as an omitted ``fmt`` would.
     """
     if fmt is None:
         fmt = detect_format(path)
-    else:
-        from tcip_annotation.json_io import load_label_document
-
-        shape = _shape_markers(load_label_document(path))
-        if shape is not None and shape != fmt:
+    elif Path(path).is_file():
+        shape = _detect_json_format(Path(path))
+        if shape != fmt:
             raise ValueError(
-                f"{path} was asked to be read as {fmt!r}, but its keys carry the {shape!r} shape "
-                f"({'an images/categories key' if shape == 'coco' else 'a bare annotations key with neither'}): "
-                "a caller-supplied fmt must match what the document's own keys carry."
+                f"{path} was asked to be read as {fmt!r}, but its keys carry "
+                f"{_SHAPE_DESCRIPTIONS[shape]}: a caller-supplied fmt must match what the "
+                "document's own keys carry."
             )
     if fmt == "json":
         return read_annotations(path)
