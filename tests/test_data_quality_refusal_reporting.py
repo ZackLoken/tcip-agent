@@ -134,7 +134,8 @@ def test_a_store_mixing_shapes_is_reported_invalid_even_when_a_coco_file_sorts_f
 
     result = validate_data_quality(str(root))
 
-    assert result["format"] == "coco"  # the informational summary field: the first file's shape
+    # format names every distinct shape present, not the first-sorted file's shape alone.
+    assert sorted(result["format"]) == ["coco", "json"]
     errors = [i for i in result["issues"] if i["level"] == "error"]
     assert len(errors) == 1
     assert Path(errors[0]["file"]).stem == "1_orphan"
@@ -197,6 +198,48 @@ def test_a_malformed_root_label_candidate_is_reported_instead_of_discarded(tmp_p
     assert len(errors) == 1
     assert Path(errors[0]["file"]).name == "annotations.json"
     assert result["is_valid"] is False
+
+
+def test_a_root_coco_candidate_sits_beside_the_per_image_tree_not_in_place_of_it(tmp_path: Path):
+    """A root-level assembled label document is one more present label, never a replacement: two
+    unconfirmed empty per-image labels stay reported even when a root candidate is also present."""
+    root = tmp_path / "ds"
+    labels_dir = root / "annotations" / DATE
+    labels_dir.mkdir(parents=True)
+    for stem in ("plotA_0_0", "plotB_0_0"):
+        _write_image(root / "images" / DATE / f"{stem}.jpg", 96, 64)
+        json_io.write_annotations(labels_dir / f"{stem}.json", [], 96, 64, keep_empty=True)
+    (root / "annotations.json").write_text(json.dumps({
+        "images": [], "annotations": [], "categories": [{"id": 1, "name": "catkin"}],
+    }), encoding="utf-8")
+
+    result = validate_data_quality(str(root))
+
+    assert result["total_labels"] == 3
+    errors = [i for i in result["issues"] if i["level"] == "error"]
+    assert {Path(e["file"]).stem for e in errors} == {"plotA_0_0", "plotB_0_0"}
+    assert result["is_valid"] is False
+
+
+def test_an_npz_captures_confirmed_negative_is_recognized(tmp_path: Path):
+    """The confirmed-negative name is resolved through the layout's own extension set, not the
+    six-extension list an ``.npz`` capture falls outside of."""
+    from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket, status_records
+
+    root = tmp_path / "ds"
+    labels_dir = root / "annotations" / DATE
+    labels_dir.mkdir(parents=True)
+    (root / "images" / DATE).mkdir(parents=True)
+    (root / "images" / DATE / "plotA_0_0.npz").write_bytes(b"\x00")
+    json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 8, 8, keep_empty=True)
+    replace_image_status_store(root, {
+        status_bucket("catkin", DATE): status_records(
+            {"plotA_0_0.npz": "negative"}, recorded_by="user:breeder"),
+    })
+
+    result = validate_data_quality(str(root))
+
+    assert not any("confirmed negative" in i["message"] for i in result["issues"])
 
 
 def test_reported_subjects_are_the_ones_present_in_the_label_files(tmp_path: Path):

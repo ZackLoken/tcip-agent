@@ -18,6 +18,8 @@ from tcip_mcp.dataset_layout import (
     annotation_dir,
     annotation_path,
     image_dir,
+    image_status_key,
+    replace_image_status_store,
     status_bucket,
     status_records,
 )
@@ -44,10 +46,15 @@ def _project(tmp_path: Path) -> Path:
     json_io.write_annotations(ann / "IMG_C.json",
                               [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32)
     # Scoped by subject/date: a confirmation belongs to the subject it was made in.
-    (state / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", "2026-02-11"): status_records(
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
+        status_bucket("catkin", "2026-02-11"): status_records(
             {"IMG_A.JPG": "negative", "IMG_B.JPG": "unannotated", "IMG_C.JPG": "negative"},
-            recorded_by="user:breeder")}))
+            recorded_by="user:breeder"),
+    })
     return root
 
 
@@ -55,10 +62,11 @@ def _run(root: Path, *, file_layout: bool = False):
     """Run the doctor against ``root``.
 
     ``file_layout=True`` bound to the file backend on purpose: that caller's fixture wrote
-    ``image_status.json``/``region_completeness.json``/``registry.json`` straight to disk, and
-    the check under test reads that same file layout directly, the exact case
-    ``staleness_findings`` reports as invalid once a database also holds the root, so the
-    subprocess is pinned to file regardless of whatever backend the outer test run selects.
+    ``image_status.json``/``region_completeness.json``/``registry.json`` through the storage
+    seam bound to the file backend, and the check under test reads the same file layout that
+    binding serves, the exact case ``staleness_findings`` reports as invalid once a database
+    also holds the root, so the subprocess is pinned to file regardless of whatever backend the
+    outer test run selects.
     """
     env = {**os.environ, "TCIP_STORE_BACKEND": "file"} if file_layout else None
     return subprocess.run([PY_EXE, DOCTOR, str(root)], capture_output=True, text=True, env=env)
@@ -212,9 +220,14 @@ def test_labels_are_scanned_where_the_layout_resolver_places_them(tmp_path):
     label = annotation_path(root, date, "IMG_R")
     json_io.write_annotations(
         label, [Annotation(subject="catkin", geometry=BBox(2, 3, 18, 9))], 48, 32)
-    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", date): status_records(
-            {"IMG_R.JPG": "negative"}, recorded_by="user:breeder")}))
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
+        status_bucket("catkin", date): status_records(
+            {"IMG_R.JPG": "negative"}, recorded_by="user:breeder"),
+    })
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
@@ -233,10 +246,14 @@ def test_a_negative_confirmation_names_only_its_own_subject(tmp_path):
     json_io.write_annotations(
         annotation_path(root, date, "IMG_S"),
         [Annotation(subject="leaf", geometry=BBox(4, 2, 40, 11))], 48, 32)
-    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps({
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
         status_bucket("catkin", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
         status_bucket("leaf", date): status_records({"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
-    }))
+    })
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
@@ -258,9 +275,14 @@ def test_confirmations_are_matched_on_a_dateless_dataset(tmp_path):
     json_io.write_annotations(
         annotation_path(root, None, "IMG_F"),
         [Annotation(subject="catkin", geometry=BBox(3, 1, 20, 9))], 40, 24)
-    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", None): status_records(
-            {"IMG_F.JPG": "negative"}, recorded_by="user:breeder")}))
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
+        status_bucket("catkin", None): status_records(
+            {"IMG_F.JPG": "negative"}, recorded_by="user:breeder"),
+    })
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
@@ -276,8 +298,14 @@ def test_doctor_flags_a_bare_status_token(tmp_path):
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", date): {"IMG_S.JPG": "unannotated"}}))
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    # A bare token is a shape replace_image_status_store's own writer refuses, so this fixture
+    # writes it through the store primitive directly, bound to the file backend the subprocess reads.
+    ts.bind(FileBackend())
+    ts.replace(image_status_key(root), {status_bucket("catkin", date): {"IMG_S.JPG": "unannotated"}},
+              expect=ts.Version.ABSENT)
 
     res = _run(root, file_layout=True)
     assert "1 status entry is in a shape this reader does not recognize" in res.stdout
@@ -290,9 +318,14 @@ def test_doctor_flags_a_stale_complete_token(tmp_path):
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
-    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", date): status_records(
-            {"IMG_S.JPG": "complete"}, recorded_by="user:breeder")}))
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
+        status_bucket("catkin", date): status_records(
+            {"IMG_S.JPG": "complete"}, recorded_by="user:breeder"),
+    })
 
     res = _run(root, file_layout=True)
     stale = _lines(res.stdout, "re-confirm")
@@ -465,9 +498,14 @@ def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
     root = _layout_project(tmp_path, date)
     Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
     annotation_path(root, date, "IMG_S").write_text("not json {][", encoding="utf-8")
-    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
-        {status_bucket("catkin", date): status_records(
-            {"IMG_S.JPG": "negative"}, recorded_by="user:breeder")}))
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
+        status_bucket("catkin", date): status_records(
+            {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
+    })
 
     res = _run(root, file_layout=True)
     assert res.returncode == 2, res.stdout
@@ -507,3 +545,27 @@ def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     assert "2 of 4 image(s)" in census[0]
     assert "IMG_C" in census[0] and "IMG_D" in census[0]
     assert ".original" not in res.stdout
+
+
+def test_a_seam_written_confirmation_is_seen_by_the_doctor_and_the_validator_alike(tmp_path):
+    """One confirmation written through replace_image_status_store is the single fact both the
+    doctor's negatives check and validate_data_quality read, on one root under the same backend."""
+    from scripts import doctor
+    from tcip_mcp.tools.data_tools import validate_data_quality
+
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
+    json_io.write_annotations(annotation_path(root, date, "IMG_S"), [], 32, 32, keep_empty=True)
+    replace_image_status_store(root, {
+        status_bucket("catkin", date): status_records(
+            {"IMG_S.JPG": "negative"}, recorded_by="user:breeder"),
+    })
+
+    findings: list[tuple[str, str]] = []
+    doctor.check_negatives(root, findings)
+    assert not any("not a confirmed negative" in msg for _, msg in findings)
+
+    result = validate_data_quality(str(root))
+    assert result["issues"] == []
+    assert result["is_valid"] is True
