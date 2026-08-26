@@ -74,9 +74,9 @@ def test_pin_from_marker_prefers_the_marker_over_an_inherited_root(
 ) -> None:
     from tcip_mcp import workspace
 
-    proj_root = workspace.project_path("hazelnut_demo")
+    proj_root = workspace.project_path("chestnut_demo")
     (proj_root / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("hazelnut_demo")  # also repins the variable to proj_root
+    workspace.set_active_project("chestnut_demo")  # also repins the variable to proj_root
 
     inherited = tmp_path.parent / "elsewhere"
     inherited.mkdir()
@@ -105,9 +105,9 @@ def test_pin_from_marker_records_a_dangling_marker_and_keeps_the_inherited_root(
 ) -> None:
     from tcip_mcp import workspace
 
-    proj_root = workspace.project_path("hazelnut_demo")
+    proj_root = workspace.project_path("chestnut_demo")
     (proj_root / ".tcip").mkdir(parents=True)
-    workspace.set_active_project("hazelnut_demo")
+    workspace.set_active_project("chestnut_demo")
     shutil.rmtree(proj_root / ".tcip")  # the marker now names a project with nothing there
 
     inherited = tmp_path.parent / "elsewhere"
@@ -118,7 +118,7 @@ def test_pin_from_marker_records_a_dangling_marker_and_keeps_the_inherited_root(
     assert binding.source == "inherited"
     assert binding.root == inherited
     assert binding.marker_problem is not None
-    assert "hazelnut_demo" in binding.marker_problem
+    assert "chestnut_demo" in binding.marker_problem
 
 
 def test_resolve_state_relative_stays_cwd_relative_when_unpinned(monkeypatch) -> None:
