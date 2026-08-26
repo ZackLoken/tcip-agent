@@ -310,6 +310,7 @@ export function ResultsTab() {
   const [modelsByDate, setModelsByDate] = useState<Record<string, string[]>>({});
   const [predictionDirs, setPredictionDirs] = useState<Record<string, Record<string, string>>>({});
   const [datesError, setDatesError] = useState<string | null>(null);
+  const [labelProblem, setLabelProblem] = useState<string | null>(null);
   // The model picked per date; "" means "skip this date" (dropped before compute()).
   const [dateModel, setDateModel] = useState<Record<string, string>>({});
 
@@ -572,6 +573,7 @@ export function ResultsTab() {
           Object.fromEntries(t.dates_with_images.map((d) => [d, t.models_by_date[d]?.[0] ?? ""])),
         );
         setDatesError(null);
+        setLabelProblem(t.label_problem);
       })
       .catch((e) => {
         setDatesError(
@@ -956,6 +958,9 @@ export function ResultsTab() {
                       Retry
                     </button>
                   </div>
+                )}
+                {!datesError && labelProblem && (
+                  <div className="text-[11px] text-tcip-fp mb-1">{labelProblem}</div>
                 )}
                 {dates.length === 0 ? (
                   !datesError && (

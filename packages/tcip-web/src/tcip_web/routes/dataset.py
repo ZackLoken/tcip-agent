@@ -152,14 +152,19 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     subjects = list_subjects(root)
     model_names = list_models(root)
 
+    # Read every call, not from the cache below: a label edited in place leaves the
+    # directory's own mtime untouched, and label_problem must never answer from stale content.
+    subjects_by_date, label_problem = _subjects_by_date(root, dates)
+
     key = str(root)
     signature = _tree_signature(root, dates, model_names)
     cached = _tree_cache.get(key)
     if cached is not None and cached[0] == signature:
         _tree_cache.move_to_end(key)
-        return cached[1]
+        return cached[1].model_copy(
+            update={"subjects_by_date": subjects_by_date, "label_problem": label_problem}
+        )
 
-    subjects_by_date, label_problem = _subjects_by_date(root, dates)
     tree = DatasetTree(
         dataset_root=str(root),
         dates_with_images=dates,
@@ -263,14 +268,16 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # so we don't block; we just tell the caller (agent or GUI) the canvas will start empty
     # instead of leaving a silent blank canvas.
     annotations_present = False
+    label_problem: Optional[str] = None
     if req.subject and req.date:
         from tcip_annotation.json_io import UnreadableLabelDocument
 
         try:
             annotations_present = req.subject in subjects_with_labels(root, req.date)
-        except UnreadableLabelDocument:
+        except UnreadableLabelDocument as exc:
             # Advisory only, stated above: an unreadable label must not block a selection.
             annotations_present = False
+            label_problem = str(exc)
     predictions_present = bool(
         req.model_name and req.date and req.model_name in models_with_predictions(root, req.date)
     )
@@ -279,6 +286,7 @@ async def select_dataset(req: SelectionRequest) -> dict:
         "selection": selection.model_dump(mode="json"),
         "annotations_present": annotations_present,
         "predictions_present": predictions_present,
+        "label_problem": label_problem,
     }
 
 

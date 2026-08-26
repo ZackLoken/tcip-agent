@@ -38,6 +38,9 @@ export async function openWorkspaceProject(
   });
   recordRecentProject(p.name, p.path);
   useStore.getState().applyRestoredDataset(res.selection);
+  if (res.label_problem) {
+    useStore.getState().pushToast(res.label_problem);
+  }
   return res.selection;
 }
 

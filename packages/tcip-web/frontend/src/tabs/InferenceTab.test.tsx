@@ -46,6 +46,7 @@ function mockTree(dates: string[]) {
     subjects_by_date: {},
     models_by_date: {},
     prediction_dirs: {},
+    label_problem: null,
   });
 }
 

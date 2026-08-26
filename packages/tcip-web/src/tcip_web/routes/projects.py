@@ -58,21 +58,13 @@ class ActiveProject(BaseModel):
 def _subjects_by_date(project_dir: Path, dates: list[str]) -> tuple[dict[str, list[str]], str | None]:
     """``subjects_with_labels`` per date, and the first date's problem when one won't read.
 
-    Mirrors ``routes.dataset._subjects_by_date``: a date whose labels won't read reports an
-    empty subject list for that date, never aborts the project's own listing.
+    The one implementation, shared with the per-dataset tree (``routes.dataset``): a date
+    whose labels won't read reports an empty subject list for that date, never aborts the
+    project's own listing.
     """
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_web.routes.dataset import _subjects_by_date as _dataset_subjects_by_date
 
-    by_date: dict[str, list[str]] = {}
-    problem: str | None = None
-    for d in dates:
-        try:
-            by_date[d] = dataset_layout.subjects_with_labels(project_dir, d)
-        except UnreadableLabelDocument as exc:
-            by_date[d] = []
-            if problem is None:
-                problem = str(exc)
-    return by_date, problem
+    return _dataset_subjects_by_date(project_dir, dates)
 
 
 def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:

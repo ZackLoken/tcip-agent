@@ -869,6 +869,27 @@ describe("ReviewTab image-level navigation", () => {
     expect(useStore.getState().gui.dataset.current_image_index).toBe(2);
   });
 
+  it("keeps an unreadable image navigable rather than skipping it like an empty one", async () => {
+    setup3Images();
+    // img2's document would not read; it must stay reachable, unlike a genuinely empty one.
+    statusesSpy.mockResolvedValue({
+      statuses: {},
+      detection_stems: ["img1", "img3"],
+      unreadable: ["/data/annotations/2026-03-02/img2.json"],
+    });
+    render(<ReviewTab />);
+    await waitFor(() =>
+      expect(useStore.getState().reviewStatus.unreadable).toEqual([
+        "/data/annotations/2026-03-02/img2.json",
+      ]),
+    );
+    expect(useStore.getState().reviewStatus.hasDetections["img2.jpg"]).toBe(true);
+
+    act(() => fireEvent.click(nextImage()));
+    // Reachable in traversal order, unlike the skipped-empty case above.
+    expect(useStore.getState().gui.dataset.current_image_index).toBe(1);
+  });
+
   it("the Reviewed/Unreviewed filter narrows which images navigation walks", async () => {
     setup3Images();
     // img1 + img3 reviewed, img2 not; all three have detections.

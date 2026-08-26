@@ -140,6 +140,8 @@ export interface ProjectSummary {
   // project still lists.
   site: string | null;
   site_problem: string | null;
+  // The first date's labels that would not read, naming the file; the project still lists.
+  label_problem: string | null;
 }
 
 export const api = {
@@ -170,6 +172,9 @@ export const api = {
         // date -> model -> the dir that model's predictions for that date live in, resolved by
         // the backend's own layout resolver. Index it; never reassemble the path here.
         prediction_dirs: Record<string, Record<string, string>>;
+        // The first date's labels that would not read, naming the file; the tree still lists
+        // every other date.
+        label_problem: string | null;
       }>(`${ROUTES.getDatasetTree}?${q({ dataset_root })}`),
 
     listImages: (dataset_root: string, date: string) =>
@@ -191,6 +196,9 @@ export const api = {
         // predictions. False → the canvas will start empty (not an error).
         annotations_present?: boolean;
         predictions_present?: boolean;
+        // Set when annotations_present read false because the label document would not read,
+        // naming the file; the selection still succeeds.
+        label_problem?: string | null;
       }>(ROUTES.postDatasetSelect, {
         method: "POST",
         body: JSON.stringify(body),

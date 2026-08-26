@@ -283,6 +283,58 @@ def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
     assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
+def test_load_reports_an_unreadable_label_beside_a_saved_registry(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A saved classes.json answers the subject list, but a corrupt label file under
+    annotations_dir is still worth surfacing: the registry load must not stop scanning for
+    unreadable documents just because a registry was found."""
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
+
+    save = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
+    )
+    assert save.status_code == 200
+
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+                "annotations_dir": str(ann)},
+    ).json()
+    assert set(load["subjects"]) == {"catkin"}
+    assert load["unreadable"] == [str(ann / "IMG_B.json")]
+
+
+def test_cached_label_annotations_raises_on_a_stat_failure_other_than_absence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Only a missing file derives an empty status; any other OSError at stat (a permission
+    error on a present file) is a read failure, not a fact about absence."""
+    from tcip_web.routes.classes import _cached_label_annotations
+
+    label = tmp_path / "a.json"
+    write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
+
+    real_stat = Path.stat
+
+    def _denied(self, *args, **kwargs):
+        if self == label:
+            raise PermissionError(f"denied: {self}")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _denied)
+
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    with pytest.raises(UnreadableLabelDocument):
+        _cached_label_annotations(label)
+
+
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     # Confirmations are dataset-native: a write must locate dataset_root.
     post = client.post(
@@ -413,7 +465,7 @@ def test_derive_statuses_reports_an_unreadable_label_and_still_derives_the_rest(
     )
     body = resp.json()
     assert body["statuses"] == {"IMG_A.JPG": "partial"}
-    assert body["unreadable"] == ["IMG_B.JPG"]
+    assert body["unreadable"] == [str(ann / "IMG_B.json")]
 
 
 def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tmp_path: Path) -> None:

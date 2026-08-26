@@ -62,8 +62,8 @@ def test_subject_names_differing_only_by_case_stay_distinct(
 def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
     client: TestClient, tmp_path: Path
 ) -> None:
-    """With no saved registry, the provisional one lists the names the labels actually carry, each
-    unchanged; a record whose subject name is empty names nothing and is left out."""
+    """With no saved registry, the provisional one lists the names a readable label document
+    actually carries, each unchanged."""
     labels = tmp_path / "annotations" / "2026-03-02"
     labels.mkdir(parents=True)
     write_annotations(
@@ -72,16 +72,35 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labelled(
             _box("catkin", 12, 30, 48, 140),
             _box("Catkin", 300, 44, 372, 70),
             _box("bush", 5, 9, 640, 480),
-            _box("", 700, 100, 760, 220),
         ],
         900, 500,
     )
 
-    subjects = client.get(
+    body = client.get(
         "/api/classes/load",
         params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
-    ).json()["subjects"]
-    assert set(subjects) == {"catkin", "Catkin", "bush"}
+    ).json()
+    assert set(body["subjects"]) == {"catkin", "Catkin", "bush"}
+    assert body["unreadable"] == []
+
+
+def test_registry_derivation_reports_a_document_it_cannot_read(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A record whose subject name is empty makes its own document unreadable: the provisional
+    registry still derives from the readable documents, and names the unreadable one by path
+    rather than silently deriving nothing from it."""
+    labels = tmp_path / "annotations" / "2026-03-02"
+    labels.mkdir(parents=True)
+    write_annotations(str(labels / "IMG_A.json"), [_box("catkin", 12, 30, 48, 140)], 900, 500)
+    write_annotations(str(labels / "IMG_B.json"), [_box("", 700, 100, 760, 220)], 900, 500)
+
+    body = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "annotations_dir": str(labels)},
+    ).json()
+    assert set(body["subjects"]) == {"catkin"}
+    assert body["unreadable"] == [str(labels / "IMG_B.json")]
 
 
 def test_a_new_subject_is_addable_alongside_the_saved_ones(

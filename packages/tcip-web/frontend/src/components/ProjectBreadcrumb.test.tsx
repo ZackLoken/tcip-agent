@@ -40,6 +40,7 @@ function summary(name: string): ProjectSummary {
     is_active: false,
     site: "north orchard",
     site_problem: null,
+    label_problem: null,
   };
 }
 

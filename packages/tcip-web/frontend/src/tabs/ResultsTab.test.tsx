@@ -85,6 +85,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
           v2: "C:/data/predictions/v2/2026-01-08",
         },
       },
+      label_problem: null,
     });
     const curvesSpy = vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [],
@@ -119,6 +120,35 @@ describe("ResultsTab structured predictions-by-date picker", () => {
     });
   });
 
+  it("shows the tree's label_problem beside the date list without blocking it", async () => {
+    vi.spyOn(api.dataset, "tree").mockResolvedValue({
+      dataset_root: "C:/data",
+      dates_with_images: ["2026-01-01"],
+      subjects: ["subject_a"],
+      model_names: ["baseline"],
+      subjects_by_date: {},
+      models_by_date: { "2026-01-01": ["baseline"] },
+      prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: "C:/data/annotations/2026-01-08/IMG_0000.json does not decode as JSON",
+    });
+    vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
+      rows: [],
+      n_plants: 0,
+      positive_class_id: 1,
+      ...VALIDATED,
+    });
+    vi.spyOn(resultsApi, "onsetDates").mockResolvedValue({ rows: [], ...VALIDATED });
+
+    render(<ResultsTab />);
+
+    expect(
+      await screen.findByText(
+        "C:/data/annotations/2026-01-08/IMG_0000.json does not decode as JSON",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("2026-01-01")).toBeInTheDocument();
+  });
+
   it("dropping a date to '(skip)' excludes it from the computed predictions map", async () => {
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -128,6 +158,7 @@ describe("ResultsTab structured predictions-by-date picker", () => {
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: null,
     });
     const curvesSpy = vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [],
@@ -217,6 +248,7 @@ describe("ResultsTab evidence gate", () => {
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: null,
     });
   }
 
@@ -298,6 +330,7 @@ describe("ResultsTab onset table validity marker", () => {
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: null,
     });
     vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [
@@ -650,6 +683,7 @@ describe("ResultsTab operationalization records", () => {
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: null,
     });
     vi.spyOn(resultsApi, "perPlantCurves").mockRejectedValue(
       new StructuredRefusalError(
@@ -695,6 +729,7 @@ describe("ResultsTab operationalization records", () => {
       subjects_by_date: {},
       models_by_date: { "2026-01-01": ["baseline"] },
       prediction_dirs: { "2026-01-01": { baseline: "C:/data/predictions/baseline/2026-01-01" } },
+      label_problem: null,
     });
     vi.spyOn(resultsApi, "perPlantCurves").mockResolvedValue({
       rows: [

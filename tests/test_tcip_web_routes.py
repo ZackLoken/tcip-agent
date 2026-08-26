@@ -126,6 +126,25 @@ def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
     assert str(bad / "IMG_0000.json") in body["label_problem"]
 
 
+def test_dataset_tree_label_problem_is_not_stale_after_an_in_place_edit(
+    client: TestClient, dataset_root: Path,
+) -> None:
+    """A label edited in place leaves its directory's own mtime untouched on most filesystems, so
+    label_problem must never answer from a cached tree built before the edit."""
+    ann = dataset_root / "annotations" / "2-11-26"
+    ann.mkdir(parents=True)
+    _write_gt(ann / "IMG_0000.json", [(1, 1, 3, 3)])
+
+    first = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
+    assert first["label_problem"] is None
+
+    (ann / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
+
+    second = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)}).json()
+    assert second["label_problem"] is not None
+    assert str(ann / "IMG_0000.json") in second["label_problem"]
+
+
 def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_path: Path) -> None:
     root = tmp_path / "ds"
     (root / "images" / "2026-02-11").mkdir(parents=True)
@@ -230,6 +249,8 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
     body = resp.json()
     assert body["status"] == "ok"
     assert body["annotations_present"] is False
+    assert body["label_problem"] is not None
+    assert str(ann / "IMG_0000.json") in body["label_problem"]
 
 
 def test_dataset_nav_persists_current_index(
@@ -664,12 +685,13 @@ def test_review_image_statuses_batch_reports_an_unreadable_prediction(
     client: TestClient, dataset_root: Path, tmp_path: Path,
 ) -> None:
     """A corrupt prediction document costs its own stem, never the whole batch: the good stem
-    still surfaces as a detection, and the bad one is named in unreadable instead of silently
-    reading as nothing to review."""
+    still surfaces as a detection, and the bad one is named by its document's path in unreadable
+    instead of silently reading as nothing to review."""
     pred_dir = tmp_path / "predictions"
     pred_dir.mkdir(parents=True)
     _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
-    (pred_dir / "IMG_0002.json").write_text("not json {][", encoding="utf-8")
+    bad = pred_dir / "IMG_0002.json"
+    bad.write_text("not json {][", encoding="utf-8")
 
     resp = client.get(
         "/api/review/image_statuses",
@@ -678,7 +700,30 @@ def test_review_image_statuses_batch_reports_an_unreadable_prediction(
     assert resp.status_code == 200
     body = resp.json()
     assert body["detection_stems"] == ["IMG_0000"]
-    assert body["unreadable"] == ["IMG_0002"]
+    assert body["unreadable"] == [str(bad)]
+
+
+def test_review_image_statuses_checks_a_prediction_even_when_gt_already_has_objects(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A stem the GT directory already resolved to "has objects" must still have its own
+    prediction document opened: an unreadable prediction must not go unnoticed just because
+    another directory already answered for the same stem."""
+    gt_dir = tmp_path / "gt"
+    pred_dir = tmp_path / "predictions"
+    gt_dir.mkdir(parents=True)
+    pred_dir.mkdir(parents=True)
+    _write_gt(gt_dir / "IMG_0000.json", [(40, 32, 60, 48)])
+    bad = pred_dir / "IMG_0000.json"
+    bad.write_text("not json {][", encoding="utf-8")
+
+    resp = client.get(
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root), "gt_dir": str(gt_dir), "pred_dir": str(pred_dir)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unreadable"] == [str(bad)]
 
 
 def test_review_image_statuses_admits_a_bucket_holding_sidecars(
