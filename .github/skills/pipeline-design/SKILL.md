@@ -197,9 +197,8 @@ image_results = [
     for r in read_stage_b_preds_as_image_results("stage_b_preds")  # your own per-image count reader
 ]
 
-# The final CSV is a phenotype delivery door: it refuses a bare write. Pass pred_dirs so the count
-# operating point's validity is read from each bucket's operating_point.json (or measurement_validated
-# for a continuous/ordinal trait), or acknowledge_unvalidated=True for a flagged provisional CSV.
+# The final CSV is a phenotype delivery door: without pred_dirs it floors to unvalidated
+# regardless of any asserted string. Pass pred_dirs, or acknowledge_unvalidated=True for provisional.
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
 export_aggregated_csv(summaries, "phenotype_csv", trait_name="<trait>", pred_dirs=["stage_b_preds"])
 ```

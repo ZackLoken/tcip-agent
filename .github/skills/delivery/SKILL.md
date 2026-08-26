@@ -96,13 +96,16 @@ uncharacterized, which is a claim about a quantity that has been defined.
 ## The delivery gate (measurement integrity)
 
 Every phenotype-delivery door refuses a bare write: an unvalidated measurement number with no
-acknowledgement. The count/date/value is the phenotype, so each door runs one shared
-`check_delivery_gate`: it ships only when each measurement dimension the deliverable rests on is
-validated against a reference of that dimension's own kind (for the count/measurement/classifier
-dimensions, held-out GT or a breeder-confirmed output sample, see the `evaluation` and
-`cv-research` skills; a tile scale needs a geometry basis, a physical scale a physical
-measurement, and no kind stands in for another), read from the predictions' own
-`operating_point.json` sidecar, not a caller-asserted string.
+acknowledgement. The count/date/value is the phenotype, so each door reconciles every measurement
+dimension the deliverable rests on against a reference of that dimension's own kind (for the
+count/measurement/classifier dimensions, held-out GT or a breeder-confirmed output sample, see the
+`evaluation` and `cv-research` skills; a tile scale needs a geometry basis, a physical scale a
+physical measurement, and no kind stands in for another), reading the predictions' own sidecar
+(`operating_point.json`, `ordinal_operating_point.json` or `regression_operating_point.json`)
+rather than trusting a caller-asserted string, then hands the resolved states to one shared
+`check_delivery_gate`, which does no I/O of its own: it judges the already-resolved dict, ships
+only when every dimension it was handed clears, and otherwise refuses (or, with
+`acknowledge_unvalidated=True`, stamps the unvalidated dimension(s) false).
 
 - `compute_phenology` and the web `/export_csv` phenology branch both reconcile the positive-state
   classifier (from `classifier_operating_point.json`, see `calibrate_classifier_operating_point`)
@@ -119,12 +122,14 @@ measurement, and no kind stands in for another), read from the predictions' own
   `export_detection_csv` the already-reconciled state, plus the bucket it persisted when it was
   given a `predictions_dir` to persist one into.
   `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same way: pass
-  `pred_dirs` for a count trait so the validity is reconciled from each bucket's
-  `operating_point.json` sidecar rather than trusting a bare caller string. Without `pred_dirs`,
-  either writer takes `measurement_validated` directly as a caller-asserted string with no on-disk
-  reconciliation. A continuous/ordinal trait has no on-disk measurement-validity producer today, so
-  without `pred_dirs` the only route to delivery through `export_aggregated_csv` is the explicit
-  acknowledge below.
+  `pred_dirs` so the validity is reconciled from each bucket's own sidecar rather than trusting a
+  bare caller string. Without `pred_dirs`, either writer floors `measurement_validated` to
+  unvalidated regardless of what the caller asserted; there is no carve-out. A continuous or
+  ordinal trait's on-disk measurement-validity producer is
+  `calibrate_ordinal_regression_operating_point`, which stamps `ordinal_operating_point.json` /
+  `regression_operating_point.json`; `export_aggregated_csv` reconciles against it the same way it
+  reconciles a count trait's `operating_point.json`, keyed off each result's own
+  `measurement_document`.
 - A tiled run's `tile_size` is a second gating dimension of the same count operating point, at
   every one of those doors: the tile edge scales the per-image counts, so a run with no persisted
   training geometry, no recoverable native-frame edge, and no explicit caller override refuses
