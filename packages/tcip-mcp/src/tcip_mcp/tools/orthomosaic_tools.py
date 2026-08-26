@@ -112,7 +112,7 @@ def deliver_orthomosaic_plant_counts(
             is unvalidated, stamping the un-validated dimension ``false`` so the
             un-trustworthiness travels downstream.
     """
-    from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
+    from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.project_paths import resolve_output_path
 
     output_csv_path = str(resolve_output_path(output_csv_path))
@@ -146,8 +146,7 @@ def deliver_orthomosaic_plant_counts(
     if not stated.ok:
         return {"error": stated.message}
 
-    pred_files = sorted(f for f in pred_dir.glob("*.json")
-                        if f.name not in SIDECAR_FILENAMES)
+    pred_files = prediction_documents(pred_dir)
     if not pred_files:
         return {"error": f"no prediction file(s) found in {predictions_dir}"}
 
@@ -176,13 +175,17 @@ def deliver_orthomosaic_plant_counts(
         )}
 
     from tcip_annotation import json_io
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_annotation.state import bbox_of
 
     boxes: list[list[float]] = []
-    for f in pred_files:
-        for a in json_io.read_annotations(str(f)):
-            b = bbox_of(a.geometry)
-            boxes.append([b.x1, b.y1, b.x2, b.y2])
+    try:
+        for f in pred_files:
+            for a in json_io.read_annotations(str(f)):
+                b = bbox_of(a.geometry)
+                boxes.append([b.x1, b.y1, b.x2, b.y2])
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     detections = {"boxes": boxes}
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (

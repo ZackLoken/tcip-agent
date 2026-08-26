@@ -34,7 +34,7 @@ def _status_store_exists(dataset_root: Path) -> bool:
 def test_load_empty_registry(client: TestClient, tmp_path: Path) -> None:
     resp = client.get("/api/classes/load", params={"project_root": str(tmp_path)})
     assert resp.status_code == 200
-    assert resp.json() == {"subjects": {}, "version": None}
+    assert resp.json() == {"subjects": {}, "version": None, "unreadable": []}
 
 
 def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
@@ -222,6 +222,24 @@ def test_load_derives_subjects_from_labels_when_registry_absent(
         params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
     ).json()
     assert set(load["subjects"]) == {"bush", "catkin"}
+    assert load["unreadable"] == []
+
+
+def test_load_reports_an_unreadable_label_and_still_derives_the_rest(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """One corrupt label file costs its own name, never the whole provisional-registry scan."""
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
+
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
+    ).json()
+    assert set(load["subjects"]) == {"catkin"}
+    assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
@@ -335,6 +353,26 @@ def test_derive_statuses_negatives_are_intentional(client: TestClient, tmp_path:
         "IMG_D.JPG": "negative",  # completed + empty → confirmed negative (intentional)
         "IMG_E.JPG": "complete",  # completed + has objects
     }
+
+
+def test_derive_statuses_reports_an_unreadable_label_and_still_derives_the_rest(
+    client: TestClient, tmp_path: Path
+) -> None:
+    ann = tmp_path / "annotations"
+    ann.mkdir()
+    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.post(
+        "/api/classes/image_status/derive",
+        json={
+            "project_root": str(tmp_path), "annotations_dir": str(ann), "subject": "catkin",
+            "image_list": ["IMG_A.JPG", "IMG_B.JPG"], "complete_override": [],
+        },
+    )
+    body = resp.json()
+    assert body["statuses"] == {"IMG_A.JPG": "partial"}
+    assert body["unreadable"] == ["IMG_B.JPG"]
 
 
 def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tmp_path: Path) -> None:

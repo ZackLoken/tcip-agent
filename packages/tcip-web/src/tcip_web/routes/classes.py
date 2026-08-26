@@ -45,8 +45,9 @@ _label_annotations_cache: "OrderedDict[str, tuple[int, list]]" = OrderedDict()
 def _cached_label_annotations(path: Path) -> list:
     """The typed annotation records ``read_annotations`` parses from ``path``, memoized by mtime.
 
-    A missing or malformed file reads as no annotations, the reader's own never-raise contract;
-    the cache holds that empty result exactly like a genuine empty file.
+    A missing file reads as no annotations. A present, unreadable one raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, uncached: a broken document is
+    retried, never remembered as an empty result.
     """
     from tcip_annotation.json_io import read_annotations
 
@@ -106,13 +107,22 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
     record_event(tool, arguments, source="gui", scope=dataset_root)
 
 
-def _subjects_in_dir(d: Path) -> set[str]:
-    """Distinct subject names present in a dir's per-image label files."""
+def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
+    """Distinct subject names present in a dir's per-image label files, and the paths that would
+    not read: one bad file costs its own name, never the whole scan."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     subjects: set[str] = set()
-    for jf in d.glob("*.json"):
-        for record in _cached_label_annotations(jf):
+    unreadable: list[str] = []
+    for jf in sorted(d.glob("*.json")):
+        try:
+            annotations = _cached_label_annotations(jf)
+        except UnreadableLabelDocument:
+            unreadable.append(str(jf))
+            continue
+        for record in annotations:
             subjects.add(record.subject)
-    return subjects
+    return subjects, unreadable
 
 
 @router.get("/load")
@@ -125,11 +135,13 @@ def load_classes(
 
     Resolution: the dataset's saved ``classes.json`` -> else a provisional registry of the subjects
     actually present in the labels (detection-only, no attributes) -> else empty. Returns
-    ``{"subjects": <nested registry mapping>, "version": <token> | None}``: ``version`` is the
-    stored registry's compare-and-set token when one was saved, else ``None`` (a provisional or
-    empty registry names nothing to assert against). A save posting this ``version`` back is
-    refused with 409 if the stored registry has moved on since; a save posting ``None`` is an
-    unconditional write, since it names no version to assert against.
+    ``{"subjects": <nested registry mapping>, "version": <token> | None, "unreadable": [paths]}``:
+    ``version`` is the stored registry's compare-and-set token when one was saved, else ``None`` (a
+    provisional or empty registry names nothing to assert against); ``unreadable`` names every
+    per-image label file under a provisional-registry scan that would not read, left out of the
+    subject scan rather than aborting it. A save posting this ``version`` back is refused with 409
+    if the stored registry has moved on since; a save posting ``None`` is an unconditional write,
+    since it names no version to assert against.
     """
     from tcip_mcp.class_registry import (
         ClassRegistry,
@@ -149,15 +161,18 @@ def load_classes(
                 registry = read_registry(p)
             except (OSError, RegistryError) as exc:
                 raise HTTPException(500, f"could not parse {p}: {exc}") from exc
-            return {"subjects": registry_to_dict(registry), "version": read_version(p).token}
+            return {"subjects": registry_to_dict(registry), "version": read_version(p).token,
+                    "unreadable": []}
 
     if annotations_dir and Path(annotations_dir).is_dir():
-        subjects = _subjects_in_dir(Path(annotations_dir))
+        subjects, unreadable = _subjects_in_dir(Path(annotations_dir))
         if subjects:
             reg = ClassRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
-            return {"subjects": registry_to_dict(reg), "version": None}
+            return {"subjects": registry_to_dict(reg), "version": None, "unreadable": unreadable}
+        if unreadable:
+            return {"subjects": {}, "version": None, "unreadable": unreadable}
 
-    return {"subjects": {}, "version": None}
+    return {"subjects": {}, "version": None, "unreadable": []}
 
 
 class SaveClassesPayload(BaseModel):
@@ -382,8 +397,12 @@ def derive_image_status(payload: DerivePayload) -> dict:
     The mapping itself is ``dataset_layout.derive_status``, the same one the review tab's Complete
     goes through, so the two cannot disagree about what a Complete on an empty image means.
     ``has_content`` is scoped to ``subject`` through ``annotations_hold_subject``, the predicate
-    the review route's own Complete derives its token through.
+    the review route's own Complete derives its token through. A name whose label file would not
+    read is left out of ``statuses`` and reported in ``unreadable`` instead: one bad file costs
+    that image, never the whole batch.
     """
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 
     # An absolute-path read needs its own confinement (no-op unless TCIP_IMAGE_ROOTS is set).
@@ -393,12 +412,17 @@ def derive_image_status(payload: DerivePayload) -> dict:
     complete_set = set(payload.complete_override)
 
     statuses: dict[str, str] = {}
+    unreadable: list[str] = []
     for name in payload.image_list:
         stem = name.rsplit(".", 1)[0]
         has_any = False
         if adir:
-            annotations = _cached_label_annotations(adir / f"{stem}.json")
+            try:
+                annotations = _cached_label_annotations(adir / f"{stem}.json")
+            except UnreadableLabelDocument:
+                unreadable.append(name)
+                continue
             has_any = annotations_hold_subject(annotations, payload.subject)
         statuses[name] = derive_status(completed=name in complete_set, has_content=has_any)
 
-    return {"statuses": statuses}
+    return {"statuses": statuses, "unreadable": unreadable}

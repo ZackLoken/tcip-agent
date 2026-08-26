@@ -453,9 +453,11 @@ export const api = {
       const qs = new URLSearchParams({ dataset_root: params.dataset_root });
       if (params.gt_dir) qs.set("gt_dir", params.gt_dir);
       if (params.pred_dir) qs.set("pred_dir", params.pred_dir);
-      return call<{ statuses: Record<string, ReviewImageStatus>; detection_stems: string[] }>(
-        `${ROUTES.getReviewImageStatuses}?${qs.toString()}`,
-      );
+      return call<{
+        statuses: Record<string, ReviewImageStatus>;
+        detection_stems: string[];
+        unreadable: string[];
+      }>(`${ROUTES.getReviewImageStatuses}?${qs.toString()}`);
     },
 
     // Launch the active-learning priority queue (informativeness ranking only, never the

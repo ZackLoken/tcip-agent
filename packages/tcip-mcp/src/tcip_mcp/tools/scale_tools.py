@@ -203,8 +203,11 @@ def calibrate_physical_scale(
         label_path = Path(labels_dir) / f"{stem}.json"
         if not label_path.is_file():
             return {"error": f"no annotation file for reference image {stem!r} at {label_path}"}
-        annotations = [a for a in json_io.read_annotations(str(label_path))
-                      if a.subject == reference_subject]
+        try:
+            annotations = [a for a in json_io.read_annotations(str(label_path))
+                          if a.subject == reference_subject]
+        except json_io.UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
         if len(annotations) != 1:
             return {"error": (
                 f"{label_path} carries {len(annotations)} {reference_subject!r} annotation(s); a "

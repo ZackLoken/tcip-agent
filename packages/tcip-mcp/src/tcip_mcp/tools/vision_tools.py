@@ -14,6 +14,7 @@ import tcip_store as ts
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation import Annotation, Point, Polygon, bbox_of, load_annotations_any
+from tcip_annotation.json_io import UnreadableLabelDocument
 from tcip_annotation.json_io import read_annotations as read_labels
 from tcip_annotation.sam_wrapper import column_label, grid_to_rect
 from tcip_annotation.viz import (
@@ -361,9 +362,9 @@ def _viz_annotations(
 
     try:
         fmt = detect_format(str(label_path))
-    except ValueError as exc:
+        anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
+    except (ValueError, UnreadableLabelDocument) as exc:
         return {"error": str(exc)}
-    anns = load_annotations_any(str(label_path), fmt=fmt, file_name=img.name)
     idx, index = _subject_indexer()
 
     n_points = _n_points(anns)
@@ -415,7 +416,10 @@ def _viz_predictions(
     if pred_file is None:
         return {"error": f"No predictions found for {stem}"}
 
-    preds = read_labels(str(pred_file))
+    try:
+        preds = read_labels(str(pred_file))
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     if conf_threshold > 0:
         preds = [a for a in preds if (a.score is None or a.score >= conf_threshold)]
     idx, index = _subject_indexer()
@@ -470,16 +474,19 @@ def _viz_comparison(
         return {"error": f"No labels found for {stem}"}
     try:
         fmt = detect_format(str(label_path))
-    except ValueError as exc:
+        gt = _boxable(load_annotations_any(str(label_path), fmt=fmt, file_name=img.name))
+    except (ValueError, UnreadableLabelDocument) as exc:
         return {"error": str(exc)}
-    gt = _boxable(load_annotations_any(str(label_path), fmt=fmt, file_name=img.name))
     gt_dicts = [_box_dict(a, index) for a in gt]
 
     pred_file = find_prediction(image_path)
     pred_dicts: list[dict] = []
     tp_matches: list[dict] = []
     if pred_file is not None:
-        preds = _boxable(read_labels(str(pred_file)))
+        try:
+            preds = _boxable(read_labels(str(pred_file)))
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
         pred_dicts = [_box_dict(a, index) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
         match_result = compute_matches(gt, preds, iou_threshold=iou_threshold,
@@ -542,7 +549,10 @@ def render_failure_cases(
         else:
             return {"error": "images_dir not specified and could not be auto-detected"}
 
-    worst = get_worst_predictions(predictions_dir, labels_dir, top_k=top_k)
+    try:
+        worst = get_worst_predictions(predictions_dir, labels_dir, top_k=top_k)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     if "error" in worst:
         return worst
 
@@ -569,14 +579,14 @@ def render_failure_cases(
         idx, index = _subject_indexer()
 
         gt_file = Path(labels_dir) / f"{stem}.json"
-        gt_dicts = []
-        if gt_file.is_file():
-            gt_dicts = [_box_dict(a, index) for a in _boxable(read_labels(str(gt_file)))]
-
         pred_file = Path(predictions_dir) / f"{stem}.json"
-        pred_dicts = []
-        if pred_file.is_file():
-            pred_dicts = [_box_dict(a, index) for a in _boxable(read_labels(str(pred_file)))]
+        try:
+            gt_dicts = ([_box_dict(a, index) for a in _boxable(read_labels(str(gt_file)))]
+                        if gt_file.is_file() else [])
+            pred_dicts = ([_box_dict(a, index) for a in _boxable(read_labels(str(pred_file)))]
+                          if pred_file.is_file() else [])
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
 
         out = str(out_dir / f"failure_{len(case_paths):03d}_{stem}.png")
         render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
@@ -638,12 +648,17 @@ def _viz_dataset_sample(
         if label_path is not None:
             try:
                 fmt = detect_format(str(label_path))
+            except UnreadableLabelDocument as exc:
+                return {"error": str(exc)}
             except ValueError:
                 label_path = None  # unrecognized store: render the image without labels
         read = _read_for_display(source)
         if label_path is not None:
             idx, index = _subject_indexer()
-            anns = load_annotations_any(str(label_path), fmt=fmt, file_name=rep_path.name)
+            try:
+                anns = load_annotations_any(str(label_path), fmt=fmt, file_name=rep_path.name)
+            except UnreadableLabelDocument as exc:
+                return {"error": str(exc)}
             if task == "detect":
                 shapes = _boxable(anns)
                 out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],

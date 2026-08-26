@@ -48,6 +48,7 @@ def check_negatives(root: Path, findings: list) -> None:
     rule ``annotations_hold_subject`` applies everywhere else this question is asked.
     """
     from tcip_annotation import json_io
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
         annotation_date, annotation_root, annotations_hold_subject, bucket_subject_date,
         image_status_path, is_confirmed_negative, normalize_status_store,
@@ -62,7 +63,11 @@ def check_negatives(root: Path, findings: list) -> None:
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if ".original" in label.parts:
             continue
-        anns = json_io.read_annotations(str(label))
+        try:
+            anns = json_io.read_annotations(str(label))
+        except UnreadableLabelDocument as exc:
+            findings.append(("error", f"{label.relative_to(root)}: label file will not read: {exc}"))
+            continue
         name = stems.get(label.stem, f"{label.stem}.JPG")
         date = annotation_date(label)
         for key, bucket in by_bucket.items():
@@ -111,6 +116,7 @@ def check_status_tokens(root: Path, findings: list) -> None:
     it, and this doctor is not that person.
     """
     from tcip_annotation import json_io
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
         annotation_path, annotations_hold_subject, bucket_subject_date, image_status_path,
         status_confirmations, unreadable_status_entries,
@@ -128,7 +134,11 @@ def check_status_tokens(root: Path, findings: list) -> None:
             if record.get("status") != "complete":
                 continue
             label = annotation_path(root, date, Path(name).stem)
-            anns = json_io.read_annotations(str(label)) if label.is_file() else []
+            try:
+                anns = json_io.read_annotations(str(label)) if label.is_file() else []
+            except UnreadableLabelDocument as exc:
+                findings.append(("error", f"{bucket}/{name}: label file will not read: {exc}"))
+                continue
             if not annotations_hold_subject(anns, subject):
                 findings.append(("warn", f"{bucket}/{name}: status says 'complete' but the label "
                                 f"file holds no {subject!r} annotation; re-confirm"))
@@ -170,7 +180,7 @@ def check_registry(root: Path, findings: list) -> None:
 
 
 def check_provenance(root: Path, findings: list) -> None:
-    from tcip_annotation.json_io import ANNOTATIONS_KEY
+    from tcip_annotation.json_io import ANNOTATIONS_KEY, UnreadableLabelDocument, load_label_document
     from tcip_mcp.dataset_layout import annotation_root
 
     ann_root = annotation_root(root)
@@ -178,8 +188,12 @@ def check_provenance(root: Path, findings: list) -> None:
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if ".original" in label.parts:
             continue
-        data = _load(label)
-        for o in (data or {}).get(ANNOTATIONS_KEY, []) if isinstance(data, dict) else []:
+        try:
+            data = load_label_document(label)
+        except UnreadableLabelDocument as exc:
+            findings.append(("error", f"{label.relative_to(root)}: label file will not read: {exc}"))
+            continue
+        for o in data.get(ANNOTATIONS_KEY, []) if isinstance(data.get(ANNOTATIONS_KEY), list) else []:
             if not isinstance(o, dict):
                 continue
             if o.get("accepted_by") and not o.get("created_by"):
@@ -228,6 +242,7 @@ def check_region_completeness(root: Path, findings: list) -> None:
     """A region-completeness attestation whose cell content has since been edited or deleted is a
     stale claim block calibration could otherwise trust silently; flag every disagreement between
     an attested cell's stamped digest and its current annotation content."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
         bucket_subject_date, normalize_region_completeness_store,
         region_completeness_digest_path, region_completeness_path,
@@ -245,7 +260,12 @@ def check_region_completeness(root: Path, findings: list) -> None:
         if not isinstance(subject, str) or not subject:
             subject, _ = bucket_subject_date(bucket)
         stamped = digests.get(bucket)
-        stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+        try:
+            stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+        except UnreadableLabelDocument as exc:
+            findings.append(("error", f"region completeness for {subject!r} on "
+                            f"{record.get('stem')!r}: label file will not read: {exc}"))
+            continue
         if stale:
             findings.append(("error", f"region completeness for {subject!r} on "
                             f"{record.get('stem')!r}: cell(s) {stale} are attested complete but "

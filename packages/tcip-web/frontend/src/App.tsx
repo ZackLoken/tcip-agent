@@ -232,6 +232,13 @@ function App() {
       try {
         const reg = await classesApi.load(projectRoot, datasetRoot, annotationsDir);
         setRegistry(reg.subjects, reg.version);
+        if (reg.unreadable.length) {
+          useStore
+            .getState()
+            .pushToast(
+              `${reg.unreadable.length} label file(s) could not be read: ${reg.unreadable.join(", ")}`,
+            );
+        }
         // Default the active authoring subject to the selection's subject when it exists in the
         // registry, else the first declared subject: a shape can't be authored with none set.
         const names = Object.keys(reg.subjects);

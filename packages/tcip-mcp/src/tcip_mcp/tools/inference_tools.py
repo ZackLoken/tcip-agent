@@ -749,6 +749,8 @@ def run_inference(
     # per dataset (count-unbiased + held-out validated); otherwise the byte-identical raw path.
     extra: dict = {}
     if trait and calibration_labels_dir:
+        from tcip_annotation.json_io import UnreadableLabelDocument
+
         cal_images = calibration_images_dir or images_dir
         try:
             bundle, cal_hash, n_excluded_incomplete_attribute, evidence = _calibrate_operating_point(
@@ -764,9 +766,9 @@ def run_inference(
                 experiment_id=identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
             )
-        except ValueError as exc:
-            # An inadmissible reference, or a locked split that no longer resolves: a clean refusal
-            # here, not a bare KeyError from a stale stem_to_image lookup downstream.
+        except (ValueError, UnreadableLabelDocument) as exc:
+            # An inadmissible reference, a locked split that no longer resolves, or a calibration
+            # GT file that will not read: a clean refusal, not a bare KeyError downstream.
             return {"error": str(exc)}
         conf_param = bundle.get("conf")
         conf = (conf_param.value if conf_param.is_shippable

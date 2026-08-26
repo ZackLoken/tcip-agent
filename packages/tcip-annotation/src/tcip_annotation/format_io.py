@@ -63,9 +63,15 @@ def detect_format(path: str) -> AnnotFormat:
 
     ``"json"`` is the canonical per-image label file (``json_io`` schema, keyed on
     :data:`~tcip_annotation.json_io.ANNOTATIONS_KEY`); ``"coco"`` is an assembled dataset-level COCO
-    (keyed on ``images`` / ``categories``). The old ``objects`` schema is not sniffed; it raises.
-    Old files are converted once, never read in place: reading an unconverted file as the new schema
-    would silently yield zero annotations and train on fabricated empty negatives.
+    (keyed on ``images`` / ``categories``). The old ``objects`` schema is not sniffed; it raises a
+    ``ValueError``. Old files are converted once, never read in place: reading an unconverted file
+    as the new schema would silently yield zero annotations and train on fabricated empty negatives.
+
+    A present file that will not decode as JSON, or that decodes to something other than a dict,
+    raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` instead of being tried as an
+    unrecognized shape: an undecodable candidate is not evidence the directory holds no label
+    format, it is a document nobody can read, and a caller must not learn that fact only as
+    "cannot determine the annotation format".
     """
     p = Path(path)
     candidates = sorted(p.glob("*.json")) if p.is_dir() else [p]
@@ -80,15 +86,17 @@ def detect_format(path: str) -> AnnotFormat:
 
 
 def _detect_json_format(path: Path) -> AnnotFormat | None:
-    """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if it is neither. Raises on the
-    old ``objects`` shape rather than sniffing it (it is converted, not read)."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    """``"json"`` / ``"coco"`` from a file's keys, or ``None`` if the path is missing or is a
+    decodable dict that is neither. Raises on the old ``objects`` shape rather than sniffing it
+    (it is converted, not read), and raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`,
+    through the shared loader, for a *present* file that will not decode as a dict at all: a
+    missing candidate is not evidence of a broken document, only an absent one, and stays
+    ``detect_format``'s own "cannot determine" refusal rather than an unreadable-document one."""
+    if not path.is_file():
         return None
-    if not isinstance(data, dict):
-        return None
+    from tcip_annotation.json_io import load_label_document
+
+    data = load_label_document(path)
     if "objects" in data:
         raise ValueError(
             f"{path} is the old 'objects' label schema, which is not read in place. Convert it "
@@ -279,7 +287,9 @@ def load_annotations(
 ) -> list[Annotation]:
     """Load an image's annotations as name-based records. ``fmt`` of ``None`` detects it.
 
-    For COCO, either ``image_id`` or ``file_name`` must identify the target image.
+    For COCO, either ``image_id`` or ``file_name`` must identify the target image. A present,
+    unreadable document raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, from
+    ``detect_format`` when ``fmt`` is omitted or from ``read_annotations`` itself.
     """
     if fmt is None:
         fmt = detect_format(path)

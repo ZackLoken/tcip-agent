@@ -212,6 +212,9 @@ interface ReviewImageStatusState {
    *  entry (before the batch fetch resolves) are treated as reviewable; images explicitly false
    *  have zero detections and are skipped by Review navigation. */
   hasDetections: Record<string, boolean>;
+  /** Image names whose GT or prediction document would not read, from the same batch fetch: left
+   *  out of hasDetections so a corrupt document never reads as silently reviewable. */
+  unreadable: string[];
   /** Image-level Reviewed/Unreviewed navigation filter for the Review tab. */
   activeFilter: ReviewStatusFilter;
 }
@@ -344,6 +347,7 @@ export interface AppState {
   setReviewImageStatuses: (
     byImage: Record<string, ReviewImageStatus>,
     hasDetections: Record<string, boolean>,
+    unreadable?: string[],
   ) => void;
   setReviewImageStatus: (image: string, status: ReviewImageStatus) => void;
   setReviewStatusFilter: (filter: ReviewStatusFilter) => void;
@@ -442,7 +446,7 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
   registry: { subjects: {}, loaded: false, version: null },
   imageStatus: { byImage: {}, activeFilter: "all", staleMarks: [] },
-  reviewStatus: { byImage: {}, hasDetections: {}, activeFilter: "all" },
+  reviewStatus: { byImage: {}, hasDetections: {}, unreadable: [], activeFilter: "all" },
   annotateUi: {
     visible: true,
     snap: false,
@@ -637,8 +641,8 @@ export const useStore = create<AppState>()((set, get) => ({
   setStatusFilter: (activeFilter) =>
     set((s) => ({ imageStatus: { ...s.imageStatus, activeFilter } })),
 
-  setReviewImageStatuses: (byImage, hasDetections) =>
-    set((s) => ({ reviewStatus: { ...s.reviewStatus, byImage, hasDetections } })),
+  setReviewImageStatuses: (byImage, hasDetections, unreadable = []) =>
+    set((s) => ({ reviewStatus: { ...s.reviewStatus, byImage, hasDetections, unreadable } })),
   setReviewImageStatus: (image, status) =>
     set((s) => ({
       reviewStatus: {

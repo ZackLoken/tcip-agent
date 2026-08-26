@@ -415,6 +415,20 @@ def test_only_annotated_and_confirmed_negatives_train(tmp_path, label_format):
     assert ds.sample_counts["skipped_unannotated"] >= 1
 
 
+def test_a_corrupt_confirmed_negative_refuses_the_direct_json_loader(tmp_path):
+    """A stored 'negative' whose label document is corrupt must never train as a zero-object
+    negative: the direct-JSON path's own stem scan raises rather than reading the file as empty."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+
+    images, labels = _rail_fixture(tmp_path)
+    (labels / "neg.json").write_text("not json {][", encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument):
+        build_dataset("detection", images_dir=str(images), labels_dir=str(labels),
+                     subject=CATKIN, label_format="json")
+
+
 def test_caller_supplied_stems_are_filtered_too(tmp_path):
     """Split stems go through the same gate, otherwise the split reintroduces the fabrications."""
     from tcip_mcp.pipelines.data.datasets import build_dataset

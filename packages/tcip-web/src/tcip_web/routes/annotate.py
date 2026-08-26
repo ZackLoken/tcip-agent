@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from tcip_annotation import BBox, Point, Polygon
 from tcip_annotation.json_io import (
+    UnreadableLabelDocument,
     annotation_from_payload,
     read_annotations_versioned,
     write_annotations,
@@ -174,7 +175,10 @@ def load_labels(image_path: str, label_path: Optional[str] = None) -> dict:
     annotations: list[dict] = []
     token: Optional[str] = None
     if label_path:
-        stored, version = read_annotations_versioned(label_path)
+        try:
+            stored, version = read_annotations_versioned(label_path)
+        except UnreadableLabelDocument as exc:
+            raise HTTPException(400, str(exc)) from exc
         annotations = [_ann_dict(a) for a in stored]
         token = version.token
     return {

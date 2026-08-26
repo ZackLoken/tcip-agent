@@ -1965,12 +1965,12 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     if task in ("detection", "instance_seg") and not (
         data_cfg.get("label_format") or data_cfg.get("coco_json")
     ):
-        from tcip_mcp.pipelines.data.datasets import dir_label_format, first_parseable_labels_json
+        from tcip_mcp.pipelines.data.datasets import dir_label_format, first_labels_json
         _labels, _images = src.get("labels_dir", ""), src.get("images_dir", "")
         if _labels and _images:
             _detected_label_format = dir_label_format(_labels)
             if _detected_label_format == "coco":
-                _offending = first_parseable_labels_json(_labels)
+                _offending = first_labels_json(_labels)
                 raise ValueError(
                     f"data.labels_dir={_labels!r} holds a dataset-level COCO file ({_offending}): "
                     "if the per-image label files in this directory are the ones that should "
@@ -2102,10 +2102,8 @@ def get_worst_predictions(
     if not gt_path.is_dir():
         return {"error": f"Labels directory not found: {labels_dir}"}
 
-    from tcip_annotation.json_io import read_annotations
+    from tcip_annotation.json_io import prediction_documents, read_annotations
     from tcip_annotation.state import Point
-
-    from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
 
     def _boxes(path) -> list:
         """The annotations this count heuristic counts, a geometry-less label and a ``Point`` are
@@ -2114,9 +2112,7 @@ def get_worst_predictions(
                 if a.geometry is not None and not isinstance(a.geometry, Point)]
 
     scores: list[tuple[str, float]] = []
-    for pred_file in pred_path.glob("*.json"):
-        if pred_file.name in SIDECAR_FILENAMES:
-            continue
+    for pred_file in prediction_documents(pred_path):
         gt_file = gt_path / pred_file.name
         preds = _boxes(pred_file)
         gt_anns = _boxes(gt_file) if gt_file.is_file() else []

@@ -293,6 +293,7 @@ def get_completeness(
         region_completeness_digest_key,
         region_completeness_key,
     )
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
     root = _resolve_root(path, dataset_root)
@@ -311,7 +312,10 @@ def get_completeness(
         if not isinstance(subject, str) or not subject:
             continue
         stamped = digests.get(bucket)
-        stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+        try:
+            stale = stale_cells(root, record, stamped if isinstance(stamped, dict) else {}, subject)
+        except UnreadableLabelDocument as exc:
+            raise HTTPException(400, str(exc)) from exc
         by_subject[subject] = {**record, "stale_cells": stale}
     return {"by_subject": by_subject}
 
@@ -325,7 +329,7 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
     stored record whose grid disagrees with the posted one replaces wholesale (cells and digest
     stamps alike), rather than trusting a same-named cell across two different lattices.
     """
-    from tcip_annotation.json_io import read_annotations
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
 
     from tcip_mcp.dataset_layout import (
         annotation_path,
@@ -381,7 +385,10 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
             bucket_digests = {}
         if complete:
             label_path = annotation_path(root, date, stem)
-            annotations = read_annotations(str(label_path)) if label_path.is_file() else []
+            try:
+                annotations = read_annotations(str(label_path)) if label_path.is_file() else []
+            except UnreadableLabelDocument as exc:
+                raise HTTPException(400, str(exc)) from exc
             bucket_digests[payload.cell] = cell_annotation_digest(
                 annotations, subject, cells_by_name[payload.cell])
         else:

@@ -585,6 +585,21 @@ class TestCompletenessRoute:
         assert resp.status_code == 400
         assert "Z9" in resp.json()["detail"]
 
+    def test_marking_a_cell_complete_refuses_an_unreadable_label(self, client, dated_dataset):
+        """Marking a cell complete stamps a digest of the label file's current content; a
+        document that will not read must refuse rather than stamp a digest of nothing."""
+        from tcip_mcp.dataset_layout import annotation_path
+
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        label = annotation_path(root, "2026-03-01", Path(path).stem)
+        label.parent.mkdir(parents=True, exist_ok=True)
+        label.write_text("not json {][", encoding="utf-8")
+
+        resp = self._toggle(client, path, grid, "A1")
+        assert resp.status_code == 400
+        assert str(label) in resp.json()["detail"]
+
     def test_by_stem_reads_back_the_attested_cell(self, client, dated_dataset):
         _root, path = dated_dataset
         grid = _grid(client, path, tile_size=64)
@@ -639,6 +654,21 @@ class TestCompletenessRoute:
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
         assert record["cells_complete"] == ["A1"]
         assert record["stale_cells"] == ["A1"]
+
+    def test_reading_completeness_refuses_an_unreadable_label(self, client, dated_dataset):
+        """Staleness is recomputed from the label file on every read; a document that will not
+        read must refuse rather than silently score every cell fresh or every cell stale."""
+        root, path = dated_dataset
+        grid = _grid(client, path, tile_size=64)
+        self._toggle(client, path, grid, "A1")
+
+        label_path = root / "annotations" / "2026-03-01" / "plot.json"
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        label_path.write_text("not json {][", encoding="utf-8")
+
+        resp = client.get("/api/coverage/completeness", params={"path": path})
+        assert resp.status_code == 400
+        assert str(label_path) in resp.json()["detail"]
 
     def test_audit_records_the_write(self, client, dated_dataset):
         root, path = dated_dataset

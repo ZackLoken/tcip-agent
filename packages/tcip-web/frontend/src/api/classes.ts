@@ -41,7 +41,7 @@ export const classesApi = {
     const params = new URLSearchParams({ project_root });
     if (dataset_root) params.set("dataset_root", dataset_root);
     if (annotations_dir) params.set("annotations_dir", annotations_dir);
-    return getJson<{ subjects: Registry; version: string | null }>(
+    return getJson<{ subjects: Registry; version: string | null; unreadable: string[] }>(
       `${ROUTES.getClassesLoad}?${params.toString()}`,
     );
   },
@@ -130,7 +130,10 @@ export const classesApi = {
     image_list: string[];
     complete_override?: string[];
   }) =>
-    postJson<{ statuses: Record<string, ImageStatus> }>(ROUTES.postClassesImageStatusDerive, body),
+    postJson<{ statuses: Record<string, ImageStatus>; unreadable: string[] }>(
+      ROUTES.postClassesImageStatusDerive,
+      body,
+    ),
 };
 
 // High-contrast palette the GUI derives subject/value colours from. Colour is GUI-local (the

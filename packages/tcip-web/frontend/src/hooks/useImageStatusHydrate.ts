@@ -55,6 +55,13 @@ export function useImageStatusHydrate({
         const derived = derivedRes.statuses ?? {};
         const { writes, staleMarks } = reconcileImageStatuses(stored, derived, confirmed);
         if (cancelled) return;
+        if (derivedRes.unreadable.length) {
+          useStore
+            .getState()
+            .pushToast(
+              `${derivedRes.unreadable.length} label file(s) could not be read: ${derivedRes.unreadable.join(", ")}`,
+            );
+        }
         if (Object.keys(writes).length) {
           await classesApi.setImageStatusBulk(
             projectRoot,

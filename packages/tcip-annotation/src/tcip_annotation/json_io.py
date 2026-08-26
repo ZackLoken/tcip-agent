@@ -30,9 +30,14 @@ negative; :func:`to_coco_dataset` skips an unconfirmed empty. An annotation with
 geometry (an image-level label) is a real annotation: it keeps the image out of the empty-negative
 bucket and never collapses to nothing.
 
-Readers never raise on malformed input: a bad file / annotation is skipped and the reader returns what
-it could parse. Writers and readers are symmetric, and a degenerate polygon (<3 points) is skipped on
-write so it can never masquerade as an empty record.
+A missing file reads as unannotated (``[]``), and so does the platform's own empty document
+(``{"annotations": []}``). A *present* document this format cannot make sense of (undecodable text,
+a non-dict document, an ``annotations`` that is not a list, a record that is not a dict or carries
+no string ``subject``, or a stored box with no positive extent) raises
+:class:`UnreadableLabelDocument` instead of reading as empty: an unreadable file is not the same
+fact as no file, and reading one as empty would train a corrupt document as a confirmed negative.
+Writers and readers are symmetric, and a degenerate polygon (<3 points) is skipped on write so it
+can never masquerade as an empty record.
 """
 
 from __future__ import annotations
@@ -97,16 +102,91 @@ def _document_bytes(payload: dict) -> bytes:
     return json.dumps(payload, ensure_ascii=False, indent=1, allow_nan=False).encode("utf-8")
 
 
+class UnreadableLabelDocument(Exception):
+    """A present label document this platform's readers cannot make sense of.
+
+    Deliberately not a :class:`ValueError`: a handler written to catch format detection's own
+    ``ValueError`` (an unrecognized-but-decodable shape, a legitimate "not this kind of file"
+    answer) must not also absorb a document that is flatly broken and silently render or train it
+    as unlabeled.
+    """
+
+
+def parse_label_document(text: str, *, source: str) -> dict:
+    """A per-image label document's parsed dict, from its raw text.
+
+    Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
+    JSON or that decodes to something other than a dict: neither is a document this schema can
+    read, and reading either as empty would train an unreadable file as an unannotated image.
+    """
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise UnreadableLabelDocument(f"{source} does not decode as JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise UnreadableLabelDocument(
+            f"{source} decodes to a {type(data).__name__}, not the object a label document is"
+        )
+    return data
+
+
+def load_label_document(path: str | Path) -> dict:
+    """A per-image label document's parsed dict, read from ``path``.
+
+    Raises :class:`UnreadableLabelDocument`, naming ``path``, when the file cannot be opened (a
+    permission error, a directory where a file was expected) or when
+    :func:`parse_label_document` refuses its contents. Callers check for a missing path
+    themselves: this function is only ever called once a document is known to be present, so it
+    does not special-case absence.
+    """
+    p = Path(path)
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
+    return parse_label_document(text, source=str(p))
+
+
+SIDECAR_FILENAMES = frozenset({
+    "operating_point.json",
+    "classifier_operating_point.json",
+    "ordinal_operating_point.json",
+    "regression_operating_point.json",
+    "resolve_scale.json",
+})
+"""Every provenance stamp a prediction bucket carries beside its per-image documents.
+
+A stamp is not a per-image label: a reader enumerating a bucket's prediction files excludes
+these, or it invents an image stem no image has and reads a stamp as if it were detections.
+Stated once here, so a stamp added for a new measurement dimension is excluded on every path
+that enumerates a bucket, in this package and in any package that imports this set rather than
+declaring its own copy.
+"""
+
+
+def prediction_documents(bucket: str | Path) -> list[Path]:
+    """Every per-image document in a prediction bucket, sorted, its own sidecar stamps excluded.
+
+    The one enumeration every bucket walk uses, so a stamp added for a new measurement dimension
+    is excluded everywhere at once rather than in each caller's own inline filter. A missing or
+    non-directory ``bucket`` yields nothing.
+    """
+    d = Path(bucket)
+    if not d.is_dir():
+        return []
+    return sorted(f for f in d.glob("*.json") if f.name not in SIDECAR_FILENAMES)
+
+
 def _load(path: str) -> dict | None:
-    """Parsed dict, or None if the file is missing/unreadable/not a dict."""
+    """The parsed document at ``path``, or ``None`` when there is no file there.
+
+    A present file that will not read raises :class:`UnreadableLabelDocument`: a bad document is
+    not the same fact as no document, and reading it as absent would train an unreadable file as
+    an empty negative.
+    """
     if not os.path.exists(path):
         return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    return load_label_document(path)
 
 
 def _safe_score(x) -> float:
@@ -265,20 +345,29 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
 
     Prefers a polygon geometry over a box when both are present (the polygon is the source of truth and
     its box is derivable). An annotation with a ``subject`` but no geometry is kept (an image-level
-    label). An entry with no ``subject`` is skipped, since a name-based label is undecodable without it.
+    label).
+
+    Raises :class:`UnreadableLabelDocument` for a document whose ``annotations`` is present but not
+    a list (covers it being absent or ``null`` too), for a record that is not a dict or carries no
+    string ``subject`` (naming the record's index: skipping it silently would let a one-record file
+    whose only record is malformed read as an empty document, and an empty read is what every
+    zero-object training path is built on), and for a record whose stored box has no positive
+    extent (:func:`check_box_extent`).
     """
-    if not data:
+    if data is None:
         return []
     raw = data.get(ANNOTATIONS_KEY)
     if not isinstance(raw, list):
-        return []
+        raise UnreadableLabelDocument(
+            f"{ANNOTATIONS_KEY!r} is {raw!r}, not the list a label document holds"
+        )
     out: list[Annotation] = []
-    for o in raw:
+    for i, o in enumerate(raw):
         if not isinstance(o, dict):
-            continue
+            raise UnreadableLabelDocument(f"record {i} is {o!r}, not an annotation object")
         subject = o.get("subject")
         if not isinstance(subject, str) or not subject:
-            continue
+            raise UnreadableLabelDocument(f"record {i} carries no string subject: {o!r}")
         geometry: BBox | Polygon | Point | None = None
         rings = _rings_from_segmentation(o.get("segmentation"))
         if rings is not None:
@@ -288,6 +377,10 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
             if bb is not None:
                 x, y, w, h = bb
                 geometry = BBox(x, y, x + w, y + h)
+                try:
+                    check_box_extent(geometry, where=f"record {i} ({subject!r})")
+                except ValueError as exc:
+                    raise UnreadableLabelDocument(str(exc)) from exc
             else:
                 pt = _coerce_point(o.get("point"))
                 if pt is not None:
@@ -300,9 +393,7 @@ def _annotations_of(data: dict | None) -> list[Annotation]:
 
 
 # ── reader ─────────────────────────────────────────────────────────────────
-# A missing/empty/malformed file → [] (absent == unannotated, never raises). One reader for GT and
-# predictions; ``score`` set means a prediction. Callers filter by subject and derive the geometry a
-# task needs (``state.bbox_of`` reads a box from a polygon).
+# A missing file reads as []; a present, unreadable document raises UnreadableLabelDocument.
 
 
 def read_annotations(path) -> list[Annotation]:
@@ -315,17 +406,14 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
     What a load-edit-save client needs: the token names exactly the bytes the client was shown,
     so a document that changed in between cannot pass the comparison on the way back in. An
     absent document reads as no annotations at ``Version.ABSENT``, which is the token that says
-    "create this, or refuse". Unreadable bytes read as no annotations at their own version, the
-    same never-raise contract every reader here keeps.
+    "create this, or refuse". A present document that will not parse raises
+    :class:`UnreadableLabelDocument`, the same reader contract :func:`read_annotations` keeps.
     """
     stored = tcip_store.read_blob_versioned(_record_key(target), default=b"")
     if not stored.value:
         return [], stored.version
-    try:
-        data = json.loads(stored.value.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        return [], stored.version
-    return _annotations_of(data if isinstance(data, dict) else None), stored.version
+    data = parse_label_document(stored.value.decode("utf-8", errors="replace"), source=str(target))
+    return _annotations_of(data), stored.version
 
 
 # ── reference admissibility ────────────────────────────────────────────────
@@ -373,13 +461,16 @@ def require_reference_ground_truth(directory: str | Path) -> None:
     Refuses on the whole directory, never by dropping the offending records: a mixed directory
     silently narrowed to its admissible subset would validate against a reference nobody chose.
     An absent or empty directory raises nothing here; a caller that needs a reference to exist
-    checks that itself.
+    checks that itself. Walks the directory through :func:`prediction_documents`, so a reference
+    that happens to be a prediction bucket is read by its per-image documents alone, never one of
+    its own sidecar stamps (a dict with no ``annotations`` list, which the reader would otherwise
+    refuse as unreadable).
     """
     directory = Path(directory)
     scored = 0
     total = 0
     agent_authored: list[str] = []
-    for path in sorted(directory.glob("*.json")):
+    for path in prediction_documents(directory):
         for a in read_annotations(path):
             total += 1
             scored += is_unadjudicated_prediction(a)
@@ -555,6 +646,11 @@ def to_coco_dataset(
     alongside ``images``/``annotations``/``categories``, so a downstream partition
     (``trainable_stems``) can attribute the drop to its real reason rather than re-deriving one from
     the image's mere absence, which reads identically to an empty label file nobody confirmed.
+
+    A missing label file is skipped, unannotated; a present, unreadable one raises
+    :class:`UnreadableLabelDocument` rather than assembling as a zero-object image, so a corrupt
+    document behind a confirmed-negative name never enters the assembled dataset as a fabricated
+    negative.
     """
     categories = [{"id": cid, "name": name} for name, cid in sorted(id_map.items(), key=lambda kv: kv[1])]
     coco: dict = {"images": [], "annotations": [], "categories": categories,
@@ -565,7 +661,7 @@ def to_coco_dataset(
     for label_path, file_name in entries:
         if not os.path.exists(str(label_path)):
             continue  # unannotated, not part of the training set
-        data = _load(str(label_path)) or {}
+        data = load_label_document(str(label_path))
         scoped = [a for a in _annotations_of(data) if a.subject == subject]
         if not scoped and file_name not in negatives:
             continue  # no annotations of this subject and not a confirmed negative, skip

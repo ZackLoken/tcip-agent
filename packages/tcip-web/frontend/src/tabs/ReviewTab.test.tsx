@@ -142,7 +142,7 @@ beforeEach(() => {
   // Both dataset images have something to review by default (stems of img1.jpg / img2.jpg).
   statusesSpy = vi
     .spyOn(api.review, "imageStatuses")
-    .mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img2"] });
+    .mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img2"], unreadable: [] });
   // Default: no recorded generation confidence -> no Conf >= censoring warning. Tests exercising
   // the warning override this per-case.
   vi.spyOn(api.review, "generationConf").mockResolvedValue({ generation_conf: null });
@@ -854,7 +854,11 @@ describe("ReviewTab image-level navigation", () => {
   it("skips images with zero detections during navigation", async () => {
     setup3Images();
     // img2 has nothing to review -> nav must jump straight from img1 to img3.
-    statusesSpy.mockResolvedValue({ statuses: {}, detection_stems: ["img1", "img3"] });
+    statusesSpy.mockResolvedValue({
+      statuses: {},
+      detection_stems: ["img1", "img3"],
+      unreadable: [],
+    });
     render(<ReviewTab />);
     await waitFor(() =>
       expect(useStore.getState().reviewStatus.hasDetections["img2.jpg"]).toBe(false),
@@ -870,6 +874,7 @@ describe("ReviewTab image-level navigation", () => {
     statusesSpy.mockResolvedValue({
       statuses: { "img1.jpg": "completed", "img3.jpg": "completed" },
       detection_stems: ["img1", "img2", "img3"],
+      unreadable: [],
     });
     render(<ReviewTab />);
     await waitFor(() =>

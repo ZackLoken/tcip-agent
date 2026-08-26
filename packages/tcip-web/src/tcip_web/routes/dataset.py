@@ -80,10 +80,12 @@ class DatasetTree(BaseModel):
     # date with no labels for a subject doesn't offer it (which would open an empty canvas).
     subjects_by_date: dict[str, list[str]]
     models_by_date: dict[str, list[str]]
-    # Where each (date, model)'s predictions live, straight from ``dataset_layout.prediction_dir``.
-    # The GUI indexes this instead of reassembling the layout convention itself, so a client can
-    # never point a delivery at a path no writer produces.
+    # Where each (date, model)'s predictions live, straight from dataset_layout.prediction_dir,
+    # so a client never points a delivery at a path no writer produces.
     prediction_dirs: dict[str, dict[str, str]]
+    # The first date whose labels would not read, naming the file (mirrors ProjectSummary's own
+    # site_problem). The tree still lists every other date; a corrupt label costs one date.
+    label_problem: Optional[str] = None
 
 
 # ── /tree cache ────────────────────────────────────────────────────────────
@@ -101,6 +103,26 @@ def _dir_mtime_ns(p: Path) -> int:
         return p.stat().st_mtime_ns
     except OSError:
         return -1
+
+
+def _subjects_by_date(root: Path, dates: list[str]) -> tuple[dict[str, list[str]], Optional[str]]:
+    """``subjects_with_labels`` per date, and the first date's problem when one won't read.
+
+    A date whose labels won't read reports an empty subject list for that date rather than
+    aborting the scan: every other date's own labels are unaffected by one date's corrupt file.
+    """
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    by_date: dict[str, list[str]] = {}
+    problem: Optional[str] = None
+    for d in dates:
+        try:
+            by_date[d] = subjects_with_labels(root, d)
+        except UnreadableLabelDocument as exc:
+            by_date[d] = []
+            if problem is None:
+                problem = str(exc)
+    return by_date, problem
 
 
 def _tree_signature(root: Path, dates: list[str], models: list[str]) -> tuple:
@@ -137,17 +159,19 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
         _tree_cache.move_to_end(key)
         return cached[1]
 
+    subjects_by_date, label_problem = _subjects_by_date(root, dates)
     tree = DatasetTree(
         dataset_root=str(root),
         dates_with_images=dates,
         subjects=subjects,
         # A model is selectable once it has a predictions bucket under this dataset.
         model_names=model_names,
-        subjects_by_date={d: subjects_with_labels(root, d) for d in dates},
+        subjects_by_date=subjects_by_date,
         models_by_date={d: models_with_predictions(root, d) for d in dates},
         prediction_dirs={
             d: {m: str(prediction_dir(root, m, d)) for m in model_names} for d in dates
         },
+        label_problem=label_problem,
     )
     _tree_cache[key] = (signature, tree)
     _tree_cache.move_to_end(key)
@@ -238,11 +262,15 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # negatives), and starting a brand-new annotation on an unlabelled date is still allowed,
     # so we don't block; we just tell the caller (agent or GUI) the canvas will start empty
     # instead of leaving a silent blank canvas.
-    annotations_present = bool(
-        req.subject
-        and req.date
-        and req.subject in subjects_with_labels(root, req.date)
-    )
+    annotations_present = False
+    if req.subject and req.date:
+        from tcip_annotation.json_io import UnreadableLabelDocument
+
+        try:
+            annotations_present = req.subject in subjects_with_labels(root, req.date)
+        except UnreadableLabelDocument:
+            # Advisory only, stated above: an unreadable label must not block a selection.
+            annotations_present = False
     predictions_present = bool(
         req.model_name and req.date and req.model_name in models_with_predictions(root, req.date)
     )
