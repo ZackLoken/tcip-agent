@@ -11,6 +11,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+from collections import Counter
 
 import pytest
 import yaml
@@ -40,61 +41,123 @@ def test_parsed_job_set_matches_the_workflows_job_set_with_environment_out_of_sc
 
 
 def test_every_declared_step_runs_or_is_skipped_by_the_stated_rule():
+    # A Counter over the full plan, not a dict keyed by stage.key, so two stages sharing a key
+    # (mypy's two unnamed actions/cache@v4 steps) are both counted, not one silently overwritten.
     gate_baseline = _load()
     plan = gate_baseline.build_plan()
-    by_key = {stage.key: stage for stage in plan}
 
-    skipped_by_uses = {
-        "actions/checkout@v4", "actions/setup-python@v5", "actions/cache@v4",
-        "actions/checkout@v4 [sqlite]", "actions/setup-python@v5 [sqlite]",
-        "actions/cache@v4 [sqlite]", "actions/checkout@v4 [file]",
-        "actions/setup-python@v5 [file]", "actions/cache@v4 [file]",
-        "actions/checkout@v4", "actions/setup-node@v4",
-    }
-    skipped_by_run_prefix = {
-        "Install CPU-only torch", "Install packages",
-        "Install CPU-only torch [sqlite]", "Install packages [sqlite]",
-        "Install CPU-only torch [file]", "Install packages [file]",
-        "Install frontend dependencies",
-    }
-    run_steps = {
-        "Type check (mypy, permissive; see mypy.ini)",
-        "Lint (ruff) [sqlite]", "ARCHITECTURE.md matches the tree [sqlite]",
-        "ARCHITECTURE.md citations match what they quote [sqlite]", "Run tests [sqlite]",
-        "Lint (ruff) [file]", "ARCHITECTURE.md matches the tree [file]",
-        "ARCHITECTURE.md citations match what they quote [file]", "Run tests [file]",
-        "Format check", "Lint", "Type check", "Test", "Build",
-    }
+    skipped_by_uses = [
+        "mypy:actions/checkout@v4", "mypy:actions/setup-python@v5",
+        "mypy:actions/cache@v4", "mypy:actions/cache@v4",
+        "python:actions/checkout@v4 [sqlite]", "python:actions/setup-python@v5 [sqlite]",
+        "python:actions/cache@v4 [sqlite]",
+        "python:actions/checkout@v4 [file]", "python:actions/setup-python@v5 [file]",
+        "python:actions/cache@v4 [file]",
+        "typescript:actions/checkout@v4", "typescript:actions/setup-node@v4",
+    ]
+    skipped_by_run_prefix = [
+        "mypy:Install CPU-only torch", "mypy:Install packages",
+        "python:Install CPU-only torch [sqlite]", "python:Install packages [sqlite]",
+        "python:Install CPU-only torch [file]", "python:Install packages [file]",
+        "typescript:Install frontend dependencies",
+    ]
+    run_steps = [
+        "mypy:Type check (mypy, permissive; see mypy.ini)",
+        "python:Lint (ruff) [sqlite]", "python:ARCHITECTURE.md matches the tree [sqlite]",
+        "python:ARCHITECTURE.md citations match what they quote [sqlite]",
+        "python:Run tests [sqlite]",
+        "python:Lint (ruff) [file]", "python:ARCHITECTURE.md matches the tree [file]",
+        "python:ARCHITECTURE.md citations match what they quote [file]", "python:Run tests [file]",
+        "typescript:Format check", "typescript:Lint", "typescript:Type check",
+        "typescript:Test", "typescript:Build",
+    ]
 
-    assert set(by_key) == skipped_by_uses | skipped_by_run_prefix | run_steps
+    expected = Counter(skipped_by_uses + skipped_by_run_prefix + run_steps)
+    assert Counter(stage.key for stage in plan) == expected
+
+    by_key: dict = {}
+    for stage in plan:
+        by_key.setdefault(stage.key, []).append(stage)
     for key in skipped_by_uses:
-        assert by_key[key].skip_reason is not None and by_key[key].skip_reason.startswith("uses:")
+        for stage in by_key[key]:
+            assert stage.skip_reason is not None and stage.skip_reason.startswith("uses:")
     for key in skipped_by_run_prefix:
-        assert by_key[key].skip_reason is not None and "run: starts with" in by_key[key].skip_reason
+        for stage in by_key[key]:
+            assert stage.skip_reason is not None and "run: starts with" in stage.skip_reason
     for key in run_steps:
-        assert by_key[key].skip_reason is None
+        for stage in by_key[key]:
+            assert stage.skip_reason is None
+
+
+def test_every_stage_key_is_unique_per_job_step_and_leg():
+    # mypy's two unnamed cache steps are the one case job/name/leg cannot separate; both share a
+    # skip reason and never run, so that single duplicate is named here, not asserted away.
+    gate_baseline = _load()
+    plan = gate_baseline.build_plan()
+    counts = Counter(stage.key for stage in plan)
+    duplicated = {key: n for key, n in counts.items() if n > 1}
+    assert duplicated == {"mypy:actions/cache@v4": 2}
+
+
+def test_resolve_git_bash_prefers_the_derived_path_when_it_exists(tmp_path, monkeypatch):
+    gate_baseline = _load()
+    exec_path = tmp_path / "Git" / "mingw64" / "libexec" / "git-core"
+    exec_path.mkdir(parents=True)
+    bash_exe = exec_path.parent.parent / "bin" / "bash.exe"
+    bash_exe.parent.mkdir(parents=True)
+    bash_exe.write_text("", encoding="utf-8")
+
+    class _Completed:
+        returncode = 0
+        stdout = str(exec_path) + "\n"
+        stderr = ""
+
+    monkeypatch.setattr(gate_baseline.subprocess, "run", lambda *a, **k: _Completed())
+    assert gate_baseline._resolve_git_bash() == str(bash_exe)
 
 
 def test_python_jobs_matrix_leg_env_carries_the_resolved_store_backend():
     gate_baseline = _load()
     by_key = {stage.key: stage for stage in gate_baseline.build_plan()}
-    assert by_key["Run tests [sqlite]"].env["TCIP_STORE_BACKEND"] == "sqlite"
-    assert by_key["Run tests [file]"].env["TCIP_STORE_BACKEND"] == "file"
+    assert by_key["python:Run tests [sqlite]"].env["TCIP_STORE_BACKEND"] == "sqlite"
+    assert by_key["python:Run tests [file]"].env["TCIP_STORE_BACKEND"] == "file"
+
+
+def test_unresolved_expression_refuses_by_name(tmp_path, monkeypatch):
+    # ci.yml itself carries no ${{ }} expression build_plan cannot resolve, so this drives the
+    # refusal with a fixture workflow instead: a stray expression in a job's own env.
+    gate_baseline = _load()
+    workflow = tmp_path / "ci.yml"
+    workflow.write_text(
+        "jobs:\n"
+        "  mypy:\n"
+        "    env:\n"
+        "      TOKEN: ${{ secrets.NOT_A_MATRIX_VALUE }}\n"
+        "    steps: []\n"
+        "  python:\n"
+        "    steps: []\n"
+        "  typescript:\n"
+        "    steps: []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate_baseline, "CI_WORKFLOW", workflow)
+    with pytest.raises(gate_baseline.UnresolvedExpressionError):
+        gate_baseline.build_plan()
 
 
 def test_main_refuses_without_an_out_directory(monkeypatch):
     gate_baseline = _load()
-    # --timeout bounds a pre-change script that lacked this refusal and would otherwise run its
-    # whole default stage list for real; the refusal here is expected to fire before any of that.
+    # --timeout 1 is a property of this test, not the refusal under test: it bounds how long a
+    # regression that let this run for real (rather than refusing) could hold up the suite.
     monkeypatch.setattr(sys, "argv", ["gate_baseline.py", "--timeout", "1"])
     with pytest.raises(SystemExit):
         gate_baseline.main()
 
 
-def test_main_refuses_the_phase0_baseline_directory(monkeypatch):
+def test_main_refuses_the_recorded_baseline_directory(monkeypatch):
     gate_baseline = _load()
     monkeypatch.setattr(sys, "argv", [
-        "gate_baseline.py", "--out", str(gate_baseline.PHASE0_BASELINE), "--timeout", "1",
+        "gate_baseline.py", "--out", str(gate_baseline.RECORDED_BASELINE), "--timeout", "1",
     ])
     with pytest.raises(SystemExit):
         gate_baseline.main()
@@ -106,9 +169,28 @@ def test_main_runs_a_selected_stage_to_a_fresh_out_directory(tmp_path, monkeypat
     gate_baseline = _load()
     out = tmp_path / "gate-out"
     monkeypatch.setattr(sys, "argv", [
-        "gate_baseline.py", "--out", str(out), "--only", "Lint (ruff) [sqlite]",
+        "gate_baseline.py", "--out", str(out), "--only", "python:Lint (ruff) [sqlite]",
     ])
     assert gate_baseline.main() == 0
     summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    assert summary["stages"][0]["stage"] == "Lint (ruff) [sqlite]"
+    assert summary["stages"][0]["stage"] == "python:Lint (ruff) [sqlite]"
     assert summary["stages"][0]["exit_code"] == 0
+
+
+def test_only_accepts_a_stage_key_carrying_a_comma(tmp_path, monkeypatch):
+    # The mypy step's own name carries a comma, so --only must not split on one; the stage's own
+    # subprocess is stubbed so this stays fast rather than running a real mypy pass.
+    gate_baseline = _load()
+
+    class _Completed:
+        stdout = ""
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(gate_baseline.subprocess, "run", lambda *a, **k: _Completed())
+    out = tmp_path / "gate-out"
+    key = "mypy:Type check (mypy, permissive; see mypy.ini)"
+    monkeypatch.setattr(sys, "argv", ["gate_baseline.py", "--out", str(out), "--only", key])
+    assert gate_baseline.main() == 0
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert summary["stages"][0]["stage"] == key

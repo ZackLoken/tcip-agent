@@ -285,7 +285,7 @@ shapes with the GUI's own symbology. See the `visual-analysis` skill.
 
 ```bash
 conda activate tcip-agent          # Python 3.12; torch installs CUDA (cu126) by default, runs fine without a GPU too (see environment.yml)
-pytest tests/ -n 4 --tb=short -q   # bounded locally; CI's 4-core runners run -n auto
+pytest tests/ -n 4 --tb=short --timeout=300 -q   # bounded locally; CI's 4-core runners run -n auto
 ruff check .
 mypy                               # type gate; roots come from mypy.ini's files list, run from the repo root
 python scripts/list_tools.py       # current MCP tool list/count (don't hardcode counts in docs)

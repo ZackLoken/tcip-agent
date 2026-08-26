@@ -8,9 +8,10 @@ does not hide the timing of the rest.
 The ``environment`` job is out of scope: it creates the conda environment this gate's own
 process already runs inside, so there is nothing local to run in its place.
 
-Each step's ``run:`` text goes through Git Bash (this machine's own bash.exe under a WSL or
-system32 shim reads Windows paths differently), never through PowerShell or cmd, since that is
-the shell GitHub's own Linux runners give the same text.
+Each step's ``run:`` text goes through Git Bash, never through PowerShell or cmd, since that is
+the shell GitHub's own Linux runners give the same text. A bare ``bash`` resolved from ``PATH``
+can be a WSL launcher or a System32 shim on some machines, reading Windows paths differently; the
+path this script resolves is Git's own bash.exe, derived from the ``git`` on this machine's PATH.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import json
 import os
 import pathlib
 import re
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -32,7 +32,9 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-PHASE0_BASELINE = REPO_ROOT / "docs" / "audit" / "phase0" / "gate-baseline"
+# The one-leg pytest run recorded before this gate ran two backend legs; kept as history, not a
+# comparable baseline, and never overwritten by a later run.
+RECORDED_BASELINE = REPO_ROOT / "docs" / "audit" / "phase0" / "gate-baseline"
 
 PARSED_JOBS = ("mypy", "python", "typescript")
 OUT_OF_SCOPE_JOB = "environment"
@@ -116,7 +118,9 @@ def build_plan() -> "list[Stage]":
     """The full stage list, one entry per step per matrix leg, in workflow order.
 
     Building this never touches a subprocess: it is safe to call from a test that wants to
-    check what would run without actually running any of it.
+    check what would run without actually running any of it. Each key is prefixed with its job
+    name and matrix leg, so the same step name in two jobs (both carry an unnamed
+    ``actions/checkout@v4``) never collides.
     """
     jobs = _load_workflow()["jobs"]
     stages: "list[Stage]" = []
@@ -140,7 +144,7 @@ def build_plan() -> "list[Stage]":
                         # -n auto scales to CI's runner; the documented local invocation is -n 4.
                         run_text = run_text.replace("-n auto", "-n 4")
                 stages.append(Stage(
-                    key=f"{name}{leg_suffix}", job=job_name, name=name, run=run_text,
+                    key=f"{job_name}:{name}{leg_suffix}", job=job_name, name=name, run=run_text,
                     cwd=cwd, env={**job_env, **step_env}, skip_reason=_skip_reason(step),
                 ))
     return stages
@@ -159,12 +163,21 @@ def mypy_pin() -> "str | None":
 
 
 def _resolve_git_bash() -> str:
-    """Git Bash's own ``bash.exe``, never the ``bash`` a bare ``PATH`` lookup could resolve to
-    on Windows (WSL's launcher, or nothing), since the run text is written for Git Bash's shell."""
-    git = shutil.which("git")
-    candidates = []
-    if git:
-        candidates.append(pathlib.Path(git).resolve().parent.parent / "bin" / "bash.exe")
+    """Git Bash's own ``bash.exe``, derived from ``git --exec-path`` (whose parent's parent is
+    the Git installation root) rather than a bare ``PATH`` lookup, since a bare ``bash`` can
+    resolve to WSL's launcher or a System32 shim on some machines. The hardcoded default install
+    path is the stated fallback when the derivation finds nothing there.
+    """
+    candidates: "list[pathlib.Path]" = []
+    try:
+        probe = subprocess.run(
+            ["git", "--exec-path"], capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        probe = None
+    if probe is not None and probe.returncode == 0 and probe.stdout.strip():
+        git_root = pathlib.Path(probe.stdout.strip()).parent.parent
+        candidates.append(git_root / "bin" / "bash.exe")
     candidates.append(pathlib.Path("C:/Program Files/Git/bin/bash.exe"))
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
@@ -173,8 +186,9 @@ def _resolve_git_bash() -> str:
         if candidate.is_file():
             return str(candidate)
     raise SystemExit(
-        "Git Bash was not found (checked beside git.exe and the usual install locations); this "
-        "gate runs each step's run: text through it, never through WSL's or cmd's own shell."
+        "Git Bash was not found (checked beside git --exec-path and the usual install "
+        "locations); this gate runs each step's run: text through it, never through WSL's or "
+        "cmd's own shell."
     )
 
 
@@ -187,13 +201,14 @@ def main() -> int:
     parser.add_argument("--out", type=pathlib.Path, required=True,
                         help="directory to write per-stage output and summary.json into")
     parser.add_argument("--timeout", type=int, default=7200)
-    parser.add_argument("--only", default=None,
-                        help="comma-separated stage keys to run instead of the full plan")
+    parser.add_argument("--only", action="append", default=None,
+                        help="a stage key to run instead of the full plan (job:name[leg]); "
+                             "repeat --only for more than one, since a key may itself carry a comma")
     args = parser.parse_args()
 
-    if args.out.resolve() == PHASE0_BASELINE.resolve():
+    if args.out.resolve() == RECORDED_BASELINE.resolve():
         parser.error(
-            f"{PHASE0_BASELINE} is the recorded phase 0 baseline (a one-leg pytest run, not "
+            f"{RECORDED_BASELINE} is the recorded baseline (a one-leg pytest run, not "
             "comparable to this gate's two-leg run) and stays as history; pass a different --out."
         )
     args.out.mkdir(parents=True, exist_ok=True)
@@ -201,7 +216,7 @@ def main() -> int:
     bash = _resolve_git_bash()
     plan = build_plan()
     if args.only:
-        wanted = {s.strip() for s in args.only.split(",") if s.strip()}
+        wanted = set(args.only)
         unknown = wanted - {stage.key for stage in plan}
         if unknown:
             parser.error(f"unknown stage keys: {sorted(unknown)}")
@@ -239,13 +254,15 @@ def main() -> int:
         print(f"{stage.key:<40}{code:>5}{duration:>9.1f}s")
 
     pin = mypy_pin()
-    mypy_ran = None
-    try:
-        probe = subprocess.run(["mypy", "--version"], capture_output=True, text=True,
-                               timeout=60, check=False)
-        mypy_ran = (probe.stdout or probe.stderr).strip() or None
-    except (OSError, subprocess.SubprocessError):
-        mypy_ran = None
+    mypy_stage_ran = any(r["job"] == "mypy" and not r["skipped"] for r in results)
+    mypy_version_on_caller_path = None
+    if mypy_stage_ran:
+        try:
+            probe = subprocess.run(["mypy", "--version"], capture_output=True, text=True,
+                                   timeout=60, check=False)
+            mypy_version_on_caller_path = (probe.stdout or probe.stderr).strip() or None
+        except (OSError, subprocess.SubprocessError):
+            mypy_version_on_caller_path = None
 
     total = round(sum(r.get("duration_s", 0.0) for r in results if not r["skipped"]), 1)
     summary = {
@@ -254,7 +271,9 @@ def main() -> int:
         "out_of_scope_job": OUT_OF_SCOPE_JOB,
         "out_of_scope_reason": OUT_OF_SCOPE_REASON,
         "mypy_pin": pin,
-        "mypy_version_ran": mypy_ran,
+        # A probe on this caller's own PATH, not read from the mypy stage's own subprocess
+        # environment; None both when the probe fails and when the mypy stage did not run.
+        "mypy_version_on_caller_path": mypy_version_on_caller_path,
         "total_duration_s": total,
         "stages": results,
     }
