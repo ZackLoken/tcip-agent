@@ -135,3 +135,35 @@ def test_confirmations_recorded_under_different_dates_stay_separate(
     assert read("2026-03-02") == {"IMG_0007.JPG": "negative"}
     assert read("2026-03-09") == {"IMG_0007.JPG": "complete"}
     assert read(None) == {}
+
+
+def test_confirmed_negative_with_an_empty_label_file_still_carries(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A confirmed negative whose label file records nothing for the subject is admitted: the
+    rail must not refuse the case it exists to let through."""
+    labels = tmp_path / "annotations"
+    labels.mkdir()
+    write_annotations(str(labels / "img_blank.json"), [], 900, 500, keep_empty=True)
+    _store(client, tmp_path, "subject_a", {"img_blank.jpg": "negative"})
+
+    assert confirmed_negative_names(labels, subject="subject_a", date=None) == {"img_blank.jpg"}
+
+
+def test_confirmed_negative_refuses_when_the_label_file_holds_the_subject(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A stored negative and a label file that now carries the subject disagree about the same
+    image; a training run must not silently pick the store's side of that disagreement."""
+    labels = tmp_path / "annotations"
+    labels.mkdir()
+    write_annotations(str(labels / "img_bush.json"), [_box("bush", 5, 9, 640, 480)], 900, 500)
+    _store(client, tmp_path, "subject_a", {"img_bush.jpg": "negative"})
+    write_annotations(
+        str(labels / "img_bush.json"),
+        [_box("bush", 5, 9, 640, 480), _box("subject_a", 12, 30, 48, 140)],
+        900, 500,
+    )
+
+    with pytest.raises(ValueError, match="img_bush.jpg"):
+        confirmed_negative_names(labels, subject="subject_a", date=None)

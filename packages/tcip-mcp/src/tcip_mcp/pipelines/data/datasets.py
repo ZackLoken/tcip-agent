@@ -510,8 +510,8 @@ def confirmed_negative_records(
 
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        classes_path, dataset_root_of, image_status_digest_key,
-        is_confirmed_negative, status_confirmations, status_bucket, status_of,
+        annotations_hold_subject, classes_path, dataset_root_of, image_status_digest_key,
+        is_confirmed_negative, label_filename, status_confirmations, status_bucket, status_of,
     )
 
     root = dataset_root_of(labels_dir)
@@ -538,6 +538,24 @@ def confirmed_negative_records(
     negatives = {name: r for name, r in bucket.items() if is_confirmed_negative(status_of(r))}
     if not negatives:
         return negatives
+
+    # A label file holding the subject contradicts a stored negative, the disagreement
+    # scripts.doctor's check_negatives flags, through the same annotations_hold_subject predicate.
+    from tcip_annotation import json_io
+
+    def _label_holds_subject(name: str) -> bool:
+        label = Path(labels_dir) / label_filename(Path(name).stem)
+        return label.is_file() and annotations_hold_subject(
+            json_io.read_annotations(str(label)), subject
+        )
+
+    contradicted = sorted(name for name in negatives if _label_holds_subject(name))
+    if contradicted:
+        raise ValueError(
+            f"{contradicted} are recorded negative for {subject!r} but the label file holds "
+            f"{subject!r} annotations, contradicting the confirmation; re-review before this "
+            f"run can carry them as negatives."
+        )
 
     stamped_by_image: dict = {}
     try:
