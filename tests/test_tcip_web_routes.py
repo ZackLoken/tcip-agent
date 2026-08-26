@@ -166,6 +166,40 @@ def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_pa
     assert body["models_by_date"]["2026-03-24"] == []
 
 
+def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
+    client: TestClient, dataset_root: Path, monkeypatch,
+) -> None:
+    """The dataset tree, the class registry's provisional scan and the review batch all parse the
+    same date's label files; each file's parse is paid once, not once per route."""
+    import tcip_annotation.json_io as json_io
+
+    ann = dataset_root / "annotations" / "2-11-26"
+    ann.mkdir(parents=True)
+    for i in range(5):
+        _write_gt(ann / f"IMG_{i:04d}.json", [(1, 1, 3, 3)])
+
+    calls = []
+    real_read = json_io.read_annotations
+
+    def _counting_read(path):
+        calls.append(str(path))
+        return real_read(path)
+
+    monkeypatch.setattr(json_io, "read_annotations", _counting_read)
+
+    client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
+    client.get(
+        "/api/classes/load",
+        params={"project_root": str(dataset_root), "annotations_dir": str(ann)},
+    )
+    client.get(
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root), "gt_dir": str(ann)},
+    )
+
+    assert len(calls) == 5, "each of the 5 label files must be parsed exactly once, not per route"
+
+
 def test_dataset_list_images(client: TestClient, dataset_root: Path) -> None:
     resp = client.get(
         "/api/dataset/images",
@@ -1085,6 +1119,37 @@ def test_review_mark_complete_refuses_an_unreadable_gt(
     )
     assert resp.status_code == 400
     assert str(gt) in resp.json()["detail"]
+
+
+def test_review_mark_complete_refusal_persists_nothing(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A 400 on the unreadable GT read must leave the image exactly as it was: no review mark, no
+    audit line, because a claim derived from a document nobody can read is a claim about nothing."""
+    gt = tmp_path / "gt.json"
+    gt.write_text("not json {][", encoding="utf-8")
+
+    before = client.get(
+        "/api/review/image_status",
+        params={"dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG"},
+    ).json()
+    assert before["status"] == "not_started"
+
+    resp = client.post(
+        "/api/review/mark_complete",
+        json={
+            "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
+            "gt_path": str(gt), "subject": "catkin",
+        },
+    )
+    assert resp.status_code == 400
+
+    after = client.get(
+        "/api/review/image_status",
+        params={"dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG"},
+    ).json()
+    assert after["status"] == "not_started"
+    assert _audit_entries(dataset_root) == []
 
 
 def test_review_mark_complete_refuses_an_unreadable_prediction(

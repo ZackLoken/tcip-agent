@@ -190,6 +190,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/src/tcip_web/app.py | FastAPI application: REST API for MCP tools + WebSocket for GUI state sync. | 10 | 3 |
 | packages/tcip-web/src/tcip_web/identity.py | Current-user identity for provenance stamping (created_by / accepted_by). | 0 | 5 |  <!-- queued: P5-329 unwired -->
 | packages/tcip-web/src/tcip_web/jobstore.py | Persistence + memory-cap helpers for the web's async job registries. | 1 | 7 |
+| packages/tcip-web/src/tcip_web/label_annotations_cache.py | The mtime-keyed label-document parse memo shared by the classes, dataset and review routes. | 1 | 3 |
 | packages/tcip-web/src/tcip_web/paths.py | Path resolution helpers with traversal protection. | 3 | 13 |
 | packages/tcip-web/src/tcip_web/routes/__init__.py | Route modules for the tcip-web FastAPI backend. | 16 | 1 |
 | packages/tcip-web/src/tcip_web/routes/_body_common.py | The empty JSON body a route with only path parameters declares, forcing a browser onto a preflighted request instead of a simple one. | 0 | 3 |
@@ -777,12 +778,12 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/load` | `load_classes` | `routes/classes.py:132` |
-| POST | `/save` | `save_classes` | `routes/classes.py:194` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:328` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:338` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:369` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:399` |
+| GET | `/load` | `load_classes` | `routes/classes.py:97` |
+| POST | `/save` | `save_classes` | `routes/classes.py:162` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:296` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:306` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:337` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:367` |
 
 ### routes/coverage.py, prefix `/api/coverage` (5 routes)
 
@@ -798,10 +799,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:143` |  <!-- queued: P5-83 unify -->
-| GET | `/images` | `list_images` | `routes/dataset.py:189` |  <!-- queued: P5-84 delete -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:211` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:298` |
+| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:144` |  <!-- queued: P5-83 unify -->
+| GET | `/images` | `list_images` | `routes/dataset.py:190` |  <!-- queued: P5-84 delete -->
+| POST | `/select` | `select_dataset` | `routes/dataset.py:212` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:300` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -866,17 +867,17 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:457` |
-| POST | `/action` | `record_action` | `routes/review.py:583` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:458` |
+| POST | `/action` | `record_action` | `routes/review.py:584` |
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:718` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:776` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:797` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:848` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1192` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1242` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1272` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1392` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1420` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:781` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:802` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:853` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1197` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1250` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1280` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1400` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1428` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1160,8 +1161,8 @@ named third consumer, `scripts/check_dataset_identity.py`, is never executed by 
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:338`; `set_image_status_bulk`,
-`routes/classes.py:369`; `tcip_mcp.tools.data_tools._apply_negative_carry`
+`packages/tcip-web/src/tcip_web/routes/classes.py:306`; `set_image_status_bulk`,
+`routes/classes.py:337`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy, computed by `_compute_negative_carry` at `data_tools.py:558` before
 the split tree is written), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:625`.
 
@@ -1194,12 +1195,12 @@ has not been re-verified; MCP-side readers test membership through
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:298`, called from
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:266`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
-`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:194`) and `write_class_map`
+`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:162`) and `write_class_map`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1010`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
@@ -1696,7 +1697,7 @@ Phase 3 verdict: single. The posted payload carries `active_subject` beside `sub
 
 Must agree: mutations from any process land in the log their scope names, a dataset's own for a record travelling with the data and the platform's otherwise, with the same entry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/audit.py:240` (`def audited(`, taking a declared `scope_arg` naming which tool argument carries the dataset a scoped tool mutates a record of) and `record_event`, line 121, the one emitter for code that is not an `@audited` tool; both address the log through `audit_log_key`, line 84, and differ only in what a failed append means: `record_event` warns through `_write_entry`, line 103, while the decorator refuses, since its append runs after the tool body.
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:90` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:91` (`def _audit(scope: str, tool: str, arguments: dict) -> None:`, which calls `record_event` with the scope its event belongs to; `routes/results.py:54` and `routes/inference.py:84` do the same for their own roots).
 Phase 3 verdict: single.
 
 ## S07. Experiment record .tcip/experiments/<id>/
@@ -1800,7 +1801,7 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:209` (`from tcip_mcp.dataset_layout import classes_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:177` (`from tcip_mcp.dataset_layout import classes_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
@@ -1863,7 +1864,7 @@ Phase 3 verdict: single.
 ## S29. Prediction-bucket immutability
 
 Must agree: no writer overwrites a bucket whose predictions already carry human review verdicts.
-Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:191` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, line 20, excludes every provenance stamp through `tcip_annotation.json_io.prediction_documents` rather than naming one filename).
+Side A: `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:191` (`def resolve_writable_bucket(`, the one guard; `bucket_stems`, `prediction_buckets.py:22`, excludes every provenance stamp through `tcip_annotation.json_io.prediction_documents` rather than naming one filename).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:875`, `tools/vision_tools.py:1029`, `tools/inference_tools.py:1268` and `packages/tcip-web/src/tcip_web/routes/inference.py:430` (every writer door resolves through it, against the verdict store `review_state_dir_of` names).
 Phase 3 verdict: single.
 
@@ -2061,7 +2062,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:384` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:385` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry

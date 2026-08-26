@@ -315,7 +315,7 @@ def test_cached_label_annotations_raises_on_a_stat_failure_other_than_absence(
 ) -> None:
     """Only a missing file derives an empty status; any other OSError at stat (a permission
     error on a present file) is a read failure, not a fact about absence."""
-    from tcip_web.routes.classes import _cached_label_annotations
+    from tcip_web.label_annotations_cache import cached_label_annotations
 
     label = tmp_path / "a.json"
     write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
@@ -332,7 +332,7 @@ def test_cached_label_annotations_raises_on_a_stat_failure_other_than_absence(
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     with pytest.raises(UnreadableLabelDocument):
-        _cached_label_annotations(label)
+        cached_label_annotations(label)
 
 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
@@ -494,6 +494,27 @@ def test_derive_statuses_cache_invalidates_on_label_write(client: TestClient, tm
     assert second["statuses"]["IMG_A.JPG"] == "partial"
 
 
+def test_load_derives_subjects_excludes_a_bucket_sidecar(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A bucket's own provenance stamp is not a per-image label: it must not seed the provisional
+    registry, and it is not reported under unreadable either, since it was never meant to be read
+    as one."""
+    from tcip_mcp.pipelines.resolution import write_sidecar
+
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    write_annotations(str(ann / "IMG_A.json"), [_catkin(50, 50, 60, 60)], 100, 100)
+    write_sidecar(ann, {"checkpoint_sha256": "sha", "experiment_id": None})
+
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "annotations_dir": str(ann)},
+    ).json()
+    assert set(load["subjects"]) == {"catkin"}
+    assert load["unreadable"] == []
+
+
 def test_load_derived_registry_cache_invalidates_on_label_write(
     client: TestClient, tmp_path: Path
 ) -> None:
@@ -573,6 +594,31 @@ def test_derive_image_status_confines_annotations_dir_to_allowed_roots(
         "/api/classes/image_status/derive",
         json={"project_root": str(tmp_path), "annotations_dir": str(outside),
               "subject": "catkin", "image_list": ["IMG_A.JPG"]},
+    )
+    assert resp.status_code == 403
+
+
+def test_load_classes_confines_annotations_dir_before_scanning_it(
+    client: TestClient, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch,
+) -> None:
+    """The guard runs before the scan: a refused annotations_dir is never parsed, so a request
+    naming a dataset_root outside the allowed roots costs nothing beyond the 403 it returns."""
+    import tcip_annotation.json_io as json_io
+
+    outside = tmp_path_factory.mktemp("outside")
+    ann = outside / "annotations"
+    ann.mkdir()
+    write_annotations(str(ann / "SECRET.json"), [_catkin(1, 1, 2, 2, subject="leaked")], 10, 10)
+
+    def _must_not_be_called(path):
+        raise AssertionError(f"the annotations dir must be guarded before any file is read: {path}")
+
+    monkeypatch.setattr(json_io, "read_annotations", _must_not_be_called)
+
+    resp = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "dataset_root": str(outside),
+                "annotations_dir": str(ann)},
     )
     assert resp.status_code == 403
 
