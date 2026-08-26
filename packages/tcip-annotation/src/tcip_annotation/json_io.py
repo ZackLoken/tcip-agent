@@ -131,14 +131,18 @@ def parse_label_document(text: str, *, source: str) -> dict:
 
 
 def _decode_label_bytes(data: bytes, *, source: str) -> str:
-    """A label document's bytes, decoded strictly as UTF-8.
+    """A label document's bytes, decoded strictly as UTF-8, a leading byte-order mark accepted.
 
-    Raises :class:`UnreadableLabelDocument`, naming ``source``, for bytes that are not valid
-    UTF-8: the one decode policy every reader of a label document's raw bytes shares, so a file
-    reader and a store-backed reader over the same bytes cannot disagree about whether they read.
+    ``utf-8-sig``: a UTF-8 byte-order mark encodes the same text as the same document without
+    one, so a document this platform (or an operator's conforming script) wrote under a tool
+    that stamps one must read identically to one that does not. Bytes that decode with a BOM
+    stripped but are not valid UTF-8 otherwise, or that carry no valid UTF-8 at all (a UTF-16
+    document, for instance), still raise :class:`UnreadableLabelDocument`, naming ``source``: the
+    one decode policy every reader of a label document's raw bytes shares, so a file reader and a
+    store-backed reader over the same bytes cannot disagree about whether they read.
     """
     try:
-        return data.decode("utf-8")
+        return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise UnreadableLabelDocument(f"{source} is not valid UTF-8: {exc}") from exc
 
@@ -555,6 +559,23 @@ def xywh(x1: float, y1: float, x2: float, y2: float) -> list[float]:
     return [round(x1, 2), round(y1, 2), round(x2 - x1, 2), round(y2 - y1, 2)]
 
 
+def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
+    """A box's stored ``xywh``, refusing one whose rounded extent is not positive.
+
+    Checked against the rounded, stored box (:func:`stored_box_extent_ok`), not the raw corners:
+    a box, or a polygon's derived box, can pass on its raw extent and still round to zero width
+    or height at the document's stored 2-decimal grid, and a document the writer lets through
+    must be one the reader accepts. Shared by every geometry a writer stores as a ``bbox``, so
+    the box and polygon branches cannot drift onto two different checks.
+    """
+    if not stored_box_extent_ok(bbox):
+        raise ValueError(
+            f"{where}: box (x1={bbox.x1}, y1={bbox.y1}, x2={bbox.x2}, y2={bbox.y2}) rounds to no "
+            "positive extent at the document's stored grid"
+        )
+    return xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
+
+
 def _annotation_record(a: Annotation) -> dict | None:
     """One annotation → its JSON object, or None if a degenerate polygon should be skipped."""
     rec: dict = {"subject": a.subject}
@@ -567,15 +588,9 @@ def _annotation_record(a: Annotation) -> dict | None:
         # The polygon's box travels with it (COCO-style), derived from the rings rather than
         # authored: every reader re-derives via bbox_of, so the two can't diverge.
         poly_box = bbox_of(Polygon(valid_rings))
-        check_box_extent(poly_box, where=f"{a.subject!r} annotation's polygon")
-        rec["bbox"] = xywh(poly_box.x1, poly_box.y1, poly_box.x2, poly_box.y2)
+        rec["bbox"] = _stored_bbox_or_raise(poly_box, where=f"{a.subject!r} annotation's polygon")
     elif isinstance(geom, BBox):
-        # Checked against the rounded, stored box (stored_box_extent_ok), not the raw corners.
-        stored_bbox = xywh(geom.x1, geom.y1, geom.x2, geom.y2)
-        check_box_extent(BBox(stored_bbox[0], stored_bbox[1],
-                              stored_bbox[0] + stored_bbox[2], stored_bbox[1] + stored_bbox[3]),
-                         where=f"{a.subject!r} annotation")
-        rec["bbox"] = stored_bbox
+        rec["bbox"] = _stored_bbox_or_raise(geom, where=f"{a.subject!r} annotation")
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:
