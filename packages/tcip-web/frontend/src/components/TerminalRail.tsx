@@ -16,8 +16,11 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
 import { terminalApi, terminalWsUrl } from "@/api/terminal";
+import type { TerminalInputFrame, TerminalResizeFrame } from "@/api/types.generated";
 import { createReconnectingSocket } from "@/lib/reconnectingSocket";
 import { useStore } from "@/store";
+
+type TerminalSendFrame = TerminalInputFrame | TerminalResizeFrame;
 
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 480;
@@ -71,7 +74,7 @@ export function TerminalRail() {
   const termRef = useRef<Terminal | null>(null);
   // The lifecycle effect's `send` closure, exposed so the pending-message effect below can
   // reach the live socket without a second write path.
-  const sendRef = useRef<((payload: unknown) => void) | null>(null);
+  const sendRef = useRef<((payload: TerminalSendFrame) => void) | null>(null);
 
   // A request staged via `sendToAgentTerminal` (TuningTab, ResultsTab, ...): sent as terminal
   // input once the PTY socket is actually open, not before, so a message sent while the rail
@@ -310,7 +313,7 @@ export function TerminalRail() {
       },
     });
 
-    const send = (payload: unknown) => socket.send(JSON.stringify(payload));
+    const send = (payload: TerminalSendFrame) => socket.send(JSON.stringify(payload));
     sendRef.current = send;
     socket.start();
 

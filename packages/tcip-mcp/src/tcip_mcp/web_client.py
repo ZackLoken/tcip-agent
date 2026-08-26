@@ -165,6 +165,22 @@ TAB_NAMES = get_args(ActiveTab)
 # The pusher and the receiver both validate against this one set, so neither drifts apart.
 VALID_PANELS = frozenset(TAB_NAMES) | {"app"}
 
+# The event types the platform's own tool-driven emitters send; ``push_panel_data`` accepts any
+# caller-supplied type beyond this set, so this is not the full panel-event vocabulary.
+PANEL_EVENT_LABELS_WRITTEN = "labels_written"
+PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus"
+PANEL_EVENT_REVIEW_FOCUS = "review_focus"
+PANEL_EVENT_ACTIVE_PROJECT_CHANGED = "active_project_changed"
+PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request"
+
+PLATFORM_PANEL_EVENTS = (
+    PANEL_EVENT_LABELS_WRITTEN,
+    PANEL_EVENT_ANNOTATE_FOCUS,
+    PANEL_EVENT_REVIEW_FOCUS,
+    PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
+    PANEL_EVENT_CANVAS_STATE_REQUEST,
+)
+
 
 def resolve_web_host() -> str:
     return os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)

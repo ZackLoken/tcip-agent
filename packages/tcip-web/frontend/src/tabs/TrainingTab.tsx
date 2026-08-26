@@ -72,12 +72,16 @@ export function TrainingTab() {
       if (msg.type === "metric" && msg.row) {
         setMetrics((prev) => mergeMetric(prev, msg.row as MetricRow));
       } else if (msg.type === "status") {
-        // Terminal frame: surface completion/failure/cancellation + refresh the list.
+        // Terminal frame: an unknown run carries error and no status; a known run carries its
+        // status report and no error.
+        if (msg.error) {
+          useStore.getState().pushToast(`Training stream error: ${msg.error}`);
+          return;
+        }
         const st = msg.status?.status;
-        if (st) useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
+        if (typeof st === "string")
+          useStore.getState().pushToast(`Training ${selectedRun}: ${st}`, "info");
         void refreshRuns();
-      } else if (msg.type === "error") {
-        useStore.getState().pushToast(`Training stream error: ${msg.error ?? "unknown run"}`);
       }
     });
     return () => streamRef.current?.();

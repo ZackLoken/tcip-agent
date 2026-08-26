@@ -66,13 +66,19 @@ class _NullableStringList(BaseModel):
     values: list[Optional[str]]
 
 
-def test_a_one_member_literal_refuses_rather_than_render_the_wrapping_type() -> None:
-    """A ``const`` schema is a shape the mapper does not cover; it must say so by name instead of
-    silently rendering the primitive type underneath and dropping the literal value."""
+class _FreeFormObject(BaseModel):
+    """A scratch model whose one field is a bare ``dict``, the free-form object shape a
+    discriminated frame carries beside its ``Literal`` type field."""
+
+    payload: dict
+
+
+def test_a_one_member_literal_renders_its_own_value_as_the_type() -> None:
+    """A ``const`` schema is a single-member ``Literal``: its own value is the type TypeScript
+    narrows a discriminated union on, so it renders rather than dropping the literal."""
     generator = _generator()
     schema = _OneMemberLiteral.model_json_schema()
-    with pytest.raises(SystemExit):
-        generator._ts_type(schema["properties"]["kind"], "_OneMemberLiteral.kind")
+    assert generator._ts_type(schema["properties"]["kind"], "_OneMemberLiteral.kind") == '"only"'
 
 
 def test_a_union_used_as_an_array_item_is_parenthesized() -> None:
@@ -80,6 +86,24 @@ def test_a_union_used_as_an_array_item_is_parenthesized() -> None:
     schema = _NullableStringList.model_json_schema()
     assert (generator._ts_type(schema["properties"]["values"], "_NullableStringList.values")
             == "(string | null)[]")
+
+
+def test_a_free_form_object_renders_as_a_record_of_unknown() -> None:
+    """A bare ``dict`` field carries no fixed property set, so it maps to ``Record<string,
+    unknown>`` rather than refusing or dropping to an untyped ``object``."""
+    generator = _generator()
+    schema = _FreeFormObject.model_json_schema()
+    assert (generator._ts_type(schema["properties"]["payload"], "_FreeFormObject.payload")
+            == "Record<string, unknown>")
+
+
+def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:
+    """The free-form-object case must not swallow a plain fixed-shape object schema that arrives
+    outside a ``$ref``: that shape is still not one the mapper covers."""
+    generator = _generator()
+    schema = {"type": "object", "properties": {"a": {"type": "string"}}}
+    with pytest.raises(SystemExit):
+        generator._ts_type(schema, "_fixed_object")
 
 
 def _generated_field_sets() -> list[set[str]]:

@@ -196,9 +196,9 @@ def save_annotations(
     save_annotations_any(str(out_path), typed, w, h, fmt=fmt, file_name=img.name, keep_empty=True)
 
     try:
-        from tcip_mcp.web_client import post_panel_event
+        from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
 
-        post_panel_event("annotate", "labels_written",
+        post_panel_event("annotate", PANEL_EVENT_LABELS_WRITTEN,
                          {"image_path": image_path, "stem": img.stem, "written": [str(out_path)]})
     except Exception:
         pass
@@ -562,9 +562,12 @@ def push_panel_data(
 
     Args:
         panel: Target panel: one per GUI tab, or 'app' for app-level events like annotate_focus /
-            review_focus / project_changed. See ``web_client.VALID_PANELS`` for the current set.
-        event_type: Event type the panel switches on (e.g. 'load_matches', 'metrics_update', or
-            'banner', whose ``data['text']`` the GUI shows as a quiet note above that tab).
+            review_focus / active_project_changed. See ``web_client.VALID_PANELS`` for the
+            current set.
+        event_type: Any event type the panel understands, not confined to
+            ``web_client.PLATFORM_PANEL_EVENTS`` (the platform's own emitters). 'banner' is the
+            one example the browser renders directly: ``data['text']`` shows as a quiet note
+            above that tab.
         data: Arbitrary JSON data payload.
     """
     from tcip_mcp.web_client import VALID_PANELS, post_panel_event
@@ -670,7 +673,7 @@ def _focus_annotate(
     restated here rather than shared.
     """
     from tcip_mcp.dataset_layout import annotation_dir, image_dir, label_filename
-    from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
 
     idir = Path(image_dir(dataset_root, date))
     if not idir.is_dir():
@@ -708,7 +711,7 @@ def _focus_annotate(
         "subject": subject, "date": date, "image_index": image_index, "mode": mode,
         "active_subject": subject,
     }
-    result = post_panel_event("app", "annotate_focus", payload)
+    result = post_panel_event("app", PANEL_EVENT_ANNOTATE_FOCUS, payload)
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),
@@ -732,7 +735,7 @@ def _focus_review(
     """Drive the live Review tab to a model's predictions of ``subject`` on a frame. Posts a
     ``review_focus`` event the GUI honors with local setters."""
     from tcip_mcp.dataset_layout import image_dir, label_filename, prediction_dir
-    from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.web_client import PANEL_EVENT_REVIEW_FOCUS, post_panel_event
     from tcip_mcp.workspace import is_valid_name
 
     if filter_type not in ("all", "tp", "fp", "fn"):
@@ -773,7 +776,7 @@ def _focus_review(
         "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
     }
-    result = post_panel_event("app", "review_focus", payload)
+    result = post_panel_event("app", PANEL_EVENT_REVIEW_FOCUS, payload)
     return {
         "delivered": result.get("delivered", False),
         "status": result.get("status"),

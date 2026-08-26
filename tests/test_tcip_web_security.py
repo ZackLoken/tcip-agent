@@ -130,4 +130,5 @@ def test_ws_training_stream_unconfined_for_a_project_root_inside_the_workspace(
     ) as ws:
         msg = ws.receive_json()
         assert msg["type"] == "status"
-        assert msg["status"]["error"]
+        assert msg["status"] is None
+        assert msg["error"]

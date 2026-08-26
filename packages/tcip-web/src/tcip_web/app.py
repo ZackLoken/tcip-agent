@@ -27,7 +27,11 @@ from pydantic import BaseModel
 
 from tcip_store.binding import bind_default
 
-from tcip_mcp.web_client import VALID_PANELS
+from tcip_mcp.web_client import (
+    PANEL_EVENT_ANNOTATE_FOCUS,
+    PANEL_EVENT_REVIEW_FOCUS,
+    VALID_PANELS,
+)
 from tcip_web.trust_boundary import TrustBoundaryMiddleware, log_exposure_opt_in, origin_allowed
 
 logger = logging.getLogger(__name__)
@@ -285,7 +289,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     # Agent focus events also update the advisory GuiState slice, so gui.json (what the
     # agent reads back via view_gui_state) reflects where it pointed the human: the
     # browser applies the event locally and never syncs these fields back itself.
-    if event.event_type == "review_focus":
+    if event.event_type == PANEL_EVENT_REVIEW_FOCUS:
         review = _gui_store.state.review.model_copy(
             update={
                 k: event.data[k]
@@ -294,7 +298,7 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
             }
         )
         await _gui_store.mutate({"active_tab": "review", "review": review})
-    elif event.event_type == "annotate_focus":
+    elif event.event_type == PANEL_EVENT_ANNOTATE_FOCUS:
         mutation: dict[str, Any] = {"active_tab": "annotate"}
         if "mode" in event.data:
             mutation["mode"] = event.data["mode"]

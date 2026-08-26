@@ -199,18 +199,6 @@ describe("openTrainingStream", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
-  it("stops reconnecting once an error frame has arrived", () => {
-    const onMessage = vi.fn();
-    openTrainingStream("/data/proj", "r1", onMessage);
-    lastSocket().open();
-    lastSocket().message(JSON.stringify({ type: "error", run_id: "r1", error: "unknown run" }));
-    expect(onMessage).toHaveBeenCalledWith({ type: "error", run_id: "r1", error: "unknown run" });
-
-    lastSocket().drop();
-    vi.advanceTimersByTime(60_000);
-    expect(FakeWebSocket.instances).toHaveLength(1);
-  });
-
   it("closing the stream suppresses any further reconnect", () => {
     const stop = openTrainingStream("/data/proj", "r1", vi.fn());
     lastSocket().open();

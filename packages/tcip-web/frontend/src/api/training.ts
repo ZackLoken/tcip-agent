@@ -2,6 +2,7 @@
 
 import { getJson, postJson, wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
+import type { TrainingMetricFrame, TrainingStatusFrame } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
 
 export interface TrainingRunSummary {
@@ -70,19 +71,13 @@ export const trainingApi = {
     ),
 };
 
-export interface TrainingStreamMsg {
-  type: string;
-  run_id: string;
-  row?: MetricRow;
-  status?: { status?: string; [k: string]: unknown };
-  error?: string;
-}
+export type TrainingStreamMsg = TrainingMetricFrame | TrainingStatusFrame;
 
 /**
  * Open a live metrics stream for a training run, auto-reconnecting with capped backoff.
  * The server replays all rows from the start on each (re)connect, so the consumer must
- * dedupe by epoch/step. A ``status`` (terminal) or ``error`` (unknown run) frame ends
- * the stream; once seen we stop reconnecting.
+ * dedupe by epoch/step. The ``status`` frame is always terminal, whether it carries a
+ * known run's report or an unknown run's ``error``; once seen we stop reconnecting.
  */
 export function openTrainingStream(
   project_root: string,
@@ -94,10 +89,7 @@ export function openTrainingStream(
   );
   const socket = createReconnectingSocket({
     url,
-    ...jsonFrameHandlers<TrainingStreamMsg>(
-      onMessage,
-      (frame) => frame.type === "status" || frame.type === "error",
-    ),
+    ...jsonFrameHandlers<TrainingStreamMsg>(onMessage, (frame) => frame.type === "status"),
   });
   socket.start();
   return () => socket.stop();
