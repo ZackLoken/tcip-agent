@@ -1216,10 +1216,13 @@ exists to remove. A document with more than one entry has genuinely different ev
 one claim (ground-truth records against reviewer-confirmed verdicts), and the caller says which."""
 
 _REFERENCE_INPUT_GROUPS = ("label_dirs", "label_csvs", "reference_buckets", "scope_roots",
-                           "stated_values")
+                           "label_stems", "stated_values")
 """The kinds of evidence a reference identity is built from. Each names locations the platform can
 hash for itself, except ``stated_values``, which holds what another primitive already computed (a
-split lock's identity, a review reference's hash and image count) and this one cannot recompute."""
+split lock's identity, a review reference's hash and image count) and this one cannot recompute.
+``label_stems`` is ``label_dirs``' narrower sibling: a directory hashed over a named subset of its
+stems (``{role: {"path": dir, "stems": [...]}}``) rather than whole, for a calibration restricted
+to a split manifest's held-out side, where the whole directory was never what the reference swept."""
 
 _UNCOMPARED = object()
 """A resolver result that publishes no value of its own for its parameter, so the claim's value has
@@ -1323,6 +1326,13 @@ def _reference_identity(reference_inputs: dict, dataset_root: Path) -> dict:
             "path": _relative_location(d, dataset_root), "content_digest": bucket_content_digest(d)}
     for role, d in sorted((reference_inputs.get("scope_roots") or {}).items()):
         identity.setdefault("scope_roots", {})[role] = _relative_location(d, dataset_root)
+    for role, spec in sorted((reference_inputs.get("label_stems") or {}).items()):
+        stems = sorted(spec["stems"])
+        identity.setdefault("label_stems", {})[role] = {
+            "path": _relative_location(spec["path"], dataset_root),
+            "dataset_hash": dataset_hash(spec["path"], stems=stems),
+            "count": len(stems),
+        }
     stated = reference_inputs.get("stated_values") or {}
     if stated:
         identity["stated_values"] = {k: stated[k] for k in sorted(stated)}

@@ -421,6 +421,9 @@ def calibrate_classifier_operating_point(
     rather than a measurement; the pred dirs are predictions by definition and are not held to it,
     and when a GT dir's own dataset root contradicts the stated ``dataset_root``.
 
+    This door takes no split manifest: it draws no universe at all, the caller already hands it
+    four already-split directories.
+
     Args:
         trait_name: The registered trait whose positive class is being calibrated.
         subject: The GT annotation subject naming this trait's object type, a per-run fact the
@@ -583,6 +586,9 @@ def calibrate_ordinal_regression_operating_point(
     ``<output_dir>/ordinal_operating_point.json`` or ``regression_operating_point.json``, a file
     distinct from every other operating-point sidecar (see
     ``resolution.read_ordinal_operating_point_sidecar``/``read_regression_operating_point_sidecar``).
+
+    This door takes no split manifest: its universe is the CSV's own stems, and no split manifest
+    is drawn over a CSV-sourced scalar trait.
 
     A stamp that claims validation names the record it was earned from, the same two phases the
     classifier door goes through: ``resolution.open_validation`` runs the gate over the evidence,

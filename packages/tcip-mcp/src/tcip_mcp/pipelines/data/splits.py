@@ -31,7 +31,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Sequence
 
 from tcip_store import (
     RECORD_JSON,
@@ -795,6 +795,7 @@ register_store(
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_CalHoldoutLockLocator(),
+        enumerable=True,
     )
 )
 
@@ -866,6 +867,11 @@ def label_image_stems(
     ``labels_dir`` may itself be a prediction bucket (a calibration/holdout split of one), so its
     own provenance sidecars are excluded through :func:`~tcip_annotation.json_io.prediction_documents`
     rather than named as if they were image stems.
+
+    This is the whole-directory universe; a caller drawing under a split manifest instead narrows
+    its own listing with :func:`calibration_universe_from_manifest`, which takes this function's
+    stems as the ``present`` set it checks the manifest's held-out members against, never a second
+    scan of its own.
     """
     from tcip_annotation.json_io import prediction_documents
 
@@ -878,6 +884,65 @@ def label_image_stems(
     stem_to_image = {stem: src for stem, src in list_logical_images(images_dir).items()
                      if stem in label_stems}
     return sorted(stem_to_image), stem_to_image
+
+
+def calibration_universe_from_manifest(
+    manifest: dict, date: str | None, present: Iterable[str],
+) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]]]:
+    """The calibration universe a split manifest's held-out side gives a locked cal/holdout draw
+    for one capture date: the manifest's ``val`` members under ``date`` that are present in the
+    door's own stem listing, so a calibration measures the operating point on exactly the set the
+    shipped checkpoint was chosen to fit, not diluted with training stems (a disjointness check
+    catches those separately, against the checkpoint's own ``split.json``).
+
+    ``present`` is the door's own stem listing (e.g. :func:`label_image_stems`' stems), checked
+    against rather than assumed: a manifest member with no image left on disk is not a real
+    calibration candidate.
+
+    Returns ``(stems, group_by, group_key_map, excluded)``: ``stems`` is the val-side identities
+    narrowed to bare stems; ``group_by``/``group_key_map`` are the manifest's own grouping policy
+    (``group_key_map`` narrowed to this date's bare stems, so a lookup by stem resolves the way
+    ``_train_disjointness`` already resolves one); ``excluded`` names what the manifest held that
+    never entered the universe: present train members (``excluded_training_stems``) and present
+    members neither side claimed (``excluded_unassigned_stems``).
+
+    Refuses, naming the count, when the resulting universe would hold fewer than two groups: the
+    held-out half would be empty and an operating point would stamp unvalidated silently.
+    """
+    present_set = set(present)
+    splits = manifest.get("splits") or {}
+    train_ids = {i for i in (splits.get("train") or []) if member_identity_parts(i)[0] == date}
+    val_ids = {i for i in (splits.get("val") or []) if member_identity_parts(i)[0] == date}
+
+    stems = sorted(member_identity_parts(i)[1] for i in val_ids
+                  if member_identity_parts(i)[1] in present_set)
+    excluded = {
+        "excluded_training_stems": sorted(
+            member_identity_parts(i)[1] for i in train_ids
+            if member_identity_parts(i)[1] in present_set),
+        "excluded_unassigned_stems": sorted(
+            s for s in present_set if member_identity(date, s) not in train_ids | val_ids),
+    }
+
+    group_by = manifest.get("group_by")
+    manifest_group_key_map = manifest.get("group_key_map")
+    group_key_map = None
+    if manifest_group_key_map:
+        group_key_map = {
+            member_identity_parts(i)[1]: v for i, v in manifest_group_key_map.items()
+            if member_identity_parts(i)[0] == date
+        }
+
+    group_key_fn = resolve_group_key_fn(group_by or "tile_prefix", stems, group_key_map=group_key_map)
+    n_groups = len({group_key_fn(s) for s in stems})
+    if n_groups < 2:
+        raise ValueError(
+            f"the split manifest's held-out side for date {date!r} gives a calibration universe "
+            f"of {n_groups} group(s) ({len(stems)} stem(s)) after excluding what isn't present: "
+            "a held-out half needs at least two groups, or the operating point would stamp "
+            "unvalidated silently."
+        )
+    return stems, group_by, group_key_map, excluded
 
 
 def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
@@ -905,6 +970,7 @@ def resolve_locked_cal_holdout_split(
     seed: int = 0,
     force_redraw: bool = False,
     timestamp: str | None = None,
+    split_manifest_dir: str | None = None,
 ) -> dict:
     """Resolve (and lock) the calibration/holdout split for one dataset identity.
 
@@ -921,12 +987,20 @@ def resolve_locked_cal_holdout_split(
     ``group_by``/``group_key_map`` raises loudly here rather than silently degrading.
 
     If a lock already exists and the caller's declared policy (``group_by``/``group_key_map``/
-    ``seed``/``holdout_ratio``) differs from what is recorded in it, the divergence is logged as
-    a warning and returned under ``"policy_divergence"`` (``{"requested": ..., "locked": ...}``),
-    the locked split is still returned unchanged, never silently redrawn, but a caller now has a
-    way to *see* the mismatch instead of reading server logs. Stems the caller has that the lock
-    doesn't cover are similarly surfaced under ``"unlocked_stems"`` rather than silently dropped,
-    the lock stays authoritative for what it already covers.
+    ``seed``/``holdout_ratio``/``split_manifest_dir``) differs from what is recorded in it, the
+    divergence is logged as a warning and returned under ``"policy_divergence"``
+    (``{"requested": ..., "locked": ...}``), the locked split is still returned unchanged, never
+    silently redrawn, but a caller now has a way to *see* the mismatch instead of reading server
+    logs. Stems the caller has that the lock doesn't cover are similarly surfaced under
+    ``"unlocked_stems"`` rather than silently dropped, the lock stays authoritative for what it
+    already covers.
+
+    ``split_manifest_dir`` names the split manifest a caller drawing ``stems`` from one restricted
+    it to (``None`` for a whole-directory draw, the record's key set stays the same either way);
+    it is written into the lock and into every ``redraw_history`` entry alongside the rest of the
+    declared policy, never resolved or compared here, that is the caller's own job
+    (:func:`~tcip_mcp.pipelines.data.splits.calibration_universe_from_manifest` and the manifest
+    checks each door applies before it ever draws a universe to lock).
 
     A locked stem with no corresponding entry in the caller's current ``stems`` (its image/label
     was deleted or renamed since the split was locked) raises ``ValueError`` rather than silently
@@ -950,8 +1024,8 @@ def resolve_locked_cal_holdout_split(
     is only meaningful when a new draw actually happens (first draw, or ``force_redraw=True``).
 
     Returns the full locked-split dict: ``{identity_hash, calibration, holdout, group_by,
-    group_key_map, seed, holdout_ratio, redraw_history}``, plus the optional ``policy_divergence``
-    / ``unlocked_stems`` report fields above when a lock already existed.
+    group_key_map, seed, holdout_ratio, split_manifest_dir, redraw_history}``, plus the optional
+    ``policy_divergence`` / ``unlocked_stems`` report fields above when a lock already existed.
     """
     group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
     lock_key = cal_holdout_lock_key(identity_hash, scope_root=scope_root)
@@ -975,6 +1049,7 @@ def resolve_locked_cal_holdout_split(
     declared_policy = {
         "group_by": group_by, "group_key_map": group_key_map,
         "seed": seed, "holdout_ratio": holdout_ratio,
+        "split_manifest_dir": split_manifest_dir,
     }
 
     if existing is not None and not force_redraw:

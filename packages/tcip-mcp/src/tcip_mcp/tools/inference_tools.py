@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path, PurePosixPath
 
 from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, register_store
@@ -168,8 +169,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                                tile_resize=None,
                                tile_size_source="default", tile_size_derived_from=None,
                                tiled_source="default",
-                               group_by="tile_prefix", group_key_map=None, experiment_id=None,
-                               seed=0, holdout_ratio=0.5):
+                               group_by=None, group_key_map=None, experiment_id=None,
+                               seed=0, holdout_ratio=0.5, split_manifest_dir=None):
     """Resolve a per-dataset operating point from a labeled split.
 
     Returns ``(bundle, hash, n_excluded_incomplete_attribute, evidence)``. The third value is the
@@ -217,6 +218,21 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     ``tile_size_derived_from`` is the caller's own composed ``derived_from`` text for an explicit
     edge (see ``predictor.explicit_edge_provenance``), forwarded unchanged; ``None`` for every
     other source.
+
+    ``split_manifest_dir`` restricts the calibration universe to one capture date's held-out side
+    of a ``split_manifest`` record (``data_tools.read_split_manifest_dir``) instead of every
+    labelled stem with an image: the manifest's ``subject``/``attribute`` must equal this run's
+    recorded training scope, the labels directory's date (``dataset_layout.annotation_date``) must
+    be one the manifest holds members under, and the manifest's ``images_root`` for that date must
+    be ``images_dir``, each refusing by name. ``group_by``/``group_key_map`` default to ``None``
+    (resolved to ``"tile_prefix"`` when neither a manifest nor a value was given) so a value passed
+    beside a manifest is detectable and refuses, naming both: the manifest's own grouping policy
+    governs the locked draw instead. The identity (``dh``, the lock, the evidence's
+    ``split_identity_hash``) is ``dataset_hash(labels_dir, stems=universe)`` rather than the whole
+    directory's hash, so a manifest draw never addresses the lock a whole-directory draw locked,
+    and the evidence records the swept universe under ``label_stems.calibration`` (with
+    ``stated_values.split_manifest_dir``) instead of the whole directory under
+    ``label_dirs.calibration``.
     """
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
@@ -233,7 +249,11 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 
     labels_p = Path(labels_dir)
     require_reference_ground_truth(labels_p)
-    dh = dataset_hash(labels_dir)
+    if split_manifest_dir is not None and (group_by is not None or group_key_map is not None):
+        raise ValueError(
+            f"split_manifest_dir={split_manifest_dir!r} conflicts with group_by/group_key_map: "
+            "the manifest's own grouping policy governs the locked draw; pass neither beside it."
+        )
     # The run's subject + single id map (from predictor.config): calibration GT reads through the
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
@@ -255,6 +275,41 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # now also uses, so the two paths can't disagree about which stems exist. A stem whose image was
     # deleted/renamed never even enters the split universe here.
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
+    excluded = None
+    if split_manifest_dir is not None:
+        from tcip_mcp.dataset_layout import annotation_date
+        from tcip_mcp.pipelines.data.splits import (
+            calibration_universe_from_manifest, manifest_date_key,
+        )
+        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+
+        manifest = read_split_manifest_dir(split_manifest_dir)
+        if (manifest.get("subject"), manifest.get("attribute")) != (_subject, _attribute):
+            raise ValueError(
+                f"split manifest at {split_manifest_dir!r} was drawn for subject="
+                f"{manifest.get('subject')!r}, attribute={manifest.get('attribute')!r}, but this "
+                f"run's recorded training scope is subject={_subject!r}, attribute={_attribute!r}."
+            )
+        cal_date = annotation_date(labels_dir)
+        date_block = (manifest.get("members") or {}).get(manifest_date_key(cal_date))
+        if date_block is None:
+            raise ValueError(
+                f"split manifest at {split_manifest_dir!r} holds no members under date "
+                f"{cal_date!r}; it holds members under {sorted(manifest.get('members') or {})}."
+            )
+        manifest_images_root = date_block.get("images_root")
+        if images_dir and manifest_images_root and not os.path.samefile(
+                Path(images_dir).resolve(), Path(manifest_images_root).resolve()):
+            raise ValueError(
+                f"images_dir={images_dir!r} is not the split manifest's images_root for date "
+                f"{cal_date!r} ({manifest_images_root!r})."
+            )
+        stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
+            manifest, cal_date, stems)
+        stem_to_image = {s: stem_to_image[s] for s in stems}
+    else:
+        group_by = group_by or "tile_prefix"
+    dh = dataset_hash(labels_dir, stems=(stems if split_manifest_dir is not None else None))
     annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
     # Detector-cap censoring: a flat max_dets can still truncate a dense calibration image's raw
     # detections the same way a too-high conf floor censors them, so derive the collection-pass cap
@@ -265,6 +320,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         stems, identity_hash=dh, scope_root=cal_holdout_scope_root(labels_dir),
         annotation_counts=annotation_counts,
         group_by=group_by, group_key_map=group_key_map, seed=seed, holdout_ratio=holdout_ratio,
+        split_manifest_dir=split_manifest_dir,
     )
     if locked.get("unlocked_stems"):
         logger.info(
@@ -340,15 +396,23 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
     drawn = (locked.get("redraw_history") or [{}])[-1]
+    stated_values = {"split_identity_hash": dh, "split_content_hash": drawn.get("new_content_hash")}
+    if split_manifest_dir is not None:
+        stated_values["split_manifest_dir"] = split_manifest_dir
+        reference_inputs = {
+            "label_stems": {"calibration": {"path": str(labels_p), "stems": stems}},
+            "stated_values": stated_values,
+        }
+    else:
+        reference_inputs = {
+            "label_dirs": {"calibration": str(labels_p)}, "stated_values": stated_values,
+        }
     evidence = {
-        "resolver": "resolve_operating_point",
-        "inputs": resolver_inputs,
-        "reference_inputs": {
-            "label_dirs": {"calibration": str(labels_p)},
-            "stated_values": {"split_identity_hash": dh,
-                              "split_content_hash": drawn.get("new_content_hash")},
-        },
+        "resolver": "resolve_operating_point", "inputs": resolver_inputs,
+        "reference_inputs": reference_inputs, "calibration_stems": stems,
     }
+    if excluded is not None:
+        evidence["excluded"] = excluded
     return bundle, dh, n_excluded_incomplete_attribute, evidence
 
 
@@ -411,11 +475,14 @@ def force_redraw_cal_holdout_split(
     labels_dir: str | None = None,
     images_dir: str | None = None,
     identity_hash: str | None = None,
-    group_by: str = "tile_prefix",
+    group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     seed: int = 0,
     holdout_ratio: float = 0.5,
     reason: str = "",
+    split_manifest_dir: str | None = None,
+    subject: str | None = None,
+    attribute: str | None = None,
 ) -> dict:
     """Deliberately redraw a locked calibration/holdout split.
 
@@ -452,18 +519,43 @@ def force_redraw_cal_holdout_split(
             for a caller that has no images directory to check against.
         identity_hash: The locked split's identity hash directly.
         group_by: New grouping policy, ``"tile_prefix"`` / ``"stem"`` (ignored if
-            ``group_key_map`` is given).
+            ``group_key_map`` is given). ``None`` (default) resolves to ``"tile_prefix"`` when
+            neither this nor a manifest was given; a value beside ``split_manifest_dir`` conflicts
+            with the manifest's own grouping policy and refuses, naming both.
         group_key_map: Explicit ``{stem: group_key}`` map covering every stem, overriding
-            ``group_by``.
+            ``group_by``. Conflicts with ``split_manifest_dir`` the same way ``group_by`` does.
         seed: New split seed.
         holdout_ratio: New calibration/holdout fraction.
         reason: Required, non-empty justification for this redraw, recorded in the audit log
             alongside the old and new split membership.
+        split_manifest_dir: Restrict the redraw's universe to one capture date's held-out side of
+            a split manifest (``data_tools.read_split_manifest_dir``), the same restriction
+            ``run_inference`` applies, instead of every labelled stem with an image. Requires
+            ``labels_dir`` and ``subject``: the manifest's own subject/attribute must equal
+            ``subject``/``attribute``, the date ``labels_dir`` is under must be one the manifest
+            holds members under, and the manifest's ``images_root`` for that date must be
+            ``images_dir``, each refusing by name. The identity is
+            ``dataset_hash(labels_dir, stems=universe)`` rather than the whole directory's hash,
+            so the redraw addresses the same lock a manifest-restricted calibration locked.
+        subject: The object class ``split_manifest_dir``'s admission was drawn for; required
+            alongside it.
+        attribute: The attribute ``split_manifest_dir``'s admission was scoped to, when it was.
     """
     if not reason or not reason.strip():
         return {"error": "reason is required (a non-empty justification) for a force_redraw"}
     if not labels_dir and not identity_hash:
         return {"error": "provide either labels_dir or identity_hash"}
+    if split_manifest_dir is not None:
+        if not labels_dir:
+            return {"error": "split_manifest_dir requires labels_dir: the universe is drawn "
+                             "from the manifest's held-out members under the labels' own date."}
+        if not subject:
+            return {"error": "split_manifest_dir requires subject: the manifest's own subject "
+                             "must be checked against the door's."}
+        if group_by is not None or group_key_map is not None:
+            return {"error": f"split_manifest_dir={split_manifest_dir!r} conflicts with "
+                             "group_by/group_key_map: the manifest's own grouping policy governs "
+                             "the redraw; pass neither beside it."}
 
     from datetime import datetime, timezone
 
@@ -477,6 +569,38 @@ def force_redraw_cal_holdout_split(
     )
     from tcip_mcp.pipelines.resolution import dataset_hash
 
+    manifest_stems: list[str] | None = None
+    if split_manifest_dir is not None:
+        from tcip_mcp.dataset_layout import annotation_date
+        from tcip_mcp.pipelines.data.splits import (
+            calibration_universe_from_manifest, manifest_date_key,
+        )
+        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+
+        manifest = read_split_manifest_dir(split_manifest_dir)
+        if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
+            return {"error": f"split manifest at {split_manifest_dir!r} was drawn for subject="
+                             f"{manifest.get('subject')!r}, attribute="
+                             f"{manifest.get('attribute')!r}, but this call states "
+                             f"subject={subject!r}, attribute={attribute!r}."}
+        cal_date = annotation_date(labels_dir)
+        date_block = (manifest.get("members") or {}).get(manifest_date_key(cal_date))
+        if date_block is None:
+            return {"error": f"split manifest at {split_manifest_dir!r} holds no members under "
+                             f"date {cal_date!r}; it holds members under "
+                             f"{sorted(manifest.get('members') or {})}."}
+        manifest_images_root = date_block.get("images_root")
+        if images_dir and manifest_images_root and not os.path.samefile(
+                Path(images_dir).resolve(), Path(manifest_images_root).resolve()):
+            return {"error": f"images_dir={images_dir!r} is not the split manifest's "
+                             f"images_root for date {cal_date!r} ({manifest_images_root!r})."}
+        present, _ = label_image_stems(labels_dir, images_dir)
+        try:
+            manifest_stems, group_by, group_key_map, _excluded = calibration_universe_from_manifest(
+                manifest, cal_date, present)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     scope_root = Path(dataset_root).resolve()
     if labels_dir:
         labels_scope = cal_holdout_scope_root(labels_dir)
@@ -488,7 +612,7 @@ def force_redraw_cal_holdout_split(
 
     if identity_hash is None:
         try:
-            identity_hash = dataset_hash(labels_dir)
+            identity_hash = dataset_hash(labels_dir, stems=manifest_stems)
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
 
@@ -504,9 +628,15 @@ def force_redraw_cal_holdout_split(
     old_membership = ({"calibration": old_lock.get("calibration", []),
                        "holdout": old_lock.get("holdout", [])} if old_lock else None)
 
-    if labels_dir:
+    if manifest_stems is not None:
+        stems = manifest_stems
+        try:
+            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
+    elif labels_dir:
         # The same labels-intersect-images scan _calibrate_operating_point uses, not a second
-        # independent glob (stem_to_image unused here either way).
+        # independent glob (images_dir omitted degrades to the prior labels-only scan).
         stems, _ = label_image_stems(labels_dir, images_dir)
         try:
             annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
@@ -522,8 +652,10 @@ def force_redraw_cal_holdout_split(
     new_lock = resolve_locked_cal_holdout_split(
         stems, identity_hash=identity_hash, scope_root=scope_root,
         annotation_counts=annotation_counts,
-        group_by=group_by, group_key_map=group_key_map, holdout_ratio=holdout_ratio, seed=seed,
+        group_by=(group_by or "tile_prefix"), group_key_map=group_key_map,
+        holdout_ratio=holdout_ratio, seed=seed,
         force_redraw=True, timestamp=datetime.now(timezone.utc).isoformat(),
+        split_manifest_dir=split_manifest_dir,
     )
     new_membership = {"calibration": new_lock["calibration"], "holdout": new_lock["holdout"]}
 
@@ -531,7 +663,8 @@ def force_redraw_cal_holdout_split(
     record_event(
         "force_redraw_cal_holdout_split_result",
         {"identity_hash": identity_hash, "group_by": group_by, "group_key_map": group_key_map,
-         "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason},
+         "seed": seed, "holdout_ratio": holdout_ratio, "reason": reason,
+         "split_manifest_dir": split_manifest_dir},
         scope=dataset_scope_of(str(scope_root)),
         old_membership=old_membership, new_membership=new_membership,
     )
@@ -560,10 +693,11 @@ def run_inference(
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
     experiment_id: str | None = None,
-    group_by: str = "tile_prefix",
+    group_by: str | None = None,
     group_key_map: dict[str, str] | None = None,
     split_seed: int = 0,
     split_holdout_ratio: float = 0.5,
+    split_manifest_dir: str | None = None,
 ) -> dict:
     """Run a trained model on images.
 
@@ -623,12 +757,15 @@ def run_inference(
             legitimately has none. Also gates calibration's train-disjointness check: a
             *known* run whose training split can't be read/reconstructed fails that check closed.
         group_by: Grouping policy for the locked calibration/holdout split, ``"tile_prefix"``
-            (default) or ``"stem"``. Ignored when ``group_key_map`` is given. Only the first
-            calibration call for a given calibration-labels identity draws the split; later calls
-            return the same locked split regardless of this argument (see
-            ``force_redraw_cal_holdout_split`` to redraw deliberately).
+            or ``"stem"``. Ignored when ``group_key_map`` is given. ``None`` (default) resolves
+            to ``"tile_prefix"`` when neither this nor ``split_manifest_dir`` was given; a value
+            beside ``split_manifest_dir`` conflicts with the manifest's own grouping policy and
+            refuses, naming both. Only the first calibration call for a given calibration-labels
+            identity draws the split; later calls return the same locked split regardless of this
+            argument (see ``force_redraw_cal_holdout_split`` to redraw deliberately).
         group_key_map: An agent-derived ``{stem: group_key}`` map overriding ``group_by`` for the
             locked calibration/holdout split, must cover every stem in ``calibration_labels_dir``.
+            Conflicts with ``split_manifest_dir`` the same way ``group_by`` does.
         split_seed: Split seed for the locked calibration/holdout split, like
             ``group_by``, only takes effect on the first calibration call for a given
             calibration-labels identity; a later call's declared value is compared to the lock and
@@ -636,6 +773,14 @@ def run_inference(
             silently ignored.
         split_holdout_ratio: Calibration/holdout fraction for the locked split, same
             first-call-only semantics as ``split_seed``.
+        split_manifest_dir: Restrict the calibration universe to one capture date's held-out side
+            of a split manifest (``data_tools.read_split_manifest_dir``) instead of every
+            labelled stem with an image, so the operating point is measured on exactly the set
+            the checkpoint was chosen against, not diluted with training stems. The manifest's
+            subject/attribute must equal the checkpoint's own recorded training scope, the
+            calibration labels' date must be one the manifest holds members under, and the
+            manifest's ``images_root`` for that date must be ``calibration_images_dir`` (or
+            ``images_dir``), each refusing by name.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -772,6 +917,7 @@ def run_inference(
                 group_by=group_by, group_key_map=group_key_map,
                 experiment_id=identity["experiment_id"],
                 seed=split_seed, holdout_ratio=split_holdout_ratio,
+                split_manifest_dir=split_manifest_dir,
             )
         except (ValueError, UnreadableLabelDocument) as exc:
             # An inadmissible reference, a locked split that no longer resolves, or a calibration
@@ -796,7 +942,10 @@ def run_inference(
         from tcip_annotation.json_io import prediction_documents
 
         inf_stems = [stem_of(pp) for pp in image_paths]
-        cal_label_stems = {pp.stem for pp in prediction_documents(calibration_labels_dir)}
+        cal_label_stems = (
+            set(evidence.get("calibration_stems", [])) if split_manifest_dir is not None
+            else {pp.stem for pp in prediction_documents(calibration_labels_dir)}
+        )
         same_images = calibration_images_dir is None or (
             images_dir is not None and Path(calibration_images_dir) == Path(images_dir))
         if same_images and inf_stems and set(inf_stems) == cal_label_stems:

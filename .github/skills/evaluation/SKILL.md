@@ -78,6 +78,13 @@ seed and the old/new split's content hashes (not the stems themselves); the old 
 membership is recorded in the audit log alongside the reason, so a redraw-until-it-passes pattern
 stays visible on review.
 
+`run_inference`/`force_redraw_cal_holdout_split` also take `split_manifest_dir`: draw the
+calibration universe from one capture date's held-out side of a named `split_manifest` record
+instead of every labelled stem with an image, so the operating point measures on exactly the set
+the shipped checkpoint was chosen against. Its subject/attribute must match the checkpoint's own
+recorded training scope, and it conflicts with an explicit `group_by`/`group_key_map`, whose
+default becomes `None` for this reason (resolved to `tile_prefix` when neither was given).
+
 ## Failure Triage
 
 When metrics are poor, investigate systematically:

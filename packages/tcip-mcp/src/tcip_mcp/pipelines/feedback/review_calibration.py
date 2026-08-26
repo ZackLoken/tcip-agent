@@ -479,7 +479,9 @@ def resolve_operating_point_from_review(
 
     ``resolve_locked_cal_holdout_split`` raises ``ValueError`` when the lock references a stem no
     longer among the reviewed images, or when its lock file is corrupt, this
-    propagates to the caller rather than crashing later on a missing dict lookup.
+    propagates to the caller rather than crashing later on a missing dict lookup. This function
+    takes no split manifest: the universe here is the breeder's own confirmations, which a split
+    manifest has no say over.
 
     ``experiment_id_ambiguous`` is true when the caller's own buckets named more than one
     producing run rather than none at all (``routes/review.py`` collapses both cases to

@@ -16,7 +16,8 @@ Usage:
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
         --dataset-root <dataset_root> \
-        [--experiment-id <id>] [--val-ratio 0.5] [--device cpu]
+        [--experiment-id <id>] [--val-ratio 0.5] [--device cpu] [--subject <subject>] \
+        [--attribute <attribute>] [--split-manifest-dir <dir>]
 """
 
 from __future__ import annotations
@@ -49,13 +50,34 @@ def main(argv: list[str] | None = None) -> int:
                         help="Split seed for the locked cal/holdout split. Same first-call-only "
                              "semantics as --val-ratio.")
     parser.add_argument("--device", default=None, help="cuda / cpu (auto if omitted).")
-    parser.add_argument("--group-by", default="tile_prefix",
-                        help="Grouping policy for the cal/holdout split: 'tile_prefix' (default, "
-                             "strips a trailing _<x>_<y> tile offset) or 'stem' (one group per "
-                             "image). Ignored if --group-key-map is given.")
+    parser.add_argument("--group-by", default=None,
+                        help="Grouping policy for the cal/holdout split: 'tile_prefix' (strips a "
+                             "trailing _<x>_<y> tile offset) or 'stem' (one group per image). "
+                             "Ignored if --group-key-map is given. Omitted, resolves to "
+                             "'tile_prefix' when neither this nor --split-manifest-dir was given; "
+                             "conflicts with --split-manifest-dir, whose own grouping policy "
+                             "governs the locked draw instead.")
     parser.add_argument("--group-key-map", default=None,
                         help="Path to a JSON file mapping stem -> group key, overriding --group-by.")
+    parser.add_argument("--subject", default=None,
+                        help="The object class to read name-based labels for. Required with "
+                             "--split-manifest-dir; a run's own admission needs one too.")
+    parser.add_argument("--attribute", default=None,
+                        help="Scope the draw to instances already assessed for this attribute "
+                             "of --subject.")
+    parser.add_argument("--split-manifest-dir", default=None,
+                        help="Restrict the calibration universe to one capture date's held-out "
+                             "side of a split manifest (make_splits' output directory) instead of "
+                             "every labeled stem, the same restriction run_inference applies. "
+                             "Conflicts with --group-by/--group-key-map; requires --subject.")
     args = parser.parse_args(argv)
+    if args.split_manifest_dir and not args.subject:
+        print("--split-manifest-dir requires --subject.", file=sys.stderr)
+        return 2
+    if args.split_manifest_dir and (args.group_by is not None or args.group_key_map):
+        print("--split-manifest-dir conflicts with --group-by/--group-key-map: the manifest's "
+              "own grouping policy governs the locked draw.", file=sys.stderr)
+        return 2
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
@@ -86,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
                                 max_dets=DEFAULT_MAX_DETS)
     tile_size = getattr(predictor, "train_tile_size", None)
 
-    probe = build_dataset("detection", images_dir=args.images_dir, labels_dir=args.labels_dir)
+    probe = build_dataset("detection", images_dir=args.images_dir, labels_dir=args.labels_dir,
+                          subject=args.subject, attribute=args.attribute)
     stems = sorted(getattr(probe, "stems", []))
     if len(stems) < 2:
         print(f"Need >=2 labeled stems to split cal/holdout; found {len(stems)}.", file=sys.stderr)
@@ -96,8 +119,46 @@ def main(argv: list[str] | None = None) -> int:
     if args.group_key_map:
         with open(args.group_key_map, encoding="utf-8") as f:
             group_key_map = json.load(f)
+    group_by = args.group_by
 
-    dh = dataset_hash(args.labels_dir)
+    if args.split_manifest_dir:
+        from tcip_mcp.dataset_layout import annotation_date
+        from tcip_mcp.pipelines.data.splits import (
+            calibration_universe_from_manifest, manifest_date_key,
+        )
+        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+
+        manifest = read_split_manifest_dir(args.split_manifest_dir)
+        if (manifest.get("subject"), manifest.get("attribute")) != (args.subject, args.attribute):
+            print(f"split manifest at {args.split_manifest_dir!r} was drawn for subject="
+                  f"{manifest.get('subject')!r}, attribute={manifest.get('attribute')!r}, but "
+                  f"this run states subject={args.subject!r}, attribute={args.attribute!r}.",
+                  file=sys.stderr)
+            return 2
+        cal_date = annotation_date(args.labels_dir)
+        date_block = (manifest.get("members") or {}).get(manifest_date_key(cal_date))
+        if date_block is None:
+            print(f"split manifest at {args.split_manifest_dir!r} holds no members under date "
+                  f"{cal_date!r}; it holds members under {sorted(manifest.get('members') or {})}.",
+                  file=sys.stderr)
+            return 2
+        manifest_images_root = date_block.get("images_root")
+        import os
+        from pathlib import Path
+
+        if manifest_images_root and not os.path.samefile(
+                Path(args.images_dir).resolve(), Path(manifest_images_root).resolve()):
+            print(f"images_dir={args.images_dir!r} is not the split manifest's images_root for "
+                  f"date {cal_date!r} ({manifest_images_root!r}).", file=sys.stderr)
+            return 2
+        try:
+            stems, group_by, group_key_map, _excluded = calibration_universe_from_manifest(
+                manifest, cal_date, stems)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+    dh = dataset_hash(args.labels_dir, stems=(stems if args.split_manifest_dir else None))
     annotation_counts = {s: count_label_lines(args.labels_dir, s) for s in stems}
     # Detector-cap censoring: the flat DEFAULT_MAX_DETS below can still truncate a dense
     # calibration image's raw detections the same way a too-high conf floor censors them, so
@@ -111,8 +172,9 @@ def main(argv: list[str] | None = None) -> int:
     locked = resolve_locked_cal_holdout_split(
         stems, identity_hash=dh, scope_root=args.dataset_root,
         annotation_counts=annotation_counts,
-        group_by=args.group_by, group_key_map=group_key_map, holdout_ratio=args.val_ratio,
-        seed=args.seed,
+        group_by=(group_by or "tile_prefix"), group_key_map=group_key_map,
+        holdout_ratio=args.val_ratio, seed=args.seed,
+        split_manifest_dir=args.split_manifest_dir,
     )
     if locked.get("policy_divergence"):
         div = locked["policy_divergence"]
@@ -136,7 +198,8 @@ def main(argv: list[str] | None = None) -> int:
 
     def _records(sub):
         ds = build_dataset("detection", images_dir=args.images_dir,
-                           labels_dir=args.labels_dir, stems=sub)
+                           labels_dir=args.labels_dir, stems=sub,
+                           subject=args.subject, attribute=args.attribute)
         loader = DataLoader(ds, batch_size=4, collate_fn=task_collate("detection"))
         return records_over_loader(predictor.model, loader, predictor.device, "detection")
 

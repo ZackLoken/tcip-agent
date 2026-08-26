@@ -10,7 +10,9 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `calibrate_operating_point.py` - runs one model pass over a disjoint calibration/holdout
   split of a labeled dir, derives a count-unbiased detection operating point, checks its
   held-out count bias, and prints the full provenance + sweep for inspection. It writes
-  nothing; validated claims are minted only by the audited doors.
+  nothing; validated claims are minted only by the audited doors. `--split-manifest-dir`
+  (with `--subject` required beside it) restricts the calibration universe to one capture
+  date's held-out side of a split manifest instead of every labeled stem.
 - `adopt_store.py` - moves a root's existing record and log files into a store database, so
   the database backend can own state that predates it. Decodes every file it will adopt and
   refuses the whole root on the first that will not, publishes the database only after
