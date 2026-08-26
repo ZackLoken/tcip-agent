@@ -65,6 +65,24 @@ def test_parse_coco_detect_missing_image():
     assert len(anns) == 0
 
 
+def test_parse_coco_matches_a_manifest_named_logical_image_by_stem():
+    """A ``.bandgroup`` manifest's own on-disk name never appears verbatim in an externally
+    authored COCO document; its stem still ties the record recorded under one of its bands."""
+    coco = _sample_coco_detect()
+    anns = parse_coco_annotations(coco, file_name="IMG_0001.bandgroup")
+    assert len(anns) == 2
+
+
+def test_parse_coco_prefers_an_exact_file_name_match_over_the_stem_tie():
+    coco = _sample_coco_detect()
+    coco["images"].append(
+        {"id": 2, "file_name": "IMG_0001.bandgroup", "width": 10, "height": 10})
+    coco["annotations"].append(
+        {"id": 3, "image_id": 2, "category_id": 0, "bbox": [1, 1, 2, 2], "area": 4, "iscrowd": 0})
+    anns = parse_coco_annotations(coco, file_name="IMG_0001.bandgroup")
+    assert len(anns) == 1
+
+
 def test_write_coco_roundtrip(tmp_path):
     anns = [Annotation(subject="tree", geometry=BBox(10, 20, 50, 80)),
             Annotation(subject="nut", geometry=BBox(100, 100, 200, 150))]

@@ -122,6 +122,77 @@ class TestEvaluatePredictionsDetail:
         assert "detections" in result
 
 
+# ── score_predictions(dataset) enumeration: cumulative over the layout, one bucket level ────
+
+
+def _write_empty_label(path: Path, w: int, h: int) -> None:
+    from tcip_annotation import json_io
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(str(path), [], w, h, keep_empty=True)
+
+
+class TestEvaluateFolderEnumeration:
+    def test_a_band_grouped_capture_scores_as_one_logical_image(self, tmp_path: Path):
+        import numpy as np
+        import tifffile
+
+        from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+        from tcip_mcp.tools.annotation_tools import score_predictions
+
+        images_dir = tmp_path / "images" / "2024-01-01"
+        images_dir.mkdir(parents=True)
+        band_a, band_b = images_dir / "cap_G.tif", images_dir / "cap_R.tif"
+        tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
+        tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
+        write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
+        _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "cap.json", 8, 8)
+
+        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        assert result["image_count"] == 1
+        assert [row["image"] for row in result["per_image"]] == ["cap.bandgroup"]
+
+    def test_a_loose_image_beside_a_dated_bucket_still_scores(self, tmp_path: Path):
+        from tcip_mcp.tools.annotation_tools import score_predictions
+
+        images_dir = tmp_path / "images"
+        (images_dir / "2024-01-01").mkdir(parents=True)
+        Image.new("RGB", (8, 8)).save(images_dir / "2024-01-01" / "bucketed.jpg")
+        Image.new("RGB", (8, 8)).save(images_dir / "loose.jpg")
+        _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "bucketed.json", 8, 8)
+        _write_empty_label(tmp_path / "annotations" / "loose.json", 8, 8)
+
+        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        assert result["image_count"] == 2
+        assert {row["image"] for row in result["per_image"]} == {"bucketed.jpg", "loose.jpg"}
+
+    def test_an_npz_capture_scores(self, tmp_path: Path):
+        import numpy as np
+
+        from tcip_mcp.tools.annotation_tools import score_predictions
+
+        images_dir = tmp_path / "images" / "2024-01-01"
+        images_dir.mkdir(parents=True)
+        np.savez(str(images_dir / "cap.npz"), bands=np.zeros((8, 8, 3), dtype=np.uint16))
+        _write_empty_label(tmp_path / "annotations" / "2024-01-01" / "cap.json", 8, 8)
+
+        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        assert result["image_count"] == 1
+        assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
+
+    def test_a_folder_nested_inside_a_bucket_is_not_scored(self, tmp_path: Path):
+        """``images/<bucket>/`` is the layout; a folder inside a bucket is not itself one, so it is
+        not descended into."""
+        from tcip_mcp.tools.annotation_tools import score_predictions
+
+        nested = tmp_path / "images" / "2024-01-01" / "nested"
+        nested.mkdir(parents=True)
+        Image.new("RGB", (8, 8)).save(nested / "inner.jpg")
+
+        result = score_predictions(str(tmp_path), iou_threshold=0.5)
+        assert result["image_count"] == 0
+
+
 # ── Augmentation tests ──────────────────────────────────────────────────────
 
 
