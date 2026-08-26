@@ -63,6 +63,36 @@ def split_manifest_key(split_dir: str | Path) -> Key:
     return Key(SPLIT_MANIFEST_STORE, str(Path(split_dir).absolute()), _SPLIT_MANIFEST_PARTS)
 
 
+def read_split_manifest_dir(split_dir: str | Path) -> dict:
+    """The ``split_manifest`` record ``make_splits`` wrote under ``split_dir``, the one reader a
+    run names its ``data.split.manifest_dir`` through.
+
+    Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
+    a mapping, or lacks ``subject`` or ``members``: the two keys every binding needs and a record
+    predating this family's ``make_splits`` (or not written by it at all) would not carry.
+    """
+    from tcip_store import DecodeError
+
+    try:
+        manifest = tcip_store.read(split_manifest_key(split_dir), default=None)
+    except DecodeError as exc:
+        raise ValueError(f"the split manifest at {split_dir} could not be read: {exc}") from exc
+    if manifest is None:
+        raise ValueError(f"no split manifest recorded under {split_dir}; run make_splits first.")
+    if not isinstance(manifest, dict):
+        raise ValueError(
+            f"the split manifest at {split_dir} decodes to a {type(manifest).__name__}, not the "
+            "mapping make_splits writes."
+        )
+    missing = [k for k in ("subject", "members") if k not in manifest]
+    if missing:
+        raise ValueError(
+            f"the split manifest at {split_dir} carries no {missing}: not written by this "
+            "family's make_splits, or written before it."
+        )
+    return manifest
+
+
 ROOT_LABEL_CANDIDATES = ("annotations.json", "labels.json", "instances.json")
 """Candidate filenames for one assembled dataset-level label document at a dataset's root,
 checked in this order; the first one present on disk is the dataset's label store. Shared by

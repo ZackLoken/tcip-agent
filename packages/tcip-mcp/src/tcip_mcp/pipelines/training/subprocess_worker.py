@@ -108,6 +108,41 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
         logger.warning("class-id-map patch-back failed for %s", experiment_id, exc_info=True)
 
 
+def _patch_experiment_config_split(experiment_id: str, split_cfg: dict) -> None:
+    """Best-effort: merge this run's resolved split policy into the durable experiment record's
+    own ``config.json``, the same merge-not-rewrite shape :func:`_patch_experiment_config_tiling`
+    and :func:`_patch_experiment_config_id_map` already use. A binding to a named split manifest
+    (``data.split.manifest_binding``) is what this exists for: ``launch_config.json``, written
+    before the child exists, never carries it, so the durable record is the only other place a
+    reviewer can see that a recorded partition, not a drawn one, governed the run. Never sinks
+    the run if there is no experiment record to patch."""
+    from tcip_mcp.experiments import ExperimentTerminal
+
+    try:
+        from tcip_store import store
+
+        from tcip_mcp.experiments import config_key, refuse_if_terminal, status_key
+
+        key, st_key = config_key(experiment_id), status_key(experiment_id)
+        if not store.exists(key):
+            return
+        try:
+            with store.transaction(key, st_key) as txn:
+                state = (txn.read(st_key, default={}) or {}).get("state")
+                refuse_if_terminal(experiment_id, "patch_experiment_config_split", state)
+                cfg = txn.read(key, default={})
+                data_cfg = cfg.setdefault("data", {})
+                data_cfg.setdefault("split", {}).update(split_cfg)
+                txn.write(key, cfg)
+        except ExperimentTerminal as exc:
+            from tcip_mcp.experiments import audit_refusal_reraising
+            audit_refusal_reraising(experiment_id, "patch_experiment_config_split", {}, exc)
+    except ExperimentTerminal:
+        raise
+    except Exception:
+        logger.warning("split policy patch-back failed for %s", experiment_id, exc_info=True)
+
+
 def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dict] | None:
     """This run's resolved name->id map, or ``None`` when there is nothing to
     record. Returns ``(subject, attribute, id_map)``.
@@ -193,6 +228,11 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
         transforms = build_augmentation(aug_config)
 
     train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+
+    # data_cfg["split"] is a manifest binding's own patch target (_auto_train_val writes it in
+    # place); mirrored onto the durable record the same way the tiling and id-map patches are.
+    if isinstance(data_cfg.get("split"), dict):
+        _patch_experiment_config_split(experiment_id, data_cfg["split"])
 
     # Stamp this run's resolved name->id map onto config["data"] in place, data_cfg
     # is the same dict object, so this lands on the checkpoint (generic_trainer persists run.config
