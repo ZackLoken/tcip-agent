@@ -13,8 +13,9 @@ number* unless it was checked against the right kind of real-world reference for
 ``unvalidated_value(...)`` and say so explicitly. This makes an unvalidated measurement value
 physically un-shippable rather than merely discouraged.
 
-No torch, safe to import anywhere; the storage seam (``tcip_store``) is the one dependency beyond
-the standard library, since the prediction buckets' provenance stamps are declared here.
+No torch, safe to import anywhere; the storage seam (``tcip_store``) and ``tcip_annotation``'s
+``json_io`` (the sidecar filename set) are the only dependencies beyond the standard library,
+since the prediction buckets' provenance stamps are declared here.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import tcip_store
+from tcip_annotation.json_io import SIDECAR_FILENAMES
 from tcip_store import (
     RECORD_JSON,
     Key,
@@ -765,6 +767,7 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
 
 
 # --- the prediction bucket's provenance stamps (the delivery gate reads these, not a caller string) ---
+# SIDECAR_FILENAMES is re-exported here for every existing caller of this module's own name.
 
 _SIDECAR_LOCATOR = RootedFileLocator(suffix=".json")
 """A stamp sits directly in the bucket it describes, addressed by its own document name."""
@@ -780,25 +783,13 @@ _SIDECAR_STORES: dict[str, str] = {
             locator=_SIDECAR_LOCATOR,
         )
     ).name
-    for document in (
-        "operating_point",
-        "classifier_operating_point",
-        "ordinal_operating_point",
-        "regression_operating_point",
-        "resolve_scale",
-    )
+    for document in (filename[: -len(".json")] for filename in sorted(SIDECAR_FILENAMES))
 }
 """One store per measurement dimension, never one store holding every dimension's fields: the
 dimensions are structurally independent (a physical scale is a fact about the imagery, a classifier
 stamp is about a state call, the count operating point is about a threshold), and a single document
-is exactly what would let a generic writer conflate them."""
-
-SIDECAR_FILENAMES = frozenset(f"{document}.json" for document in _SIDECAR_STORES)
-"""Every provenance stamp a prediction bucket carries beside its per-image records.
-
-A stamp is not a per-image label: a reader enumerating a bucket's prediction files excludes these,
-or it invents an image stem no image has and reads a stamp as if it were detections. Stated once
-here, so a stamp added for a new dimension is excluded on every path that enumerates a bucket."""
+is exactly what would let a generic writer conflate them. The document names come from
+:data:`SIDECAR_FILENAMES`, the one declared set, rather than a second enumeration of them here."""
 
 
 def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:

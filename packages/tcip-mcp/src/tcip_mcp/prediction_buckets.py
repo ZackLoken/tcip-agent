@@ -15,19 +15,15 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES, dataset_hash
+from tcip_annotation.json_io import prediction_documents
+from tcip_mcp.pipelines.resolution import dataset_hash
 
 
 def bucket_stems(*dirs: Path | str) -> set[str]:
     """Image stems that have a per-image prediction file across the given bucket dir(s)."""
     stems: set[str] = set()
     for d in dirs:
-        p = Path(d)
-        if not p.is_dir():
-            continue
-        for f in p.glob("*.json"):
-            if f.name not in SIDECAR_FILENAMES:
-                stems.add(f.stem)
+        stems.update(f.stem for f in prediction_documents(d))
     return stems
 
 

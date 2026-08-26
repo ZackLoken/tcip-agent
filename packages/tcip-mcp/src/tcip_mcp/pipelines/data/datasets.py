@@ -178,37 +178,47 @@ def _json_det_targets(path, subject, attribute, id_map):
     return boxes, labels, n_unlabeled
 
 
-def first_parseable_labels_json(labels_dir) -> Path | None:
-    """The first parseable ``.json`` file in ``labels_dir``, sorted: the file
-    :func:`dir_label_format` decides its shape from, exposed separately so a refusal naming a
-    dataset-level COCO export can point at the actual file, not just the directory."""
+def first_labels_json(labels_dir) -> Path | None:
+    """The first ``.json`` file in ``labels_dir``, sorted: the file :func:`dir_label_format`
+    decides this directory's shape from, exposed separately so a refusal naming a dataset-level
+    COCO export can point at the actual file, not just the directory.
+
+    Raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when that first file is
+    present but will not read: trying the next file instead would read a directory as unlabeled
+    that in fact holds a document nobody can make sense of, the opposite of what "the first" here
+    is supposed to name.
+    """
+    from tcip_annotation.json_io import load_label_document
+
     d = Path(labels_dir)
     if not d.is_dir():
         return None
-    for jp in sorted(d.glob("*.json")):
-        try:
-            json.loads(jp.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        return jp
-    return None
+    candidates = sorted(d.glob("*.json"))
+    if not candidates:
+        return None
+    jp = candidates[0]
+    load_label_document(jp)
+    return jp
 
 
 def dir_label_format(labels_dir) -> str | None:
-    """``"json"``/``"coco"`` if this dir's first parseable ``.json`` file declares that shape,
-    else ``None``.
+    """``"json"``/``"coco"`` if this dir's first ``.json`` file declares that shape, else
+    ``None``.
 
-    Used to route a JSON label store onto the COCO training path. Decides the first parseable
-    file's shape through ``format_io``'s own per-file detection (COCO markers checked first, the
-    same priority a dataset-level COCO reads with everywhere else), rather than a second,
-    disagreeing ``ANNOTATIONS_KEY``-only test; the old ``objects`` schema, which that detection
-    raises on, is treated the same as any other unrecognized shape here: ``None``, never a raise.
-    A ``.json`` that is not one of these shapes is not claimed, an unrecognized store must not be
-    read as an all-empty one.
+    Used to route a JSON label store onto the COCO training path. Decides the first file's shape
+    through ``format_io``'s own per-file detection (COCO markers checked first, the same priority
+    a dataset-level COCO reads with everywhere else), rather than a second, disagreeing
+    ``ANNOTATIONS_KEY``-only test; the old ``objects`` schema, which that detection raises on, is
+    treated the same as any other unrecognized shape here: ``None``, never a raise. A ``.json``
+    that is not one of these shapes is not claimed, an unrecognized store must not be read as an
+    all-empty one. A present, unreadable first file raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, from :func:`first_labels_json` or
+    from this function's own re-check of the same file, uncaught here: an unreadable document is
+    not the same fact as an unrecognized one.
     """
     from tcip_annotation.format_io import _detect_json_format
 
-    jp = first_parseable_labels_json(labels_dir)
+    jp = first_labels_json(labels_dir)
     if jp is None:
         return None
     try:
@@ -1561,7 +1571,7 @@ def _autoresolve_json_labels(kwargs: dict, *, subject: str, attribute: str | Non
         return
     detected = dir_label_format(labels_dir)
     if detected == "coco":
-        offending = first_parseable_labels_json(labels_dir)
+        offending = first_labels_json(labels_dir)
         raise ValueError(
             f"labels_dir={labels_dir!r} holds a dataset-level COCO file ({offending}): if the "
             "per-image label files in this directory are the ones that should train, move it out "

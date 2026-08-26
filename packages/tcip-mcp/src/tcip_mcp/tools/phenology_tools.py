@@ -302,12 +302,15 @@ def _classification_items(gt_dir: str, pred_dir: str, *, trait_name: str, subjec
     it either, and never re-derived per image.
     """
     from tcip_annotation import json_io
+    from tcip_annotation.json_io import prediction_documents
     from tcip_annotation.state import BBox
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
     gt_p, pred_p = Path(gt_dir), Path(pred_dir)
     json_io.require_reference_ground_truth(gt_p)  # the prediction side is never held to this
-    paired = [f for f in sorted(gt_p.glob("*.json")) if (pred_p / f.name).is_file()]
+    # gt_dir/pred_dir may themselves be prediction buckets (a calibration/holdout split of one),
+    # so both are walked through prediction_documents, their own sidecar stamps excluded.
+    paired = [f for f in prediction_documents(gt_p) if (pred_p / f.name).is_file()]
 
     def _scoped_gt(path: str) -> list:
         return [a for a in json_io.read_annotations(path) if a.subject == subject]
@@ -455,6 +458,8 @@ def calibrate_classifier_operating_point(
     if disagreement:
         return {"error": disagreement}
 
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     try:
         cal_items = _classification_items(calibration_gt_dir, calibration_pred_dir, trait_name=trait_name,
                                           subject=subject, positive_value=spec.positive_class_name,
@@ -462,7 +467,7 @@ def calibrate_classifier_operating_point(
         hold_items = _classification_items(holdout_gt_dir, holdout_pred_dir, trait_name=trait_name,
                                            subject=subject, positive_value=spec.positive_class_name,
                                            attribute=attribute)
-    except ValueError as exc:
+    except (ValueError, UnreadableLabelDocument) as exc:
         return {"error": str(exc)}
     result = resolve_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,

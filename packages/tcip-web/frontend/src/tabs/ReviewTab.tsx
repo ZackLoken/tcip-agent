@@ -586,7 +586,7 @@ export function ReviewTab() {
           byImage[name] = res.statuses[name] ?? "not_started";
           has[name] = stems.has(name.replace(/\.[^.]+$/, ""));
         }
-        setReviewImageStatuses(byImage, has);
+        setReviewImageStatuses(byImage, has, res.unreadable);
       } catch {
         /* leave prior statuses; nav stays permissive (every image reviewable) until this resolves */
       }
@@ -1199,6 +1199,16 @@ export function ReviewTab() {
             <span className="text-tcip-warn max-w-[360px]">
               No dataset is selected, so review verdicts have nowhere to be recorded. Reopen this
               project from the top bar to select its dataset.
+            </span>
+          )}
+          {reviewStatus.unreadable.length > 0 && (
+            <span
+              className="text-tcip-warn max-w-[360px] truncate"
+              title={reviewStatus.unreadable.join(", ")}
+            >
+              {reviewStatus.unreadable.length} label document
+              {reviewStatus.unreadable.length === 1 ? "" : "s"} could not be read:{" "}
+              {reviewStatus.unreadable.join(", ")}
             </span>
           )}
           {/* Which registered trait a validation-reference promotion is computed for (see

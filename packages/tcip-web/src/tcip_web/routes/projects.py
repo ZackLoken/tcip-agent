@@ -45,11 +45,34 @@ class ProjectSummary(BaseModel):
     # Exactly one is set (site_fields never raises), so a recordless or damaged project still lists.
     site: str | None
     site_problem: str | None
+    # The first date's labels that would not read, naming the file; the project still lists, and
+    # its subjects_by_date reports that date empty rather than aborting the scan.
+    label_problem: str | None
 
 
 class ActiveProject(BaseModel):
     name: str | None = None
     path: str | None = None
+
+
+def _subjects_by_date(project_dir: Path, dates: list[str]) -> tuple[dict[str, list[str]], str | None]:
+    """``subjects_with_labels`` per date, and the first date's problem when one won't read.
+
+    Mirrors ``routes.dataset._subjects_by_date``: a date whose labels won't read reports an
+    empty subject list for that date, never aborts the project's own listing.
+    """
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    by_date: dict[str, list[str]] = {}
+    problem: str | None = None
+    for d in dates:
+        try:
+            by_date[d] = dataset_layout.subjects_with_labels(project_dir, d)
+        except UnreadableLabelDocument as exc:
+            by_date[d] = []
+            if problem is None:
+                problem = str(exc)
+    return by_date, problem
 
 
 def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
@@ -62,6 +85,7 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
         )
     dates = dataset_layout.list_dates(project_dir)
     site = site_fields(project_dir)
+    subjects_by_date, label_problem = _subjects_by_date(project_dir, dates)
     return ProjectSummary(
         name=project_dir.name,
         path=str(project_dir),
@@ -70,12 +94,13 @@ def _summarize(project_dir: Path, active_name: str | None) -> ProjectSummary:
         dates=dates,
         subjects=dataset_layout.list_subjects(project_dir),
         models=dataset_layout.list_models(project_dir),
-        subjects_by_date={d: dataset_layout.subjects_with_labels(project_dir, d) for d in dates},
+        subjects_by_date=subjects_by_date,
         models_by_date={d: dataset_layout.models_with_predictions(project_dir, d) for d in dates},
         image_count=image_count,
         is_active=project_dir.name == active_name,
         site=site["site"],
         site_problem=site["site_problem"],
+        label_problem=label_problem,
     )
 
 

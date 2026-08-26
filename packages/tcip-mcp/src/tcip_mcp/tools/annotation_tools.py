@@ -14,7 +14,7 @@ from tcip_annotation import (
     load_annotations_any,
     save_annotations_any,
 )
-from tcip_annotation.json_io import _PROV_KEYS, annotation_from_payload, box_extent_ok
+from tcip_annotation.json_io import _PROV_KEYS, UnreadableLabelDocument, annotation_from_payload, box_extent_ok
 from tcip_annotation.json_io import read_annotations as read_labels
 
 from tcip_mcp.dataset_layout import (
@@ -113,9 +113,9 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
     if gt_path is not None:
         try:
             file_fmt = fmt or detect_format(str(gt_path))
-        except ValueError as exc:
+            anns = load_annotations_any(str(gt_path), fmt=file_fmt, file_name=img.name)
+        except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
-        anns = load_annotations_any(str(gt_path), fmt=file_fmt, file_name=img.name)
         result["labels"] = {
             "path": str(gt_path), "format": file_fmt, "count": len(anns),
             "subjects": sorted({a.subject for a in anns}),
@@ -124,7 +124,10 @@ def read_annotations(image_path: str, fmt: str | None = None) -> dict:
 
     pred_path = find_prediction(image_path)
     if pred_path is not None:
-        preds = read_labels(str(pred_path))
+        try:
+            preds = read_labels(str(pred_path))
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
         result["predictions"] = {
             "path": str(pred_path), "count": len(preds),
             "subjects": sorted({a.subject for a in preds}),

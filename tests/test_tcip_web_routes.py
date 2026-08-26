@@ -104,6 +104,26 @@ def test_dataset_tree(client: TestClient, dataset_root: Path) -> None:
     # no label files exist yet).
     assert set(body["subjects_by_date"]) == {"2-11-26", "3-2-26"}
     assert body["subjects_by_date"]["2-11-26"] == []
+    assert body["label_problem"] is None
+
+
+def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
+    client: TestClient, dataset_root: Path,
+) -> None:
+    """A corrupt label on one date costs that date's own subject list, never the whole tree: the
+    other date's dates_with_images/subjects_by_date entries are unaffected."""
+    bad = dataset_root / "annotations" / "2-11-26"
+    bad.mkdir(parents=True)
+    (bad / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "2-11-26" in body["dates_with_images"] and "3-2-26" in body["dates_with_images"]
+    assert body["subjects_by_date"]["2-11-26"] == []
+    assert body["subjects_by_date"]["3-2-26"] == []
+    assert body["label_problem"] is not None
+    assert str(bad / "IMG_0000.json") in body["label_problem"]
 
 
 def test_dataset_tree_per_date_reflects_actual_labels(client: TestClient, tmp_path: Path) -> None:
@@ -186,6 +206,30 @@ def test_dataset_select_advisory_reflects_actual_labels(
     r2 = client.post("/api/dataset/select", json=body).json()
     assert r2["annotations_present"] is True
     assert r2["predictions_present"] is True
+
+
+def test_dataset_select_still_selects_over_an_unreadable_label(
+    client: TestClient, dataset_root: Path, tmp_path: Path
+) -> None:
+    """The advisory check never blocks a selection: an unreadable label reads as advisory-absent
+    rather than refusing the select outright."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    ann = dataset_root / "annotations" / "2-11-26"
+    ann.mkdir(parents=True, exist_ok=True)
+    (ann / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.post(
+        "/api/dataset/select",
+        json={
+            "project_root": str(project), "dataset_root": str(dataset_root),
+            "subject": "catkin", "date": "2-11-26", "model_name": "baseline",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["annotations_present"] is False
 
 
 def test_dataset_nav_persists_current_index(
@@ -301,6 +345,22 @@ def test_annotate_load_and_save_roundtrip(client: TestClient, dataset_root: Path
     # polygon as `rings`: a stored shape can be occlusion-split, so it is never flattened to one.
     assert sum("bbox" in a for a in anns) == 1
     assert sum("rings" in a for a in anns) == 1
+
+
+def test_annotate_load_refuses_an_unreadable_label(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
+    label_path = tmp_path / "labels" / "IMG_0000.json"
+    label_path.parent.mkdir(parents=True)
+    label_path.write_text("not json {][", encoding="utf-8")
+
+    resp = client.get(
+        "/api/annotate/labels",
+        params={"image_path": str(img_path), "label_path": str(label_path)},
+    )
+    assert resp.status_code == 400
+    assert str(label_path) in resp.json()["detail"]
 
 
 def test_annotate_save_empty_preserves_negative(
@@ -597,6 +657,48 @@ def test_review_image_statuses_batch(client: TestClient, dataset_root: Path, tmp
     body = resp.json()
     assert body["detection_stems"] == ["IMG_0000"]  # empty + missing files excluded
     assert body["statuses"]["IMG_0000.JPG"] == "completed"
+    assert body["unreadable"] == []
+
+
+def test_review_image_statuses_batch_reports_an_unreadable_prediction(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A corrupt prediction document costs its own stem, never the whole batch: the good stem
+    still surfaces as a detection, and the bad one is named in unreadable instead of silently
+    reading as nothing to review."""
+    pred_dir = tmp_path / "predictions"
+    pred_dir.mkdir(parents=True)
+    _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
+    (pred_dir / "IMG_0002.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.get(
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detection_stems"] == ["IMG_0000"]
+    assert body["unreadable"] == ["IMG_0002"]
+
+
+def test_review_image_statuses_admits_a_bucket_holding_sidecars(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A prediction bucket's own provenance stamps are not label documents and must never be
+    read as one, or enumerated as an image with nothing to review."""
+    pred_dir = tmp_path / "predictions"
+    pred_dir.mkdir(parents=True)
+    _write_pred(pred_dir / "IMG_0000.json", [(40, 32, 60, 48, 0.9)])
+    (pred_dir / "operating_point.json").write_text('{"conf": {"value": 0.5}}', encoding="utf-8")
+
+    resp = client.get(
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root), "pred_dir": str(pred_dir)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detection_stems"] == ["IMG_0000"]
+    assert body["unreadable"] == []
 
 
 def test_review_action_persists(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
@@ -921,6 +1023,40 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
     )
     assert status.json()["status"] == "completed"
     assert any(e.get("tool") == "gui_review_mark_complete" for e in _audit_entries(dataset_root))
+
+
+def test_review_mark_complete_refuses_an_unreadable_gt(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    gt = tmp_path / "gt.json"
+    gt.write_text("not json {][", encoding="utf-8")
+
+    resp = client.post(
+        "/api/review/mark_complete",
+        json={
+            "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
+            "gt_path": str(gt), "subject": "catkin",
+        },
+    )
+    assert resp.status_code == 400
+    assert str(gt) in resp.json()["detail"]
+
+
+def test_review_mark_complete_refuses_an_unreadable_prediction(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    pred_dir = tmp_path / "predictions"
+    pred_dir.mkdir(parents=True)
+    (pred_dir / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.post(
+        "/api/review/mark_complete",
+        json={
+            "dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG",
+            "pred_dir": str(pred_dir),
+        },
+    )
+    assert resp.status_code == 400
 
 
 def test_review_gt_edit_audits_into_the_log_of_the_dataset_it_wrote(

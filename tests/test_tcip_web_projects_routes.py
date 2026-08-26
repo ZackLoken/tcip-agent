@@ -103,6 +103,29 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
     assert hz["models_by_date"]["2026-02-11"] == ["baseline"]
     assert hz["models_by_date"]["2026-03-02"] == []
     assert hz["models_by_date"]["2026-03-24"] == []
+    assert hz["label_problem"] is None
+
+
+def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
+    """A corrupt label under one project must not 500 the whole listing (mirrors site_problem):
+    the project still lists, its other dates are unaffected, and the file is named."""
+    from tcip_mcp.dataset_layout import annotation_dir
+
+    proj = _make_project(
+        workspace_dir, "hazelnut_catkin_valley-farm",
+        dates=["2026-02-11", "2026-03-02"], subjects=["catkin"],
+    )
+    bad = annotation_dir(proj, "2026-02-11")
+    bad.mkdir(parents=True, exist_ok=True)
+    (bad / "img.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.get("/api/projects")
+    assert resp.status_code == 200
+    hz = next(p for p in resp.json()["projects"] if p["name"] == "hazelnut_catkin_valley-farm")
+    assert hz["subjects_by_date"]["2026-02-11"] == []
+    assert hz["subjects_by_date"]["2026-03-02"] == []
+    assert hz["label_problem"] is not None
+    assert str(bad / "img.json") in hz["label_problem"]
 
 
 def test_list_ignores_dirs_without_tcip(client, workspace_dir):

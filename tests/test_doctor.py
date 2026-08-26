@@ -457,6 +457,25 @@ def test_doctor_errors_on_a_project_whose_record_does_not_decode(tmp_path):
     assert "does not decode" in res.stdout
 
 
+def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
+    """A corrupt label file behind a stored 'negative' is an error-level finding, never a pass:
+    the reader raises on it, and the doctor reports it rather than letting the corruption hide
+    behind the confirmed-negative status."""
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "IMG_S.JPG")
+    annotation_path(root, date, "IMG_S").write_text("not json {][", encoding="utf-8")
+    (root / ".tcip" / "state" / "image_status.json").write_text(json.dumps(
+        {status_bucket("catkin", date): status_records(
+            {"IMG_S.JPG": "negative"}, recorded_by="user:breeder")}))
+
+    res = _run(root, file_layout=True)
+    assert res.returncode == 2, res.stdout
+    unreadable = _lines(res.stdout, "will not read")
+    assert len(unreadable) >= 1, res.stdout
+    assert any("IMG_S" in ln for ln in unreadable), res.stdout
+
+
 def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     """The pre-review snapshots under an annotations dir's .original are copies, not labels:
     an image whose only file there is a snapshot still has no label record and trains on

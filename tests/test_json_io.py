@@ -12,9 +12,12 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from tcip_annotation.json_io import (
     UNLABELED,
     read_annotations,
+    require_reference_ground_truth,
     target_class_id,
     to_coco_dataset,
     write_annotations,
@@ -334,32 +337,38 @@ def test_present_negative_is_distinct_from_missing(tmp_path: Path) -> None:
     assert not os.path.exists(missing)
 
 
-# -- robustness: malformed inputs are skipped/empty, never raise --------------
+# -- robustness: a missing file reads empty; a present, unreadable one raises ------------------
 
 
-def test_non_json_file_reads_empty(tmp_path: Path) -> None:
+def test_non_json_file_raises(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     path = tmp_path / "garbage.json"
     path.write_text("not json {][", encoding="utf-8")
-    assert read_annotations(path) == []
+
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations(path)
 
 
-def test_json_that_is_not_a_dict_reads_empty(tmp_path: Path) -> None:
+def test_json_that_is_not_a_dict_raises(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     for i, payload in enumerate(('[1, 2, 3]', '"a string"', "42", "null")):
         path = tmp_path / f"nondict_{i}.json"
         path.write_text(payload, encoding="utf-8")
-        assert read_annotations(path) == []
+
+        with pytest.raises(UnreadableLabelDocument):
+            read_annotations(path)
 
 
-def test_entry_without_subject_skipped_geometryless_kept(tmp_path: Path) -> None:
-    # A name-based label is undecodable without a subject, so a subject-less entry is dropped; a
-    # subject with no geometry is a real image-level label and is kept.
+def test_geometryless_subject_kept_as_image_level_label(tmp_path: Path) -> None:
+    # A subject with no geometry is a real image-level label and is kept.
     path = tmp_path / "a.json"
     payload = {
         "image": "a", "width": 100, "height": 100,
         "annotations": [
             {"subject": "catkin"},                                # image-level label: kept
             {"subject": "leaf", "bbox": [1.0, 2.0, 3.0, 4.0]},    # box: kept
-            {"bbox": [5.0, 6.0, 7.0, 8.0]},                       # no subject: skipped
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -368,6 +377,22 @@ def test_entry_without_subject_skipped_geometryless_kept(tmp_path: Path) -> None
     assert [a.subject for a in got] == ["catkin", "leaf"]
     assert got[0].geometry is None  # geometry-less label is a real annotation, not dropped
     assert isinstance(got[1].geometry, BBox)
+
+
+def test_entry_without_subject_raises(tmp_path: Path) -> None:
+    # A name-based label is undecodable without a subject: the document raises rather than
+    # reading as one record short.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "a.json"
+    payload = {
+        "image": "a", "width": 100, "height": 100,
+        "annotations": [{"bbox": [5.0, 6.0, 7.0, 8.0]}],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations(path)
 
 
 def test_bad_bbox_yields_no_box_geometry(tmp_path: Path) -> None:
@@ -379,14 +404,27 @@ def test_bad_bbox_yields_no_box_geometry(tmp_path: Path) -> None:
             {"subject": "catkin", "bbox": [1, 2, 3, 4, 5]},          # wrong length
             {"subject": "catkin", "bbox": "10,20,30,40"},            # not a list
             {"subject": "catkin", "bbox": ["a", "b", "c", "d"]},     # non-numeric
-            {"bbox": [1.0, 2.0, 3.0, 4.0]},                          # no subject: skipped entirely
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     got = read_annotations(path)
-    # No malformed bbox becomes a garbage box; the subject-less entry is dropped.
+    # No malformed bbox becomes a garbage box.
     assert len(got) == 4
     assert all(a.geometry is None for a in got)
+
+
+def test_stored_box_with_no_positive_extent_raises(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "a.json"
+    payload = {
+        "image": "a", "width": 100, "height": 100,
+        "annotations": [{"subject": "catkin", "bbox": [5.0, 5.0, 0.0, 0.0]}],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations(path)
 
 
 def test_bad_segmentation_yields_no_polygon(tmp_path: Path) -> None:
@@ -411,11 +449,24 @@ def test_bad_segmentation_yields_no_polygon(tmp_path: Path) -> None:
     assert all(a.geometry is None for a in got)  # and no other geometry is invented in its place
 
 
-def test_annotations_null_or_absent_reads_empty(tmp_path: Path) -> None:
+def test_annotations_null_or_absent_raises(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     for i, payload in enumerate(('{"image": "a", "annotations": null}', '{"image": "a"}')):
         path = tmp_path / f"empty_{i}.json"
         path.write_text(payload, encoding="utf-8")
-        assert read_annotations(path) == []
+
+        with pytest.raises(UnreadableLabelDocument):
+            read_annotations(path)
+
+
+def test_the_platforms_own_empty_document_still_reads_empty(tmp_path: Path) -> None:
+    # The platform's own shape (what write_annotations(keep_empty=True) writes for a confirmed
+    # negative), unlike a null or absent annotations key, keeps reading as empty.
+    path = tmp_path / "negative.json"
+    path.write_text(json.dumps({"image": "a", "annotations": []}), encoding="utf-8")
+
+    assert read_annotations(path) == []
 
 
 def test_write_skips_degenerate_polygon(tmp_path: Path) -> None:
@@ -436,11 +487,10 @@ def test_write_skips_degenerate_polygon(tmp_path: Path) -> None:
     assert not os.path.exists(only_bad)
 
 
-def test_readers_tolerate_non_dict_annotations(tmp_path: Path) -> None:
+def test_readers_accept_a_document_of_only_valid_records(tmp_path: Path) -> None:
     payload = {
         "image": "a",
         "annotations": [
-            1, "x", None, [1, 2],  # junk entries that must not raise
             {"subject": "catkin", "bbox": [1.0, 2.0, 3.0, 4.0]},
             {"subject": "leaf", "segmentation": [[0.0, 0.0, 9.0, 0.0, 5.0, 9.0]]},
         ],
@@ -451,6 +501,20 @@ def test_readers_tolerate_non_dict_annotations(tmp_path: Path) -> None:
     assert len(got) == 2
     assert isinstance(got[0].geometry, BBox)
     assert isinstance(got[1].geometry, Polygon)
+
+
+@pytest.mark.parametrize("junk", [1, "x", None, [1, 2]])
+def test_a_non_dict_annotation_record_raises(tmp_path: Path, junk) -> None:
+    # A record that is not an object is undecodable the same way a subject-less one is: reading
+    # past it as if it weren't there would let a corrupt record read as a smaller label set.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    payload = {"image": "a", "annotations": [junk]}
+    path = tmp_path / "a.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations(path)
 
 
 def test_null_or_bad_score_reads_as_none(tmp_path: Path) -> None:
@@ -851,3 +915,92 @@ def test_rating_only_image_counts_as_annotated_with_no_targets(tmp_path: Path) -
     assert coco["annotations"] == []
     assert coco["excluded_incomplete_attribute"] == []
     assert coco["images"][0]["width"] == 320 and coco["images"][0]["height"] == 240
+
+
+def test_to_coco_dataset_refuses_a_corrupt_document_behind_a_confirmed_negative_name(
+    tmp_path: Path,
+) -> None:
+    # A confirmed negative is supposed to be an empty label file plus a human's Complete; a
+    # corrupt document behind that name must never assemble as a fabricated zero-object image.
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "IMG_bad.json"
+    path.write_text("not json {][", encoding="utf-8")
+
+    with pytest.raises(UnreadableLabelDocument):
+        to_coco_dataset([(str(path), "IMG_bad.JPG")], subject="catkin", id_map={"catkin": 0},
+                        confirmed_negative_names={"IMG_bad.JPG"})
+
+
+# -- the loader, the parser, and the sidecar exclusion ------------------------
+
+
+def test_parse_label_document_raises_on_undecodable_text() -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument, parse_label_document
+
+    with pytest.raises(UnreadableLabelDocument):
+        parse_label_document("not json {][", source="<test>")
+
+
+def test_parse_label_document_raises_on_a_non_dict_document() -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument, parse_label_document
+
+    with pytest.raises(UnreadableLabelDocument):
+        parse_label_document("[1, 2, 3]", source="<test>")
+
+
+def test_parse_label_document_returns_the_dict() -> None:
+    from tcip_annotation.json_io import parse_label_document
+
+    assert parse_label_document('{"annotations": []}', source="<test>") == {"annotations": []}
+
+
+def test_load_label_document_raises_on_an_unopenable_path(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument, load_label_document
+
+    with pytest.raises(UnreadableLabelDocument):
+        load_label_document(tmp_path / "no_such_directory" / "a.json")
+
+
+def test_load_label_document_returns_the_dict(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import load_label_document
+
+    path = tmp_path / "a.json"
+    path.write_text('{"annotations": []}', encoding="utf-8")
+    assert load_label_document(path) == {"annotations": []}
+
+
+def test_prediction_documents_excludes_every_sidecar_filename(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import SIDECAR_FILENAMES, prediction_documents
+
+    bucket = tmp_path / "bucket"
+    bucket.mkdir()
+    write_annotations(bucket / "IMG_0001.json", [Annotation(subject="catkin", geometry=BBox(1, 1, 2, 2))],
+                      10, 10)
+    for name in SIDECAR_FILENAMES:
+        (bucket / name).write_text("{}", encoding="utf-8")
+
+    documents = prediction_documents(bucket)
+
+    assert [p.name for p in documents] == ["IMG_0001.json"]
+
+
+def test_prediction_documents_on_a_missing_directory_is_empty(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import prediction_documents
+
+    assert prediction_documents(tmp_path / "nope") == []
+
+
+def test_require_reference_ground_truth_admits_a_bucket_holding_sidecars(tmp_path: Path) -> None:
+    # A calibration/holdout reference dir may itself be a prediction bucket carrying its own
+    # provenance stamps; those are not label documents and must never be read as one.
+    from tcip_annotation.json_io import SIDECAR_FILENAMES
+
+    bucket = tmp_path / "bucket"
+    bucket.mkdir()
+    write_annotations(bucket / "IMG_0001.json", [Annotation(subject="catkin", geometry=BBox(1, 1, 2, 2))],
+                      10, 10)
+    for name in SIDECAR_FILENAMES:
+        (bucket / name).write_text("{}", encoding="utf-8")
+
+    require_reference_ground_truth(bucket)  # must not raise

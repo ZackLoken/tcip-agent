@@ -266,7 +266,11 @@ describe("AnnotateToolbar subject authoring", () => {
     seedDataset();
     act(() => useStore.getState().setRegistry({ leaf: {} }, "v1"));
     vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
-    vi.spyOn(classesApi, "load").mockResolvedValue({ subjects: { leaf: {} }, version: "v3" });
+    vi.spyOn(classesApi, "load").mockResolvedValue({
+      subjects: { leaf: {} },
+      version: "v3",
+      unreadable: [],
+    });
     answerPrompt("husk");
     renderToolbar();
 

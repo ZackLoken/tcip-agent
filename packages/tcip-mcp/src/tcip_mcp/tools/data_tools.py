@@ -68,9 +68,13 @@ def _scan_dataset(root: str) -> dict:
 
     Labels are the name-based per-image JSON (one file per image, all subjects) under
     ``annotations/<date>/`` (no detect/segment split), or a single assembled dataset-level COCO.
+
+    An unreadable first-sorted label (undecodable, non-dict, or otherwise malformed) raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than being folded into "format
+    undetectable": the caller reports it as the named file it is, not a guess.
     """
+    from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
-    from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
 
     root_path = Path(root)
     image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
@@ -110,11 +114,15 @@ def _scan_dataset(root: str) -> dict:
                 pass
             break
 
-    # Predictions: predictions/<model>/[<date>/]<stem>.json; the bucket's stamps are not labels.
+    # Predictions: predictions/<model>/[<date>/]<stem>.json; each model/date bucket is walked on
+    # its own through prediction_documents, so the bucket's own stamps are excluded everywhere.
     pred_dir = prediction_root(root_path)
     if pred_dir.is_dir():
-        preds = [str(f) for f in sorted(pred_dir.rglob("*.json"))
-                 if f.is_file() and f.name not in SIDECAR_FILENAMES]
+        preds = [
+            str(f)
+            for bucket in sorted({p.parent for p in pred_dir.rglob("*.json")})
+            for f in prediction_documents(bucket)
+        ]
 
     return {"images": images, "labels": labels, "predictions": preds, "format": detected_format}
 
@@ -136,7 +144,12 @@ def scan_dataset(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    scan = _scan_dataset(folder_path)
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    try:
+        scan = _scan_dataset(folder_path)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
 
     image_stems = {Path(p).stem: p for p in scan["images"]}
     label_stems = {Path(p).stem for p in scan["labels"]}
@@ -171,7 +184,12 @@ def validate_data_quality(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    scan = _scan_dataset(folder_path)
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    try:
+        scan = _scan_dataset(folder_path)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     issues: list[dict] = []
     fmt = scan.get("format")
 

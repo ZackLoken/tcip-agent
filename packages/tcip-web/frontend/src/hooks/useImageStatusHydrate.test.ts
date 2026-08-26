@@ -31,6 +31,7 @@ describe("useImageStatusHydrate", () => {
     });
     vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "negative" },
+      unreadable: [],
     });
     const bulk = vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({});
 
@@ -47,6 +48,7 @@ describe("useImageStatusHydrate", () => {
     });
     vi.spyOn(classesApi, "deriveImageStatus").mockResolvedValue({
       statuses: { "img1.jpg": "partial" },
+      unreadable: [],
     });
     const bulk = vi.spyOn(classesApi, "setImageStatusBulk").mockResolvedValue({});
 

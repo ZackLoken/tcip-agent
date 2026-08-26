@@ -41,7 +41,8 @@ from tcip_annotation import (
     compute_matches,
 )
 from tcip_annotation.json_io import (
-    annotation_from_payload, bbox_from_corners, check_box_extent, read_annotations,
+    UnreadableLabelDocument, annotation_from_payload, bbox_from_corners, check_box_extent,
+    prediction_documents, read_annotations,
 )
 from tcip_annotation.review_engine import label_baseline_key
 from tcip_annotation.state import Annotation
@@ -324,6 +325,15 @@ def _compute_matches(
     )
 
 
+def _read_annotations_or_400(path: str) -> list:
+    """``read_annotations``, refused (400) naming the file when the document will not read: a
+    review derived from a document nobody can read is a claim about nothing."""
+    try:
+        return read_annotations(path)
+    except UnreadableLabelDocument as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
               pred_path: Optional[str]) -> ReviewContext:
     w, h = _image_dims(image_path)
@@ -331,9 +341,9 @@ def _load_ctx(image_name: str, image_path: str, *, gt_path: Optional[str],
     gt_path = _guard_path(gt_path)
     pred_path = _guard_path(pred_path)
     if gt_path:
-        ctx.gt = read_annotations(gt_path)
+        ctx.gt = _read_annotations_or_400(gt_path)
     if pred_path:
-        ctx.preds = read_annotations(pred_path)
+        ctx.preds = _read_annotations_or_400(pred_path)
     return ctx
 
 
@@ -723,7 +733,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
         # verdicts on an image the bucket did predict on is not covered.
         try:
             is_negative = _is_negative_for_subject(pred_dir, payload.image_name, payload.subject)
-        except ValueError as exc:
+        except (ValueError, UnreadableLabelDocument) as exc:
             raise HTTPException(400, str(exc)) from None
         slot_key = payload.subject or "*"
         engine.mark_image_reviewed(bucket, payload.image_name,
@@ -735,7 +745,7 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     # No subject named -> no status to derive.
     annotation_status = None
     if payload.subject:
-        annotations = read_annotations(gt_path) if gt_path else []
+        annotations = _read_annotations_or_400(gt_path) if gt_path else []
         has_content = annotations_hold_subject(annotations, payload.subject)
         annotation_status = derive_status(completed=payload.completed, has_content=has_content)
     _audit(payload.dataset_root, "gui_review_mark_complete", {
@@ -1178,10 +1188,12 @@ class ImageStatusesResponse(BaseModel):
     # image_name -> "not_started" | "started" | "completed"; images the engine has never
     # touched are absent (the client defaults them to "not_started").
     statuses: dict[str, str]
-    # Stems (filename without extension) whose GT or prediction file holds at least one annotation,
-    # i.e. the image has something to review. Images whose stem is absent contribute no TP/FP/FN,
-    # so Review navigation skips them.
+    # Stems (filename without extension) whose GT or prediction file holds >=1 annotation; a
+    # stem absent here contributes no TP/FP/FN, so Review navigation skips it.
     detection_stems: list[str]
+    # Stems whose GT or prediction document would not read: left out of detection_stems, so the
+    # tab keeps them visible instead of silently navigating past them.
+    unreadable: list[str]
 
 
 def _has_objects(path: Path) -> bool:
@@ -1190,18 +1202,25 @@ def _has_objects(path: Path) -> bool:
     return bool(read_annotations(str(path)))
 
 
-def _stems_with_objects(*dirs: Optional[str]) -> set[str]:
+def _stems_with_objects(*dirs: Optional[str]) -> tuple[set[str], set[str]]:
+    """Stems with >=1 annotation record across ``dirs``, and the stems whose document would not
+    read (per file: one bad document costs its own stem, never the whole scan)."""
     stems: set[str] = set()
+    unreadable: set[str] = set()
     for d in dirs:
         if not d:
             continue
-        p = Path(d)
-        if not p.is_dir():
-            continue
-        for f in p.glob("*.json"):
-            if f.stem not in stems and _has_objects(f):
+        for f in prediction_documents(d):
+            if f.stem in stems or f.stem in unreadable:
+                continue
+            try:
+                has_objects = _has_objects(f)
+            except UnreadableLabelDocument:
+                unreadable.add(f.stem)
+                continue
+            if has_objects:
                 stems.add(f.stem)
-    return stems
+    return stems, unreadable
 
 
 @router.get("/image_statuses")
@@ -1217,9 +1236,11 @@ def image_statuses(
     gt_dir = _guard_path(gt_dir)
     pred_dir = _guard_path(pred_dir)
     engine = _get_engine(dataset_root)
+    stems, unreadable = _stems_with_objects(gt_dir, pred_dir)
     return ImageStatusesResponse(
         statuses=engine.get_all_image_statuses(),
-        detection_stems=sorted(_stems_with_objects(gt_dir, pred_dir)),
+        detection_stems=sorted(stems),
+        unreadable=sorted(unreadable),
     )
 
 

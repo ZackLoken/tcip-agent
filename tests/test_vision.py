@@ -298,6 +298,20 @@ class TestVisualizeAnnotations:
         result = visualize("bogus", img)
         assert "error" in result
 
+    def test_an_unreadable_label_returns_an_error_naming_the_file(self, viz_dataset: Path):
+        """Undecodable text is refused by the shared parser itself (UnreadableLabelDocument),
+        not by detect_format falling through to its own generic 'cannot determine' message."""
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        label = viz_dataset / "annotations" / "img_001.json"
+        label.write_text("not json {][", encoding="utf-8")
+
+        result = visualize("annotations", img)
+        assert "error" in result
+        assert str(label) in result["error"]
+        assert "does not decode as JSON" in result["error"]
+
 
 class TestVisualizePredictions:
     def test_detect(self, viz_dataset: Path):
@@ -318,6 +332,17 @@ class TestVisualizePredictions:
         result = visualize("predictions", str(no_pred))
         assert "error" in result
 
+    def test_an_unreadable_prediction_returns_an_error_naming_the_file(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        pred = viz_dataset / "predictions" / "live" / "img_001.json"
+        pred.write_text("not json {][", encoding="utf-8")
+
+        result = visualize("predictions", img)
+        assert "error" in result
+        assert str(pred) in result["error"]
+
 
 class TestVisualizeComparison:
     def test_basic(self, viz_dataset: Path):
@@ -329,6 +354,31 @@ class TestVisualizeComparison:
         assert Path(result["image_path"]).is_file()
         assert result["gt_count"] == 2
         assert result["pred_count"] == 2
+
+    def test_an_unreadable_gt_returns_an_error_naming_the_file(self, viz_dataset: Path):
+        """Same distinction as the annotations source: the shared parser's own message, not
+        detect_format's generic fallback."""
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        label = viz_dataset / "annotations" / "img_001.json"
+        label.write_text("not json {][", encoding="utf-8")
+
+        result = visualize("comparison", img)
+        assert "error" in result
+        assert str(label) in result["error"]
+        assert "does not decode as JSON" in result["error"]
+
+    def test_an_unreadable_prediction_returns_an_error_naming_the_file(self, viz_dataset: Path):
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_dataset / "images" / "img_001.jpg")
+        pred = viz_dataset / "predictions" / "live" / "img_001.json"
+        pred.write_text("not json {][", encoding="utf-8")
+
+        result = visualize("comparison", img)
+        assert "error" in result
+        assert str(pred) in result["error"]
 
 
 class TestDisplayRead:
@@ -409,6 +459,21 @@ class TestVisualizeDatasetSample:
         (tmp_path / "images").mkdir()
         result = visualize("dataset", str(tmp_path), n=4)
         assert "error" in result
+
+    def test_a_corrupt_label_returns_an_error_not_an_unlabeled_render(self, viz_dataset: Path):
+        """A present, unreadable label document must surface as an error, not be silently
+        rendered as though the image carried no labels."""
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = Image.new("RGB", (640, 480), color=(100, 120, 80))
+        img.save(viz_dataset / "images" / "img_bad.jpg")
+        (viz_dataset / "annotations" / "img_bad.json").write_text("not json {][", encoding="utf-8")
+
+        # n covers every image (5, with img_bad): sampling is otherwise random, and the corrupt
+        # image must be reached deterministically for this assertion.
+        result = visualize("dataset", str(viz_dataset), n=5)
+        assert "error" in result
+        assert "img_bad.json" in result["error"]
 
     def test_an_unlabeled_multiband_sample_is_a_rendered_cell(self, tmp_path: Path, monkeypatch):
         """Every grid cell is a rendered artifact, labels or not: the grid tiles renders, and a

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import bisect
 import hashlib
-import json
 import logging
 import random
 import re
@@ -87,8 +86,10 @@ def count_lines(label_path: str | Path) -> int:
 def count_label_lines(labels_dir: str | Path, stem: str) -> int:
     """Annotation count for ``stem`` from its name-based per-image ``<stem>.json``.
 
-    Drives stratified splitting (a foreground-density proxy across all subjects in the file), so a
-    stem whose labels cannot be read scores 0 foreground.
+    Drives stratified splitting (a foreground-density proxy across all subjects in the file). A
+    missing file scores 0 foreground; a present, unreadable one raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than scoring 0, since a
+    corrupt document is not the same fact as an empty one.
     """
     from tcip_annotation import json_io
     from tcip_mcp.dataset_layout import label_filename
@@ -101,26 +102,25 @@ def count_label_lines(labels_dir: str | Path, stem: str) -> int:
 
 def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, int] | None:
     """``(width, height)`` a stem's per-image label JSON records, or ``None`` when the file is
-    missing, unreadable, or carries no positive width/height.
+    missing or carries no positive width/height.
 
     The label file already carries the frame its boxes were authored against (the json_io
     schema's top-level ``width``/``height``), so a caller that needs an image's pixel extent for
     split geometry reads it here rather than decoding the image. This is the same field
     :class:`~tcip_mcp.pipelines.data.datasets.TiledDetectionDataset` treats as authoritative for
     its own authored-vs-decoded frame check, so a split derived from this extent and a tiled
-    dataset later built over the same stem agree on the frame by construction.
+    dataset later built over the same stem agree on the frame by construction. A present,
+    unreadable file raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than
+    reading ``None``, the same distinction between "no extent" and "unreadable" every other reader
+    keeps.
     """
+    from tcip_annotation.json_io import load_label_document
     from tcip_mcp.dataset_layout import label_filename
 
     p = Path(labels_dir) / label_filename(stem)
     if not p.is_file():
         return None
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
+    data = load_label_document(p)
     w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
     return (w, h) if w > 0 and h > 0 else None
 
@@ -733,9 +733,14 @@ def label_image_stems(
     images directory to intersect against. With ``images_dir`` given, only stems that also have a
     matching logical image (a plain file, or a ``.bandgroup``-grouped capture) survive, so a stem
     in the labels dir with no image left (deleted/renamed) never enters the split universe.
+    ``labels_dir`` may itself be a prediction bucket (a calibration/holdout split of one), so its
+    own provenance sidecars are excluded through :func:`~tcip_annotation.json_io.prediction_documents`
+    rather than named as if they were image stems.
     """
+    from tcip_annotation.json_io import prediction_documents
+
     labels_p = Path(labels_dir)
-    label_stems = {p.stem for p in labels_p.glob("*.json")}
+    label_stems = {p.stem for p in prediction_documents(labels_p)}
     if images_dir is None:
         return sorted(label_stems), {}
     from tcip_mcp.pipelines.image_utils import list_logical_images
