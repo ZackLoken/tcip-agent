@@ -484,6 +484,30 @@ def test_export_empty_mask_falls_back_to_bbox(tmp_path):
     assert isinstance(anns[0].geometry, BBox)
 
 
+def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
+    """A mask whose contour is real but collinear carries no real extent either: the writer drops
+    it and reports the count, the same as a degenerate box, rather than storing a zero-area shape."""
+    from tcip_mcp.pipelines.postprocessing import export
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Polygon
+
+    monkeypatch.setattr(
+        export, "_mask_geometry_for_export",
+        lambda mask, bbox_xyxy, subject, *, image_size=None: Polygon(
+            rings=[[(5, 10), (8, 10), (12, 10)]]),
+    )
+    result = {
+        "image": "img.jpg", "width": 64, "height": 64,
+        "boxes": [[5.0, 10.0, 12.0, 12.0]], "scores": [0.9], "labels": [1],
+        "masks": [[[0]]],
+    }
+    out = tmp_path / "img.json"
+    dropped = export.write_predictions_json(str(out), result)
+
+    assert dropped == 1
+    assert json_io.read_annotations(str(out)) == []
+
+
 def test_export_no_masks_key_writes_bbox_as_before():
     """Regression guard: a plain detection result (no masks key at all) must still export BBox
     as before; masks are additive, not a behavior change for non-instance_seg."""

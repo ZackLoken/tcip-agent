@@ -1,8 +1,6 @@
-"""An inverted or zero-extent box is refused wherever a writer builds one.
-
-Both P2F-03 (a save with nowhere to write) and P3-68 (a degenerate box) land together: they
-touch the same route module and the same per-image reader/writer.
-"""
+"""An inverted or zero-extent box is refused wherever a writer builds one, and a save naming no
+label document is refused rather than silently skipped: both touch the same route module and the
+same per-image reader/writer."""
 
 from __future__ import annotations
 
@@ -14,7 +12,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tcip_annotation.json_io import write_annotations
-from tcip_annotation.state import Annotation, BBox
+from tcip_annotation.state import Annotation, BBox, Polygon
 
 
 def _write_image(path: Path, size=(200, 150)) -> None:
@@ -82,6 +80,30 @@ def test_write_annotations_admits_an_ordered_box(tmp_path):
     )
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved["annotations"][0]["bbox"] == [5, 5, 5, 15]
+
+
+def test_write_annotations_refuses_a_collinear_polygon(tmp_path):
+    """A polygon whose points all sit on one line has a derived bbox with no real extent either:
+    the same boundary check catches it, not only a bare BBox."""
+    with pytest.raises(ValueError):
+        write_annotations(
+            str(tmp_path / "img.json"),
+            [Annotation(subject="leaf", geometry=Polygon(rings=[[(5, 10), (8, 10), (12, 10)]]))],
+            200, 150,
+        )
+    assert not (tmp_path / "img.json").exists()
+
+
+def test_write_annotations_admits_a_real_polygon(tmp_path):
+    # admits valid work: a polygon with real area is unaffected by the collinear-polygon refusal.
+    path = tmp_path / "img.json"
+    write_annotations(
+        str(path),
+        [Annotation(subject="leaf", geometry=Polygon(rings=[[(5, 10), (15, 10), (15, 20)]]))],
+        200, 150,
+    )
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["annotations"][0]["bbox"] == [5, 10, 10, 10]
 
 
 # ── the MCP save door ────────────────────────────────────────────────────────
@@ -268,7 +290,7 @@ def test_review_action_refuses_accepting_a_degenerate_prediction(
     client: TestClient, tmp_path: Path
 ) -> None:
     # A degenerate prediction reaching the store bypasses the staging door's own drop (a file
-    # placed directly, as a foreign/legacy bucket might be): the accept branch still refuses it.
+    # placed directly, as a foreign bucket might hold): the accept branch still refuses it.
     gt_path, pred_path = _seed_review_dataset(tmp_path, pred_box=(10, 10, 10, 20))
 
     resp = client.post("/api/review/action", json=_action_payload(tmp_path, gt_path, pred_path))

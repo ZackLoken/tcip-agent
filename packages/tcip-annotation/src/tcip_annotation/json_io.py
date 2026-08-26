@@ -523,10 +523,10 @@ def _annotation_record(a: Annotation) -> dict | None:
         if not valid_rings:
             return None  # no ring is a real shape; skip so write<->read stays symmetric
         rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy] for ring in valid_rings]
-        # The polygon's box travels with it (COCO-style record). Derived from the rings here and
-        # never authored or trusted as input: the polygon stays the sole source of truth, so the two
-        # can't diverge; every reader re-derives via bbox_of rather than reading this stored value.
+        # The polygon's box travels with it (COCO-style), derived from the rings rather than
+        # authored: every reader re-derives via bbox_of, so the two can't diverge.
         poly_box = bbox_of(Polygon(valid_rings))
+        check_box_extent(poly_box, where=f"{a.subject!r} annotation's polygon")
         rec["bbox"] = xywh(poly_box.x1, poly_box.y1, poly_box.x2, poly_box.y2)
     elif isinstance(geom, BBox):
         check_box_extent(geom, where=f"{a.subject!r} annotation")
