@@ -422,7 +422,13 @@ export const api = {
 
     // Promote a completed review into a validation reference for its (model, trait, date). Runs the
     // same disjoint + count-bias gate the backend uses and returns an honest validated / not-yet result.
-    validateReference: (body: { dataset_root: string; trait: string; pred_dir?: string | null }) =>
+    validateReference: (body: {
+      dataset_root: string;
+      trait: string;
+      pred_dir?: string | null;
+      // The object identity this reference validates; the door refuses a request naming none.
+      subject: string;
+    }) =>
       call<{
         validated: boolean;
         reference: string | null;

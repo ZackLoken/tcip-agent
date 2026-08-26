@@ -151,7 +151,7 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
     client: TestClient, tmp_path: Path
 ) -> None:
     """A subject's own predictions being absent is a genuine negative for it, even when the same
-    file holds another subject's boxes: the conservative-direction defect this map fixes."""
+    file holds another subject's boxes."""
     d = tmp_path / "predictions" / "baseline" / "2-11-26"
     d.mkdir(parents=True)
     write_annotations(
@@ -172,11 +172,12 @@ def test_complete_named_subject_over_a_file_holding_only_another_subjects_predic
     assert _shard(dataset_root, "IMG_0060.JPG")["adjudication_covered"] == {"catkin": True}
 
 
-def test_complete_named_subject_the_bucket_never_assessed_is_refused(
+def test_complete_named_subject_the_bucket_never_assessed_omits_the_coverage_entry(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A subject not among the bucket's own recorded class map cannot be judged negative or
-    positive: this bucket never assessed it, so the Complete is refused rather than guessed."""
+    positive: the coverage entry is omitted, and the Complete and its status write still
+    proceed."""
     bucket = _bucket(tmp_path)  # a sidecar with no id_map at all
     dataset_root = _dataset_root(tmp_path)
 
@@ -186,8 +187,10 @@ def test_complete_named_subject_the_bucket_never_assessed_is_refused(
         "pred_dir": str(bucket),
         "subject": "catkin",
     })
-    assert resp.status_code == 400
-    assert "catkin" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert resp.json()["image_status"] == "completed"
+    state = _shard(dataset_root, "IMG_0007.JPG")
+    assert "catkin" not in (state.get("adjudication_covered") or {})
 
 
 def test_a_second_complete_under_another_subject_leaves_the_firsts_claim_intact(

@@ -313,6 +313,7 @@ describe("ReviewTab validation-reference affordance", () => {
         dataset_root: "C:/data",
         trait: "subject_a",
         pred_dir: PRED_DIR_A,
+        subject: "subject_a",
       }),
     );
     expect(await screen.findByText("Validated")).toBeInTheDocument();

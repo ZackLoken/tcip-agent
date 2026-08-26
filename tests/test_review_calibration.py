@@ -328,6 +328,15 @@ def test_covers_reads_false_for_no_recorded_map_at_all():
     assert covers(None, "catkin") is False
 
 
+def test_covers_reads_the_subjects_own_false_entry_over_a_star_entry():
+    # An explicit per-subject False must not be overridden by an unrelated "*" entry: the
+    # subject's own entry, whatever it says, wins once it is present.
+    from tcip_mcp.pipelines.feedback.review_calibration import covers
+
+    slot = {"*": True, "leaf": False}
+    assert covers(slot, "leaf") is False
+
+
 def test_covers_refuses_a_bare_boolean_by_name():
     # A bare boolean is not a shape any writer produces; reading one as covering everything or
     # nothing would guess at the subject a bare flag never named.
@@ -339,14 +348,14 @@ def test_covers_refuses_a_bare_boolean_by_name():
 
 def test_zero_verdict_image_coverage_is_read_for_the_subject_the_reference_validates():
     # A file holding another subject's boxes must not read as covered for the subject actually
-    # being validated: the reproduced defect this map fixes.
+    # being validated.
     state = {"image": {"NEG.jpg": {
         "img_status": "completed", "detections": [],
         "producer_identity": _IDENTITY_A,
         "adjudication_covered": {"catkin": True, "leaf": False},
     }}}
-    catkin_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="catkin")
-    assert catkin_recs[0]["adjudication_covered"] is True
+    subject_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="catkin")
+    assert subject_recs[0]["adjudication_covered"] is True
     leaf_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="leaf")
     assert leaf_recs[0]["adjudication_covered"] is False
 

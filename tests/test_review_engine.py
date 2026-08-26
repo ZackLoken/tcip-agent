@@ -224,6 +224,17 @@ def test_mark_image_reviewed_merges_a_second_subjects_coverage_without_erasing_t
     assert img_data["adjudication_covered"] == {"catkin": True, "leaf": False}
 
 
+def test_mark_image_reviewed_refuses_to_merge_over_a_non_map_existing_value(
+    engine: ReviewEngine,
+) -> None:
+    """A bare boolean already recorded for a shard is a shape no current writer produces; the
+    merge raises by name rather than silently discarding it."""
+    engine.mark_image_reviewed(BUCKET, "IMG_0301.JPG", adjudication_covered={"catkin": True})
+    engine.raw_state["verdicts"][(BUCKET, "IMG_0301.JPG")]["adjudication_covered"] = True
+    with pytest.raises(ValueError, match="adjudication_covered"):
+        engine.mark_image_reviewed(BUCKET, "IMG_0301.JPG", adjudication_covered={"catkin": True})
+
+
 def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext) -> None:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     assert len(matches["tp"]) == 1
