@@ -1098,9 +1098,9 @@ def capture_live_canvas(
     refreshed = False
     ping_delivered = False
     if refresh:
-        from tcip_mcp.web_client import post_panel_event
+        from tcip_mcp.web_client import PANEL_EVENT_CANVAS_STATE_REQUEST, post_panel_event
 
-        res = post_panel_event("app", "canvas_state_request", {})
+        res = post_panel_event("app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
         ping_delivered = bool(res.get("delivered"))
         if ping_delivered:
             for _ in range(12):  # ~2.4s for the GUI's flush to land

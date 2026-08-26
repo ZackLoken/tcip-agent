@@ -240,7 +240,7 @@ def set_active_project(name: str) -> dict:
         name: The workspace project to make active.
     """
     from tcip_mcp import workspace
-    from tcip_mcp.web_client import post_panel_event
+    from tcip_mcp.web_client import PANEL_EVENT_ACTIVE_PROJECT_CHANGED, post_panel_event
 
     try:
         marker = workspace.set_active_project(name)
@@ -249,7 +249,7 @@ def set_active_project(name: str) -> dict:
         return {"error": str(exc)}
 
     delivery = post_panel_event(
-        "app", "active_project_changed", {"name": name, "project_path": str(proj)}
+        "app", PANEL_EVENT_ACTIVE_PROJECT_CHANGED, {"name": name, "project_path": str(proj)}
     )
     return {
         "name": name,

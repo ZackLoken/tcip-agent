@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -172,6 +172,24 @@ def compare_runs_route(payload: ExperimentComparePayload) -> dict:
 # ── WebSocket live metrics ──────────────────────────────────────────────
 
 
+class TrainingMetricFrame(BaseModel):
+    """One metrics-log row, pushed as it is appended."""
+
+    type: Literal["metric"]
+    run_id: str
+    row: dict
+
+
+class TrainingStatusFrame(BaseModel):
+    """The terminal frame: ``status`` carries ``check_training_status``'s report whole for a
+    run this process can still identify, ``error`` is set instead when it cannot."""
+
+    type: Literal["status"]
+    run_id: str
+    status: dict | None
+    error: str | None
+
+
 async def _stream_metrics(
     ws: WebSocket, project_root: str, run_id: str, poll_seconds: float = 1.0
 ) -> None:
@@ -196,19 +214,26 @@ async def _stream_metrics(
             cursor = page.cursor
             rows = [dict(row) for row in page.records]
         for row in rows:
-            await ws.send_json({"type": "metric", "run_id": run_id, "row": row})
+            frame = TrainingMetricFrame(type="metric", run_id=run_id, row=row)
+            await ws.send_json(frame.model_dump())
 
-        # Has the run finished (or gone away)?
+        # Has the run finished (or gone away)? ``error`` with no ``status`` key => unknown run;
+        # a cancelled run never reaches completed/failed, so either case ends the stream.
         try:
             from tcip_mcp.tools.training_tools import check_training_status
             from tcip_web import jobstore
 
             status = check_training_status(run_id)
-            # ``error`` => unknown run (e.g. streamed after a restart); a cancelled run
-            # never reaches completed/failed. Either way, terminate: the prior check
-            # keyed only on completed/failed/"not_found" and spun forever on both.
             if status.get("error") or status.get("status") in jobstore.TERMINAL_STATUSES:
-                await ws.send_json({"type": "status", "run_id": run_id, "status": status})
+                if "status" in status:
+                    status_frame = TrainingStatusFrame(
+                        type="status", run_id=run_id, status=status, error=None
+                    )
+                else:
+                    status_frame = TrainingStatusFrame(
+                        type="status", run_id=run_id, status=None, error=status.get("error")
+                    )
+                await ws.send_json(status_frame.model_dump())
                 break
         except Exception:
             logger.exception("check_training_status failed in stream")

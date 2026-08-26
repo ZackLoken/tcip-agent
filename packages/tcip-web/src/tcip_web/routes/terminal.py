@@ -2,7 +2,8 @@
 
 One live terminal session (the co-pilot rail) is the norm; the API is session-plural so
 multiples need no redesign. The WebSocket carries raw PTY output as text frames
-(server → browser) and JSON control messages (browser → server):
+(server → browser) and JSON control messages (browser → server), validated as
+``TerminalInputFrame``/``TerminalResizeFrame``:
 
     {"type": "input",  "data": "<keystrokes>"}
     {"type": "resize", "rows": 34, "cols": 96}
@@ -25,10 +26,10 @@ import json
 import logging
 import os
 import threading
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from tcip_web import terminal as pty_host
 from tcip_web.trust_boundary import origin_allowed
@@ -253,6 +254,21 @@ def get_status() -> dict:
     return pty_host.terminal_status()
 
 
+class TerminalInputFrame(BaseModel):
+    """Keystrokes typed into the rail, forwarded to the PTY verbatim."""
+
+    type: Literal["input"]
+    data: str
+
+
+class TerminalResizeFrame(BaseModel):
+    """The rail's terminal dimensions, applied to the PTY's window size."""
+
+    type: Literal["resize"]
+    rows: int
+    cols: int
+
+
 class CreateSessionRequest(BaseModel):
     rows: int = pty_host.DEFAULT_ROWS
     cols: int = pty_host.DEFAULT_COLS
@@ -346,16 +362,20 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            mtype = msg.get("type")
+            mtype = msg.get("type") if isinstance(msg, dict) else None
             if mtype == "input":
-                data = msg.get("data")
-                if isinstance(data, str) and data:
-                    session.write(data)
+                try:
+                    input_frame = TerminalInputFrame.model_validate(msg)
+                except ValidationError:
+                    continue
+                if input_frame.data:
+                    session.write(input_frame.data)
             elif mtype == "resize":
                 try:
-                    session.resize(_clamp(msg.get("rows", 0)), _clamp(msg.get("cols", 0)))
-                except (TypeError, ValueError):
-                    pass
+                    resize_frame = TerminalResizeFrame.model_validate(msg)
+                except ValidationError:
+                    continue
+                session.resize(_clamp(resize_frame.rows), _clamp(resize_frame.cols))
     except WebSocketDisconnect:
         pass
     finally:

@@ -3,7 +3,7 @@ import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { classesApi } from "@/api/classes";
 import type { ImageStatus } from "@/api/classes";
 import { ROUTES } from "@/api/routes";
-import { TAB_NAMES } from "@/api/types.generated";
+import { PLATFORM_PANEL_EVENTS, TAB_NAMES } from "@/api/types.generated";
 import { sessionsApi } from "@/api/sessions";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { TerminalRail } from "@/components/TerminalRail";
@@ -29,6 +29,11 @@ import { ReviewTab } from "@/tabs/ReviewTab";
 // Every tab has an agent panel of the same name (the backend's own panel set also carries
 // "app", handled by its own subscription below).
 const TAB_PANELS: readonly TabName[] = TAB_NAMES;
+
+// The platform's own emitters' event names, in the backend's declared order (labels_written is
+// handled generically below, by panel rather than by name).
+const [, ANNOTATE_FOCUS, REVIEW_FOCUS, ACTIVE_PROJECT_CHANGED, CANVAS_STATE_REQUEST] =
+  PLATFORM_PANEL_EVENTS;
 
 // Code-split the recharts-heavy tabs (recharts + its d3 deps are ~5MB unpacked and used only
 // here) so the Annotate/Review workflow (the primary use) paints without them. App mounts
@@ -112,7 +117,7 @@ function App() {
         return;
       }
 
-      if (ev.event_type === "active_project_changed") {
+      if (ev.event_type === ACTIVE_PROJECT_CHANGED) {
         const name = (ev.data as { name?: string }).name;
         if (!name) return;
         void openProjectByName(name)
@@ -136,7 +141,7 @@ function App() {
       // Agent → GUI "focus the Annotate tab": land on a (subject, date) in the right mode on an
       // annotated frame (see applyAnnotateFocus, which uses local setters like Review→Edit so the
       // deliberate "mode/index stay local" behavior of mergeSnapshot is preserved).
-      if (ev.event_type === "annotate_focus") {
+      if (ev.event_type === ANNOTATE_FOCUS) {
         void applyAnnotateFocus(ev.data as AnnotateFocusData).catch(() => {
           useStore
             .getState()
@@ -147,14 +152,14 @@ function App() {
 
       // Agent → GUI "push your canvas now": capture_live_canvas pings before rendering so it
       // sees the freshest state; the mounted tab answers with an immediate full push.
-      if (ev.event_type === "canvas_state_request") {
+      if (ev.event_type === CANVAS_STATE_REQUEST) {
         notifyCanvasStateRequest();
         return;
       }
 
       // Agent → GUI "focus the Review tab": load a model's predictions on a frame/detection so
       // the human sees exactly what the agent flagged (a false positive, a missed detection).
-      if (ev.event_type === "review_focus") {
+      if (ev.event_type === REVIEW_FOCUS) {
         void applyReviewFocus(ev.data as ReviewFocusData).catch(() => {
           useStore
             .getState()
