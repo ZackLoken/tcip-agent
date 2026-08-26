@@ -35,3 +35,31 @@ export function reconcileImageStatuses(
   }
   return { writes, staleMarks: staleMarks.sort() };
 }
+
+/** A shape carrying a `subject` field: a box, polygon, point or image-level rating. */
+interface SubjectScoped {
+  subject: string;
+}
+
+/** The canvas content a subject-scoped check reads: every shape kind a save or a status write
+ *  considers, image-level ratings included. */
+export interface SubjectScopedShapes {
+  boxes: SubjectScoped[];
+  polygons: SubjectScoped[];
+  points: SubjectScoped[];
+  imageAnnotations: SubjectScoped[];
+}
+
+/** Whether the canvas holds at least one shape (of any kind, an image-level rating included)
+ *  authored for `subject`. The one predicate the Complete toggle, the stale re-confirm action and
+ *  the save path all call to decide whether an image carries this subject's content, so a status
+ *  write can't read a different subject's shapes as this one's. A null subject holds nothing. */
+export function canvasHoldsSubject(shapes: SubjectScopedShapes, subject: string | null): boolean {
+  if (!subject) return false;
+  return (
+    shapes.boxes.some((s) => s.subject === subject) ||
+    shapes.polygons.some((s) => s.subject === subject) ||
+    shapes.points.some((s) => s.subject === subject) ||
+    shapes.imageAnnotations.some((s) => s.subject === subject)
+  );
+}

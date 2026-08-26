@@ -270,6 +270,22 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().user).toBe("breeder");
     expect(vi.mocked(classesApi.setImageStatus).mock.calls[0][7]).toBe("breeder");
   });
+
+  it("never rewrites a confirmed negative to partial, even when the save adds content", async () => {
+    useStore.setState((s) => ({
+      imageStatus: { ...s.imageStatus, byImage: { "img1.jpg": "negative" } },
+    }));
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+
+    act(addBox);
+    pressSave();
+    await flush();
+
+    expect(classesApi.setImageStatus).not.toHaveBeenCalled();
+    expect(useStore.getState().imageStatus.byImage["img1.jpg"]).toBe("negative");
+  });
 });
 
 describe("AnnotateTab subject rendering", () => {
