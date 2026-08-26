@@ -99,6 +99,19 @@ def test_dir_label_format_treats_the_old_objects_schema_as_unrecognized(tmp_path
     assert dir_label_format(d) is None
 
 
+def test_first_labels_json_excludes_a_bucket_sidecar(tmp_path):
+    """A directory holding only a bucket's own provenance stamp has no first label document: the
+    sidecar is never mistaken for one, the same walk ``dir_label_format`` shares."""
+    from tcip_mcp.pipelines.data.datasets import first_labels_json
+    d = tmp_path / "detect"
+    d.mkdir()
+    (d / "operating_point.json").write_text("{}")
+    assert first_labels_json(d) is None
+
+    json_io.write_annotations(d / "a.json", [_box(10, 10, 50, 50)], 100, 100)
+    assert first_labels_json(d) == d / "a.json"
+
+
 # ── assemble_coco ───────────────────────────────────────────────────────────
 
 def test_assemble_coco_pairs_labels_with_images(tmp_path):
@@ -120,6 +133,23 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
     assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
     assert len(coco["annotations"]) == 2
     assert {a["category_id"] for a in coco["annotations"]} == {0, 1}
+
+
+def test_assemble_coco_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
+    """With no explicit ``stems``, the stem universe comes from prediction_documents, so a
+    sidecar beside a real label never mints a spurious entry."""
+    from tcip_mcp.pipelines.data.datasets import assemble_coco
+    images = tmp_path / "images"
+    labels = tmp_path / "detect"
+    labels.mkdir()
+    _make_images(images, ["img0"])
+    _reg, id_map = _reg_id_map()
+    json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
+    (labels / "operating_point.json").write_text("{}")
+
+    coco = assemble_coco(labels, images, subject=CATKIN, date=None, id_map=id_map)
+
+    assert {im["file_name"] for im in coco["images"]} == {"img0.jpg"}
 
 
 def test_assemble_coco_includes_only_confirmed_negatives(tmp_path):

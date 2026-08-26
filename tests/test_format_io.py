@@ -28,6 +28,15 @@ def test_detect_format_dir_json_coco(tmp_path):
     assert detect_format(str(tmp_path)) == "coco"
 
 
+def test_detect_format_dir_excludes_a_bucket_sidecar(tmp_path):
+    """The directory branch walks through prediction_documents, so a bucket's own provenance
+    stamp is never read as a candidate label document: a directory holding only one is
+    undetectable, the same answer an empty directory gives."""
+    (tmp_path / "operating_point.json").write_text("{}")
+    with pytest.raises(ValueError):
+        detect_format(str(tmp_path))
+
+
 def test_detect_format_per_image_json(tmp_path):
     js = tmp_path / "IMG_0001.json"
     js.write_text('{"image": "IMG_0001", "annotations": [{"subject": "catkin", "bbox": [1, 1, 9, 9]}]}')

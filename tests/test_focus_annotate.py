@@ -198,9 +198,9 @@ def test_focus_annotate_no_images(tmp_path: Path) -> None:
     assert "error" in res
 
 
-def test_focus_annotate_reports_an_unreadable_label_by_name(tmp_path: Path) -> None:
-    """A present, unreadable label on some earlier frame is an error naming the file, never a
-    raise through the tool boundary."""
+def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(tmp_path: Path) -> None:
+    """A present, unreadable label on a frame the tool is not landing on does not close the
+    navigation surface for the date; it is named in the result's ``unreadable`` list instead."""
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
@@ -212,5 +212,24 @@ def test_focus_annotate_reports_an_unreadable_label_by_name(tmp_path: Path) -> N
     _label(root, "bush", date, "segment", "IMG_0002", 1)
 
     res = focus("annotate", str(root), str(root), "bush", date)
+    assert "error" not in res
+    assert res["image"] == "IMG_0002.JPG"
+    assert res["unreadable"] == ["IMG_0000.JPG"]
+
+
+def test_focus_annotate_refuses_when_the_landed_frame_itself_is_unreadable(tmp_path: Path) -> None:
+    """A present, unreadable label naming the requested frame is an error naming the file, never
+    a raise through the tool boundary."""
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
+    _scene(root, date, imgs)
+    d = Path(annotation_dir(root, date))
+    d.mkdir(parents=True, exist_ok=True)
+    bad = d / "IMG_0000.json"
+    bad.write_bytes(b"{not json")
+    _label(root, "bush", date, "segment", "IMG_0002", 1)
+
+    res = focus("annotate", str(root), str(root), "bush", date, image_index=0)
     assert "error" in res
     assert str(bad) in res["error"]

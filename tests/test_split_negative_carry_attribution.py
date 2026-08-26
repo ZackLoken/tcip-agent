@@ -287,3 +287,27 @@ def test_a_failed_carry_computation_writes_no_split_tree(tmp_path: Path, monkeyp
 
     assert not (out / "train").exists()
     assert not (out / "val").exists()
+
+
+def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
+    """A confirmed negative whose label file will not read is caught while the carry is being
+    read, before any stem list, manifest or split tree is written: the call answers an error dict
+    naming the file, and nothing from this call is left on disk."""
+    from tcip_mcp.tools.data_tools import split_manifest_key, split_stem_list_key
+
+    root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
+    bad = root / "annotations" / DATE / f"{NEGATIVE_STEM}.json"
+    bad.write_bytes(b"{not json")
+    out = tmp_path / "splits"
+
+    result = make_splits(
+        str(root), output_path=str(out), materialize=True, subject=SUBJECT,
+        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3, stratify_foreground=False,
+    )
+
+    assert "error" in result
+    assert str(bad) in result["error"]
+    assert not ts.exists(split_manifest_key(out))
+    assert not ts.exists(split_stem_list_key(out, "train"))
+    assert not ts.exists(split_stem_list_key(out, "val"))
+    assert not out.exists()

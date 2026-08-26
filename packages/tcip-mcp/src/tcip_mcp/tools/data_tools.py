@@ -473,6 +473,15 @@ def make_splits(
         seed=seed,
     )
 
+    negative_carry: "_NegativeCarry | None" = None
+    if materialize:
+        # Read every confirmed negative this split will carry before anything (a stem list, the
+        # manifest, the split tree) is written: a refusal here must leave nothing persisted.
+        try:
+            negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
+
     # Content hash of the labels this split partitions: two runs with the same seed still yield
     # different splits over different GT, so the hash + seed together identify the partition.
     dataset_hash = None
@@ -522,9 +531,6 @@ def make_splits(
     }
 
     if materialize:
-        # The carry is computed before anything is written: a refusal here must leave no
-        # partial split tree on disk.
-        negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name in kept_splits:
             split_stems = parts[split_name]

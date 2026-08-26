@@ -92,6 +92,28 @@ def test_force_redraw_with_labels_dir_rescans_stems(tmp_path: Path):
         ["img0", "img1", "img2", "img3"]
 
 
+def test_force_redraw_answers_an_error_dict_over_an_unreadable_label(tmp_path: Path):
+    """An unreadable label under ``labels_dir`` is an error dict naming the file, never a raw
+    raise through this audited door."""
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    json_io.write_annotations(
+        str(labels_dir / "img0.json"),
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 8, 8)
+    bad = labels_dir / "img1.json"
+    bad.write_bytes(b"{not json")
+
+    result = force_redraw_cal_holdout_split(
+        dataset_root=str(tmp_path), labels_dir=str(labels_dir), seed=1,
+        reason="an unreadable label must answer an error, not raise")
+    assert "error" in result
+    assert str(bad) in result["error"]
+
+
 def test_force_redraw_refuses_a_root_the_labels_own_lock_does_not_live_under(tmp_path: Path):
     """A redraw under a root the labels do not lock against replaces a lock nothing reads.
 

@@ -698,6 +698,10 @@ def _focus_annotate(
     """Drive the live Annotate tab to a (subject, date), in the right mode, on a frame labeled for
     the subject. Posts an ``annotate_focus`` event the GUI honors with local view setters.
 
+    Refuses only when the landed-on (or explicitly named) frame's own label will not read; every
+    other unreadable document on the date is named in the result's ``unreadable`` instead, so one
+    bad file elsewhere on the date never closes the agent's own navigation surface for it.
+
     The ``mode`` vocabulary this validates against restates ``tcip_web.state.AnnotateMode``: this
     package cannot import ``tcip_web`` (the dependency runs the other way), so the check is
     restated here rather than shared.
@@ -720,8 +724,16 @@ def _focus_annotate(
 
     n_annotated = 0
     first_idx: int | None = None
+    tasks: dict[str, str | None] = {}
+    unreadable: dict[str, str] = {}
     for i, name in enumerate(images):
-        if _task(Path(name).stem) is not None:
+        try:
+            task = _task(Path(name).stem)
+        except UnreadableLabelDocument as exc:
+            unreadable[name] = str(exc)
+            continue
+        tasks[name] = task
+        if task is not None:
             n_annotated += 1
             if first_idx is None:
                 first_idx = i
@@ -730,7 +742,10 @@ def _focus_annotate(
         image_index = first_idx if first_idx is not None else 0
     image_index = max(0, min(image_index, len(images) - 1))
 
-    resolved_task = _task(Path(images[image_index]).stem)
+    target_name = images[image_index]
+    if target_name in unreadable:
+        return {"error": unreadable[target_name]}
+    resolved_task = tasks[target_name]
     if mode is None:
         mode = _TASK_MODE.get(resolved_task or "", "box")
     if mode not in ("box", "polygon", "point"):
@@ -747,6 +762,7 @@ def _focus_annotate(
         "status": result.get("status"),
         "subject": subject, "date": date, "image_index": image_index, "mode": mode,
         "n_images": len(images), "n_annotated": n_annotated, "image": images[image_index],
+        "unreadable": sorted(unreadable),
     }
 
 
