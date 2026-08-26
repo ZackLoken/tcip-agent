@@ -186,19 +186,8 @@ def pin_project_root(*, from_marker: bool) -> RootBinding:
         if found is not None:
             _, root = found
             source = "marker"
-        elif marker_problem is None:
-            # active_project_if_present folds "no marker" and "marker names a project that
-            # is not adoptable" into the same None; ask the raising predicate which it was.
-            try:
-                name = workspace.read_active_project(create=False)
-            except Exception as exc:  # noqa: BLE001 - same as above
-                marker_problem = str(exc)
-            else:
-                if name:
-                    try:
-                        workspace.adoptable_project_root(name)
-                    except ValueError as exc:
-                        marker_problem = str(exc)
+        else:
+            marker_problem = workspace.marker_problem(create=False)
 
     if root is None:
         if inherited:

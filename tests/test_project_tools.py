@@ -223,6 +223,28 @@ def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
     assert "platform_root_diverges_from_marker" not in status
 
 
+def test_inspect_project_reports_marker_problem_for_a_dangling_marker(
+    tmp_path: Path, monkeypatch
+):
+    """A marker naming a project whose ``.tcip`` is gone is not adoptable: the divergence
+    report must say so rather than naming ``set_active_project`` as if adopting it would work."""
+    import shutil
+
+    from tcip_mcp import workspace
+
+    ws = tmp_path / "ws"
+    proj = ws / "chestnut_burr_valley"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    workspace.set_active_project("chestnut_burr_valley")
+    shutil.rmtree(proj / ".tcip")
+
+    status = inspect_project(str(tmp_path / "elsewhere"))
+    divergence = status["platform_root_diverges_from_marker"]
+    assert "marker_problem" in divergence
+    assert "chestnut_burr_valley" in divergence["marker_problem"]
+
+
 def test_inspect_project_against_a_nonexistent_workspace_creates_nothing(
     tmp_path: Path, monkeypatch
 ):
@@ -258,7 +280,7 @@ def test_inspect_project_reports_the_workspace_store_refusal_for_a_loose_marker(
     status = inspect_project(str(proj))
 
     divergence = status["platform_root_diverges_from_marker"]
-    assert "error" in divergence
+    assert "marker_problem" in divergence
     assert not (ws / ".tcip").exists()
 
 

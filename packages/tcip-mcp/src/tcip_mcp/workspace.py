@@ -213,6 +213,31 @@ def active_project_if_present(*, create: bool = True) -> Optional[tuple[str, Pat
     return name, path
 
 
+def marker_problem(*, create: bool = False) -> Optional[str]:
+    """Why :func:`active_project_if_present` answered ``None``, or ``None`` when there was
+    simply no marker to have a problem with.
+
+    Call only after :func:`active_project_if_present` has already answered ``None``: it folds
+    "no marker" and "the marker names a project that is not adoptable" together, and this is
+    the one place that tells them apart, for every reader that needs to
+    (``project_paths.pin_project_root``, the workspace projects' divergence report, the web
+    backend's own re-read on the agent's adopt signal). A store refusal or a lock timeout
+    reading the marker is caught and returned as the problem text, the same as an unadoptable
+    name, since either way the process must carry on rather than raise.
+    """
+    try:
+        name = read_active_project(create=create)
+    except Exception as exc:  # noqa: BLE001 - a store refusal or lock timeout, returned as text
+        return str(exc)
+    if not name:
+        return None
+    try:
+        adoptable_project_root(name)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def resolve_project_path(given: str) -> str:
     """A given path wins; empty falls back to the active project's root (the live GUI session)."""
     if given:
