@@ -399,6 +399,28 @@ describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
       undefined,
     );
   });
+
+  it("writes complete for the dataset's subject when the canvas holds this subject's shapes", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_a"]);
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(setStatus).toHaveBeenCalledWith(
+      "C:/proj",
+      "img1.jpg",
+      "complete",
+      "subject_a",
+      "2026-01-01",
+      "C:/data",
+      "C:/data/annotations/2026-01-01",
+      undefined,
+    );
+  });
 });
 
 describe("AnnotateToolbar stale re-confirm", () => {
@@ -446,5 +468,33 @@ describe("AnnotateToolbar stale re-confirm", () => {
       undefined,
     );
     expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
+  });
+
+  it("does nothing over a stale image whose labels have not loaded yet (loadedImagePath mismatch)", async () => {
+    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
+    useStore.setState((s) => ({ canvas: { ...s.canvas, loadedImagePath: null } }));
+    setCanvasBoxSubjects(["subject_a"]);
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar();
+
+    const button = screen.getByRole("button", { name: "Re-confirm" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+
+    expect(setStatus).not.toHaveBeenCalled();
+    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
+  });
+
+  it("restores the stale mark when the re-confirm write fails to persist", async () => {
+    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
+    setCanvasBoxSubjects(["subject_a"]);
+    vi.spyOn(classesApi, "setImageStatus").mockRejectedValue(new Error("network error"));
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
+    });
+
+    expect(useStore.getState().imageStatus.staleMarks).toEqual(["img1.jpg"]);
   });
 });

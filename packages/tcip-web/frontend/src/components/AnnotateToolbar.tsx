@@ -14,8 +14,9 @@ import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
 import { BandPicker } from "@/components/BandPicker";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { useDisclosure } from "@/hooks/useDisclosure";
-import { useImageNav } from "@/hooks/useImageNav";
+import { stepTarget, useImageNav } from "@/hooks/useImageNav";
 import { showsBandPicker, type BandSelection } from "@/lib/bandSelection";
+import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
 
@@ -138,8 +139,13 @@ export function AnnotateToolbar({
   const canvasReady = !!loadedImagePath && loadedImagePath === imagePath(dataset, currentImage);
   const nav = useImageNav();
   const isStale = useCallback((name: string) => staleMarks.includes(name), [staleMarks]);
-  const staleNav = useImageNav({ activeFilter: "all", isNavigable: isStale });
+  const staleNav = useImageNav({ activeFilter: "all", isNavigable: isStale, wrap: true });
   const currentIsStale = !!currentImage && staleMarks.includes(currentImage);
+  // The scattered stale set has no real ends, so its step wraps; disabled only once wrapping
+  // still finds nowhere to go (no stale mark, or the current image is the only one).
+  const staleStepDisabled =
+    staleNav.total === 0 ||
+    stepTarget(staleNav.filteredIndices, dataset.current_image_index, 1, true) === null;
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
 
@@ -190,6 +196,7 @@ export function AnnotateToolbar({
   // dataset.subject so a write here can't read back as a confirmation about a different subject.
   async function writeCompleteStatus(newStatus: ImageStatus) {
     if (!currentImage || !dataset.project_root || !dataset.subject) return;
+    const wasStale = staleMarks.includes(currentImage);
     setImageStatus(currentImage, newStatus);
     try {
       await classesApi.setImageStatus(
@@ -203,15 +210,30 @@ export function AnnotateToolbar({
         useStore.getState().user || undefined,
       );
     } catch (e) {
+      // The optimistic write above cleared the mark; the confirmation it stood for never
+      // reached the server, so the disagreement it named still holds.
+      if (wasStale) useStore.getState().markStale(currentImage);
       useStore
         .getState()
         .pushToast(`Could not update status: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
+  function subjectHasContent(): boolean {
+    return canvasHoldsSubject(
+      {
+        boxes: canvasBoxes,
+        polygons: canvasPolygons,
+        points: canvasPoints,
+        imageAnnotations: canvasImageAnnotations,
+      },
+      dataset.subject,
+    );
+  }
+
   async function toggleComplete(next: boolean) {
     if (!dataset.subject) return;
-    const hasContent = (subjectCounts.get(dataset.subject) ?? 0) > 0;
+    const hasContent = subjectHasContent();
     const newStatus: ImageStatus = next
       ? hasContent
         ? "complete"
@@ -229,9 +251,8 @@ export function AnnotateToolbar({
   // A stale complete already reads as checked, so one click of the toggle would write
   // unannotated instead of restating the subject's current content.
   async function reconfirmStale() {
-    if (!dataset.subject) return;
-    const hasContent = (subjectCounts.get(dataset.subject) ?? 0) > 0;
-    await writeCompleteStatus(hasContent ? "complete" : "negative");
+    if (!dataset.subject || !canvasReady) return;
+    await writeCompleteStatus(subjectHasContent() ? "complete" : "negative");
   }
 
   return (
@@ -434,7 +455,12 @@ export function AnnotateToolbar({
                 type="button"
                 className="tcip-btn text-[11px]"
                 onClick={() => void reconfirmStale()}
-                title="Restate this image's current subject content as its status"
+                disabled={!canvasReady}
+                title={
+                  canvasReady
+                    ? `Restate this image's current ${dataset.subject ?? "subject"} content as its status`
+                    : "Loading this image's labels…"
+                }
               >
                 Re-confirm
               </button>
@@ -480,7 +506,7 @@ export function AnnotateToolbar({
             <>
               <span
                 className="font-mono text-[11px] text-tcip-warn"
-                title="Confirmed images whose label file now disagrees with the stored status"
+                title="Confirmed images whose label file disagreed with the stored status as of the last dataset selection; a mark that goes stale mid-session shows at the next selection."
               >
                 {staleNav.total} stale
               </span>
@@ -488,6 +514,7 @@ export function AnnotateToolbar({
                 type="button"
                 className="tcip-btn text-[11px]"
                 onClick={() => staleNav.stepImage(1)}
+                disabled={staleStepDisabled}
                 aria-label="Next stale image"
                 title="Jump to the next image needing re-confirmation"
               >
@@ -504,7 +531,7 @@ export function AnnotateToolbar({
             !dataset.subject
               ? "Select a subject before marking Complete."
               : canvasReady
-                ? undefined
+                ? `Marks this image's ${dataset.subject} content complete or negative`
                 : "Loading this image's labels…"
           }
         >

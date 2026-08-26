@@ -3,7 +3,7 @@ import { Circle, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 
 import { api } from "@/api/client";
-import { classesApi, subjectColor, type AttributeDef } from "@/api/classes";
+import { classesApi, subjectColor, type AttributeDef, type ImageStatus } from "@/api/classes";
 import { sessionsApi } from "@/api/sessions";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
@@ -21,6 +21,7 @@ import { useRegionServes } from "@/hooks/useRegionServes";
 import { compositeParams } from "@/lib/bandSelection";
 import { stepUnsweptCell, type GridCell } from "@/lib/coverage";
 import type { LoadedImage } from "@/lib/imageLoader";
+import { canvasHoldsSubject } from "@/lib/imageStatus";
 import { currentImage, labelPath } from "@/lib/paths";
 import { zoomToRect } from "@/lib/viewGeometry";
 import {
@@ -608,22 +609,23 @@ export function AnnotateTab() {
       return;
     }
 
-    // Update per-image status unless it is pinned Complete. Runs before the staleness guard
-    // below on the captured paths + canvas snapshot, so it stays correct for the image that
-    // was actually saved even after navigating away.
+    // Heals an unconfirmed status from the saved content; a confirmed name (complete or
+    // negative) is a human mark, rewritten only through the toolbar's re-confirm action.
     const name = paths.image.split(/[/\\]/).pop() ?? "";
     if (projectRoot && name) {
       const current = useStore.getState().imageStatus.byImage[name];
-      if (current !== "complete") {
-        const hasContent =
-          c.boxes.length + c.polygons.length + c.points.length + c.imageAnnotations.length > 0;
-        // content -> partial; an empty save keeps a prior confirmed negative, else unannotated
-        // (a negative needs an explicit Complete, not just an empty file).
-        const newStatus = hasContent
-          ? "partial"
-          : current === "negative"
-            ? "negative"
-            : "unannotated";
+      const confirmed = current === "complete" || current === "negative";
+      if (!confirmed) {
+        const hasContent = canvasHoldsSubject(
+          {
+            boxes: c.boxes,
+            polygons: c.polygons,
+            points: c.points,
+            imageAnnotations: c.imageAnnotations,
+          },
+          dataset.subject,
+        );
+        const newStatus: ImageStatus = hasContent ? "partial" : "unannotated";
         if (current !== newStatus) {
           setImageStatus(name, newStatus);
           if (dataset.subject) {

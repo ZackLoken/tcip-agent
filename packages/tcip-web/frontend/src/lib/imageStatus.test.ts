@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { ImageStatus } from "@/api/classes";
-import { reconcileImageStatuses } from "@/lib/imageStatus";
+import { canvasHoldsSubject, reconcileImageStatuses } from "@/lib/imageStatus";
 
 function statuses(pairs: [string, ImageStatus][]): Record<string, ImageStatus> {
   return Object.fromEntries(pairs);
 }
+
+const EMPTY_SHAPES = { boxes: [], polygons: [], points: [], imageAnnotations: [] };
 
 describe("reconcileImageStatuses", () => {
   it("writes an unconfirmed name whose derived token differs from the stored one", () => {
@@ -46,7 +48,7 @@ describe("reconcileImageStatuses", () => {
     expect(result.staleMarks).toEqual([]);
   });
 
-  it("heals an unconfirmed name from unannotated to partial and back", () => {
+  it("heals an unconfirmed name from partial back to unannotated", () => {
     const stored = statuses([["a.jpg", "partial"]]);
     const derived = statuses([["a.jpg", "unannotated"]]);
     const result = reconcileImageStatuses(stored, derived, []);
@@ -60,5 +62,25 @@ describe("reconcileImageStatuses", () => {
     const result = reconcileImageStatuses(stored, derived, ["b.jpg"]);
     expect(result.staleMarks).toEqual([]);
     expect(result.writes).toEqual({ "a.jpg": "partial" });
+  });
+});
+
+describe("canvasHoldsSubject", () => {
+  it("is false with no subject selected, regardless of canvas content", () => {
+    expect(canvasHoldsSubject({ ...EMPTY_SHAPES, boxes: [{ subject: "a" }] }, null)).toBe(false);
+  });
+
+  it("is false when the canvas holds only another subject's shapes", () => {
+    expect(canvasHoldsSubject({ ...EMPTY_SHAPES, boxes: [{ subject: "b" }] }, "a")).toBe(false);
+  });
+
+  it("is true for a box of the given subject", () => {
+    expect(canvasHoldsSubject({ ...EMPTY_SHAPES, boxes: [{ subject: "a" }] }, "a")).toBe(true);
+  });
+
+  it("is true for an image-level rating of the given subject, with no geometry", () => {
+    expect(canvasHoldsSubject({ ...EMPTY_SHAPES, imageAnnotations: [{ subject: "a" }] }, "a")).toBe(
+      true,
+    );
   });
 });
