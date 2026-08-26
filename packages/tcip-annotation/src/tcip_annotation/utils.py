@@ -8,20 +8,31 @@ from PIL import Image, ExifTags
 logger = logging.getLogger(__name__)
 
 
-def auto_orient_image(img: Image.Image) -> Image.Image:
-    """Apply EXIF orientation correction to a PIL Image."""
+def _read_orientation_tag(img: Image.Image) -> int | None:
+    """The image's EXIF Orientation tag value, or ``None`` if it carries no EXIF data or no
+    Orientation tag. The one orientation read `auto_orient_image` and `get_image_dimensions`
+    both use, so the frame one rotates and the frame the other measures can't disagree.
+    """
     try:
         exif = img._getexif()
         if exif is None:
-            return img
+            return None
         orientation_key = None
         for k, v in ExifTags.TAGS.items():
             if v == "Orientation":
                 orientation_key = k
                 break
         if orientation_key is None or orientation_key not in exif:
-            return img
-        orientation = exif[orientation_key]
+            return None
+        return int(exif[orientation_key])
+    except Exception:
+        return None
+
+
+def auto_orient_image(img: Image.Image) -> Image.Image:
+    """Apply EXIF orientation correction to a PIL Image."""
+    try:
+        orientation = _read_orientation_tag(img)
         ops = {
             2: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT),
             3: lambda i: i.rotate(180, expand=True),
@@ -42,15 +53,12 @@ def get_image_dimensions(path: str) -> tuple[int, int]:
     """Return (width, height) of an image, applying EXIF orientation.
 
     Header-only: reads size + orientation without decoding pixels. The transpose-based
-    path forced a full decode of a 24MP frame (~0.5 s) just to learn its dimensions,
-    and this runs on every label load / save / review-matches call.
+    path forced a full decode of a 24MP frame (~0.5 s) just to learn its dimensions.
+    Its one production caller is `image_utils.image_dimensions`, which routes every
+    photographic container here.
     """
     with Image.open(path) as img:
         w, h = img.size
-        orientation = 1
-        try:
-            orientation = int(img.getexif().get(0x0112, 1) or 1)
-        except Exception:
-            pass
+        orientation = _read_orientation_tag(img) or 1
     # Orientations 5-8 include a 90°/270° rotation, so the oriented axes swap.
     return (h, w) if orientation in (5, 6, 7, 8) else (w, h)
