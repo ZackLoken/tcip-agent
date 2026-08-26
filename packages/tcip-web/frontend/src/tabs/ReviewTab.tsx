@@ -910,12 +910,17 @@ export function ReviewTab() {
         .pushToast("No predictions to validate. Select a model with predictions first.");
       return;
     }
+    if (!dataset.subject) {
+      useStore.getState().pushToast("Pick a subject before validating.");
+      return;
+    }
     setValidating(true);
     try {
       const res = await api.review.validateReference({
         dataset_root: dataset.dataset_root,
         trait,
         pred_dir: dataset.predictions_dir,
+        subject: dataset.subject,
       });
       setValidationResult({ validated: res.validated, reason: res.reason });
       useStore.getState().pushToast(res.reason);

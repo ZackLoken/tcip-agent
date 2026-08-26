@@ -685,18 +685,21 @@ class MarkCompletePayload(BaseModel):
 
 def _is_negative_for_subject(
     pred_dir: Optional[str], image_name: str, subject: Optional[str]
-) -> bool:
+) -> Optional[bool]:
     """Whether ``pred_dir``'s predictions for ``image_name`` hold nothing for ``subject``, the fact
-    a zero-verdict Complete is confirming.
+    a zero-verdict Complete is confirming; ``None`` when the bucket cannot answer for ``subject``
+    at all.
 
     No prediction bucket at all is unconditionally negative, there is nothing to check against. A
     subject-less Complete checks the whole file (the claim a subject-less Complete makes, about
-    every subject). A named subject is resolved through the bucket's own recorded name->id map
+    every subject). A named subject is checked against the bucket's own recorded name->id map
     (``phenology.bucket_id_map``, the same map ``_resolve_verdict_class_id`` reads for a verdict's
-    class identity), never a plain string match of a registry subject name against a decoded class
-    name: a subject the map does not recognize (an attribute-scoped bucket's map is keyed by
-    attribute values, not the object's subject name) is unresolvable, so this raises rather than
-    reading an unassessed subject as an accidental negative.
+    class identity) only as an admission gate: membership proves the bucket assessed this subject
+    at all (an attribute-scoped bucket's map is keyed by attribute values, not the object's subject
+    name, so it admits no object subject). The comparison itself is by the decoded name
+    (``read_annotations``' own ``subject`` field), never the id, since the bucket's own predictions
+    were already decoded through that same map. A subject the map does not admit is ``None``: the
+    caller omits the coverage entry rather than guessing one.
     """
     if not pred_dir:
         return True
@@ -707,10 +710,7 @@ def _is_negative_for_subject(
 
     id_map = bucket_id_map(Path(pred_dir))
     if id_map is None or subject not in id_map:
-        raise ValueError(
-            f"{subject!r} is not a subject this prediction bucket's own recorded class map "
-            f"resolves ({pred_dir}), so whether it is negative for that subject cannot be said."
-        )
+        return None
     return not any(a.subject == subject for a in read_annotations(str(pred_file)))
 
 
@@ -721,7 +721,9 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     Adjudication coverage is recorded per subject: a map from subject name (or ``"*"`` for a
     subject-less Complete, a claim about every subject) to whether that zero-verdict completion
     was a genuine negative for it, so a later Complete under another subject on the same image
-    adds its own entry rather than overwriting the first.
+    adds its own entry rather than overwriting the first. A subject the bucket's own recorded
+    class map cannot resolve writes no entry at all: the Complete and its status write still
+    proceed, and the coverage reader fails closed on the missing entry at validation time.
     """
     gt_path = _guard_path(payload.gt_path)
     pred_dir = _guard_path(payload.pred_dir)
@@ -733,12 +735,16 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
         # verdicts on an image the bucket did predict on is not covered.
         try:
             is_negative = _is_negative_for_subject(pred_dir, payload.image_name, payload.subject)
-        except (ValueError, UnreadableLabelDocument) as exc:
+        except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from None
-        slot_key = payload.subject or "*"
+        # An unresolvable subject omits the entry rather than refusing the Complete; the reader
+        # fails closed on the missing entry at validation time.
+        adjudication_covered = (
+            {(payload.subject or "*"): is_negative} if is_negative is not None else None
+        )
         engine.mark_image_reviewed(bucket, payload.image_name,
                                    producer_identity=producer_identity,
-                                   adjudication_covered={slot_key: is_negative})
+                                   adjudication_covered=adjudication_covered)
     else:
         engine.unmark_image_reviewed(bucket, payload.image_name)
     # The annotation status is derived from the GT file, scoped to the confirmed subject.
@@ -822,8 +828,8 @@ class ValidateReferenceRequest(BaseModel):
     # The prediction bucket whose review is being promoted: the per-image prediction dir the
     # delivery gate reads an ``operating_point.json`` from.
     pred_dir: Optional[str] = None
-    # The object identity this reference validates (the GUI's own dataset.subject); a zero-verdict
-    # image's coverage claim is read for this subject, not whichever one confirmed it.
+    # The object identity this reference validates. Required by the route; kept optional here so
+    # an absent one earns the route's own named 400 rather than a generic pydantic error.
     subject: Optional[str] = None
 
 
@@ -854,6 +860,12 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     answers for is treated as unvalidated and is promotable over, and a review whose prediction
     documents are no longer the ones the reviewer saw earns nothing at all.
     """
+    if not req.subject:
+        raise HTTPException(
+            400,
+            "validate_reference requires the subject this reference validates; name one rather "
+            "than leaving it unstated.",
+        )
     pred_dir = _guard_path(req.pred_dir)
     bucket_dirs = [pred_dir] if pred_dir else []
     if not bucket_dirs:

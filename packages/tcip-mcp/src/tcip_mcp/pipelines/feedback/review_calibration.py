@@ -195,8 +195,9 @@ def _matches_any_bucket(identity: dict | None, bucket_identities: list[dict]) ->
 
 def covers(slot: Any, subject: str | None) -> bool:
     """True when a zero-verdict image's own recorded ``adjudication_covered`` map confirms
-    coverage for ``subject``, ``None`` read as ``"*"``: the writer's entry for that exact subject,
-    or the entry a subject-less Complete wrote (a claim about every subject).
+    coverage for ``subject``, ``None`` read as ``"*"``: the subject's own entry when the map has
+    one, whatever it says, never overridden by a subject-less Complete's ``"*"`` entry; the "*"
+    entry answers only when the subject has no entry of its own.
 
     ``slot`` is that map, or ``None`` for an image with no such record. A bare boolean is not a
     shape any writer produces; reading one as covering everything, or nothing, would guess at the
@@ -210,7 +211,9 @@ def covers(slot: Any, subject: str | None) -> bool:
             "expects; a bare boolean here would guess which subject it was confirming."
         )
     key = subject if subject is not None else "*"
-    return bool(slot.get(key)) or bool(slot.get("*"))
+    if key in slot:
+        return bool(slot[key])
+    return bool(slot.get("*"))
 
 
 def review_to_records(
@@ -254,7 +257,10 @@ def review_to_records(
         already-indexed GT box being corrected or confirmed, not a newly-attested miss) ends up with
         the identical ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once persisted, so inferring
         coverage from that shape would silently count an FN correction as if it were a
-        swept-for-a-missed-object attestation.
+        swept-for-a-missed-object attestation. Both ``gt_preexisting`` and the attestation are
+        recorded at the image level, not scoped to any subject, so a reference built for one
+        subject can be admitted on evidence that concerned a different subject on the same image;
+        scoping either fact to the subject actually being validated is unimplemented.
       - a zero-verdict (``mark_complete``) image: the recorded ``adjudication_covered`` map the
         route stamped at completion time, read through :func:`covers` for ``subject`` (``"*"`` when
         ``subject`` is ``None``): ``True`` only when that subject's own entry, or a subject-less

@@ -204,7 +204,8 @@ def test_promotion_refuses_a_changed_prediction_file(client: TestClient, tmp_pat
 
     def _promote() -> dict:
         resp = client.post("/api/review/validate_reference", json={
-            "dataset_root": str(dataset_root), "trait": "catkin", "pred_dir": str(bucket)})
+            "dataset_root": str(dataset_root), "trait": "catkin", "pred_dir": str(bucket),
+            "subject": "catkin"})
         assert resp.status_code == 200, resp.text
         return resp.json()
 
@@ -252,7 +253,8 @@ def test_promotion_refuses_a_bucket_from_another_dataset_root(
     _sidecar(bucket)
 
     resp = client.post("/api/review/validate_reference", json={
-        "dataset_root": str(here), "trait": "catkin", "pred_dir": str(bucket)})
+        "dataset_root": str(here), "trait": "catkin", "pred_dir": str(bucket),
+        "subject": "catkin"})
     assert resp.status_code == 400
     detail = resp.json()["detail"]
     assert str(here) in detail and str(elsewhere) in detail
@@ -322,7 +324,8 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
     assert calls and calls[0]["dataset_root"] == str(dataset_root)
 
     promo = client.post("/api/review/validate_reference", json={
-        "dataset_root": str(dataset_root), "trait": "catkin", "pred_dir": str(bucket)})
+        "dataset_root": str(dataset_root), "trait": "catkin", "pred_dir": str(bucket),
+        "subject": "catkin"})
     assert promo.status_code == 200, promo.text
     assert promo.json()["reviewed_image_count"] == 1
 

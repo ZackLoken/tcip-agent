@@ -360,7 +360,12 @@ class ReviewEngine:
             img_data["producer_identity"] = producer_identity
         if adjudication_covered is not None:
             existing = img_data.get("adjudication_covered")
-            merged = dict(existing) if isinstance(existing, dict) else {}
+            if existing is not None and not isinstance(existing, dict):
+                raise ValueError(
+                    f"adjudication_covered is {existing!r}, not the subject-keyed map a merge "
+                    "expects; a bare boolean here is a shape no current writer produces."
+                )
+            merged = dict(existing) if existing is not None else {}
             merged.update(adjudication_covered)
             img_data["adjudication_covered"] = merged
         self._save_image(bucket, img_name)

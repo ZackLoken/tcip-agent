@@ -181,7 +181,7 @@ def test_generation_conf_confines_the_bucket_it_reads(
 def test_validate_reference_confines_the_bucket_it_stamps(
     client: TestClient, allowed: Path, outside: Path
 ) -> None:
-    base = {"dataset_root": str(_dataset_root(allowed)), "trait": "catkin"}
+    base = {"dataset_root": str(_dataset_root(allowed)), "trait": "catkin", "subject": "catkin"}
 
     refused = client.post("/api/review/validate_reference",
                           json={**base, "pred_dir": str(outside)})
