@@ -294,9 +294,10 @@ def _evaluate_image(
 ) -> dict:
     """Match predictions against ground truth for a single image (COCOeval).
 
-    mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a per-box overlay for the GUI
-    review panel (``compute_matches``). With a count ``trait`` the reported count is governed by the
-    trait's derived criterion, map50 kept as comparability.
+    mAP / TP / FP / FN come from pycocotools; the ``matches`` block is a per-box overlay the agent
+    can render for review (``compute_matches``); the Review tab's own GUI route reads
+    ``compute_matches`` directly rather than through this tool. With a count ``trait`` the
+    reported count is governed by the trait's derived criterion, map50 kept as comparability.
     """
     loaded = _load_image_annotations(image_path)
     if loaded is None:
@@ -334,16 +335,29 @@ def _evaluate_folder(
     conf_threshold: float = DEFAULT_CONF,
     trait: str | None = None,
 ) -> dict:
-    """Aggregate detection metrics across all images in a dataset."""
+    """Aggregate detection metrics across all images in a dataset.
+
+    Scores the logical images directly under ``images_dir`` plus those in each of its direct
+    bucket subdirectories (``images/<bucket>/``, the dataset layout), one level: a loose image
+    beside a dated bucket still scores, a ``.bandgroup``-grouped capture scores as one logical
+    image, and a folder nested inside a bucket is not itself a bucket, so it is not descended.
+    """
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+
     root = Path(folder_path)
     images_dir = root / "images"
     if not images_dir.is_dir():
         images_dir = root
 
-    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    images = sorted(
-        f for f in images_dir.rglob("*") if f.is_file() and f.suffix.lower() in image_exts
-    )
+    def _logical_paths(d: Path) -> list[Path]:
+        return [src.manifest_path if isinstance(src, BandGroupRef) else src
+                for src in list_logical_images(d).values()]
+
+    images = _logical_paths(images_dir)
+    if images_dir.is_dir():
+        for bucket in sorted(p for p in images_dir.iterdir() if p.is_dir()):
+            images.extend(_logical_paths(bucket))
+    images.sort()
 
     from tcip_mcp.pipelines.training.evaluation import coco_detection_metrics, records_from_annotation
 
@@ -432,8 +446,9 @@ def score_predictions(
 
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
     per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``) for the
-    GUI review panel; a dataset directory returns aggregate metrics plus ``per_image`` TP/FP/FN.
-    Both regimes share ``coco_detection_metrics``.
+    agent to render for review; a dataset directory returns aggregate metrics plus ``per_image``
+    TP/FP/FN. Both regimes share ``coco_detection_metrics``; no GUI route calls this tool, since the
+    Review tab's own backend route reads ``compute_matches`` directly.
 
     Args:
         path: Absolute path to an image file (single-image match) or a dataset root (aggregate).

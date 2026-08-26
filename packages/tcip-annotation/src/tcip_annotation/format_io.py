@@ -128,8 +128,14 @@ def _coco_categories(coco: dict) -> dict[int, str]:
 def _coco_image_annotations(
     coco: dict, image_id: int | None = None, file_name: str | None = None,
 ) -> tuple[list[dict], int, int]:
-    """Annotations for a single image from a COCO dict, plus ``(img_w, img_h)``."""
+    """Annotations for a single image from a COCO dict, plus ``(img_w, img_h)``.
+
+    ``file_name`` matches exactly first; failing that, a manifest-named logical image (whose own
+    on-disk name is its ``.bandgroup`` manifest, not a name an externally authored COCO document
+    would carry) matches the recorded ``file_name`` whose own stem equals its stem.
+    """
     img_record = None
+    stem_tie = None
     for img in coco.get("images", []):
         if image_id is not None and img.get("id") == image_id:
             img_record = img
@@ -137,6 +143,10 @@ def _coco_image_annotations(
         if file_name is not None and img.get("file_name") == file_name:
             img_record = img
             break
+        if (stem_tie is None and file_name is not None
+                and Path(img.get("file_name", "")).stem == Path(file_name).stem):
+            stem_tie = img
+    img_record = img_record or stem_tie
     if img_record is None:
         return [], 0, 0
     img_id = img_record["id"]

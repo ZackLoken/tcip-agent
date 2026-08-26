@@ -3,7 +3,7 @@
 Single home for:
   * the pycocotools-backed detection / instance_seg metrics (mAP + operating-point
     TP/FP/FN), shared by training ``_validate``, ``run_test_evaluation`` and the
-    agent/GUI tool ``score_predictions``, one source of
+    agent's own ``score_predictions`` tool (no GUI route calls it), one source of
     truth, the canonical COCO mAP definition;
   * in-house scalar metrics for classification / ordinal / regression (the seam
     where pycocotools ``iou_type='segm'`` can later cover true instance seg);
