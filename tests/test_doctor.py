@@ -390,14 +390,17 @@ def _dir_outside_any_temp_tree() -> Path:
     so a test wanting the other findings needs a real file elsewhere. The interpreter's temp
     directory qualifies on Linux and not on Windows, where it sits under a Temp segment, so the
     filesystem root is tried after it; the first candidate that is creatable and unmarked wins.
+    The leaf is named for this process, so two suites running at once (one per store backend)
+    never write and unlink one shared file.
     """
+    import os
     import tempfile
 
     from scripts.doctor import TEMP_TREE_MARKERS
 
     candidates = [Path(tempfile.gettempdir()), Path(Path.cwd().anchor)]
     for base in candidates:
-        target = base / "tcip_no_metrics_source_fixture"
+        target = base / "tcip_no_metrics_source_fixture" / str(os.getpid())
         if any(marker in str(target) for marker in TEMP_TREE_MARKERS):
             continue
         try:
