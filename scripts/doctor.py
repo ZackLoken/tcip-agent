@@ -16,9 +16,6 @@ import json
 import sys
 from pathlib import Path
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-
-
 def _load(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -27,8 +24,10 @@ def _load(path: Path):
 
 
 def _image_stems(root: Path) -> dict[str, str]:
-    """stem -> file name for every image under images/ (any date bucket)."""
+    """stem -> file name for every image under images/ (any date bucket), over the platform's
+    own extension set, so a capture the loaders admit is never reported as missing here."""
     from tcip_mcp.dataset_layout import image_root
+    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
     out: dict[str, str] = {}
     images = image_root(root)

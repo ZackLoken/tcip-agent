@@ -411,6 +411,30 @@ def _dir_outside_any_temp_tree() -> Path:
     raise RuntimeError(f"no writable directory outside a temp tree among {candidates}")
 
 
+def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
+    """The doctor's image census reads the platform's own extension set, so an .npz capture or a
+    band-group manifest is matched to its label rather than reported missing."""
+    from scripts.doctor import _image_stems
+
+    images = tmp_path / "images" / "2026-03-04"
+    images.mkdir(parents=True)
+    (images / "plotA_0_0.npz").write_bytes(b"\x00")
+    (images / "plotA_0_1.jpg").write_bytes(b"\xff\xd8")
+
+    assert _image_stems(tmp_path) == {"plotA_0_0": "plotA_0_0.npz", "plotA_0_1": "plotA_0_1.jpg"}
+
+
+def test_the_checkpoint_fixture_directory_is_this_processs_own():
+    import os
+
+    target = _dir_outside_any_temp_tree()
+    try:
+        assert target.name == str(os.getpid())
+        assert target.parent.name == "tcip_no_metrics_source_fixture"
+    finally:
+        target.rmdir()
+
+
 def test_registry_entry_with_no_metrics_source_is_flagged(tmp_path):
     """A registry entry that predates the metrics_source field is reported, not read as though
     the platform had verified its numbers."""

@@ -240,6 +240,8 @@ def test_an_npz_captures_confirmed_negative_is_recognized(tmp_path: Path):
     result = validate_data_quality(str(root))
 
     assert not any("confirmed negative" in i["message"] for i in result["issues"])
+    assert result["total_images"] == 1
+    assert not any("No matching image" in i["message"] for i in result["issues"])
 
 
 def test_reported_subjects_are_the_ones_present_in_the_label_files(tmp_path: Path):
