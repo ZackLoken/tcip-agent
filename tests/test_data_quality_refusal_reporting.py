@@ -110,6 +110,95 @@ def test_a_coco_image_missing_from_the_images_dir_is_a_warning_that_leaves_the_d
     assert result["is_valid"] is True
 
 
+def test_a_store_mixing_shapes_is_reported_invalid_even_when_a_coco_file_sorts_first(
+    tmp_path: Path,
+):
+    """Format is decided per label file, not once for the whole dataset: a COCO-shaped file
+    sorting first must not make every other file in the same directory get silently parsed as
+    COCO too, which would hide a real defect (here, an orphan per-image label) behind a report
+    of nothing wrong."""
+    root = tmp_path / "ds"
+    labels_dir = root / "annotations" / DATE
+    labels_dir.mkdir(parents=True)
+    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
+
+    (labels_dir / "0_coco.json").write_text(json.dumps({
+        "images": [{"id": 1, "file_name": "plotA_0_0.jpg", "width": 96, "height": 64}],
+        "annotations": [],
+        "categories": [{"id": 1, "name": "catkin"}],
+    }), encoding="utf-8")
+    json_io.write_annotations(
+        labels_dir / "1_orphan.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 8, 8))], 100, 100,
+    )
+
+    result = validate_data_quality(str(root))
+
+    assert result["format"] == "coco"  # the informational summary field: the first file's shape
+    errors = [i for i in result["issues"] if i["level"] == "error"]
+    assert len(errors) == 1
+    assert Path(errors[0]["file"]).stem == "1_orphan"
+    assert result["is_valid"] is False
+
+
+def test_an_empty_label_not_confirmed_negative_is_an_error_that_denies_validity(tmp_path: Path):
+    """A platform-written empty document is not a zero-byte file, so a size check never catches
+    it; an empty label with no human confirmation is unannotated, not a negative, and reporting
+    it as a mere warning would let is_valid stay true over exactly the state that corrupts
+    training."""
+    root = tmp_path / "ds"
+    labels_dir = root / "annotations" / DATE
+    labels_dir.mkdir(parents=True)
+    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
+    json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
+
+    result = validate_data_quality(str(root))
+
+    errors = [i for i in result["issues"] if i["level"] == "error"]
+    assert len(errors) == 1
+    assert Path(errors[0]["file"]).stem == "plotA_0_0"
+    assert "confirmed negative" in errors[0]["message"]
+    assert result["is_valid"] is False
+
+
+def test_a_confirmed_negative_empty_label_stays_valid(tmp_path: Path):
+    """The rail this suppression exists for: a human's Complete-with-nothing must not be flagged
+    as though nobody had looked."""
+    from tcip_mcp.dataset_layout import replace_image_status_store, status_bucket, status_records
+
+    root = tmp_path / "ds"
+    labels_dir = root / "annotations" / DATE
+    labels_dir.mkdir(parents=True)
+    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
+    json_io.write_annotations(labels_dir / "plotA_0_0.json", [], 96, 64, keep_empty=True)
+    replace_image_status_store(root, {
+        status_bucket("catkin", DATE): status_records(
+            {"plotA_0_0.jpg": "negative"}, recorded_by="user:breeder"),
+    })
+
+    result = validate_data_quality(str(root))
+
+    assert result["issues"] == []
+    assert result["is_valid"] is True
+
+
+def test_a_malformed_root_label_candidate_is_reported_instead_of_discarded(tmp_path: Path):
+    """A root-level candidate whose format cannot be determined is a present label file, not
+    evidence the dataset carries none; it must be counted and flagged, not silently dropped by a
+    caught detection error."""
+    root = tmp_path / "ds"
+    _write_image(root / "images" / DATE / "plotA_0_0.jpg", 96, 64)
+    (root / "annotations.json").write_text(json.dumps({"foo": "bar"}), encoding="utf-8")
+
+    result = validate_data_quality(str(root))
+
+    assert result["total_labels"] == 1
+    errors = [i for i in result["issues"] if i["level"] == "error"]
+    assert len(errors) == 1
+    assert Path(errors[0]["file"]).name == "annotations.json"
+    assert result["is_valid"] is False
+
+
 def test_reported_subjects_are_the_ones_present_in_the_label_files(tmp_path: Path):
     """The subject list is a census of every label file's contents, not a reading of the
     registry: a subject declared but never annotated is absent, and a subject annotated only in

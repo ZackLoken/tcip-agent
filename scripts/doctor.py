@@ -51,14 +51,15 @@ def check_negatives(root: Path, findings: list) -> None:
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
         annotation_date, annotation_root, annotations_hold_subject, bucket_subject_date,
-        image_status_path, is_confirmed_negative, normalize_status_store,
+        confirmed_negative_names_any_subject, image_status_path, is_confirmed_negative,
+        normalize_status_store,
     )
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
     by_bucket = normalize_status_store(_load(image_status_path(root)))
     stems = _image_stems(root)
     ann_root = annotation_root(root)
-    neg_names = {n for b in by_bucket.values() for n, s in b.items() if is_confirmed_negative(s)}
+    neg_names = confirmed_negative_names_any_subject(by_bucket)
 
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
         if ".original" in label.parts:
