@@ -1214,9 +1214,9 @@ class ImageStatusesResponse(BaseModel):
 
 
 def _has_objects(path: Path) -> bool:
-    """True if ``path`` holds at least one annotation record, read through the mtime-keyed label
-    memo shared with the classes and dataset routes. An empty (confirmed-negative) or missing
-    file has nothing to review."""
+    """True if ``path`` holds at least one annotation record, read through the label memo shared
+    with the classes and dataset routes. An empty (confirmed-negative) or missing file has
+    nothing to review."""
     return bool(cached_label_annotations(path))
 
 

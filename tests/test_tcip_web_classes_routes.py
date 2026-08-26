@@ -335,6 +335,30 @@ def test_cached_label_annotations_raises_on_a_stat_failure_other_than_absence(
         cached_label_annotations(label)
 
 
+def test_cached_label_annotations_detects_an_edit_that_lands_on_the_same_mtime(
+    tmp_path: Path,
+) -> None:
+    """Two writes close enough together can land on the identical filesystem timestamp; a memo
+    keyed on mtime alone would then serve the first write's parse for the second. Forcing that
+    exact collision here (rather than hoping two real writes race into it) makes the guard
+    reproducible."""
+    from tcip_web.label_annotations_cache import cached_label_annotations
+
+    label = tmp_path / "a.json"
+    write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
+    os.utime(label, (1_000_000, 1_000_000))
+    first = cached_label_annotations(label)
+    assert len(first) == 1
+
+    label.write_text("not json {][", encoding="utf-8")
+    os.utime(label, (1_000_000, 1_000_000))  # identical mtime, different size
+
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    with pytest.raises(UnreadableLabelDocument):
+        cached_label_annotations(label)
+
+
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
     # Confirmations are dataset-native: a write must locate dataset_root.
     post = client.post(

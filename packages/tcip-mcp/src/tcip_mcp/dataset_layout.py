@@ -984,7 +984,8 @@ def subjects_on_date(
     Every sidecar-named file (a bucket's own provenance stamp) is excluded from the walk, so it
     contributes no subject and never raises. Reads each remaining ``annotations/<date>/<stem>.json``
     through ``reader`` (``json_io.read_annotations`` by default; a caller with its own memoized
-    reader, keyed by path and mtime, passes it here instead of parsing the same files twice), so
+    reader, keyed by path plus mtime and size, passes it here instead of parsing the same files
+    twice), so
     the subjects offered are the subjects genuinely labeled there, sorted. Raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when a present label file on this
     date will not read; a missing ``annotations/<date>/`` directory reads as no subjects.
