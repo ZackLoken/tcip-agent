@@ -1004,3 +1004,102 @@ def test_require_reference_ground_truth_admits_a_bucket_holding_sidecars(tmp_pat
         (bucket / name).write_text("{}", encoding="utf-8")
 
     require_reference_ground_truth(bucket)  # must not raise
+
+
+def test_load_label_document_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import UnreadableLabelDocument, load_label_document
+
+    path = tmp_path / "a.json"
+    path.write_bytes(b'{"annotations": [{"subject": "cat\xffkin"}]}')
+    with pytest.raises(UnreadableLabelDocument):
+        load_label_document(path)
+
+
+def test_read_annotations_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
+    """A write truncated mid multi-byte sequence is a present, unreadable document, not an empty
+    one: the writer emits ensure_ascii=False, so this is reachable in practice."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "a.json"
+    path.write_bytes(b'{"annotations": [{"subject": "cat\xffkin"}]}')
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations(path)
+
+
+def test_read_annotations_versioned_raises_on_invalid_utf8_bytes(tmp_path: Path) -> None:
+    import tcip_store
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocument, annotation_record_key, read_annotations_versioned,
+    )
+
+    key = annotation_record_key(tmp_path, "a")
+    tcip_store.put_blob(key, b'{"annotations": [{"subject": "cat\xffkin"}]}')
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations_versioned(key)
+
+
+def test_read_annotations_versioned_reads_an_absent_document_as_empty(tmp_path: Path) -> None:
+    from tcip_store import Version
+    from tcip_annotation.json_io import annotation_record_key, read_annotations_versioned
+
+    key = annotation_record_key(tmp_path, "never_written")
+    annotations, version = read_annotations_versioned(key)
+    assert annotations == []
+    assert version == Version.ABSENT
+
+
+def test_read_annotations_versioned_and_read_annotations_agree_on_the_same_bytes(
+    tmp_path: Path,
+) -> None:
+    """One decode policy: whatever the file reader accepts or refuses, the store-backed reader
+    over the identical bytes must agree."""
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocument, annotation_record_key, read_annotations_versioned,
+        write_annotations,
+    )
+
+    path = tmp_path / "a.json"
+    write_annotations(path, [Annotation(subject="catkin", geometry=BBox(1, 1, 2, 2))], 10, 10)
+    key = annotation_record_key(tmp_path, "a")
+    annotations, _ = read_annotations_versioned(key)
+    assert [a.subject for a in annotations] == [a.subject for a in read_annotations(path)]
+
+    corrupt = tmp_path / "b.json"
+    corrupt.write_bytes(b"{not json")
+    corrupt_key = annotation_record_key(tmp_path, "b")
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations(corrupt)
+    with pytest.raises(UnreadableLabelDocument):
+        read_annotations_versioned(corrupt_key)
+
+
+def test_a_box_that_would_round_to_zero_extent_is_refused_at_write(tmp_path: Path) -> None:
+    """A box with real pre-round extent that collapses to nothing at the document's stored
+    2-decimal quantum must never be written: the writer would otherwise hand the reader a
+    document it refuses."""
+    path = tmp_path / "a.json"
+    sliver = Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 1.003, 1.003))
+    with pytest.raises(ValueError):
+        write_annotations(path, [sliver], 10, 10)
+
+
+def test_a_box_that_rounds_to_positive_extent_still_writes_and_reads_back(tmp_path: Path) -> None:
+    path = tmp_path / "a.json"
+    real = Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 1.02, 1.02))
+    write_annotations(path, [real], 10, 10)
+    [back] = read_annotations(path)
+    assert back.subject == "catkin"
+
+
+def test_prediction_documents_skips_a_directory_named_like_a_json_file(tmp_path: Path) -> None:
+    from tcip_annotation.json_io import prediction_documents
+
+    bucket = tmp_path / "bucket"
+    bucket.mkdir()
+    write_annotations(bucket / "IMG_0001.json", [Annotation(subject="catkin", geometry=BBox(1, 1, 2, 2))],
+                      10, 10)
+    (bucket / "x.json").mkdir()
+
+    documents = prediction_documents(bucket)
+
+    assert [p.name for p in documents] == ["IMG_0001.json"]

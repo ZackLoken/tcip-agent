@@ -130,21 +130,34 @@ def parse_label_document(text: str, *, source: str) -> dict:
     return data
 
 
+def _decode_label_bytes(data: bytes, *, source: str) -> str:
+    """A label document's bytes, decoded strictly as UTF-8.
+
+    Raises :class:`UnreadableLabelDocument`, naming ``source``, for bytes that are not valid
+    UTF-8: the one decode policy every reader of a label document's raw bytes shares, so a file
+    reader and a store-backed reader over the same bytes cannot disagree about whether they read.
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UnreadableLabelDocument(f"{source} is not valid UTF-8: {exc}") from exc
+
+
 def load_label_document(path: str | Path) -> dict:
     """A per-image label document's parsed dict, read from ``path``.
 
     Raises :class:`UnreadableLabelDocument`, naming ``path``, when the file cannot be opened (a
-    permission error, a directory where a file was expected) or when
-    :func:`parse_label_document` refuses its contents. Callers check for a missing path
+    permission error, a directory where a file was expected), when its bytes are not valid UTF-8,
+    or when :func:`parse_label_document` refuses its contents. Callers check for a missing path
     themselves: this function is only ever called once a document is known to be present, so it
     does not special-case absence.
     """
     p = Path(path)
     try:
-        text = p.read_text(encoding="utf-8")
+        data = p.read_bytes()
     except OSError as exc:
         raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
-    return parse_label_document(text, source=str(p))
+    return parse_label_document(_decode_label_bytes(data, source=str(p)), source=str(p))
 
 
 SIDECAR_FILENAMES = frozenset({
@@ -174,7 +187,7 @@ def prediction_documents(bucket: str | Path) -> list[Path]:
     d = Path(bucket)
     if not d.is_dir():
         return []
-    return sorted(f for f in d.glob("*.json") if f.name not in SIDECAR_FILENAMES)
+    return sorted(f for f in d.glob("*.json") if f.is_file() and f.name not in SIDECAR_FILENAMES)
 
 
 def _load(path: str) -> dict | None:
@@ -246,9 +259,23 @@ def box_extent_ok(bbox: BBox) -> bool:
 
     For a caller that wants to drop or count a degenerate box (a detector's own output clipped
     to nothing at an image edge) rather than raise: :func:`check_box_extent` enforces the same
-    rule for a request that must be refused rather than silently dropped.
+    rule for a request that must be refused rather than silently dropped. Checks the raw corners;
+    :func:`stored_box_extent_ok` is the check against what a write would actually store.
     """
     return bbox.x2 > bbox.x1 and bbox.y2 > bbox.y1
+
+
+def stored_box_extent_ok(bbox: BBox) -> bool:
+    """Whether ``bbox`` still has positive extent once rounded to the stored 2-decimal quantum.
+
+    A box can pass :func:`box_extent_ok` on its raw corners and still round to zero width or
+    height at the grid :func:`xywh` stores (a sub-centipixel detection). A caller deciding
+    whether to keep or drop a detection before it ever reaches :func:`write_annotations` checks
+    this, not the raw check, since the raw check alone would let such a box through to a writer
+    that refuses it.
+    """
+    _, _, w, h = xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
+    return w > 0 and h > 0
 
 
 def check_box_extent(bbox: BBox, *, where: str) -> None:
@@ -406,14 +433,16 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
     What a load-edit-save client needs: the token names exactly the bytes the client was shown,
     so a document that changed in between cannot pass the comparison on the way back in. An
     absent document reads as no annotations at ``Version.ABSENT``, which is the token that says
-    "create this, or refuse". A present document that will not parse raises
-    :class:`UnreadableLabelDocument`, the same reader contract :func:`read_annotations` keeps.
+    "create this, or refuse", told apart from a present document by the store's own version, never
+    by the bytes (a present document can be zero bytes long and is still present). A present
+    document that will not decode or will not parse raises :class:`UnreadableLabelDocument`, the
+    same reader contract :func:`read_annotations` keeps, decoded through the same strict policy.
     """
     stored = tcip_store.read_blob_versioned(_record_key(target), default=b"")
-    if not stored.value:
+    if stored.version == Version.ABSENT:
         return [], stored.version
-    data = parse_label_document(stored.value.decode("utf-8", errors="replace"), source=str(target))
-    return _annotations_of(data), stored.version
+    text = _decode_label_bytes(stored.value, source=str(target))
+    return _annotations_of(parse_label_document(text, source=str(target))), stored.version
 
 
 # ── reference admissibility ────────────────────────────────────────────────
@@ -529,8 +558,12 @@ def _annotation_record(a: Annotation) -> dict | None:
         check_box_extent(poly_box, where=f"{a.subject!r} annotation's polygon")
         rec["bbox"] = xywh(poly_box.x1, poly_box.y1, poly_box.x2, poly_box.y2)
     elif isinstance(geom, BBox):
-        check_box_extent(geom, where=f"{a.subject!r} annotation")
-        rec["bbox"] = xywh(geom.x1, geom.y1, geom.x2, geom.y2)
+        # Checked against the rounded, stored box (stored_box_extent_ok), not the raw corners.
+        stored_bbox = xywh(geom.x1, geom.y1, geom.x2, geom.y2)
+        check_box_extent(BBox(stored_bbox[0], stored_bbox[1],
+                              stored_bbox[0] + stored_bbox[2], stored_bbox[1] + stored_bbox[3]),
+                         where=f"{a.subject!r} annotation")
+        rec["bbox"] = stored_bbox
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:

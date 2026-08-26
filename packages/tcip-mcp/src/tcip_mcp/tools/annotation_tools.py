@@ -14,7 +14,9 @@ from tcip_annotation import (
     load_annotations_any,
     save_annotations_any,
 )
-from tcip_annotation.json_io import _PROV_KEYS, UnreadableLabelDocument, annotation_from_payload, box_extent_ok
+from tcip_annotation.json_io import (
+    _PROV_KEYS, UnreadableLabelDocument, annotation_from_payload, stored_box_extent_ok,
+)
 from tcip_annotation.json_io import read_annotations as read_labels
 
 from tcip_mcp.dataset_layout import (
@@ -958,7 +960,7 @@ def stage_proposals(
     for (subject, conf, cx, cy, w, h) in norm_boxes:
         box = BBox((cx - w / 2) * img_w, (cy - h / 2) * img_h,
                   (cx + w / 2) * img_w, (cy + h / 2) * img_h)
-        if not box_extent_ok(box):
+        if not stored_box_extent_ok(box):
             dropped_boxes += 1
             continue
         box_proposals.append(Annotation(subject=subject, geometry=box, score=conf,
