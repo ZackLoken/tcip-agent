@@ -135,6 +135,15 @@ const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   lastFlushedKey: null,
 };
 
+// Scoped to one dataset selection's own batch fetch; a switch to a different dataset must not
+// carry a prior dataset's review-status facts forward.
+const DEFAULT_REVIEW_STATUS: ReviewImageStatusState = {
+  byImage: {},
+  hasDetections: {},
+  unreadable: [],
+  activeFilter: "all",
+};
+
 interface BandSelectionState {
   /** The breeder's chosen band composite for each distinct band set this session has seen, keyed
    *  by bandSetSignature (the image's band names, in order). Absent means no change has been made
@@ -208,12 +217,12 @@ interface ReviewImageStatusState {
   /** Per-image review completion status, batch-fetched from the ReviewEngine on dataset entry
    *  and kept live as verdicts land (untouched images default to "not_started"). */
   byImage: Record<string, ReviewImageStatus>;
-  /** Whether each image has anything to review (any GT or prediction annotation). Images with no
-   *  entry (before the batch fetch resolves) are treated as reviewable; images explicitly false
-   *  have zero detections and are skipped by Review navigation. */
+  /** Whether each image stays reachable in Review navigation: true when it has anything to
+   *  review, when its label document could not be read (stays navigable so the breeder can see
+   *  why), or when the batch fetch hasn't resolved yet; false only for a readable image with
+   *  zero detections, which Review navigation skips. */
   hasDetections: Record<string, boolean>;
-  /** Image names whose GT or prediction document would not read, from the same batch fetch: left
-   *  out of hasDetections so a corrupt document never reads as silently reviewable. */
+  /** Label document paths (GT or prediction) that would not read, from the same batch fetch. */
   unreadable: string[];
   /** Image-level Reviewed/Unreviewed navigation filter for the Review tab. */
   activeFilter: ReviewStatusFilter;
@@ -452,7 +461,7 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
   registry: { subjects: {}, loaded: false, version: null },
   imageStatus: { byImage: {}, activeFilter: "all", staleMarks: [] },
-  reviewStatus: { byImage: {}, hasDetections: {}, unreadable: [], activeFilter: "all" },
+  reviewStatus: DEFAULT_REVIEW_STATUS,
   annotateUi: {
     visible: true,
     snap: false,
@@ -517,7 +526,11 @@ export const useStore = create<AppState>()((set, get) => ({
 
   setGui: (next) => set({ gui: next }),
   patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
-  clearDataset: () => set((s) => ({ gui: { ...s.gui, dataset: DEFAULT_DATASET } })),
+  clearDataset: () =>
+    set((s) => ({
+      gui: { ...s.gui, dataset: DEFAULT_DATASET },
+      reviewStatus: DEFAULT_REVIEW_STATUS,
+    })),
 
   saveCurrentDatasetUi: () => {
     const s = get();
@@ -587,14 +600,19 @@ export const useStore = create<AppState>()((set, get) => ({
             active_subject: incoming.active_subject ?? null,
             pred_reference: null,
           },
+          reviewStatus: DEFAULT_REVIEW_STATUS,
           wsVersion: nextVersion,
         };
       }
 
       if (identityChanged) {
         // New dataset selection: adopt it wholesale (including its index) and drop
-        // any stale prediction-reference overlay. The active tab stays put.
-        return { gui: { ...local, dataset: inDs, pred_reference: null }, wsVersion: nextVersion };
+        // any stale prediction-reference overlay and reviewStatus. The active tab stays put.
+        return {
+          gui: { ...local, dataset: inDs, pred_reference: null },
+          reviewStatus: DEFAULT_REVIEW_STATUS,
+          wsVersion: nextVersion,
+        };
       }
       // Same dataset: accept backend-owned dataset fields (e.g. a changed model's
       // prediction dir) but keep the user's navigation position and the local

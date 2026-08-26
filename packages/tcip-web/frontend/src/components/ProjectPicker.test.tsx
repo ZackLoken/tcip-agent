@@ -39,6 +39,7 @@ const PROJECTS: ProjectSummary[] = [
     is_active: false,
     site: "north orchard",
     site_problem: null,
+    label_problem: null,
   },
   {
     name: "crop_b_burr_site-b",
@@ -56,6 +57,7 @@ const PROJECTS: ProjectSummary[] = [
     site_problem:
       "No site recorded yet: record it with init_project(<path>, site=<site>) or " +
       "scripts/conform_project_site.py, for /ws/crop_b_burr_site-b",
+    label_problem: null,
   },
 ];
 
@@ -127,6 +129,30 @@ describe("ProjectPicker", () => {
       await screen.findByText(
         "No site recorded yet: record it with init_project(<path>, site=<site>) or " +
           "scripts/conform_project_site.py, for /ws/crop_b_burr_site-b",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a card's label_problem beside its site", async () => {
+    const withLabelProblem = [
+      {
+        ...PROJECTS[0],
+        label_problem:
+          "/ws/crop_a_subject_a_valley-farm/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      },
+      PROJECTS[1],
+    ];
+    vi.mocked(api.projects.list).mockResolvedValue({
+      workspace: "/ws",
+      active: null,
+      active_path: null,
+      projects: withLabelProblem,
+    });
+    render(<ProjectPicker />);
+
+    expect(
+      await screen.findByText(
+        "/ws/crop_a_subject_a_valley-farm/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
       ),
     ).toBeInTheDocument();
   });

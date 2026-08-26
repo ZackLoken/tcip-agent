@@ -25,9 +25,13 @@ COCO training set is assembled from these per-image files (`datasets.py`'s
 | coco | Single `.json` for the dataset | Pixel coordinates | an `images`/`categories` key |
 
 Both are read by `format_io.load_annotations` / written by `save_annotations`; the agent-facing
-MCP tool wrapping the read side is `read_annotations` (see Tools below). `format_io.detect_format`
-reads the format off the file's own keys and raises on anything else rather than guessing: a
-misdetected format reads real annotations as empty, so no answer beats a wrong one.
+MCP tool wrapping the read side is `read_annotations` (see Tools below). A missing label file
+reads as no annotations; a present one this format cannot make sense of (undecodable text, a
+non-dict document, a malformed record) raises `json_io.UnreadableLabelDocument` naming the file,
+at every reader, rather than reading as empty: an unreadable file is not the same fact as no
+file. `format_io.detect_format` reads the format off a decodable document's own keys and raises
+its own `ValueError` only when the document decodes but matches neither shape, so a misdetected
+format never reads real annotations as empty either.
 
 A collaborator's delivery in some other schema is yours to convert: read a sample, write a
 converter in `scripts/`, and emit the canonical per-image JSON. The platform carries no built-in

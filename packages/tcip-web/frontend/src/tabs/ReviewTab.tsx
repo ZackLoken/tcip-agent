@@ -580,11 +580,17 @@ export function ReviewTab() {
         });
         if (cancelled) return;
         const stems = new Set(res.detection_stems);
+        // res.unreadable names label document paths, not stems; a stem this names stays
+        // navigable (the breeder can still reach and see it), never silently skipped.
+        const unreadableStems = new Set(
+          res.unreadable.map((p) => (p.split(/[/\\]/).pop() ?? p).replace(/\.[^.]+$/, "")),
+        );
         const byImage: Record<string, ReviewImageStatus> = {};
         const has: Record<string, boolean> = {};
         for (const name of imageList) {
           byImage[name] = res.statuses[name] ?? "not_started";
-          has[name] = stems.has(name.replace(/\.[^.]+$/, ""));
+          const stem = name.replace(/\.[^.]+$/, "");
+          has[name] = unreadableStems.has(stem) || stems.has(stem);
         }
         setReviewImageStatuses(byImage, has, res.unreadable);
       } catch {

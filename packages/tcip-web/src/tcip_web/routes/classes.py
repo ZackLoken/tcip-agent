@@ -47,14 +47,17 @@ def _cached_label_annotations(path: Path) -> list:
 
     A missing file reads as no annotations. A present, unreadable one raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, uncached: a broken document is
-    retried, never remembered as an empty result.
+    retried, never remembered as an empty result. That includes a present file the OS refuses to
+    stat (a permission error): only its absence derives an empty status, never a read failure.
     """
-    from tcip_annotation.json_io import read_annotations
+    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
 
     try:
         mtime_ns = path.stat().st_mtime_ns
-    except OSError:
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise UnreadableLabelDocument(f"{path} could not be opened: {exc}") from exc
     key = str(path)
     cached = _label_annotations_cache.get(key)
     if cached is not None and cached[0] == mtime_ns:
@@ -110,11 +113,11 @@ def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
 def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
     """Distinct subject names present in a dir's per-image label files, and the paths that would
     not read: one bad file costs its own name, never the whole scan."""
-    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.json_io import UnreadableLabelDocument, prediction_documents
 
     subjects: set[str] = set()
     unreadable: list[str] = []
-    for jf in sorted(d.glob("*.json")):
+    for jf in prediction_documents(d):
         try:
             annotations = _cached_label_annotations(jf)
         except UnreadableLabelDocument:
@@ -138,10 +141,12 @@ def load_classes(
     ``{"subjects": <nested registry mapping>, "version": <token> | None, "unreadable": [paths]}``:
     ``version`` is the stored registry's compare-and-set token when one was saved, else ``None`` (a
     provisional or empty registry names nothing to assert against); ``unreadable`` names every
-    per-image label file under a provisional-registry scan that would not read, left out of the
-    subject scan rather than aborting it. A save posting this ``version`` back is refused with 409
-    if the stored registry has moved on since; a save posting ``None`` is an unconditional write,
-    since it names no version to assert against.
+    per-image label file under ``annotations_dir`` that would not read, scanned whether or not a
+    registry is saved (a saved registry answers the subject list on its own, but a corrupt label
+    file is still worth surfacing to the breeder), and left out of a provisional subject scan
+    rather than aborting it. A save posting this ``version`` back is refused with 409 if the stored
+    registry has moved on since; a save posting ``None`` is an unconditional write, since it names
+    no version to assert against.
     """
     from tcip_mcp.class_registry import (
         ClassRegistry,
@@ -153,6 +158,11 @@ def load_classes(
     )
     from tcip_mcp.dataset_layout import classes_path
 
+    subjects: set[str] = set()
+    unreadable: list[str] = []
+    if annotations_dir and Path(annotations_dir).is_dir():
+        subjects, unreadable = _subjects_in_dir(Path(annotations_dir))
+
     root = _resolve_dataset_root(dataset_root, annotations_dir)
     if root:
         p = classes_path(root)
@@ -162,17 +172,12 @@ def load_classes(
             except (OSError, RegistryError) as exc:
                 raise HTTPException(500, f"could not parse {p}: {exc}") from exc
             return {"subjects": registry_to_dict(registry), "version": read_version(p).token,
-                    "unreadable": []}
+                    "unreadable": unreadable}
 
-    if annotations_dir and Path(annotations_dir).is_dir():
-        subjects, unreadable = _subjects_in_dir(Path(annotations_dir))
-        if subjects:
-            reg = ClassRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
-            return {"subjects": registry_to_dict(reg), "version": None, "unreadable": unreadable}
-        if unreadable:
-            return {"subjects": {}, "version": None, "unreadable": unreadable}
-
-    return {"subjects": {}, "version": None, "unreadable": []}
+    if subjects:
+        reg = ClassRegistry(subjects=tuple(Subject(name=s) for s in sorted(subjects)))
+        return {"subjects": registry_to_dict(reg), "version": None, "unreadable": unreadable}
+    return {"subjects": {}, "version": None, "unreadable": unreadable}
 
 
 class SaveClassesPayload(BaseModel):
@@ -397,9 +402,9 @@ def derive_image_status(payload: DerivePayload) -> dict:
     The mapping itself is ``dataset_layout.derive_status``, the same one the review tab's Complete
     goes through, so the two cannot disagree about what a Complete on an empty image means.
     ``has_content`` is scoped to ``subject`` through ``annotations_hold_subject``, the predicate
-    the review route's own Complete derives its token through. A name whose label file would not
-    read is left out of ``statuses`` and reported in ``unreadable`` instead: one bad file costs
-    that image, never the whole batch.
+    the review route's own Complete derives its token through. An image whose label file would
+    not read is left out of ``statuses`` and its label document's path is reported in
+    ``unreadable`` instead: one bad file costs that image, never the whole batch.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument
 
@@ -417,10 +422,11 @@ def derive_image_status(payload: DerivePayload) -> dict:
         stem = name.rsplit(".", 1)[0]
         has_any = False
         if adir:
+            label_path = adir / f"{stem}.json"
             try:
-                annotations = _cached_label_annotations(adir / f"{stem}.json")
+                annotations = _cached_label_annotations(label_path)
             except UnreadableLabelDocument:
-                unreadable.append(name)
+                unreadable.append(str(label_path))
                 continue
             has_any = annotations_hold_subject(annotations, payload.subject)
         statuses[name] = derive_status(completed=name in complete_set, has_content=has_any)

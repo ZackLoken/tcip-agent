@@ -1216,19 +1216,22 @@ def _has_objects(path: Path) -> bool:
 
 def _stems_with_objects(*dirs: Optional[str]) -> tuple[set[str], set[str]]:
     """Stems with >=1 annotation record across ``dirs``, and the stems whose document would not
-    read (per file: one bad document costs its own stem, never the whole scan)."""
+    read (per file: one bad document costs its own stem, never the whole scan).
+
+    Every directory's own document for a stem is opened, never skipped because an earlier
+    directory already resolved that stem: a corrupt prediction document must surface as
+    unreadable even when the ground truth already supplied an object for the same stem.
+    """
     stems: set[str] = set()
     unreadable: set[str] = set()
     for d in dirs:
         if not d:
             continue
         for f in prediction_documents(d):
-            if f.stem in stems or f.stem in unreadable:
-                continue
             try:
                 has_objects = _has_objects(f)
             except UnreadableLabelDocument:
-                unreadable.add(f.stem)
+                unreadable.add(str(f))
                 continue
             if has_objects:
                 stems.add(f.stem)

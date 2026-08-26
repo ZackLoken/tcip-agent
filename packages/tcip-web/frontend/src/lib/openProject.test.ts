@@ -27,6 +27,7 @@ function project(overrides: Partial<ProjectSummary> & { name: string }): Project
     is_active: false,
     site: "north orchard",
     site_problem: null,
+    label_problem: null,
     ...overrides,
   };
 }
@@ -213,5 +214,22 @@ describe("adoptWorkspaceProject", () => {
     // The marker write is fire-and-forget: await a microtask for its rejection to settle.
     await Promise.resolve();
     expect(pushToast).toHaveBeenCalledWith(expect.stringContaining("hz"));
+  });
+
+  it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
+    const p = project({ name: "hz", dates: ["2026-02-11"] });
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      selection: {} as any,
+      label_problem: "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+    });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+
+    await adoptWorkspaceProject(p, "2026-02-11", "subject_a", "baseline");
+
+    expect(pushToast).toHaveBeenCalledWith(
+      "C:/data/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+    );
   });
 });

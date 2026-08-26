@@ -82,11 +82,17 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.image_list).toHaveLength(3);
   });
 
-  it("adopts a new dataset identity and resets index + pred_reference", () => {
+  it("adopts a new dataset identity and resets index + pred_reference + reviewStatus", () => {
     useStore.setState((st) => ({
       gui: {
         ...st.gui,
         pred_reference: { type: "box", coords: [0, 0, 1, 1], confidence: null },
+      },
+      reviewStatus: {
+        byImage: { "a.jpg": "completed" },
+        hasDetections: { "a.jpg": true },
+        unreadable: ["/proj/ds/annotations/2-11-26/b.json"],
+        activeFilter: "reviewed",
       },
     }));
     s().mergeSnapshot(
@@ -96,6 +102,12 @@ describe("mergeSnapshot ownership model", () => {
     expect(s().gui.dataset.date).toBe("3-2-26");
     expect(s().gui.dataset.current_image_index).toBe(0);
     expect(s().gui.pred_reference).toBeNull();
+    expect(s().reviewStatus).toEqual({
+      byImage: {},
+      hasDetections: {},
+      unreadable: [],
+      activeFilter: "all",
+    });
   });
 
   it("drops a stale (older-version) replay", () => {
@@ -178,5 +190,27 @@ describe("mergeSnapshot ownership model", () => {
     s().mergeSnapshot(snapshot({ active_tab: "review" }), 1);
     expect(s().gui.active_tab).toBe("training");
     localStorage.removeItem("tcip.lasttab./proj");
+  });
+});
+
+describe("clearDataset", () => {
+  it("clears reviewStatus along with the dataset selection", () => {
+    useStore.setState({
+      gui: snapshot({ dataset: dataset() }),
+      reviewStatus: {
+        byImage: { "a.jpg": "completed" },
+        hasDetections: { "a.jpg": true },
+        unreadable: ["/proj/ds/annotations/2-11-26/b.json"],
+        activeFilter: "reviewed",
+      },
+    });
+    s().clearDataset();
+    expect(s().gui.dataset.dataset_root).toBeNull();
+    expect(s().reviewStatus).toEqual({
+      byImage: {},
+      hasDetections: {},
+      unreadable: [],
+      activeFilter: "all",
+    });
   });
 });
