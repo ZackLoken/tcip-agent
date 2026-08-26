@@ -41,7 +41,7 @@ import {
   pointInRings,
   ringsBbox,
 } from "@/lib/polygonGeometry";
-import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/reviewEditGeometry";
+import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/editGeometry";
 import { useStore } from "@/store";
 import type { Box, Mode, PointShape, PolygonShape, PredictionReference } from "@/store/types";
 

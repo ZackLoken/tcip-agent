@@ -34,7 +34,7 @@ import {
   MIN_BOX_SIDE,
   type EditDrag,
   type EditShape,
-} from "@/lib/reviewEditGeometry";
+} from "@/lib/editGeometry";
 import {
   buildReviewShapes,
   computeViewport,

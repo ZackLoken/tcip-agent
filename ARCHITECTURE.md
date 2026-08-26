@@ -300,6 +300,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.ts | Stop the browser's own ctrl+wheel page zoom over the app, so the canvas' zoom is the only zoom. | 0 | 2 |
 | packages/tcip-web/frontend/src/lib/datasetUiState.ts | Per-(project, date, subject/model) UI state, so switching dates/projects and returning lands you back where you were. | 3 | 3 |
+| packages/tcip-web/frontend/src/lib/editGeometry.test.ts | (none found) | 0 | 0 |
+| packages/tcip-web/frontend/src/lib/editGeometry.ts | Pure geometry for in-place box/polygon editing, shared by the Annotate and Review tabs' editors. | 1 | 2 |
 | packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 0 | 6 |
 | packages/tcip-web/frontend/src/lib/labelSerde.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/labelSerde.ts | The single mapping between the unified name-based label file (one Annotation list per image) and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). | 1 | 3 |
@@ -313,8 +315,6 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/reconnectingSocket.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/reconnectingSocket.ts | One reconnecting-WebSocket shape, shared by every socket this app opens. | 0 | 4 |
 | packages/tcip-web/frontend/src/lib/reviewColors.ts | (none found) | 0 | 4 |
-| packages/tcip-web/frontend/src/lib/reviewEditGeometry.test.ts | (none found) | 0 | 0 |
-| packages/tcip-web/frontend/src/lib/reviewEditGeometry.ts | Pure geometry for the Review tab's in-place shape editor. | 1 | 1 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/lib/reviewFocus.ts | Drive the Review tab to a model's predictions on a specific frame/detection in response to the agent's `review_focus` event. | 2 | 3 |
 | packages/tcip-web/frontend/src/lib/reviewGeometry.ts | The single source of a review detection's geometry. | 1 | 0 |
@@ -463,12 +463,12 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/coverage.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/coverageTracker.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/ctrlWheelGuard.test.ts |
+| tcip-web-frontend | packages/tcip-web/frontend/src/lib/editGeometry.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/imageLoader.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/labelSerde.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/openProject.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/paths.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/polygonGeometry.test.ts |
-| tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewEditGeometry.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewFocus.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/reviewGeometry.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/lib/viewGeometry.test.ts |
@@ -536,12 +536,12 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `read_annotations` | `annotation_tools.py:93` | yes | Load the ground-truth labels and predictions for a single image. |
 | `save_annotations` | `annotation_tools.py:142` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `score_predictions` | `annotation_tools.py:441` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
-| `segment_prompt` | `annotation_tools.py:474` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
-| `push_panel_data` | `annotation_tools.py:570` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus` | `annotation_tools.py:604` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
-| `stage_proposals` | `annotation_tools.py:809` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:998` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `score_predictions` | `annotation_tools.py:444` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
+| `segment_prompt` | `annotation_tools.py:477` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
+| `push_panel_data` | `annotation_tools.py:573` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `focus` | `annotation_tools.py:607` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
+| `stage_proposals` | `annotation_tools.py:812` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+| `write_class_map` | `annotation_tools.py:1001` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)
 
@@ -766,11 +766,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `serve_image` | `routes/images.py:492` |
-| GET | `/dimensions` | `get_dimensions` | `routes/images.py:702` |
-| GET | `/bands` | `get_bands` | `routes/images.py:722` |
-| POST | `/overviews` | `build_image_overviews` | `routes/images.py:855` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:879` |
+| GET | `` (root) | `serve_image` | `routes/images.py:499` |
+| GET | `/dimensions` | `get_dimensions` | `routes/images.py:714` |
+| GET | `/bands` | `get_bands` | `routes/images.py:734` |
+| POST | `/overviews` | `build_image_overviews` | `routes/images.py:867` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:891` |
 
 ### routes/inference.py, prefix `/api/inference` (4 HTTP + 1 WS)
 
@@ -822,14 +822,14 @@ registered at HEAD.
 | POST | `/matches` | `compute_image_matches` | `routes/review.py:457` |
 | POST | `/action` | `record_action` | `routes/review.py:583` |
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:718` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:781` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:802` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:853` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1197` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1244` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1274` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1394` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1422` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:776` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:797` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:848` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1192` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1239` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1269` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1389` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1417` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1029,7 +1029,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:399`;
 `tcip_annotation.format_io.load_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:281`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:292`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:944`.
 
@@ -1051,12 +1051,12 @@ different consumer path in the same test.
 Path: caller-supplied, single dataset-level `.json` file, not per-image.
 
 Writers: `tcip_annotation.format_io.write_coco`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:218`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:229`;
 `tcip_annotation.format_io.save_annotations` (`fmt="coco"`), `format_io.py:283`;
 `tcip_annotation.json_io.to_coco_dataset` (returns dict, performs no file I/O),
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:413`.
 
-Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:176`;
+Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:187`;
 `tcip_annotation.format_io.load_annotations` (`fmt="coco"` or auto-detected via `detect_format`,
 `format_io.py:61`), `format_io.py:263`.
 
@@ -1073,7 +1073,7 @@ Path: `<dataset_root>/classes.json`.
 Writer: `tcip_mcp.class_registry.replace_registry`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`, the one write both registry doors call
 (the GUI's `save_classes` and the tool's `write_class_map`,
-`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:998`).
+`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1001`).
 
 Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:190`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
@@ -1153,7 +1153,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:293`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:189`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:998`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1001`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1640,9 +1640,9 @@ Phase 3 verdict: duplicated.
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:732` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:735` (`result = post_panel_event("app", "annotate_focus", payload)`).
 Side B: `packages/tcip-web/src/tcip_web/app.py:303` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
-Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:869`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
+Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:872`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 
@@ -1977,7 +1977,7 @@ Phase 3 verdict: duplicated.
 ## S52. Image-serve response headers  <!-- queued: P5-301 unify -->
 
 Must agree: header names and value encodings match.
-Side A: `packages/tcip-web/src/tcip_web/routes/images.py:680` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
+Side A: `packages/tcip-web/src/tcip_web/routes/images.py:692` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
 Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:55` (`const statsSourceRaw = headers.get("X-TCIP-Stats-Source");`).
 Phase 3 verdict: duplicated.
 

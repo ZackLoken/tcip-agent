@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  applyEditDrag,
-  clampShapeToImage,
-  hitTestEdit,
-  type EditShape,
-} from "@/lib/reviewEditGeometry";
+import { applyEditDrag, clampShapeToImage, hitTestEdit, type EditShape } from "@/lib/editGeometry";
 
 const box = (b: [number, number, number, number]): EditShape => ({ kind: "box", box: b });
 const poly = (points: [number, number][]): EditShape => ({ kind: "polygon", points });
