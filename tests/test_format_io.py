@@ -247,3 +247,42 @@ def test_detect_format_refuses_older_objects_keyed_schema(tmp_path):
     old.write_text(json.dumps({"image": "a", "objects": [{"category_id": 0, "bbox": [1, 1, 9, 9]}]}))
     with pytest.raises(ValueError):
         detect_format(str(old))
+
+
+# ── load_annotations: a supplied fmt is a claim, not a bypass ───────────────
+
+
+def test_load_annotations_refuses_a_per_image_document_asked_for_as_coco(tmp_path):
+    """A caller-supplied fmt='coco' over a document carrying only the per-image annotations key
+    (no images/categories) must not silently answer zero results; it must name the mismatch."""
+    js = tmp_path / "IMG_0001.json"
+    js.write_text(json.dumps({"image": "IMG_0001", "width": 100, "height": 100,
+                              "annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}))
+    with pytest.raises(ValueError, match="coco"):
+        load_annotations(str(js), fmt="coco", file_name="IMG_0001.json")
+
+
+def test_load_annotations_refuses_a_coco_document_asked_for_as_json(tmp_path):
+    """The mirror direction: a dataset-level COCO document asked for as the per-image schema."""
+    coco = _sample_coco_detect()
+    path = tmp_path / "annotations.json"
+    path.write_text(json.dumps(coco))
+    with pytest.raises(ValueError, match="json"):
+        load_annotations(str(path), fmt="json")
+
+
+def test_load_annotations_accepts_a_coco_document_declared_as_coco(tmp_path):
+    coco = _sample_coco_detect()
+    path = tmp_path / "annotations.json"
+    path.write_text(json.dumps(coco))
+    anns = load_annotations(str(path), fmt="coco", file_name="IMG_0001.jpg")
+    assert len(anns) == 2
+
+
+def test_load_annotations_accepts_a_per_image_document_declared_as_json(tmp_path):
+    js = tmp_path / "IMG_0001.json"
+    js.write_text(json.dumps({"image": "IMG_0001", "width": 100, "height": 100,
+                              "annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}))
+    anns = load_annotations(str(js), fmt="json")
+    assert len(anns) == 1
+    assert anns[0].subject == "catkin"
