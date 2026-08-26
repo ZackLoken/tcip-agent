@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-import torch
 from PIL import Image
 
 from tcip_mcp.pipelines import raster_source
@@ -16,6 +16,9 @@ from tcip_mcp.pipelines.data.band_groups import (
     read_band_group_manifest,
 )
 from tcip_mcp.pipelines.raster_source import Rect
+
+if TYPE_CHECKING:
+    import torch
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
@@ -244,6 +247,8 @@ def pil_to_tensor(img) -> torch.Tensor:
     supported. Integer inputs are scaled by their dtype max (uint8→/255, uint16→/65535);
     float inputs are assumed already normalized.
     """
+    import torch
+
     arr = np.asarray(img)
     if arr.ndim == 2:  # grayscale [H, W] -> [H, W, 1]
         arr = arr[:, :, None]
