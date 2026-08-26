@@ -12,6 +12,8 @@ from __future__ import annotations
 import ast
 import importlib.util
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -68,6 +70,44 @@ def test_every_decorated_tool_registers():
     missing = decorated - registered
     extra = registered - decorated
     assert not missing and not extra, f"missing from registry={missing}, unexpected={extra}"
+
+
+_BLOCK_TORCH_AND_IMPORT_SERVER = """
+import sys
+
+
+class _BlockTorch:
+    def find_module(self, name, path=None):
+        return self if name == "torch" or name.startswith("torch.") else None
+
+    def load_module(self, name):
+        raise ImportError(f"torch blocked for this check: {name}")
+
+
+sys.meta_path.insert(0, _BlockTorch())
+import tcip_mcp.server
+assert "torch" not in sys.modules, "importing the server pulled torch into sys.modules"
+print(len(tcip_mcp.server.list_registered_tools()))
+"""
+
+
+def test_server_imports_with_torch_absent():
+    """Every tool module registers even when torch cannot be imported at all.
+
+    The server's own tool imports must never require torch at module load time; a tool
+    module that needs torch imports it inside its own functions. Runs the check in a
+    subprocess that blocks torch from importing, since this process already has torch
+    loaded once any other test has imported it.
+    """
+    assert importlib.util.find_spec("torch") is not None, (
+        "torch must be installed in this test environment for this check to mean anything"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", _BLOCK_TORCH_AND_IMPORT_SERVER],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert int(result.stdout.strip()) > 0
 
 
 def test_consolidated_tools_present_and_removed_absent():
