@@ -158,6 +158,33 @@ def test_export_detection_csv_acknowledge_stamps_false(tmp_path):
     assert rows[0]["measurement_validated"] == VALIDATED_FALSE
 
 
+def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_box(tmp_path):
+    """A box that collapses to zero width is never a detection: the CSV row and the persisted
+    prediction file must count and average confidence over the same surviving detection, never one
+    counting the dropped box and the other not."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv, write_predictions_json
+
+    def _raw() -> dict:
+        return {
+            "image": "img_a.jpg", "width": 200, "height": 150,
+            "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]],  # the second collapses to zero width
+            "scores": [0.9, 0.5], "labels": [1, 1], "count": 2,
+        }
+
+    pred_path = tmp_path / "img_a.json"
+    dropped = write_predictions_json(pred_path, _raw(), id_map={fx.COUNT_SUBJECT: 0})
+    assert dropped == 1
+    persisted = json.loads(pred_path.read_text())["annotations"]
+
+    out = tmp_path / "o.csv"
+    export_detection_csv([_raw()], str(out), trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    rows = list(csv.DictReader(out.open()))
+
+    assert len(persisted) == 1
+    assert int(rows[0]["detection_count"]) == 1
+    assert float(rows[0]["avg_confidence"]) == pytest.approx(0.9)
+
+
 # ── export_detection_csv reconciles pred_dirs against on-disk sidecars ─────
 
 def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6,

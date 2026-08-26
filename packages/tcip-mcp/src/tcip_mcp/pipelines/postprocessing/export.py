@@ -20,6 +20,26 @@ def _clip(value: float, upper: float | None) -> float:
     return max(0.0, min(float(value), float(upper)))
 
 
+def positive_detections(image_result: dict) -> tuple[int, list[float]]:
+    """One image's raw predictor result narrowed to real detections: a box with no positive
+    extent was never a detection, so it counts toward neither the kept count nor the confidence
+    scores. The one predicate :func:`write_predictions_json` itself drops by, so a delivered count
+    or a CSV row computed here always agrees with what that write actually persists.
+
+    Falls back to ``image_result["count"]`` when no ``boxes`` are present at all (a caller that
+    states only a bare count, never a per-box result to narrow).
+    """
+    from tcip_annotation.json_io import box_extent_ok
+    from tcip_annotation.state import BBox
+
+    boxes = image_result.get("boxes", [])
+    scores = image_result.get("scores", [])
+    if not boxes:
+        return image_result.get("count", 0), scores
+    keep = [box_extent_ok(BBox(*b)) for b in boxes]
+    return keep.count(True), [s for s, k in zip(scores, keep) if k]
+
+
 def write_predictions_json(
     json_path: str | Path, result: dict, created_by: str | None = None, *,
     id_map: dict[str, int] | None = None,
@@ -58,16 +78,20 @@ def write_predictions_json(
     that write predictions to disk (``export_predictions``, the web inference route) call once and
     fold into that same stamp, mirroring how ``tiled``/``tile_size``/``conf`` already travel there.
 
-    A detector's own box can collapse to zero extent at an image edge (clipping) or a mask that
-    binarized to nothing can fall back to one; a box of nothing is no detection, so it is dropped
-    here rather than raising :func:`~tcip_annotation.json_io.write_annotations`'s own persistence-
-    boundary refusal and failing the whole run over one degenerate detection. Returns the number
-    dropped, for the caller's own run summary.
+    A detector's own box can collapse to zero extent at an image edge (clipping), or a mask can
+    binarize to a sliver whose own derived box carries no real extent either; either way there is
+    no detection to store, so it is dropped here rather than raising
+    :func:`~tcip_annotation.json_io.write_annotations`'s own persistence-boundary refusal and
+    failing the whole run over one degenerate detection. Returns the number dropped, for the
+    caller's own run summary. Mutates ``result`` in place to drop the same entries from its
+    ``boxes``/``scores``/``labels``/``masks``/``count``, so a caller that reads ``result`` again
+    after this call (a delivered count, a CSV row) sees exactly what landed rather than a stale
+    pre-drop figure.
     """
     from datetime import datetime, timezone
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox
+    from tcip_annotation.state import Annotation, BBox, bbox_of
     from tcip_mcp.class_registry import decode_class_ids
 
     w = result.get("width") or 0
@@ -75,23 +99,34 @@ def write_predictions_json(
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None
     id_to_name = decode_class_ids(id_map) if id_map else {}
     masks = result.get("masks")
+    boxes = result.get("boxes", [])
+    scores = result.get("scores", [])
+    labels = result.get("labels", [])
     preds: list[Annotation] = []
+    kept_indices: list[int] = []
     dropped = 0
-    for i, (box, score, label) in enumerate(zip(
-        result.get("boxes", []), result.get("scores", []), result.get("labels", [])
-    )):
+    for i, (box, score, label) in enumerate(zip(boxes, scores, labels)):
         x1, y1, x2, y2 = box
         cid = max(int(label) - 1, 0)  # undo the 1-indexed torchvision label -> 0-indexed run id
         name = id_to_name.get(cid, str(cid))  # decode via the recorded map, never a fresh derivation
         geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
         if masks is not None and i < len(masks):
             geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name, image_size=(w, h))
-        if isinstance(geometry, BBox) and not json_io.box_extent_ok(geometry):
+        if not json_io.box_extent_ok(bbox_of(geometry)):
             dropped += 1
             continue
         preds.append(Annotation(subject=name, geometry=geometry, score=float(score),
                                 created_by=created_by, created_at=created_at))
+        kept_indices.append(i)
     json_io.write_annotations(str(json_path), preds, int(w), int(h), keep_empty=True)
+    if dropped:
+        kept = set(kept_indices)
+        result["boxes"] = [b for i, b in enumerate(boxes) if i in kept]
+        result["scores"] = [s for i, s in enumerate(scores) if i in kept]
+        result["labels"] = [l for i, l in enumerate(labels) if i in kept]
+        result["count"] = len(kept_indices)
+        if masks is not None:
+            result["masks"] = [m for i, m in enumerate(masks) if i in kept]
     return dropped
 
 
@@ -288,11 +323,11 @@ def export_detection_csv(
         writer.writeheader()
 
         for r in image_results:
-            scores = r.get("scores", [])
+            detection_count, scores = positive_detections(r)
             avg_conf = sum(scores) / len(scores) if scores else 0.0
             writer.writerow({
                 "image": Path(r.get("image", "")).name,
-                "detection_count": r.get("count", len(r.get("boxes", []))),
+                "detection_count": detection_count,
                 "avg_confidence": round(avg_conf, 4),
                 "measurement_document": _MEASUREMENT_DOCUMENT,
                 **stamp,
