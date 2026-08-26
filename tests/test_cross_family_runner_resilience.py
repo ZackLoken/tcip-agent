@@ -34,6 +34,20 @@ def runner():
     return _load()
 
 
+def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(runner):
+    """One invocation naming every family can carry one --effort: a family whose model id
+    carries the effort records the id's own, never refusing and never passing the flag on."""
+    assert runner.effective_effort("antigravity", "gemini-3.1-pro-high", "medium") == "high"
+    assert runner.effective_effort("antigravity", "gemini-3.1-pro-high", None) == "high"
+
+
+def test_an_effort_claude_would_ignore_is_refused_by_name(runner):
+    with pytest.raises(SystemExit, match="claude effort 'turbo'"):
+        runner.effective_effort("claude", "opus", "turbo")
+    assert runner.effective_effort("claude", "opus", "high") == "high"
+    assert runner.effective_effort("codex", "gpt-5.6-sol", "high") == "high"
+
+
 def _stub_run(stdout, stderr=""):
     """A subprocess.run replacement returning the given streams verbatim."""
     def _run(*_args, **_kwargs):
