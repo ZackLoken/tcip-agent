@@ -117,7 +117,7 @@ Three seams make bespoke work first-class, and the platform guarantees integrity
   states the *only* model-side contract, the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
   contract for you: `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
-  in_chans/num_classes/img_size before the training thread spawns, so a broken builder fails the
+  in_chans/num_classes/img_size before the training subprocess spawns, so a broken builder fails the
   launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on
   demand; `launch_training(overfit_check=True)` runs `ctx.overfit_check`'s own diagnostic at
   launch, on the contract's batch, and records the result on the run's `model_contract`, never
