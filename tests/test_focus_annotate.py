@@ -196,3 +196,21 @@ def test_focus_annotate_no_images(tmp_path: Path) -> None:
     (Path(image_dir(root, "2026-03-02"))).mkdir(parents=True)
     res = focus("annotate", str(root), str(root), "bush", "2026-03-02")
     assert "error" in res
+
+
+def test_focus_annotate_reports_an_unreadable_label_by_name(tmp_path: Path) -> None:
+    """A present, unreadable label on some earlier frame is an error naming the file, never a
+    raise through the tool boundary."""
+    root = tmp_path / "proj"
+    date = "2026-03-02"
+    imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
+    _scene(root, date, imgs)
+    d = Path(annotation_dir(root, date))
+    d.mkdir(parents=True, exist_ok=True)
+    bad = d / "IMG_0000.json"
+    bad.write_bytes(b"{not json")
+    _label(root, "bush", date, "segment", "IMG_0002", 1)
+
+    res = focus("annotate", str(root), str(root), "bush", date)
+    assert "error" in res
+    assert str(bad) in res["error"]

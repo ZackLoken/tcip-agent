@@ -243,6 +243,36 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 # preflight_config's training_source seam: a bare "module:function" string
 # --------------------------------------------------------------------------
 
+def test_preflight_config_warns_rather_than_swallows_an_unreadable_label(tmp_path):
+    """The coverage check's own trainable_stems scan must not fold an unreadable label into a
+    generic build failure it silently drops: the breeder needs to see which file is broken."""
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "annotations"
+    imgs.mkdir()
+    lbls.mkdir()
+    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
+    Image.new("RGB", (20, 20)).save(imgs / "bad.jpg")
+    json_io.write_annotations(lbls / "ann.json",
+                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+    (lbls / "bad.json").write_bytes(b"{not json")
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is True  # informational only, never gating
+    assert any("bad.json" in w for w in r["warnings"]), r["warnings"]
+
+
 def test_preflight_config_training_source_shape_and_importability(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -398,6 +428,28 @@ def test_preflight_reserve_calibration_fraction_infeasible_layout_refuses_under_
     # Without smoke, this specific geometry check doesn't run (needs a real dataset build).
     r_no_smoke = preflight_config(cfg, smoke=False)
     assert not any("reserve_calibration_fraction" in i for i in r_no_smoke["issues"])
+
+
+def test_preflight_reserve_calibration_fraction_reports_an_unreadable_label_by_name(tmp_path):
+    """This probe's own generic except Exception must not swallow an unreadable label into a
+    silently-logged build failure: the breeder needs to see which file is broken."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    images_dir, labels_dir = _reserve_cal_big_single_source(tmp_path / "ds")
+    bad = labels_dir / "mosaic.json"
+    bad.write_bytes(b"{not json")
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin",
+                 "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+                 "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
+                          "reserve_calibration_fraction": 0.15}},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg, smoke=True)
+    assert any(str(bad) in i for i in r["issues"]), r["issues"]
 
 
 def test_preflight_reserve_calibration_fraction_admits_a_feasible_layout(tmp_path):

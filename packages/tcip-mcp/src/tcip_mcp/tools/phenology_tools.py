@@ -856,9 +856,14 @@ def compute_phenology(
                           f"own recorded id_map ({msg})."),
                 "n_plants": 0}
 
-    result = phenology.per_plant_phenology(
-        mapping, predictions_by_date, positive_class_name=pos, spec=spec,
-    )
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    try:
+        result = phenology.per_plant_phenology(
+            mapping, predictions_by_date, positive_class_name=pos, spec=spec,
+        )
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc), "n_plants": 0}
     rows = result["rows"]
 
     if not result["positive_class_assessed"]:

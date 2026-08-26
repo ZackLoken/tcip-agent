@@ -166,6 +166,23 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
                       tiling={"enabled": True, "tile_size": 16, "overlap": 0.0})
 
 
+def test_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(tmp_path):
+    """_authored_frame's json branch reads through the one label reader
+    (splits.image_extent_from_labels), so a present, unreadable label raises rather than
+    silently disabling the tiled dataset's frame-mismatch check for that stem."""
+    import pytest
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    from tcip_mcp.pipelines.data.datasets import _authored_frame
+
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    (labels_dir / "a.json").write_bytes(b"{not json")
+
+    with pytest.raises(UnreadableLabelDocument):
+        _authored_frame("a", labels_dir, "json")
+
+
 def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     """ctx.tiled_dataset constructs the tiler directly: it must not fall back to 3 channels."""
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, build_dataset

@@ -245,11 +245,15 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
         images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
         if images_dir and labels_dir and Path(images_dir).is_dir() and Path(labels_dir).is_dir():
             contradicted_negatives: set[str] = set()
+            from tcip_annotation.json_io import UnreadableLabelDocument
             try:
                 from tcip_mcp.pipelines.data.datasets import trainable_stems
                 stems, sample_counts = trainable_stems(
                     labels_dir, images_dir, subject=data_cfg.get("subject"),
                     date=data_cfg.get("date"), contradicted_out=contradicted_negatives)
+            except UnreadableLabelDocument as exc:
+                stems, sample_counts = None, None
+                warnings.append(f"data: {exc}")
             except (OSError, ValueError):
                 stems, sample_counts = None, None
             if contradicted_negatives:
@@ -1752,6 +1756,8 @@ def _reserve_calibration_feasibility_issues(
     if len(stems) != 1 or not smoke:
         return []
 
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
     try:
         from tcip_mcp.pipelines.data.datasets import build_dataset
 
@@ -1760,7 +1766,7 @@ def _reserve_calibration_feasibility_issues(
             subject=data_cfg.get("subject"), attribute=data_cfg.get("attribute"))
         _spatial_single_source_split(
             stems[0], dict(data_cfg), tiling_cfg, base, dict(split_cfg), None)
-    except ValueError as exc:
+    except (ValueError, UnreadableLabelDocument) as exc:
         return [f"data.split.reserve_calibration_fraction: {exc}"]
     except Exception as exc:  # noqa: BLE001, an unrelated build failure isn't this check's own
         logger.info(
@@ -1798,7 +1804,12 @@ def _spatial_single_source_split(
 
     Returns ``(train_ds, val_ds)``, or ``None`` when ``reserve_calibration_fraction`` was not
     requested and the extent is unknown or no strip layout can populate both train and val, in
-    which case the caller falls back to training without validation.
+    which case the caller falls back to training without validation. A present, unreadable label
+    document raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` unconditionally,
+    the same whether or not ``reserve_calibration_fraction`` was requested: a corrupt label is
+    never the same fact as one recording no width/height, and silently falling back to no
+    validation over a document nobody can read would be exactly the gap this mechanism exists to
+    close.
     """
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, tile_kwargs_from_tiling
     from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
@@ -1957,12 +1968,16 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
          unrecognized ``split.group_by`` or a ``split.group_key_map`` missing stem
          coverage) is called outside any handler here and its ``ValueError`` propagates
          to the caller, silently training without validation on a policy error the
-         caller could have fixed is worse than surfacing it. Every other failure in this
-         function (dataset build errors, a malformed ``val_ratio``/``seed``, a
-         ``group_balanced_split`` failure) still degrades to ``(full_train_ds, None)``.
+         caller could have fixed is worse than surfacing it. A present, unreadable
+         validation label (``UnreadableLabelDocument``) from the explicit ``val_images_dir``
+         build propagates too, rather than degrading to a run with no validation over a
+         document nobody can read. Every other failure in this function (dataset build
+         errors, a malformed ``val_ratio``/``seed``, a ``group_balanced_split`` failure)
+         still degrades to ``(full_train_ds, None)``.
 
     Reads ``auto_val`` / ``val_*`` / ``split.*`` from ``data_cfg`` (== config["data"]).
     """
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.splits import (
         group_balanced_split, count_label_lines, resolve_group_key_fn,
@@ -2006,6 +2021,8 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                     )
                 val_src["csv_path"] = val_csv
             return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling)
+        except UnreadableLabelDocument:
+            raise
         except Exception as exc:
             logger.warning("Explicit val build failed (%s); training without validation.", exc)
             return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
@@ -2188,7 +2205,7 @@ def get_worst_predictions(
         scores.append((pred_file.stem, error_score))
 
     # Also include GT images with no predictions at all (completely missed)
-    for gt_file in gt_path.glob("*.json"):
+    for gt_file in prediction_documents(gt_path):
         pred_file = pred_path / gt_file.name
         if not pred_file.is_file():
             gt_anns = _boxes(gt_file)
@@ -2326,6 +2343,8 @@ def evaluate_model(
         resolved_max_dets = DEFAULT_MAX_DETS if max_dets is None else max_dets
         # tile_size/overlap pass through as None-if-absent: run_full_frame_evaluation itself
         # resolves them from persisted training geometry (or refuses), never this wrapper fabricating.
+        from tcip_annotation.json_io import UnreadableLabelDocument
+
         try:
             return run_full_frame_evaluation(
                 ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
@@ -2335,7 +2354,7 @@ def evaluate_model(
                 global_nms_iou=global_nms_iou, postprocess=postprocess,
                 max_dets=resolved_max_dets, trait=trait, date=date,
             )
-        except ValueError as exc:
+        except (ValueError, UnreadableLabelDocument) as exc:
             return {"error": str(exc)}
 
     # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.

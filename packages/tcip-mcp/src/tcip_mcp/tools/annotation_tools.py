@@ -467,10 +467,13 @@ def score_predictions(
             count; map50 stays a labeled comparability metric. Absent -> the IoU convention governs.
     """
     p = Path(path)
-    if p.is_file():
-        return _evaluate_image(path, iou_threshold, conf_threshold, detail, trait)
-    if p.is_dir():
-        return _evaluate_folder(path, iou_threshold, conf_threshold, trait)
+    try:
+        if p.is_file():
+            return _evaluate_image(path, iou_threshold, conf_threshold, detail, trait)
+        if p.is_dir():
+            return _evaluate_folder(path, iou_threshold, conf_threshold, trait)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     return {"error": f"Path not found: {path}"}
 
 
@@ -643,16 +646,20 @@ def focus(
         iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
         conf_threshold: Review only, confidence cutoff for showing predictions.
     """
-    if tab == "annotate":
-        return _focus_annotate(project_root, dataset_root, subject, date, mode=mode, image_index=image_index)
-    if tab == "review":
-        if not model_name:
-            return {"error": "tab='review' requires model_name"}
-        return _focus_review(
-            project_root, dataset_root, subject, date, model_name,
-            image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
-            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-        )
+    try:
+        if tab == "annotate":
+            return _focus_annotate(project_root, dataset_root, subject, date, mode=mode,
+                                   image_index=image_index)
+        if tab == "review":
+            if not model_name:
+                return {"error": "tab='review' requires model_name"}
+            return _focus_review(
+                project_root, dataset_root, subject, date, model_name,
+                image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
+                iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+            )
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     return {"error": f"tab must be 'annotate' or 'review', got {tab!r}"}
 
 

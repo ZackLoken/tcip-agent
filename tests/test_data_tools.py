@@ -86,6 +86,18 @@ def test_make_splits_refuses_a_nonzero_test_ratio(data_dir: Path):
     assert "test_ratio" in result["error"]
 
 
+def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_path: Path):
+    """A present, unreadable label among the candidates is an error naming the file, never a
+    raise through the tool boundary."""
+    bad = next((data_dir / "annotations" / "2-11-26").glob("*.json"))
+    bad.write_bytes(b"{not json")
+
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"))
+
+    assert "error" in result
+    assert str(bad) in result["error"]
+
+
 def test_make_splits_bad_ratios(data_dir: Path):
     result = make_splits(str(data_dir), train_ratio=0.5, val_ratio=0.5, test_ratio=0.5)
     assert "error" in result
@@ -198,6 +210,17 @@ def test_make_splits_spatial_refuses_materialize(tmp_path: Path):
     root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
     result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2, materialize=True)
     assert "error" in result and "materialize" in result["error"]
+
+
+def test_make_splits_spatial_reports_an_unreadable_label_by_name(tmp_path: Path):
+    root = _single_source_dataset(tmp_path / "ds", 1600, 1200)
+    bad = root / "annotations" / "mosaic.json"
+    bad.write_bytes(b"{not json")
+
+    result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2)
+
+    assert "error" in result
+    assert str(bad) in result["error"]
 
 
 def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):

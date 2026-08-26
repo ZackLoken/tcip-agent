@@ -398,12 +398,35 @@ def test_reserve_calibration_fraction_raises_on_unresolvable_extent(tmp_path: Pa
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir(parents=True, exist_ok=True)
     _save_png(images_dir / "mosaic.png")
-    (labels_dir / "mosaic.json").write_text("[]", encoding="utf-8")  # no width/height recorded
+    # A readable document with no width/height recorded, distinct from an unreadable one.
+    (labels_dir / "mosaic.json").write_text('{"annotations": []}', encoding="utf-8")
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin"}
     tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
     split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1, "reserve_calibration_fraction": 0.15}
     with pytest.raises(ValueError, match="reserve_calibration_fraction"):
+        _spatial_single_source_split("mosaic", data_cfg, tiling, object(), split_cfg, None)
+
+
+def test_spatial_single_source_split_raises_on_an_unreadable_label_regardless_of_reserve(
+    tmp_path: Path,
+):
+    """A present, unreadable label document is a categorically different fact than one recording
+    no width/height: it raises unconditionally, whether or not reserve_calibration_fraction was
+    requested, rather than degrading to no validation over a document nobody can read."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.tools.training_tools import _spatial_single_source_split
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    _save_png(images_dir / "mosaic.png")
+    (labels_dir / "mosaic.json").write_text("[]", encoding="utf-8")  # not a dict: unreadable
+
+    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": "catkin"}
+    tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
+    split_cfg = {"val_ratio": 0.2, "test_ratio": 0.1}  # no reserve_calibration_fraction
+    with pytest.raises(UnreadableLabelDocument):
         _spatial_single_source_split("mosaic", data_cfg, tiling, object(), split_cfg, None)
 
 

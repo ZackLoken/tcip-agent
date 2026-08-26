@@ -215,6 +215,39 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     assert out_csv.exists()
 
 
+def test_compute_phenology_reports_an_unreadable_prediction_by_name(tmp_path: Path) -> None:
+    """A present, unreadable prediction document is an error naming the file, never a raise
+    through the tool boundary and never silently read as this plant's date contributing nothing."""
+    root = _ds_root(tmp_path)
+    d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
+    _write_preds(d1, "P1_a", ["dormant"])
+    d2.mkdir(parents=True, exist_ok=True)
+    bad = d2 / "P1_b.json"
+    bad.write_text("not json {][", encoding="utf-8")
+    _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
+    _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
+    mapping_path = tmp_path / "state" / "plant_mapping.json"
+    _write_mapping(mapping_path, {
+        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+    })
+    out_csv = tmp_path / "out" / "catkin_phenology.csv"
+
+    res = compute_phenology(
+        trait="catkin",
+        mapping_path=str(mapping_path),
+        predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
+        output_csv_path=str(out_csv),
+        classifier_pred_dirs=[str(d1)],
+        operating_point_conf=0.4,
+        operating_point_validated="held_out_annotations",
+    )
+
+    assert "error" in res
+    assert str(bad) in res["error"]
+
+
 def test_compute_phenology_re_reads_the_registry_at_the_second_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
