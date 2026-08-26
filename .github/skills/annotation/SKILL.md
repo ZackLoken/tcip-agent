@@ -106,17 +106,17 @@ Full workflow:
    content identity of the pixels the engine ran on; on a path outside any dataset's `images/`
    tree the render and candidates still come back (`staged: false`, naming why), but there is
    nothing for `accept_proposals` to read back later
-2. Agent `view_image` on overlay → identifies and classifies each candidate
+2. Agent reads the overlay with its own image-capable read tool → identifies and classifies each candidate
 3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → reads
    the proposals staged for that image's content, refusing if the image has changed since that
    run, then stages accepted candidates as predictions (`created_by=<engine>`) in the predictions
    tree for human review on the Review canvas, never writes GT directly, and through the
    verdict-guarded staging helper so a re-run never orphans recorded verdicts
-4. Agent `view_image` on the staged result → visual QA pass
+4. Agent reads the staged result with its own image-capable read tool → visual QA pass
 
 Corrective loop (for missed objects):
 1. `overlay_reference_grid(image_path)` → labeled reference grid ('A1' top-left) for spatial reference
-2. Agent `view_image` → identifies missed regions by grid cell
+2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell
 3. `segment_prompt(image_path, grid_cells=["B3", "D5"], tile_size=<echoed>)` → the engine segments
    at those locations
 4. Save new annotations via `save_annotations`
@@ -138,7 +138,7 @@ Grid cell system:
 | `accept_proposals` | Stage classified candidates as predictions | Classification |
 | `overlay_reference_grid` | Spatial reference for corrections | Correction |
 | `segment_prompt(grid_cells=...)` | Targeted segmentation | Correction |
-| `view_image` | Agent visual review | All phases |
+| Agent's own image-capable read tool | Agent visual review | All phases |
 
 ## Review Protocol
 
