@@ -46,52 +46,58 @@ def check_negatives(root: Path, findings: list) -> None:
     subject and date, so the disagreement is checked per subject present in the file. An
     image-level record (a subject with no geometry) counts as content for that subject, the same
     rule ``annotations_hold_subject`` applies everywhere else this question is asked.
+
+    Reads the status store through the same seam ``validate_data_quality`` reads it through, so
+    the two agree on one root under whichever backend the process is bound to; not gated in
+    ``gated_stores`` for that reason, the same as any check reading entirely through the seam.
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import (
         annotation_date, annotation_root, annotations_hold_subject, bucket_subject_date,
-        confirmed_negative_names_any_subject, image_status_path, is_confirmed_negative,
-        normalize_status_store,
+        confirmed_negative_names_any_subject, is_confirmed_negative, normalize_status_store,
+        read_image_status_store, resolve_image_name,
     )
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
-    by_bucket = normalize_status_store(_load(image_status_path(root)))
+    by_bucket = normalize_status_store(read_image_status_store(root))
     stems = _image_stems(root)
     ann_root = annotation_root(root)
     neg_names = confirmed_negative_names_any_subject(by_bucket)
 
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
-        if ".original" in label.parts:
+        if BASELINE_DIRNAME in label.parts:
             continue
         try:
             anns = json_io.read_annotations(str(label))
         except UnreadableLabelDocument as exc:
             findings.append(("error", f"{label.relative_to(root)}: label file will not read: {exc}"))
             continue
-        name = stems.get(label.stem, f"{label.stem}.JPG")
         date = annotation_date(label)
-        for key, bucket in by_bucket.items():
-            if not is_confirmed_negative(bucket.get(name)):
-                continue
-            subj, bdate = bucket_subject_date(key)
-            if bdate != date:
-                continue
-            if annotations_hold_subject(anns, subj):
-                findings.append(("error", f"{label.relative_to(root)}: has {subj!r} annotations but "
-                                f"the status store says 'negative' for {subj!r}, contradictory; re-review"))
-        if not anns and name not in neg_names:
+        name = resolve_image_name(root, date, label.stem)
+        if name is not None:
+            for key, bucket in by_bucket.items():
+                if not is_confirmed_negative(bucket.get(name)):
+                    continue
+                subj, bdate = bucket_subject_date(key)
+                if bdate != date:
+                    continue
+                if annotations_hold_subject(anns, subj):
+                    findings.append(("error", f"{label.relative_to(root)}: has {subj!r} annotations "
+                                    f"but the status store says 'negative' for {subj!r}, "
+                                    "contradictory; re-review"))
+        if not anns and (name is None or name not in neg_names):
             findings.append(("warn", f"{label.relative_to(root)}: empty label but not a confirmed "
                             "negative for any subject; excluded from training (delete the file, or "
                             "mark the image Complete for the subject it should be a negative of)"))
         if label.stem not in stems:
             findings.append(("warn", f"{label.relative_to(root)}: label has no matching image"))
 
-    # The dominant case under "label a few examples": images with no label record at all. They are
-    # excluded from training, so a breeder who labelled 30 of 400 trains on 30; worth seeing at a
-    # glance. Reported as one line, not one per image.
+    # Images with no label record at all: excluded from training, so a breeder who labelled 30 of
+    # 400 trains on 30. Reported as one line, not one per image (the dominant case at small scale).
     labelled = {p.stem for p in ann_root.rglob("*.json")
-                if ".original" not in p.parts} if ann_root.is_dir() else set()
+                if BASELINE_DIRNAME not in p.parts} if ann_root.is_dir() else set()
     unannotated = sorted(set(stems) - labelled)
     if unannotated:
         shown = ", ".join(unannotated[:5]) + ("…" if len(unannotated) > 5 else "")
@@ -183,12 +189,13 @@ def check_registry(root: Path, findings: list) -> None:
 
 def check_provenance(root: Path, findings: list) -> None:
     from tcip_annotation.json_io import ANNOTATIONS_KEY, UnreadableLabelDocument, load_label_document
+    from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import annotation_root
 
     ann_root = annotation_root(root)
     unstamped = 0
     for label in ann_root.rglob("*.json") if ann_root.is_dir() else []:
-        if ".original" in label.parts:
+        if BASELINE_DIRNAME in label.parts:
             continue
         try:
             data = load_label_document(label)

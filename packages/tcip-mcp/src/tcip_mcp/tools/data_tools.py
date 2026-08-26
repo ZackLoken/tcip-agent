@@ -73,13 +73,20 @@ def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels.
 
     Labels are the name-based per-image JSON (one file per image, all subjects) under
-    ``annotations/<date>/`` (no detect/segment split), or a single assembled dataset-level COCO.
+    ``annotations/<date>/`` (no detect/segment split), a review baseline directory's copies
+    excluded, plus a single assembled dataset-level COCO at the root if one is present: the root
+    candidate sits beside the per-image tree, never in place of it, so a dataset carrying both
+    reports every one of them.
 
     An unreadable first-sorted label (undecodable, non-dict, or otherwise malformed) raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than being folded into "format
-    undetectable": the caller reports it as the named file it is, not a guess.
+    undetectable": the caller reports it as the named file it is, not a guess. ``format`` is an
+    informational best guess (the per-image tree's first-sorted label's shape, or the root
+    candidate's when there is no per-image tree), not a claim every label file shares it;
+    :func:`validate_data_quality` decides format per file instead.
     """
     from tcip_annotation.json_io import prediction_documents
+    from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
 
     root_path = Path(root)
@@ -96,10 +103,14 @@ def _scan_dataset(root: str) -> dict:
         if f.is_file() and f.suffix.lower() in image_exts:
             images.append(str(f))
 
-    # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject).
+    # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject),
+    # a review baseline copy under BASELINE_DIRNAME excluded: it is a snapshot, not a label.
     ann_dir = annotation_root(root_path)
     if ann_dir.is_dir():
-        labels = [str(f) for f in sorted(ann_dir.rglob("*.json")) if f.is_file()]
+        labels = [
+            str(f) for f in sorted(ann_dir.rglob("*.json"))
+            if f.is_file() and BASELINE_DIRNAME not in f.parts
+        ]
         if labels:
             try:
                 from tcip_annotation.format_io import detect_format
@@ -107,18 +118,16 @@ def _scan_dataset(root: str) -> dict:
             except ValueError:
                 detected_format = None  # unrecognized: report nothing rather than a guess
 
-    # A single COCO JSON at the dataset root
-    for candidate in ROOT_LABEL_CANDIDATES:
-        coco_path = root_path / candidate
-        if coco_path.is_file():
+    # A single COCO JSON at the dataset root: one more present label beside the per-image tree.
+    root_candidate = _root_label_candidate(root, set(labels))
+    if root_candidate is not None:
+        labels.append(root_candidate)
+        if detected_format is None:
             try:
                 from tcip_annotation.format_io import detect_format
-                if detect_format(str(coco_path)) == "coco":
-                    labels = [str(coco_path)]
-                    detected_format = "coco"
+                detected_format = detect_format(root_candidate)
             except ValueError:
                 pass
-            break
 
     # Predictions: predictions/<model>/[<date>/]<stem>.json; each model/date bucket is walked on
     # its own through prediction_documents, so the bucket's own stamps are excluded everywhere.
@@ -177,13 +186,14 @@ def scan_dataset(folder_path: str) -> dict:
 
 def _root_label_candidate(folder_path: str, already_present: set) -> str | None:
     """The dataset root's own assembled-label candidate, if one is present and not already
-    counted among the labels ``_scan_dataset`` found.
+    counted among ``already_present``.
 
-    ``_scan_dataset`` discards a root candidate whose format it cannot determine (a swallowed
-    ``ValueError``), so that candidate never reaches its ``labels`` list at all; a caller checking
-    every present label file for a data-quality issue would then never see it. This re-derives
-    only which candidate is present, from the same three names and the same first-match order
-    ``_scan_dataset`` checks, and leaves detecting its format to the caller.
+    The one walk of ``ROOT_LABEL_CANDIDATES`` in their declared first-match order, called by
+    :func:`_scan_dataset` before the candidate joins its ``labels`` list and by any other caller
+    that has its own already-counted set to check the candidate against, so a present root
+    candidate can never be walked for twice by two diverging implementations. A candidate whose
+    format cannot be determined is still returned: it is a present label file, not evidence the
+    dataset carries none, and detecting its format is left to the caller.
     """
     root_path = Path(folder_path)
     for candidate in ROOT_LABEL_CANDIDATES:
@@ -206,6 +216,13 @@ def validate_data_quality(folder_path: str) -> dict:
     unreadable. Class consistency against a subject registry and coordinate-range validation are
     not implemented.
 
+    ``total_labels`` counts exactly the files ``scan_dataset``'s own ``labels_count`` counts (the
+    per-image tree, a review baseline excluded, plus a present root candidate): the two are the
+    same list. ``format`` is the distinct shapes actually found among the label files this call
+    could classify: one shape's name when every file agrees, the shapes sorted when they do not,
+    and ``None`` when no label file's format could be determined at all (labels present but
+    undetectable, or no labels present).
+
     Args:
         folder_path: Path to the dataset root directory.
     """
@@ -216,7 +233,8 @@ def validate_data_quality(folder_path: str) -> dict:
     from tcip_annotation.format_io import _parse_coco_json, detect_format
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
-        confirmed_negative_names_any_subject, normalize_status_store, read_image_status_store,
+        annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
+        read_image_status_store, resolve_image_name,
     )
 
     try:
@@ -226,18 +244,14 @@ def validate_data_quality(folder_path: str) -> dict:
     issues: list[dict] = []
 
     image_stems = {Path(p).stem for p in scan["images"]}
-    image_names = {Path(p).stem: Path(p).name for p in scan["images"]}
-
-    label_paths = [p for p in scan["labels"] if ".original" not in Path(p).parts]
-    root_candidate = _root_label_candidate(folder_path, set(label_paths))
-    if root_candidate is not None:
-        label_paths.append(root_candidate)
+    label_paths = list(scan["labels"])
 
     negatives = confirmed_negative_names_any_subject(
         normalize_status_store(read_image_status_store(folder_path))
     )
 
     subjects: set[str] = set()
+    shapes_found: set[str] = set()
     for label_path in label_paths:
         stem = Path(label_path).stem
         try:
@@ -250,6 +264,7 @@ def validate_data_quality(folder_path: str) -> dict:
             issues.append({"level": "error", "file": label_path,
                           "message": f"label file will not read: {exc}"})
             continue
+        shapes_found.add(file_fmt)
 
         if file_fmt == "json":
             if stem not in image_stems:
@@ -263,8 +278,8 @@ def validate_data_quality(folder_path: str) -> dict:
             for a in anns:
                 subjects.add(a.subject)
             if not anns:
-                name = image_names.get(stem, f"{stem}.JPG")
-                if name not in negatives:
+                name = resolve_image_name(folder_path, annotation_date(label_path), stem)
+                if name is None or name not in negatives:
                     issues.append({"level": "error", "file": label_path,
                                   "message": "empty label file, not a confirmed negative for any "
                                   "subject; excluded from training"})
@@ -282,9 +297,16 @@ def validate_data_quality(folder_path: str) -> dict:
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"COCO parse error: {e}"})
 
+    if not shapes_found:
+        report_format = None
+    elif len(shapes_found) == 1:
+        report_format = next(iter(shapes_found))
+    else:
+        report_format = sorted(shapes_found)
+
     return {
         "path": folder_path,
-        "format": scan.get("format"),
+        "format": report_format,
         "total_images": len(scan["images"]),
         "total_labels": len(label_paths),
         "subjects": sorted(subjects),

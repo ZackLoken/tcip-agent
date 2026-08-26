@@ -187,3 +187,37 @@ def test_a_record_file_name_is_the_stem_the_resolver_would_have_used() -> None:
     assert label_filename("IMG_0001") == "IMG_0001.json"
     assert annotation_path("/ds", "2026-03-02", "IMG_0001").name == label_filename("IMG_0001")
     assert prediction_path("/ds", "m", "2026-03-02", "IMG_0001").name == label_filename("IMG_0001")
+
+
+def test_resolve_image_name_recognizes_an_npz_capture(tmp_path: Path) -> None:
+    """The platform's real extension set, not a private six-extension list: an ``.npz`` capture
+    resolves to its own on-disk name rather than reading as absent."""
+    from tcip_mcp.dataset_layout import resolve_image_name
+
+    date = "2026-03-04"
+    (tmp_path / "images" / date).mkdir(parents=True)
+    (tmp_path / "images" / date / "plotA_0_0.npz").write_bytes(b"\x00")
+
+    assert resolve_image_name(tmp_path, date, "plotA_0_0") == "plotA_0_0.npz"
+
+
+def test_resolve_image_name_resolves_per_bucket_not_last_write_wins(tmp_path: Path) -> None:
+    """A stem two date buckets both use resolves against its own bucket, never a flat map where
+    one bucket's extension silently wins over the other's."""
+    from tcip_mcp.dataset_layout import resolve_image_name
+
+    (tmp_path / "images" / "d1").mkdir(parents=True)
+    (tmp_path / "images" / "d2").mkdir(parents=True)
+    (tmp_path / "images" / "d1" / "IMG_S.jpg").write_bytes(b"\x00")
+    (tmp_path / "images" / "d2" / "IMG_S.png").write_bytes(b"\x00")
+
+    assert resolve_image_name(tmp_path, "d1", "IMG_S") == "IMG_S.jpg"
+    assert resolve_image_name(tmp_path, "d2", "IMG_S") == "IMG_S.png"
+
+
+def test_resolve_image_name_is_none_for_an_unresolvable_stem(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import resolve_image_name
+
+    (tmp_path / "images" / "d1").mkdir(parents=True)
+
+    assert resolve_image_name(tmp_path, "d1", "no_such_stem") is None

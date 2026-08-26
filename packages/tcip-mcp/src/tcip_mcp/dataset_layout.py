@@ -144,6 +144,26 @@ def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: st
     return _entry_path(_IMAGE_TREE, dataset_root, (*_date_seg(date), image_filename(stem, ext)))
 
 
+def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str) -> Optional[str]:
+    """The on-disk display name of the logical image at ``stem`` in one date bucket.
+
+    A plain capture's own file name, or a ``.bandgroup``-grouped capture's manifest file name:
+    the same resolution :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` gives every
+    other by-name reader, over that module's own extension set, so a name behind a
+    confirmed-negative lookup is never fabricated from a guessed extension and never resolved
+    against the wrong bucket by a stem two dates happen to share. ``None`` when no logical image
+    at ``stem`` resolves in that bucket; a caller looking up a status-store entry treats that as
+    unresolvable rather than guessing a name to look one up under.
+    """
+    from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_image_source
+
+    try:
+        source = resolve_image_source(image_dir(dataset_root, date), stem)
+    except FileNotFoundError:
+        return None
+    return source.manifest_path.name if isinstance(source, BandGroupRef) else source.name
+
+
 IMAGERY_STORE = "imagery"
 register_store(
     StoreDescriptor(
@@ -694,10 +714,9 @@ def confirmed_negative_names_any_subject(by_bucket: Mapping[str, Mapping[str, st
     An empty label file names no subject of its own to scope the question by, so the check that
     decides whether to flag it (rather than treat it as a confirmed negative) spans every bucket
     the store holds, unlike the per-subject checks elsewhere in this module. Takes ``by_bucket``
-    already in :func:`normalize_status_store`'s shape rather than a root to read, so a caller that
-    reads the store directly off disk (the doctor, deliberately bypassing the storage seam to
-    catch staleness) and one reading through the seam share this one rule without either
-    dictating how the other reads.
+    already in :func:`normalize_status_store`'s shape rather than a root to read, so every reader
+    of the confirmed-negative store, the doctor and the data-quality validator alike, shares this
+    one rule over whatever ``by_bucket`` it read rather than each deciding admission on its own.
     """
     return {name for bucket in by_bucket.values() for name, status in bucket.items()
             if is_confirmed_negative(status)}

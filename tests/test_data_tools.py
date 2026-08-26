@@ -42,6 +42,31 @@ def test_validate_data_quality_missing_dir():
     assert "error" in validate_data_quality("/nonexistent/path/xyz123")
 
 
+def test_scan_dataset_and_validate_data_quality_count_the_same_labels(tmp_path: Path):
+    """scan_dataset's labels_count and validate_data_quality's total_labels are the same list
+    over one root: the per-image tree plus a present root candidate, a review baseline excluded
+    from both the same way."""
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir = root / "annotations" / "2-11-26"
+    labels_dir.mkdir(parents=True)
+    for stem in ("plotA_0_0", "plotB_0_0"):
+        (images_dir / f"{stem}.jpg").write_bytes(b"\xff\xd8\xff")
+        json_io.write_annotations(labels_dir / f"{stem}.json", [], 32, 32, keep_empty=True)
+    baselines = labels_dir / ".original"
+    baselines.mkdir()
+    json_io.write_annotations(baselines / "plotA_0_0.json", [], 32, 32, keep_empty=True)
+    (root / "annotations.json").write_text(
+        '{"images": [], "annotations": [], "categories": []}', encoding="utf-8"
+    )
+
+    scan_result = scan_dataset(str(root))
+    quality_result = validate_data_quality(str(root))
+
+    assert scan_result["labels_count"] == quality_result["total_labels"] == 3
+
+
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     out = tmp_path / "splits"
     result = make_splits(str(data_dir), output_path=str(out), materialize=True)
