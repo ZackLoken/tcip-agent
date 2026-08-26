@@ -25,7 +25,7 @@ truth for label/prediction locations: every producer and consumer resolves paths
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -975,34 +975,43 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
     return [s.name for s in registry.subjects]
 
 
-def subjects_on_date(dataset_root: str | Path, date: Optional[str]) -> list[str]:
+def subjects_on_date(
+    dataset_root: str | Path, date: Optional[str], *, reader: Optional[Callable] = None,
+) -> list[str]:
     """Distinct subjects that actually appear in the per-image label files on ``date``: the one
     per-date label scan, shared by ``subjects_with_labels`` and the GUI's subject selector.
 
-    Reads each ``annotations/<date>/<stem>.json`` through ``json_io.read_annotations`` (the single
-    reader), so the subjects offered are the subjects genuinely labeled there, sorted. Raises
+    Every sidecar-named file (a bucket's own provenance stamp) is excluded from the walk, so it
+    contributes no subject and never raises. Reads each remaining ``annotations/<date>/<stem>.json``
+    through ``reader`` (``json_io.read_annotations`` by default; a caller with its own memoized
+    reader, keyed by path and mtime, passes it here instead of parsing the same files twice), so
+    the subjects offered are the subjects genuinely labeled there, sorted. Raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when a present label file on this
     date will not read; a missing ``annotations/<date>/`` directory reads as no subjects.
     """
     from tcip_annotation import json_io
 
+    if reader is None:
+        reader = json_io.read_annotations
     d = annotation_dir(dataset_root, date)
     if not d.is_dir():
         return []
     found: set[str] = set()
     for f in json_io.prediction_documents(d):
-        for a in json_io.read_annotations(str(f)):
+        for a in reader(f):
             found.add(a.subject)
     return sorted(found)
 
 
-def subjects_with_labels(dataset_root: str | Path, date: Optional[str]) -> list[str]:
+def subjects_with_labels(
+    dataset_root: str | Path, date: Optional[str], *, reader: Optional[Callable] = None,
+) -> list[str]:
     """Subjects that actually have ≥1 label on ``date``: what the GUI's subject selector offers.
 
     A subject the registry declares but that is unlabeled on the selected date lands the user on an
     empty canvas, so the selector is sourced from the labels present, not the registry.
     """
-    return subjects_on_date(dataset_root, date)
+    return subjects_on_date(dataset_root, date, reader=reader)
 
 
 def list_models(dataset_root: str | Path) -> list[str]:

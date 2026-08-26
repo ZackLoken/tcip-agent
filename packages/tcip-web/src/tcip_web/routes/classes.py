@@ -19,7 +19,6 @@ undecodable without it.
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -30,45 +29,11 @@ from tcip_store import StoreError
 
 from tcip_mcp.dataset_layout import IMAGE_STATUSES
 from tcip_web.identity import resolve_user, user_id
+from tcip_web.label_annotations_cache import cached_label_annotations
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
-
-
-# ── Label-annotations memo (mtime-keyed, bounded) ─────────────────────────
-# Both consumers below re-parse the same label files on every call; memoize per (path, mtime_ns).
-_LABEL_ANNOTATIONS_CACHE_MAX = 4096
-_label_annotations_cache: "OrderedDict[str, tuple[int, list]]" = OrderedDict()
-
-
-def _cached_label_annotations(path: Path) -> list:
-    """The typed annotation records ``read_annotations`` parses from ``path``, memoized by mtime.
-
-    A missing file reads as no annotations. A present, unreadable one raises
-    :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, uncached: a broken document is
-    retried, never remembered as an empty result. That includes a present file the OS refuses to
-    stat (a permission error): only its absence derives an empty status, never a read failure.
-    """
-    from tcip_annotation.json_io import UnreadableLabelDocument, read_annotations
-
-    try:
-        mtime_ns = path.stat().st_mtime_ns
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise UnreadableLabelDocument(f"{path} could not be opened: {exc}") from exc
-    key = str(path)
-    cached = _label_annotations_cache.get(key)
-    if cached is not None and cached[0] == mtime_ns:
-        _label_annotations_cache.move_to_end(key)
-        return cached[1]
-    annotations = read_annotations(path)
-    _label_annotations_cache[key] = (mtime_ns, annotations)
-    _label_annotations_cache.move_to_end(key)
-    if len(_label_annotations_cache) > _LABEL_ANNOTATIONS_CACHE_MAX:
-        _label_annotations_cache.popitem(last=False)
-    return annotations
 
 
 def _guard_dataset_root(root: str) -> str:
@@ -119,7 +84,7 @@ def _subjects_in_dir(d: Path) -> tuple[set[str], list[str]]:
     unreadable: list[str] = []
     for jf in prediction_documents(d):
         try:
-            annotations = _cached_label_annotations(jf)
+            annotations = cached_label_annotations(jf)
         except UnreadableLabelDocument:
             unreadable.append(str(jf))
             continue
@@ -158,12 +123,15 @@ def load_classes(
     )
     from tcip_mcp.dataset_layout import classes_path
 
+    if annotations_dir:
+        _guard_dataset_root(annotations_dir)
+    root = _resolve_dataset_root(dataset_root, annotations_dir)
+
     subjects: set[str] = set()
     unreadable: list[str] = []
     if annotations_dir and Path(annotations_dir).is_dir():
         subjects, unreadable = _subjects_in_dir(Path(annotations_dir))
 
-    root = _resolve_dataset_root(dataset_root, annotations_dir)
     if root:
         p = classes_path(root)
         if p.exists():
@@ -424,7 +392,7 @@ def derive_image_status(payload: DerivePayload) -> dict:
         if adir:
             label_path = adir / f"{stem}.json"
             try:
-                annotations = _cached_label_annotations(label_path)
+                annotations = cached_label_annotations(label_path)
             except UnreadableLabelDocument:
                 unreadable.append(str(label_path))
                 continue

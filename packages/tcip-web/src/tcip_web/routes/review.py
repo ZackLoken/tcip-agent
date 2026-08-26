@@ -50,6 +50,7 @@ from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
 from tcip_web.identity import resolve_user, user_id
+from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
 
 router = APIRouter(prefix="/api/review", tags=["review"])
@@ -729,14 +730,21 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
     pred_dir = _guard_path(payload.pred_dir)
     engine = _get_engine(payload.dataset_root)
     bucket = _bucket_of_dir(pred_dir)
+    is_negative: Optional[bool] = None
     if payload.completed:
-        producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
         # Adjudication-covered only for a genuine negative: a bulk-accept with no individual
         # verdicts on an image the bucket did predict on is not covered.
         try:
             is_negative = _is_negative_for_subject(pred_dir, payload.image_name, payload.subject)
         except UnreadableLabelDocument as exc:
             raise HTTPException(400, str(exc)) from None
+    # The annotation status is derived from the GT file, scoped to the confirmed subject; the
+    # read runs before either engine write, so an unreadable document persists nothing.
+    annotations: list = []
+    if payload.subject and gt_path:
+        annotations = _read_annotations_or_400(gt_path)
+    if payload.completed:
+        producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
         # An unresolvable subject omits the entry rather than refusing the Complete; the reader
         # fails closed on the missing entry at validation time.
         adjudication_covered = (
@@ -747,11 +755,8 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
                                    adjudication_covered=adjudication_covered)
     else:
         engine.unmark_image_reviewed(bucket, payload.image_name)
-    # The annotation status is derived from the GT file, scoped to the confirmed subject.
-    # No subject named -> no status to derive.
     annotation_status = None
     if payload.subject:
-        annotations = _read_annotations_or_400(gt_path) if gt_path else []
         has_content = annotations_hold_subject(annotations, payload.subject)
         annotation_status = derive_status(completed=payload.completed, has_content=has_content)
     _audit(payload.dataset_root, "gui_review_mark_complete", {
@@ -1203,20 +1208,23 @@ class ImageStatusesResponse(BaseModel):
     # Stems (filename without extension) whose GT or prediction file holds >=1 annotation; a
     # stem absent here contributes no TP/FP/FN, so Review navigation skips it.
     detection_stems: list[str]
-    # Stems whose GT or prediction document would not read: left out of detection_stems, so the
-    # tab keeps them visible instead of silently navigating past them.
+    # Absolute paths of GT or prediction documents that would not read; a stem named here can
+    # also be in detection_stems, and the tab keeps it visible rather than navigating past it.
     unreadable: list[str]
 
 
 def _has_objects(path: Path) -> bool:
-    """True if ``path`` holds at least one annotation record, read through the one label reader.
-    An empty (confirmed-negative) or missing file has nothing to review."""
-    return bool(read_annotations(str(path)))
+    """True if ``path`` holds at least one annotation record, read through the mtime-keyed label
+    memo shared with the classes and dataset routes. An empty (confirmed-negative) or missing
+    file has nothing to review."""
+    return bool(cached_label_annotations(path))
 
 
 def _stems_with_objects(*dirs: Optional[str]) -> tuple[set[str], set[str]]:
-    """Stems with >=1 annotation record across ``dirs``, and the stems whose document would not
-    read (per file: one bad document costs its own stem, never the whole scan).
+    """Stems with >=1 annotation record across ``dirs``, and the absolute paths of documents that
+    would not read (per file: one bad document costs its own stem, never the whole scan). A stem
+    can appear in both sets at once, when one directory's document is unreadable and the other's
+    holds objects for the same stem.
 
     Every directory's own document for a stem is opened, never skipped because an earlier
     directory already resolved that stem: a corrupt prediction document must surface as

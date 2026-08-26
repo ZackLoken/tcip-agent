@@ -38,6 +38,7 @@ from tcip_mcp.dataset_layout import (
     subjects_with_labels,
 )
 from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed, safe_join
 from tcip_web.state import DatasetSelection, store
 
@@ -117,7 +118,7 @@ def _subjects_by_date(root: Path, dates: list[str]) -> tuple[dict[str, list[str]
     problem: Optional[str] = None
     for d in dates:
         try:
-            by_date[d] = subjects_with_labels(root, d)
+            by_date[d] = subjects_with_labels(root, d, reader=cached_label_annotations)
         except UnreadableLabelDocument as exc:
             by_date[d] = []
             if problem is None:
@@ -273,7 +274,8 @@ async def select_dataset(req: SelectionRequest) -> dict:
         from tcip_annotation.json_io import UnreadableLabelDocument
 
         try:
-            annotations_present = req.subject in subjects_with_labels(root, req.date)
+            annotations_present = req.subject in subjects_with_labels(
+                root, req.date, reader=cached_label_annotations)
         except UnreadableLabelDocument as exc:
             # Advisory only, stated above: an unreadable label must not block a selection.
             annotations_present = False
