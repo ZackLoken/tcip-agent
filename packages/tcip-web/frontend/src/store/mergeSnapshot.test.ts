@@ -193,6 +193,35 @@ describe("mergeSnapshot ownership model", () => {
   });
 });
 
+describe("applyRestoredDataset", () => {
+  beforeEach(() => {
+    useStore.setState({
+      gui: snapshot({ dataset: dataset() }),
+      reviewStatus: {
+        byImage: { "a.jpg": "completed" },
+        hasDetections: { "a.jpg": true },
+        unreadable: ["/proj/ds/annotations/2-11-26/b.json"],
+        activeFilter: "reviewed",
+      },
+    });
+  });
+
+  it("clears reviewStatus on a dataset identity change", () => {
+    s().applyRestoredDataset(dataset({ dataset_root: "/proj/other", date: "3-2-26" }));
+    expect(s().reviewStatus).toEqual({
+      byImage: {},
+      hasDetections: {},
+      unreadable: [],
+      activeFilter: "all",
+    });
+  });
+
+  it("keeps reviewStatus when the identity is unchanged", () => {
+    s().applyRestoredDataset(dataset());
+    expect(s().reviewStatus.byImage).toEqual({ "a.jpg": "completed" });
+  });
+});
+
 describe("clearDataset", () => {
   it("clears reviewStatus along with the dataset selection", () => {
     useStore.setState({

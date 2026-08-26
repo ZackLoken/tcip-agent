@@ -144,6 +144,16 @@ const DEFAULT_REVIEW_STATUS: ReviewImageStatusState = {
   activeFilter: "all",
 };
 
+/** True when two selections name a different (dataset_root, date, subject): the identity a
+ *  review-status fetch is scoped to, so a fact fetched for one never gates navigation in the
+ *  other. */
+function datasetIdentityChanged(
+  a: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
+  b: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
+): boolean {
+  return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
+}
+
 interface BandSelectionState {
   /** The breeder's chosen band composite for each distinct band set this session has seen, keyed
    *  by bandSetSignature (the image's band names, in order). Absent means no change has been made
@@ -566,6 +576,9 @@ export const useStore = create<AppState>()((set, get) => ({
           // newly selected dataset could flag a same-named image that was never checked.
           staleMarks: [],
         },
+        reviewStatus: datasetIdentityChanged(s.gui.dataset, sel)
+          ? DEFAULT_REVIEW_STATUS
+          : s.reviewStatus,
       };
     }),
 
@@ -585,10 +598,7 @@ export const useStore = create<AppState>()((set, get) => ({
         return { wsVersion: nextVersion };
       }
 
-      const identityChanged =
-        inDs.dataset_root !== local.dataset.dataset_root ||
-        inDs.date !== local.dataset.date ||
-        inDs.subject !== local.dataset.subject;
+      const identityChanged = datasetIdentityChanged(inDs, local.dataset);
 
       // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
       // the tab is the client's per-project record (backend active_tab only moves on agent focus).

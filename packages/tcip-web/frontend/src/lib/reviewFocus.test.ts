@@ -113,4 +113,27 @@ describe("applyReviewFocus", () => {
 
     expect(api.dataset.select).toHaveBeenCalledTimes(1);
   });
+
+  it("clears a prior dataset's reviewStatus when the focus switches identity", async () => {
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
+    useStore.setState({
+      reviewStatus: {
+        byImage: { "old.jpg": "completed" },
+        hasDetections: { "old.jpg": true },
+        unreadable: [],
+        activeFilter: "all",
+      },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(api.dataset.select).mockResolvedValue({ status: "ok", selection: SELECTION } as any);
+
+    await applyReviewFocus({
+      dataset_root: "/ws/proj",
+      subject: "subject_a",
+      date: "2026-02-11",
+      model_name: "baseline",
+    });
+
+    expect(useStore.getState().reviewStatus.byImage).toEqual({});
+  });
 });
