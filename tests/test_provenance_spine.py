@@ -186,12 +186,11 @@ def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
 
     out = tmp_path / "splits"
-    result = make_splits(str(data_dir), output_path=str(out), seed=7)
-    assert result["dataset_hash"]
+    result = make_splits(str(data_dir), output_path=str(out), seed=7, subject="catkin")
     assert result["seed"] == 7
     manifest = ts.read(split_manifest_key(out))
     assert manifest["seed"] == 7
-    assert manifest["dataset_hash"] == result["dataset_hash"]
+    assert manifest["members"]["2-11-26"]["dataset_hash"]
     assert set(manifest["splits"]) == {"train", "val"}
 
 

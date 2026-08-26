@@ -11,15 +11,20 @@ split side.
 
 Composes three existing pieces without reimplementing any of them: ``read_plant_csvs`` (the plant
 CSV parser), ``OrthomosaicGeoreference.pixel_to_wgs84`` (GeoTIFF pixel -> WGS84), and
-``_nearest_plant`` (GPS nearest-neighbour match) -- then hands the resulting ``{stem: group_key}``
-map to ``make_splits(group_key_map=...)``, which already refuses loudly (via
-``resolve_group_key_fn``) if the map doesn't cover every stem it needs.
+``_nearest_plant`` (GPS nearest-neighbour match) -- then hands the resulting ``{identity:
+group_key}`` map to ``make_splits(group_key_map=...)``, which already refuses loudly (via
+``resolve_group_key_fn``) if the map doesn't cover every member it needs. ``identity`` is
+``<date>/<stem>`` (:func:`~tcip_mcp.pipelines.data.splits.member_identity`, the same identity
+``make_splits`` keys its own members by), since a stem is unique only within one capture date.
+
+``--subject`` is required: ``make_splits`` draws its members through the platform's own
+per-subject admission and refuses to write a manifest without one.
 
 Usage:
     python scripts/plant_aware_group_splits.py <dataset_root> --plant-csv <plants.csv> \
-        [--plant-csv <more_plants.csv> ...] [--train-ratio 0.8] [--val-ratio 0.2] \
-        [--test-ratio 0.0] [--seed 42] [--tolerance-m 5.0] [--output-path <dir>] \
-        [--materialize] [--no-copy] [--subject <subject>]
+        [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
+        [--train-ratio 0.8] [--val-ratio 0.2] [--test-ratio 0.0] [--seed 42] \
+        [--tolerance-m 5.0] [--output-path <dir>] [--materialize] [--no-copy]
 """
 
 from __future__ import annotations
@@ -46,7 +51,9 @@ def derive_plant_group_key_map(
     *,
     nn_tolerance_m: float | None = None,
 ) -> dict[str, str]:
-    """``{stem: plot_name}`` for every stem in ``stem_to_raster``, resolved by GPS nearest-neighbour.
+    """``{identity: plot_name}`` for every key in ``stem_to_raster``, resolved by GPS
+    nearest-neighbour. ``stem_to_raster``'s keys are opaque to this function; the caller passes
+    plain stems or ``<date>/<stem>`` identities depending on what it is building the map for.
 
     Each raster's own center pixel is its representative location (mirroring how
     ``assign_detections_to_plants`` uses a detection box's own centroid), converted to WGS84 via
@@ -142,20 +149,29 @@ def main(argv: list[str] | None = None) -> int:
                          help="Also lay out a {train,val}/{images,labels}/ tree.")
     parser.add_argument("--no-copy", action="store_true",
                          help="Symlink instead of copy when materializing.")
-    parser.add_argument("--subject", default=None,
-                         help="Subject confirmed negatives are keyed under (materialize only).")
+    parser.add_argument("--subject", required=True,
+                         help="The object class make_splits draws its members for and the "
+                              "confirmed negatives are keyed under.")
+    parser.add_argument("--attribute", default=None,
+                         help="Scope the draw to instances already assessed for this attribute "
+                              "of --subject; omitted, every instance of --subject counts.")
     args = parser.parse_args(argv)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
 
+    from tcip_mcp.dataset_layout import parse_image_path
+    from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
     from tcip_mcp.tools.data_tools import _scan_dataset, make_splits
 
     bind_default()
 
     scan = _scan_dataset(args.dataset_root)
-    stem_to_raster = {Path(p).stem: Path(p) for p in scan["images"]}
+    stem_to_raster: dict[str, Path] = {}
+    for p in scan["images"]:
+        _root, date, stem = parse_image_path(p)
+        stem_to_raster[member_identity(date, stem)] = Path(p)
     if not stem_to_raster:
         print(f"error: no images found under {args.dataset_root}", file=sys.stderr)
         return 1
@@ -187,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         materialize=args.materialize,
         copy_files=not args.no_copy,
         subject=args.subject,
+        attribute=args.attribute,
     )
     if "error" in result:
         print(f"error: make_splits refused: {result['error']}", file=sys.stderr)

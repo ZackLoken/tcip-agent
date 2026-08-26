@@ -597,7 +597,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `scan_dataset` | `data_tools.py:159` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
 | `validate_data_quality` | `data_tools.py:225` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:342` | yes | Compute a leakage-free, annotation-stratified train/val/test split. |
+| `make_splits` | `data_tools.py:342` | yes | Compute a leakage-free, annotation-stratified train/val split. |
 
 ### experiment_tools.py (4 tools)
 
