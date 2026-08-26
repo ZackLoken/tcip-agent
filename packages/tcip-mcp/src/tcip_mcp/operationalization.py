@@ -805,7 +805,7 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> C
         except FileNotFoundError as exc:
             raise ValueError(
                 f"dataset_root {dataset_root!r} carries no class registry of its own. Write one "
-                "(write_registry) before a statement's classes can be checked against it."
+                "(write_class_map) before a statement's classes can be checked against it."
             ) from exc
 
     registered = read_datasets(project_root)

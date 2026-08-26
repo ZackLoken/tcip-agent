@@ -40,8 +40,13 @@ def dataset(tmp_path: Path) -> Path:
 
 
 def _save_registry(client: TestClient, root: Path, catkin_attributes: dict) -> None:
-    """Write the dataset registry through the real save route: catkin carries an attribute
-    vocabulary, bush is detection-only, so the two subjects have different schemas."""
+    """Write the dataset registry through the real save route, carrying forward the version the
+    route last reported: catkin carries an attribute vocabulary, bush is detection-only, so the
+    two subjects have different schemas."""
+    version = client.get(
+        "/api/classes/load",
+        params={"project_root": str(root), "dataset_root": str(root)},
+    ).json()["version"]
     resp = client.post(
         "/api/classes/save",
         json={
@@ -51,6 +56,7 @@ def _save_registry(client: TestClient, root: Path, catkin_attributes: dict) -> N
                 "catkin": {"description": "the male flower", "attributes": catkin_attributes},
                 "bush": {"description": "one plant crown"},
             },
+            "version": version,
         },
     )
     assert resp.status_code == 200, resp.text

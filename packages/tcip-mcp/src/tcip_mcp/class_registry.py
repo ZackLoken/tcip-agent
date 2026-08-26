@@ -338,7 +338,10 @@ def replace_registry(
 
     The confirmation-digest sweep (:func:`_sweep_schema_change`) runs only once the write has
     actually landed, against the registry this call read before writing, so a write that loses
-    the compare-and-set leaves no stamp against a registry that never landed. Returns
+    the compare-and-set leaves no stamp against a registry that never landed. The accepted
+    residual is the reverse case: a crash between the put landing and the sweep completing leaves
+    the affected confirmations unstamped under the registry that did land, which the training
+    carry's quarantine then reads as predating the change rather than made under it. Returns
     ``{"version": Version, "schema_change_sweep": dict}``.
     """
     import tcip_store
@@ -385,17 +388,28 @@ def replace_registry(
 
 
 def copy_registry(source: str | Path, destination: str | Path) -> None:
-    """Place one dataset's registry beside another dataset's data.
+    """Place one dataset's registry beside another dataset's data, once.
 
-    Carries the stored document across rather than a re-serialization of a parsed registry,
-    so a materialized copy declares exactly what its source declares and a digest taken
-    against either one agrees, and it lands through the one writer every registry write uses.
+    Carries the stored document across rather than a re-serialization of a parsed registry, so a
+    materialized copy declares exactly what its source declares and a digest taken against either
+    one agrees. Writes create-only (``expect=Version.ABSENT``) and refuses when the destination
+    already holds a registry: a materialization or split run repeated over an existing root must
+    not replace a registry silently, since a breeder or a later write may have changed it since.
     """
     import tcip_store
 
-    tcip_store.put_blob(
-        _registry_key(destination), tcip_store.read_blob_versioned(_registry_key(source)).value
-    )
+    dest_key = _registry_key(destination)
+    try:
+        tcip_store.put_blob(
+            dest_key,
+            tcip_store.read_blob_versioned(_registry_key(source)).value,
+            expect=tcip_store.Version.ABSENT,
+        )
+    except tcip_store.VersionConflict as exc:
+        raise RegistryError(
+            f"a class registry already exists at {destination}; copy_registry places a first "
+            "copy only and never replaces one"
+        ) from exc
 
 
 def assign_class_ids(registry: ClassRegistry, subject: str, attribute: str | None = None) -> dict[str, int]:

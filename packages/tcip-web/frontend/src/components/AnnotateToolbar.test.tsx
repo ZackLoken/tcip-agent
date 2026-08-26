@@ -283,6 +283,31 @@ describe("AnnotateToolbar subject authoring", () => {
     expect(useStore.getState().registry.subjects).toEqual({ leaf: {} });
     expect(useStore.getState().registry.version).toBe("v3");
   });
+
+  it("reverts the optimistically set active subject when the save is refused", async () => {
+    seedDataset();
+    act(() => {
+      useStore.getState().setRegistry({ leaf: {} }, "v1");
+      useStore.getState().setActiveSubject("leaf");
+    });
+    vi.spyOn(classesApi, "save").mockRejectedValue(new Error("409 stale version"));
+    vi.spyOn(classesApi, "load").mockResolvedValue({
+      subjects: { leaf: {} },
+      version: "v3",
+      unreadable: [],
+    });
+    answerPrompt("husk");
+    renderToolbar();
+
+    // "leaf" is already active, so the pill reads its name rather than the default placeholder.
+    fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByText("+ New subject"));
+    });
+
+    // "husk" was set optimistically as active; the refusal must not leave it active.
+    expect(useStore.getState().gui.active_subject).toBe("leaf");
+  });
 });
 
 describe("AnnotateToolbar band picker (progressive disclosure)", () => {

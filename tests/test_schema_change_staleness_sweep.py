@@ -66,10 +66,16 @@ def dataset(tmp_path: Path) -> Path:
 
 def _save_via_route(client: TestClient, root: Path, catkin_attributes: dict,
                     bush_attributes: dict | None = None) -> dict:
+    """Save through the route, carrying forward the version the route itself last reported, the
+    way the toolbar carries what it loaded rather than defaulting to an unconditional write."""
+    version = client.get(
+        "/api/classes/load",
+        params={"project_root": str(root), "dataset_root": str(root)},
+    ).json()["version"]
     resp = client.post(
         "/api/classes/save",
         json={"project_root": str(root), "dataset_root": str(root),
-              "subjects": _subjects(catkin_attributes, bush_attributes)},
+              "subjects": _subjects(catkin_attributes, bush_attributes), "version": version},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()

@@ -180,9 +180,9 @@ class SaveClassesPayload(BaseModel):
     subjects: dict  # the nested registry mapping (subjects -> attributes -> values)
     dataset_root: Optional[str] = None
     annotations_dir: Optional[str] = None
-    # The version load_classes returned beside the registry this save was built from.
-    # None is an unconditional write; the toolbar always carries the version it loaded.
-    version: Optional[str] = None
+    # Required: the version load_classes returned beside the registry this save was built from.
+    # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
+    version: Optional[str]
 
 
 @router.post("/save")
@@ -213,7 +213,7 @@ def save_classes(payload: SaveClassesPayload) -> dict:
         raise HTTPException(400, f"invalid class registry: {exc}") from exc
     path = classes_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    expect = Version(payload.version) if payload.version is not None else None
+    expect = Version(payload.version) if payload.version is not None else Version.ABSENT
     try:
         result = replace_registry(path, registry, expect=expect)
     except RegistryError as exc:

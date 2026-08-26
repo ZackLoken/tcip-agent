@@ -202,6 +202,24 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path
         ["catkin", "bush"]
 
 
+def test_copy_registry_refuses_when_the_destination_already_holds_one(tmp_path):
+    """A materialization or split re-run must not replace a destination registry silently: the
+    first copy is create-only, and a second copy attempt over the same destination refuses."""
+    from tcip_mcp.class_registry import copy_registry
+
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    write_registry(source / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    write_registry(destination / "classes.json", ClassRegistry(subjects=(Subject(name="bush"),)))
+
+    with pytest.raises(RegistryError):
+        copy_registry(source / "classes.json", destination / "classes.json")
+
+    assert read_registry(destination / "classes.json").subject("bush") is not None
+    assert read_registry(destination / "classes.json").subject("catkin") is None
+
+
 def _leaf_bush() -> ClassRegistry:
     """A generic two-subject registry (a detection-only subject, a classified one), for the
     registry-write tests below."""
