@@ -294,3 +294,28 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
               "--labels-dir", str(labels), "--images-dir", str(tmp_path / "images"),
               "--dataset-root", str(tmp_path)])
     assert "created_by" in str(refused.value) or "claude" in str(refused.value)
+
+
+def test_script_split_manifest_dir_requires_subject(tmp_path):
+    """--split-manifest-dir needs --subject to check the manifest's own subject against; this
+    refuses before touching a checkpoint or a dataset."""
+    from scripts.calibrate_operating_point import main
+
+    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path), "--split-manifest-dir", str(tmp_path / "m")])
+
+    assert rc == 2
+
+
+def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
+    """A drawn split's own parameter beside a recorded partition is a conflict, not a silent
+    choice between the two."""
+    from scripts.calibrate_operating_point import main
+
+    rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
+              "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
+              "--dataset-root", str(tmp_path), "--split-manifest-dir", str(tmp_path / "m"),
+              "--subject", "catkin", "--group-by", "stem"])
+
+    assert rc == 2

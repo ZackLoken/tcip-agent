@@ -376,6 +376,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 7 | 0 |
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | scripts/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
+| scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 3 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 1 | 0 |
@@ -526,6 +527,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/calibrate_operating_point.py |
 | scripts | scripts/check_architecture_citations.py |
 | scripts | scripts/check_architecture_doc.py |
+| scripts | scripts/conform_cal_holdout_locks.py |
 | scripts | scripts/check_dataset_identity.py |
 | scripts | scripts/compute_disagreements.py |
 | scripts | scripts/conform_metrics_marker.py |
@@ -672,8 +674,8 @@ Docstring is the function's docstring first line, verbatim.
 | `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
 | `update_trait_spec_fields` | `phenology_tools.py:109` | yes | Update one or more fields on an already-registered trait's spec. |
 | `calibrate_classifier_operating_point` | `phenology_tools.py:392` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:555` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:743` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:558` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `compute_phenology` | `phenology_tools.py:749` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -1640,9 +1642,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: th
 ## 26. `split_manifest.json` / `split_stem_list.json`, a partition `make_splits` drew
 
 Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val}.json`, addressed by
-`split_manifest_key`/`split_stem_list_key`,
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:35`, `:35`, under whatever directory the
-caller asked the partition to be written to; no dataset resolver owns this layout.
+`split_manifest_key`, `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:58`, and
+`split_stem_list_key`, `data_tools.py:35`, under whatever directory the caller asked the
+partition to be written to; no dataset resolver owns this layout.
 
 Writer: `make_splits`, `data_tools.py:374`, when `output_path` is given or `materialize=True`.
 The manifest records `seed`, `group_by` (the resolved policy), `group_key_map` when one was
@@ -1662,6 +1664,35 @@ through `make_splits`.
 No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 `tests/test_split_manifest_binding.py` calls the real writer and the real consumer
 (`_auto_train_val`'s manifest branch) against the same files.
+
+## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
+
+Path: named for the identity hash it locks rather than a directory of its own, addressed by
+`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:803`, under the
+scope root the split was drawn over (`cal_holdout_scope_root`).
+
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:961`, locking on first draw for a given
+identity hash; every later call for the same identity answers from the lock unchanged unless
+`force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
+`group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
+the identity hash otherwise being `dataset_hash` over the manifest's held-out universe rather than
+the whole directory), and `redraw_history` (one entry per draw, each carrying its own declared
+policy, including `split_manifest_dir`, and the old/new content hashes).
+
+Readers: six callers draw a lock through this one function -
+`inference_tools._calibrate_operating_point`, `inference_tools.force_redraw_cal_holdout_split`,
+`phenology_tools.calibrate_ordinal_regression_operating_point`,
+`measurement.scale_calibration.resolve_physical_scale`,
+`scripts/calibrate_operating_point.py`, and `feedback.review_calibration.
+resolve_operating_point_from_review` - each answering its own identity's lock, so a whole-directory
+draw and a manifest-restricted draw over the same directory coexist as two distinct locks.
+
+`scripts/conform_cal_holdout_locks.py` is the one-off operator fix that adds `split_manifest_dir:
+null` to every lock (and each `redraw_history` entry) written before this key existed.
+`tests/test_conform_cal_holdout_locks.py` covers it against a fixture root; the repo root's own
+thirteen pre-existing locks are conformed once, outside the test suite, when this family lands.
+
+No seam id in `seam-coverage.json`'s inventory names this record.
 
 ## Formats with a general path-resolution seam but no per-format seam entry above
 
@@ -1848,7 +1879,7 @@ Phase 3 verdict: single.
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:415` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/datasets.py:120`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:104` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:105` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store
@@ -1925,7 +1956,7 @@ Phase 3 verdict: single.
 ## S32. Single operating-point resolution for all consumers
 
 Must agree: the same model and images yield the same conf/NMS/max_dets/tile whichever entry door asks for them.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:601` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:602` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:372` and `:414` (`raw_operating_point` and `block_calibrated_export_operating_point`, the two uncalibrated regimes). Every door takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
 Phase 3 verdict: single.
 

@@ -573,6 +573,7 @@ def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None
         "group_by": locked.get("group_by"), "group_key_map": locked.get("group_key_map"),
         "seed": locked.get("seed"), "holdout_ratio": locked.get("holdout_ratio"),
         "identity_hash": locked.get("identity_hash"),
+        "split_manifest_dir": locked.get("split_manifest_dir"),
     }
     if locked.get("policy_divergence"):
         conf.sweep["split_policy_divergence"] = locked["policy_divergence"]
