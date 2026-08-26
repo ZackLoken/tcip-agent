@@ -63,6 +63,12 @@ def split_manifest_key(split_dir: str | Path) -> Key:
     return Key(SPLIT_MANIFEST_STORE, str(Path(split_dir).absolute()), _SPLIT_MANIFEST_PARTS)
 
 
+ROOT_LABEL_CANDIDATES = ("annotations.json", "labels.json", "instances.json")
+"""Candidate filenames for one assembled dataset-level label document at a dataset's root,
+checked in this order; the first one present on disk is the dataset's label store. Shared by
+:func:`_scan_dataset` and :func:`validate_data_quality` so both name the same three candidates."""
+
+
 def _scan_dataset(root: str) -> dict:
     """Scan a directory tree for images and labels.
 
@@ -102,7 +108,7 @@ def _scan_dataset(root: str) -> dict:
                 detected_format = None  # unrecognized: report nothing rather than a guess
 
     # A single COCO JSON at the dataset root
-    for candidate in ("annotations.json", "labels.json", "instances.json"):
+    for candidate in ROOT_LABEL_CANDIDATES:
         coco_path = root_path / candidate
         if coco_path.is_file():
             try:
@@ -169,14 +175,36 @@ def scan_dataset(folder_path: str) -> dict:
     }
 
 
+def _root_label_candidate(folder_path: str, already_present: set) -> str | None:
+    """The dataset root's own assembled-label candidate, if one is present and not already
+    counted among the labels ``_scan_dataset`` found.
+
+    ``_scan_dataset`` discards a root candidate whose format it cannot determine (a swallowed
+    ``ValueError``), so that candidate never reaches its ``labels`` list at all; a caller checking
+    every present label file for a data-quality issue would then never see it. This re-derives
+    only which candidate is present, from the same three names and the same first-match order
+    ``_scan_dataset`` checks, and leaves detecting its format to the caller.
+    """
+    root_path = Path(folder_path)
+    for candidate in ROOT_LABEL_CANDIDATES:
+        cpath = root_path / candidate
+        if cpath.is_file():
+            return None if str(cpath) in already_present else str(cpath)
+    return None
+
+
 @mcp.tool()
 @audited
 def validate_data_quality(folder_path: str) -> dict:
     """Run quality checks on a dataset (any supported annotation format).
 
-    Checks: empty label files, and stem matching between images and labels (a label with no
-    matching image, or for COCO, a referenced image file not found in the images dir). Class
-    consistency against a subject registry and coordinate-range validation are not implemented.
+    Checks, decided per label file rather than once for the whole dataset (a store mixing shapes
+    cannot report valid because one file's shape happened to be detected first): stem matching
+    between images and labels (a label with no matching image, or for COCO, a referenced image
+    file not found in the images dir), an empty per-image label with no human confirmation that
+    the image is a negative, a file whose format cannot be determined, and a file present but
+    unreadable. Class consistency against a subject registry and coordinate-range validation are
+    not implemented.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -184,38 +212,63 @@ def validate_data_quality(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
+    from tcip_annotation import json_io
+    from tcip_annotation.format_io import _parse_coco_json, detect_format
     from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.dataset_layout import (
+        confirmed_negative_names_any_subject, normalize_status_store, read_image_status_store,
+    )
 
     try:
         scan = _scan_dataset(folder_path)
     except UnreadableLabelDocument as exc:
         return {"error": str(exc)}
     issues: list[dict] = []
-    fmt = scan.get("format")
 
     image_stems = {Path(p).stem for p in scan["images"]}
+    image_names = {Path(p).stem: Path(p).name for p in scan["images"]}
 
-    # Per-image labels: check stem matching (a dataset-level COCO has no per-stem file)
-    if fmt != "coco":
-        for label_path in scan["labels"]:
-            stem = Path(label_path).stem
+    label_paths = [p for p in scan["labels"] if ".original" not in Path(p).parts]
+    root_candidate = _root_label_candidate(folder_path, set(label_paths))
+    if root_candidate is not None:
+        label_paths.append(root_candidate)
+
+    negatives = confirmed_negative_names_any_subject(
+        normalize_status_store(read_image_status_store(folder_path))
+    )
+
+    subjects: set[str] = set()
+    for label_path in label_paths:
+        stem = Path(label_path).stem
+        try:
+            file_fmt = detect_format(label_path)
+        except ValueError as exc:
+            issues.append({"level": "error", "file": label_path,
+                          "message": f"cannot determine annotation format: {exc}"})
+            continue
+        except UnreadableLabelDocument as exc:
+            issues.append({"level": "error", "file": label_path,
+                          "message": f"label file will not read: {exc}"})
+            continue
+
+        if file_fmt == "json":
             if stem not in image_stems:
                 issues.append({"level": "error", "file": label_path, "message": "No matching image"})
-
-    # Format-specific validation: the subjects present, not numeric ids (labels are name-based now).
-    subjects: set[str] = set()
-
-    if fmt == "json":  # the name-based per-image label file
-        from tcip_annotation import json_io
-        for label_path in scan["labels"]:
             try:
-                for a in json_io.read_annotations(label_path):
-                    subjects.add(a.subject)
-            except Exception as e:
-                issues.append({"level": "error", "file": label_path, "message": f"JSON parse error: {e}"})
-    elif fmt == "coco":
-        from tcip_annotation.format_io import _parse_coco_json
-        for label_path in scan["labels"]:
+                anns = json_io.read_annotations(label_path)
+            except UnreadableLabelDocument as exc:
+                issues.append({"level": "error", "file": label_path,
+                              "message": f"label file will not read: {exc}"})
+                continue
+            for a in anns:
+                subjects.add(a.subject)
+            if not anns:
+                name = image_names.get(stem, f"{stem}.JPG")
+                if name not in negatives:
+                    issues.append({"level": "error", "file": label_path,
+                                  "message": "empty label file, not a confirmed negative for any "
+                                  "subject; excluded from training"})
+        elif file_fmt == "coco":
             try:
                 coco = _parse_coco_json(label_path)
                 for c in coco.get("categories", []):
@@ -224,19 +277,16 @@ def validate_data_quality(folder_path: str) -> dict:
                 coco_fnames = {img.get("file_name", "") for img in coco.get("images", [])}
                 for fn in coco_fnames:
                     if Path(fn).stem not in image_stems:
-                        issues.append({"level": "warning", "file": label_path, "message": f"COCO image '{fn}' not found in images dir"})
+                        issues.append({"level": "warning", "file": label_path,
+                                      "message": f"COCO image '{fn}' not found in images dir"})
             except Exception as e:
                 issues.append({"level": "error", "file": label_path, "message": f"COCO parse error: {e}"})
-    if fmt != "coco":
-        for label_path in scan["labels"]:
-            if os.path.getsize(label_path) == 0:
-                issues.append({"level": "warning", "file": label_path, "message": "Empty label file"})
 
     return {
         "path": folder_path,
-        "format": fmt,
+        "format": scan.get("format"),
         "total_images": len(scan["images"]),
-        "total_labels": len(scan["labels"]),
+        "total_labels": len(label_paths),
         "subjects": sorted(subjects),
         "issues": issues,
         "issue_count": len(issues),

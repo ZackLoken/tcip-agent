@@ -688,6 +688,21 @@ def is_confirmed_negative(status: object) -> bool:
     return status == CONFIRMED_NEGATIVE
 
 
+def confirmed_negative_names_any_subject(by_bucket: Mapping[str, Mapping[str, str]]) -> set[str]:
+    """Every image file name confirmed negative for some subject, in any date bucket.
+
+    An empty label file names no subject of its own to scope the question by, so the check that
+    decides whether to flag it (rather than treat it as a confirmed negative) spans every bucket
+    the store holds, unlike the per-subject checks elsewhere in this module. Takes ``by_bucket``
+    already in :func:`normalize_status_store`'s shape rather than a root to read, so a caller that
+    reads the store directly off disk (the doctor, deliberately bypassing the storage seam to
+    catch staleness) and one reading through the seam share this one rule without either
+    dictating how the other reads.
+    """
+    return {name for bucket in by_bucket.values() for name, status in bucket.items()
+            if is_confirmed_negative(status)}
+
+
 def _require_known_statuses(bucket: str, statuses: Iterable[Optional[str]]) -> None:
     """Refuse a status outside :data:`IMAGE_STATUSES`, or a value that is not a stored record.
 
