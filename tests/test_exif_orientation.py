@@ -83,6 +83,8 @@ def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------
 
 def test_load_image_frame_matches_get_image_dimensions(tmp_path: Path) -> None:
+    """Both readers share one orientation-tag read, so this guards the axis-swap rule
+    each applies from it, not whether the tag read itself agrees."""
     from tcip_annotation.utils import get_image_dimensions
     from tcip_mcp.pipelines.image_utils import load_image
 
