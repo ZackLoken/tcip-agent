@@ -13,8 +13,8 @@ mcp = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
 mcp.middleware.append(agent_identity.record_connecting_client)
 logger = logging.getLogger(__name__)
 
-# Import tool modules to register their handlers with the server.
-# Non-torch tools always load; torch-dependent tools load when torch is available.
+# Import tool modules to register their handlers with the server. Each module lazy-imports
+# torch inside its own functions, so every tool registers whether or not torch is installed.
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.project_tools  # noqa: F401, E402
 import tcip_mcp.tools.ingest_tools  # noqa: F401, E402
@@ -24,38 +24,20 @@ import tcip_mcp.tools.phenology_tools  # noqa: F401, E402
 import tcip_mcp.tools.operationalization_tools  # noqa: F401, E402
 import tcip_mcp.tools.trait_spec_authoring_tools  # noqa: F401, E402
 import tcip_mcp.tools.scale_tools  # noqa: F401, E402
-
-try:
-    import tcip_mcp.tools.annotation_tools  # noqa: F401, E402
-except ImportError as e:
-    logger.warning("Annotation tools unavailable: %s", e)
-
-try:
-    import tcip_mcp.tools.vision_tools  # noqa: F401, E402
-except ImportError as e:
-    logger.warning("Vision tools unavailable: %s", e)
-
-try:
-    import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
-except ImportError as e:
-    logger.warning("Feedback tools unavailable: %s", e)
-
-try:
-    import tcip_mcp.tools.training_tools  # noqa: F401, E402
-    import tcip_mcp.tools.inference_tools  # noqa: F401, E402
-    import tcip_mcp.tools.model_tools  # noqa: F401, E402
-    import tcip_mcp.tools.orthomosaic_tools  # noqa: F401, E402
-except (ImportError, OSError) as e:
-    logger.warning("Torch-dependent tools unavailable: %s", e)
+import tcip_mcp.tools.annotation_tools  # noqa: F401, E402
+import tcip_mcp.tools.vision_tools  # noqa: F401, E402
+import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
+import tcip_mcp.tools.training_tools  # noqa: F401, E402
+import tcip_mcp.tools.inference_tools  # noqa: F401, E402
+import tcip_mcp.tools.model_tools  # noqa: F401, E402
+import tcip_mcp.tools.orthomosaic_tools  # noqa: F401, E402
 
 
 def list_registered_tools() -> list[str]:
     """Return the sorted names of all tools currently registered on the server.
 
     This is the single source of truth for "how many tools are there": docs and
-    tests read it instead of hard-coding a number. Note the count reflects what
-    actually imported in this environment: torch-dependent tool modules only
-    register when their dependencies are present (see the guarded imports above).
+    tests read it instead of hard-coding a number.
     """
     manager = getattr(mcp, "_tool_manager", None)
     if manager is not None and hasattr(manager, "list_tools"):
