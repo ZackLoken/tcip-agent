@@ -16,8 +16,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS_DIR = REPO_ROOT / "packages" / "tcip-mcp" / "src" / "tcip_mcp" / "tools"
 
@@ -55,14 +53,8 @@ def test_registered_tool_names_unique():
 
 
 def test_every_decorated_tool_registers():
-    """Registry must match the decorated functions exactly.
-
-    Skipped when torch is absent, since the torch-dependent tool modules are
-    intentionally guarded and won't register in a torch-less environment.
-    """
-    if importlib.util.find_spec("torch") is None:
-        pytest.skip("torch not installed: torch-dependent tool modules won't register")
-
+    """Registry must match the decorated functions exactly, torch installed or not: a tool
+    module that needs torch imports it inside its own functions rather than at module level."""
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())
@@ -72,22 +64,35 @@ def test_every_decorated_tool_registers():
     assert not missing and not extra, f"missing from registry={missing}, unexpected={extra}"
 
 
-_BLOCK_TORCH_AND_IMPORT_SERVER = """
+_BLOCK_TORCH = """
+class _BlockTorch:
+    def find_spec(self, name, path=None, target=None):
+        if name == "torch" or name.startswith("torch.") or name == "torchvision" or name.startswith("torchvision."):
+            raise ImportError(f"torch blocked for this check: {name}")
+        return None
+"""
+
+_BLOCK_TORCH_AND_IMPORT_SERVER = f"""
 import sys
 
-
-class _BlockTorch:
-    def find_module(self, name, path=None):
-        return self if name == "torch" or name.startswith("torch.") else None
-
-    def load_module(self, name):
-        raise ImportError(f"torch blocked for this check: {name}")
-
-
+{_BLOCK_TORCH}
 sys.meta_path.insert(0, _BlockTorch())
 import tcip_mcp.server
 assert "torch" not in sys.modules, "importing the server pulled torch into sys.modules"
 print(len(tcip_mcp.server.list_registered_tools()))
+"""
+
+_BLOCK_TORCH_AND_TRY_IMPORT = f"""
+import sys
+
+{_BLOCK_TORCH}
+sys.meta_path.insert(0, _BlockTorch())
+try:
+    import torch
+except ImportError:
+    print("blocked")
+else:
+    print("not blocked")
 """
 
 
@@ -96,8 +101,8 @@ def test_server_imports_with_torch_absent():
 
     The server's own tool imports must never require torch at module load time; a tool
     module that needs torch imports it inside its own functions. Runs the check in a
-    subprocess that blocks torch from importing, since this process already has torch
-    loaded once any other test has imported it.
+    subprocess that blocks torch (and torchvision) from importing through a meta-path finder,
+    since this process already has torch loaded once any other test has imported it.
     """
     assert importlib.util.find_spec("torch") is not None, (
         "torch must be installed in this test environment for this check to mean anything"
@@ -110,15 +115,24 @@ def test_server_imports_with_torch_absent():
     assert int(result.stdout.strip()) > 0
 
 
+def test_block_torch_finder_actually_blocks_torch_import():
+    """The meta-path finder the subprocess checks above install really prevents importing
+    torch, rather than implementing the pre-3.4 find_module/load_module protocol Python 3.12
+    never calls, which would leave torch importable while looking like it was blocked."""
+    result = subprocess.run(
+        [sys.executable, "-c", _BLOCK_TORCH_AND_TRY_IMPORT],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "blocked"
+
+
 def test_consolidated_tools_present_and_removed_absent():
     """Merged tools register and the tools they replaced do not.
 
     An explicit presence/absence check (not a hard-coded count) so the eval-on-disk /
     splits merges and the machine-plumbing de-registrations stay put.
     """
-    if importlib.util.find_spec("torch") is None:
-        pytest.skip("torch not installed: torch-dependent tool modules won't register")
-
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())
