@@ -5,12 +5,12 @@ description: "Visual inspection of images, annotations, predictions, and trainin
 
 # Visual Analysis
 
-The agent can visually inspect images using `view_image` after rendering annotations/predictions with visualization tools.
+The agent can visually inspect images with its own image-capable read tool after rendering annotations/predictions with visualization tools.
 
 ## Pattern
 
 1. Call a visualization MCP tool → returns `image_path` in the result dict
-2. Use `view_image` on that path → model sees the rendered image
+2. Read that path with the client's image-capable read tool → model sees the rendered image
 3. Describe findings and recommend actions
 
 ## Tools
@@ -27,10 +27,8 @@ The agent can visually inspect images using `view_image` after rendering annotat
 | `overlay_reference_grid` | Labeled reference-grid overlay (square native-pixel cells); echoes its grid geometry (`tile_size`, `overlap`, `cols`, `rows`, `width`, `height`) for `segment_prompt(grid_cells=...)` |
 | `capture_live_canvas` | The human's live GUI canvas: their image, viewport, and unsaved shapes in the GUI's own symbology (+ classes schema, TP/FP/FN legend on Review) |
 
-`visualize` is one tool with a `source` of `annotations` / `predictions` / `dataset`
-(it replaced the former `visualize_annotations` / `visualize_predictions` /
-`visualize_dataset_sample`). All tools save renders to `.tcip/artifacts/viz/` and
-return the file path.
+`visualize` is one tool with a `source` of `annotations` / `predictions` / `dataset`.
+All tools save renders to `.tcip/artifacts/viz/` and return the file path.
 
 `capture_live_canvas` is the live view: the GUI continuously pushes its canvas state
 (hybrid: tiny heartbeats on pan/zoom, full display-resolved geometry on shape changes,
@@ -47,8 +45,8 @@ Goal: Verify annotation quality before training.
 
 1. `scan_dataset` → understand image inventory and format
 2. `visualize(source="dataset", path=folder_path, n=16)` → grid overview
-3. `view_image` on the grid → assess overall annotation consistency
-4. For flagged images: `visualize(source="annotations", path=image_path)` → `view_image`
+3. Read the grid with the client's image-capable read tool → assess overall annotation consistency
+4. For flagged images: `visualize(source="annotations", path=image_path)` → read the render
 5. Report: missed objects, wrong classes, sloppy box placement, inconsistent labeling
 
 ### Prediction Review
@@ -57,8 +55,8 @@ Goal: Assess model quality after inference.
 
 1. `run_inference` or verify predictions exist
 2. `render_failure_cases(predictions_dir, labels_dir, top_k=10)`
-3. `view_image` on grid → categorize failure types
-4. For specific failures: `visualize(source="comparison", path=image_path)` → `view_image`
+3. Read the grid with the client's image-capable read tool → categorize failure types
+4. For specific failures: `visualize(source="comparison", path=image_path)` → read the render
 5. Categorize: false positives, false negatives, localization errors, class confusion
 6. Recommend corrective actions
 
@@ -67,7 +65,7 @@ Goal: Assess model quality after inference.
 Goal: Diagnose training issues from worst-case analysis.
 
 1. `check_training_status` → verify training completed, review loss curves
-2. `render_failure_cases` → surface + render failure cases → `view_image`
+2. `render_failure_cases` → surface + render failure cases → read the render with the client's image-capable read tool
 3. Cross-reference visual findings with `score_predictions`' per-image TP/FP/FN breakdown
    (no per-class breakdown for detection today, see the `evaluation` skill)
 4. Recommend: more data, augmentation changes, architecture changes, longer training
@@ -76,7 +74,7 @@ Goal: Diagnose training issues from worst-case analysis.
 
 Goal: Detailed per-image quality assessment.
 
-1. `visualize(source="comparison", path=image_path, iou_threshold=0.5)` → `view_image`
+1. `visualize(source="comparison", path=image_path, iou_threshold=0.5)` → read the render with the client's image-capable read tool
 2. Assess: IoU quality, missed detections, false positives, localization drift
 3. Check multiple images to identify systematic patterns
 
@@ -109,5 +107,5 @@ When inspecting rendered annotations/predictions, evaluate:
 Full workflow, tool/role table, the method-neutral engine seam, and the corrective (grid-cell) loop
 live in `.github/skills/annotation` (it owns the format/write semantics; `accept_proposals` stages
 to predictions, never GT directly). The visual-QA-specific angle here: after each `accept_proposals`
-or `segment_prompt` call, `view_image` the staged result before moving on; catching a wrong class
+or `segment_prompt` call, read the staged result with the client's image-capable read tool before moving on; catching a wrong class
 or a sloppy mask before it reaches human review is cheaper than catching it after.
