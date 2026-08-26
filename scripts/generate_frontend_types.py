@@ -12,10 +12,11 @@ single-member ``Literal`` discriminator rendered as its literal type, and a free
 (``additionalProperties`` true, no ``properties``) rendered as ``Record<string, unknown>``);
 annotation keywords such as ``title`` and ``default`` are ignored rather than mapped, and any
 other shape (including an object with its own fixed, non-``$ref`` property set) refuses by name.
-``tcip_mcp.web_client.TAB_NAMES`` and ``PLATFORM_PANEL_EVENTS``, ``routes/images.py``'s
-``IMAGE_ERROR_HEADER`` and ``OVERVIEWS_REQUIRED``, and ``tcip_web.jobstore.TERMINAL_STATUSES``
-are projected alongside the models as runtime constants, and ``tcip_web.jobstore.JobStatus`` as a
-bare union type, none of them schema-derived.
+``tcip_mcp.web_client.TAB_NAMES`` and ``PLATFORM_PANEL_EVENTS``, each of ``web_client``'s own
+named ``PANEL_EVENT_*`` constants, ``routes/images.py``'s ``IMAGE_ERROR_HEADER`` and
+``OVERVIEWS_REQUIRED``, and ``tcip_web.jobstore.TERMINAL_STATUSES`` are projected alongside the
+models as runtime constants, and ``tcip_web.jobstore.JobStatus`` as a bare union type, none of
+them schema-derived.
 
 Run it after changing a declared model; it rewrites the module in place.
 ``tests/test_generated_frontend_types.py`` fails when the checked-in module is not what the
@@ -98,6 +99,16 @@ def platform_panel_events() -> tuple[str, ...]:
     return PLATFORM_PANEL_EVENTS
 
 
+def platform_panel_event_constants() -> list[tuple[str, str]]:
+    """Each named panel-event constant ``tcip_mcp.web_client`` declares (``PANEL_EVENT_*``), in
+    the module's own declaration order: a consumer matching an event by one of these names never
+    depends on where it sits in ``PLATFORM_PANEL_EVENTS``'s tuple."""
+    from tcip_mcp import web_client
+
+    return [(name, value) for name, value in vars(web_client).items()
+            if name.startswith("PANEL_EVENT_") and isinstance(value, str)]
+
+
 def terminal_statuses() -> tuple[str, ...]:
     from tcip_web.jobstore import TERMINAL_STATUSES
 
@@ -174,8 +185,14 @@ def render() -> str:
     overviews_const = f"export const OVERVIEWS_REQUIRED = {json.dumps(overviews_required())};\n\n"
     tabs = ", ".join(json.dumps(t) for t in tab_names())
     tab_names_const = f"export const TAB_NAMES = [{tabs}] as const;\n\n"
+    panel_event_names = "".join(
+        f"export const {name} = {json.dumps(value)};\n"
+        for name, value in platform_panel_event_constants())
     panel_events = ", ".join(json.dumps(t) for t in platform_panel_events())
-    panel_events_const = f"export const PLATFORM_PANEL_EVENTS = [{panel_events}] as const;\n\n"
+    panel_events_const = (
+        panel_event_names
+        + f"\nexport const PLATFORM_PANEL_EVENTS = [{panel_events}] as const;\n\n"
+    )
     terminal = ", ".join(json.dumps(t) for t in terminal_statuses())
     terminal_const = f"export const TERMINAL_STATUSES = [{terminal}] as const;\n\n"
     job_status = " | ".join(json.dumps(t) for t in job_status_members())
