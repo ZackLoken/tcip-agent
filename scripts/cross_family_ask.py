@@ -122,22 +122,35 @@ CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
-def check_effort(family: str, model: str | None, effort: str | None) -> None:
-    """Refuse an effort the harness would silently ignore or reject after launch.
+ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 
-    Claude Code ignores an unknown `--effort` with a warning and runs on its default, which
-    would record an effort the run did not use. Antigravity's effort lives in the model id and
-    an explicit `--effort` beside a suffixed id fails the run.
+
+def model_id_effort(family: str, model: str | None) -> str | None:
+    """The effort a model id states in its own suffix, for a family whose harness takes effort
+    that way (antigravity's `gemini-3.1-pro-high`); None for every other id or family."""
+    if family == "antigravity" and model:
+        suffix = model.rsplit("-", 1)[-1]
+        if suffix in ANTIGRAVITY_ID_EFFORTS:
+            return suffix
+    return None
+
+
+def effective_effort(family: str, model: str | None, effort: str | None) -> str | None:
+    """The effort a run records and, where the harness takes one, passes.
+
+    A model id that states its own effort is the effort, whatever `--effort` said beside it, so
+    one invocation naming every family can carry one flag; Claude Code is refused an effort it
+    would silently ignore and run on its default, which would record an effort the run did not
+    use.
     """
+    stated = model_id_effort(family, model)
+    if stated is not None:
+        return stated
     if family == "claude" and effort and effort not in CLAUDE_EFFORTS:
         raise SystemExit(
             f"claude effort {effort!r} is not one of {', '.join(CLAUDE_EFFORTS)}; the harness "
             "would ignore it and run on its default")
-    if family == "antigravity" and effort and model and model.rsplit("-", 1)[-1] in (
-            "low", "medium", "high"):
-        raise SystemExit(
-            f"antigravity model {model!r} already carries its effort; drop --effort {effort!r} "
-            "or choose an id without one")
+    return effort
 
 
 def resolve_codex_model(requested: str | None) -> tuple[str, str]:
@@ -475,8 +488,7 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     model_source = "flag" if model else "parity table"
     if family == "codex":
         resolved_model, model_source = resolve_codex_model(resolved_model)
-    resolved_effort = effort or PARITY[family]["effort"]
-    check_effort(family, resolved_model, resolved_effort)
+    resolved_effort = effective_effort(family, resolved_model, effort or PARITY[family]["effort"])
     argv, last = BUILDERS[family](prompt_file, run_dir, cwd, condition,
                                   resolved_model, resolved_effort, timeout)
 
