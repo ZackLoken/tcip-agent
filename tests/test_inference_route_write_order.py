@@ -109,5 +109,5 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
     assert sidecar["validated"] is False
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
-                                 "error", "warning", "dropped_nonpositive_boxes"}
+                                 "error", "warning", "dropped_nonpositive_boxes", "platform_root"}
     assert [r["image"] for r in job.results] == ["a.jpg", "b.jpg"]
