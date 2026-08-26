@@ -88,9 +88,10 @@ def _scan_dataset(root: str) -> dict:
     from tcip_annotation.json_io import prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
+    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
     root_path = Path(root)
-    image_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+    image_exts = IMAGE_EXTS
     images: list[str] = []
     labels: list[str] = []
     preds: list[str] = []
