@@ -159,6 +159,93 @@ class TestPostPanelEventRoute:
         assert state["active_subject"] == "catkin"
 
 
+class TestActiveProjectChangedRoute:
+    """The web backend treats the agent's adopt event as a signal to re-read the marker, not
+    a name to trust: it repins to whatever the marker says, reports a disagreement with the
+    event's own name, and never lets a repin failure block the broadcast."""
+
+    def test_repins_this_process_from_the_marker(
+        self, client: TestClient, tmp_path: Path, monkeypatch
+    ) -> None:
+        from tcip_mcp import workspace
+        from tcip_mcp.project_paths import project_root
+
+        proj = workspace.project_path("chestnut_burr_valley")
+        (proj / ".tcip").mkdir(parents=True)
+        workspace.set_active_project("chestnut_burr_valley")  # also repins this process, for now
+
+        stale = tmp_path / "stale"
+        stale.mkdir()
+        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(stale))
+        assert project_root() == stale
+
+        resp = client.post(
+            "/api/events/app",
+            json={"event_type": "active_project_changed",
+                  "data": {"name": "chestnut_burr_valley"}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["platform_root"] == str(proj)
+        assert project_root() == proj
+
+    def test_reports_a_disagreement_but_never_acts_on_the_events_own_name(
+        self, client: TestClient
+    ) -> None:
+        from tcip_mcp import workspace
+
+        proj = workspace.project_path("chestnut_burr_valley")
+        (proj / ".tcip").mkdir(parents=True)
+        workspace.set_active_project("chestnut_burr_valley")
+
+        resp = client.post(
+            "/api/events/app",
+            json={"event_type": "active_project_changed",
+                  "data": {"name": "someone_elses_project"}},
+        )
+        body = resp.json()
+        assert body["platform_root"] == str(proj)
+        assert body["platform_root_disagreement"] == {
+            "event_name": "someone_elses_project", "marker_name": "chestnut_burr_valley",
+        }
+
+    def test_reports_platform_root_problem_for_a_dangling_marker_and_still_broadcasts(
+        self, client: TestClient
+    ) -> None:
+        import shutil
+
+        from tcip_mcp import workspace
+
+        proj = workspace.project_path("chestnut_burr_valley")
+        (proj / ".tcip").mkdir(parents=True)
+        workspace.set_active_project("chestnut_burr_valley")
+        shutil.rmtree(proj / ".tcip")
+
+        resp = client.post(
+            "/api/events/app",
+            json={"event_type": "active_project_changed",
+                  "data": {"name": "chestnut_burr_valley"}},
+        )
+        body = resp.json()
+        assert "chestnut_burr_valley" in body["platform_root_problem"]
+        recent = client.get("/api/events/app/recent").json()
+        assert recent["events"][-1]["event_type"] == "active_project_changed"
+
+    def test_an_event_naming_no_project_leaves_the_root_alone(
+        self, client: TestClient
+    ) -> None:
+        from tcip_mcp.project_paths import project_root
+
+        before = project_root()
+        resp = client.post(
+            "/api/events/app",
+            json={"event_type": "active_project_changed", "data": {"name": "no_such_project"}},
+        )
+        body = resp.json()
+        assert "platform_root" not in body
+        assert "platform_root_problem" not in body
+        assert project_root() == before
+
+
 class TestPushPanelDataTool:
     """Verify the MCP tool posts via HTTP and aliases legacy panel names."""
 
@@ -553,3 +640,44 @@ def test_post_panel_event_opt_in_bypasses_suppression(monkeypatch):
     res = post_panel_event("annotate", "focus", {})
     assert res["delivered"] is False
     assert res["status"] != "suppressed_under_pytest"   # it really attempted the send
+
+
+def test_post_panel_event_returns_the_backends_response_body(monkeypatch):
+    """``post_panel_event`` reads the real HTTP response rather than discarding it: a
+    ``urllib`` round trip against a live backend, since the discarded read this guards is
+    specific to that transport, not the ASGI test client the rest of this file uses."""
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+
+    from tcip_mcp.web_client import post_panel_event
+    from tcip_web.app import app
+
+    monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setenv("TCIP_WEB_HOST", "127.0.0.1")
+    monkeypatch.setenv("TCIP_WEB_PORT", str(port))
+
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert server.started, "the test backend never came up"
+
+        res = post_panel_event("app", "active_project_changed", {"name": "no_such_project"})
+        assert res["delivered"] is True
+        assert res["response"] == {
+            "status": "ok", "panel": "app", "event_type": "active_project_changed",
+        }
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

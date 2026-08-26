@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from tcip_store.binding import bind_default
 
 from tcip_mcp.web_client import (
+    PANEL_EVENT_ACTIVE_PROJECT_CHANGED,
     PANEL_EVENT_ANNOTATE_FOCUS,
     PANEL_EVENT_REVIEW_FOCUS,
     VALID_PANELS,
@@ -281,6 +282,47 @@ def index():
 # ── Panel events: POST endpoint (MCP tools) + WS subscription (browsers) ──
 
 
+def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
+    """Re-read the workspace's active-project marker and repin this process to it.
+
+    Never trusts ``sent_name``: an unauthenticated event is a signal to re-read the marker
+    the breeder controls, not a name to act on. Returns the fields the event route's response
+    carries: ``platform_root`` on a repin, or ``platform_root_problem`` naming why the marker
+    could not be used (a store refusal, a lock timeout, or a marker naming a project that is
+    not adoptable), never both. A repin's ``platform_root_disagreement`` says when the event's
+    own name differed from what the marker actually named.
+    """
+    from tcip_mcp import workspace
+    from tcip_mcp.project_paths import repin_platform_root
+
+    try:
+        found = workspace.active_project_if_present(create=False)
+        if found is None:
+            name = workspace.read_active_project(create=False)
+            if name:
+                workspace.adoptable_project_root(name)  # raises, naming why it is not adoptable
+            return {}
+        marker_name, marker_root = found
+    except Exception as exc:  # noqa: BLE001 - reported in the response, never raised
+        return {"platform_root_problem": str(exc)}
+
+    repin_platform_root(marker_root)
+    # The per-registry rehydrate_for_current_root() calls land here; for now this repin can
+    # leave a registry rehydrated from whichever root emptied it first (see rehydrate() below).
+    try:
+        from tcip_web.routes import inference, tuning
+
+        inference.rehydrate()
+        tuning.rehydrate()
+    except Exception:  # pragma: no cover - rehydrate is best-effort, same as at startup
+        logger.exception("job registry rehydrate failed after a platform-root repin")
+
+    result: dict[str, Any] = {"platform_root": str(marker_root)}
+    if sent_name is not None and sent_name != marker_name:
+        result["platform_root_disagreement"] = {"event_name": sent_name, "marker_name": marker_name}
+    return result
+
+
 @app.post("/api/events/{panel}")
 async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     """Accept an event pushed from an MCP tool and broadcast to subscribers.
@@ -321,8 +363,11 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         if "active_subject" in event.data:
             mutation["active_subject"] = event.data["active_subject"]
         await _gui_store.mutate(mutation)
+    root_fields: dict[str, Any] = {}
+    if event.event_type == PANEL_EVENT_ACTIVE_PROJECT_CHANGED:
+        root_fields = _repin_from_active_project_event(event.data.get("name"))
     await _broadcast_to_panel(panel, payload)
-    return {"status": "ok", "panel": panel, "event_type": event.event_type}
+    return {"status": "ok", "panel": panel, "event_type": event.event_type, **root_fields}
 
 
 @app.get("/api/events/{panel}/recent")

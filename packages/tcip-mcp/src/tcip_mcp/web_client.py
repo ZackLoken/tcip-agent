@@ -238,7 +238,8 @@ def post_panel_event(
 
     Every return carries a ``delivered`` bool so callers don't mistake "backend down"
     for success. Returns one of:
-      * ``{"status": "ok", "delivered": True, ...}`` on 2xx response.
+      * ``{"status": "ok", "delivered": True, "response": ..., ...}`` on 2xx response, where
+        ``response`` is the parsed JSON body (``None`` for a body that does not decode as JSON).
       * ``{"status": "no_subscribers", "delivered": False, ...}`` if the backend is down.
       * ``{"error": ..., "delivered": False, ...}`` on any HTTP/serialization failure.
     """
@@ -266,8 +267,13 @@ def post_panel_event(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             code = getattr(resp, "status", 200)
+            body = resp.read()
             if 200 <= code < 300:
-                return {"status": "ok", "delivered": True, "url": url}
+                try:
+                    parsed = json.loads(body)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    parsed = None
+                return {"status": "ok", "delivered": True, "url": url, "response": parsed}
             return {"error": f"backend returned HTTP {code}", "delivered": False, "url": url}
     except urllib.error.URLError as exc:
         # ConnectionRefusedError or similar -> backend not running

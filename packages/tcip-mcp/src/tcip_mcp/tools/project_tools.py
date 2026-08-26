@@ -236,6 +236,11 @@ def set_active_project(name: str) -> dict:
     existing workspace project's directory name; adoption opens what is there rather than
     creating anything, so any safely-named project is adoptable, conforming or not.
 
+    The notification also carries whether the web backend repinned its own platform-state
+    root on it (``backend_repinned``) or could not (``backend_root_problem``): when the
+    backend is down or the delivery fails, both are ``None``, since it will bind from the
+    marker at its own next start regardless.
+
     Args:
         name: The workspace project to make active.
     """
@@ -251,11 +256,14 @@ def set_active_project(name: str) -> dict:
     delivery = post_panel_event(
         "app", PANEL_EVENT_ACTIVE_PROJECT_CHANGED, {"name": name, "project_path": str(proj)}
     )
+    response = delivery.get("response") or {}
     return {
         "name": name,
         "project_path": str(proj),
         "marker": str(marker),
         "gui_notified": bool(delivery.get("delivered")),
+        "backend_repinned": response.get("platform_root"),
+        "backend_root_problem": response.get("platform_root_problem"),
         "recent_activity": _recent_activity(str(proj)),
     }
 
@@ -273,28 +281,26 @@ def _root_divergence_report() -> dict[str, str] | None:
     (``workspace.set_active_project``); a separate process converges only when it itself binds
     from the marker, at its own startup or (the web backend) on the agent's adopt signal, so
     this process's root can keep naming a stale or different project until then.
-    ``None`` when there is no marker, the marker's name does not resolve, or the two agree.
+    ``None`` when there is no marker, the marker names an adoptable project this process's
+    root already matches, or the two agree. Carries ``marker_problem`` when the marker could
+    not be used at all: a store refusal, a lock timeout, or a name
+    :func:`tcip_mcp.workspace.adoptable_project_root` refuses to open, reported here rather
+    than raised out of ``inspect_project``.
 
     Reads with ``create=False`` so this check, run on every ``inspect_project`` call, cannot
-    bring the workspace directory into existence as a side effect; a workspace store that
-    refuses the read (e.g. loose marker files with no database under the default backend) is
-    reported here rather than raised, naming the refusal.
+    bring the workspace directory into existence as a side effect.
     """
-    from tcip_store import StoreError
-
     from tcip_mcp import workspace
     from tcip_mcp.project_paths import project_root
 
     try:
-        name = workspace.read_active_project(create=False)
-    except StoreError as exc:
-        return {"error": str(exc)}
-    if not name:
-        return None
-    try:
-        marker_project = workspace.project_path(name, create=False)
-    except ValueError:
-        return None
+        found = workspace.active_project_if_present(create=False)
+    except Exception as exc:  # noqa: BLE001 - reported, never raised out of inspect_project
+        return {"marker_problem": str(exc)}
+    if found is None:
+        problem = workspace.marker_problem(create=False)
+        return {"marker_problem": problem} if problem else None
+    _, marker_project = found
     root = project_root()
     if root == marker_project:
         return None
