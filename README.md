@@ -108,7 +108,7 @@ The MCP server starts automatically when an MCP client connects (see `.mcp.json`
 - Annotations: per-image COCO-shaped JSON (with `created_by`/`accepted_by` provenance), plus the dataset-level COCO assembled from it for training.
 - Experiments: one record per run holding config, metrics, artifacts and lineage, with the run's own files (weights, TensorBoard events, the source snapshot) under `.tcip/experiments/<id>/` beside it.
 - Audit log: all MCP tool calls logged via the `@audited` decorator, into the append-only log under the root each call's scope names, and written out at `.tcip/audit.jsonl` by the file backend and by `export_store.py`. An entry the decorator cannot append raises, since the append runs after the tool body.
-- Lazy imports: heavy deps (torch, torchvision) imported inside function bodies for fast MCP startup.
+- Lazy imports: within the MCP server's import closure, heavy deps (torch, torchvision) are imported inside function bodies for fast startup; other modules under `packages/*/src` (the training and inference pipelines, model components) import them at module level, since they load only once training or inference actually runs.
 - Crop traits: controlled vocabulary defined in `.github/skills/crops/`.
 - Measurement-integrity gates: every parameter a delivered phenotype depends on (confidence
   threshold, tile geometry, mask-binarize threshold, physical pixel-to-real-world scale) carries

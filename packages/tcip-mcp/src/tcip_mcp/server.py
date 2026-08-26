@@ -13,8 +13,8 @@ mcp = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
 mcp.middleware.append(agent_identity.record_connecting_client)
 logger = logging.getLogger(__name__)
 
-# Import tool modules to register their handlers with the server. Each module lazy-imports
-# torch inside its own functions, so every tool registers whether or not torch is installed.
+# Import tool modules to register their handlers with the server. A tool module that needs
+# torch imports it inside its own functions, so every tool registers whether or not torch is installed.
 import tcip_mcp.tools.data_tools  # noqa: F401, E402
 import tcip_mcp.tools.project_tools  # noqa: F401, E402
 import tcip_mcp.tools.ingest_tools  # noqa: F401, E402

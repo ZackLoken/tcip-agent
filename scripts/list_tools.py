@@ -6,8 +6,8 @@ this script instead of hard-coding a number that drifts. Run from the repo root:
 
     python scripts/list_tools.py
 
-The count reflects what imported in the current environment: torch-dependent
-tool modules only register when their dependencies are installed.
+Every tool module imports without torch (a module that needs it imports torch inside its own
+functions), so the registered count does not vary by environment.
 """
 
 from __future__ import annotations
