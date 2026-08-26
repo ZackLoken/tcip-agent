@@ -246,7 +246,8 @@ def render_comparison(
         gt_boxes: Ground truth boxes (x1, y1, x2, y2, class_id) in the native frame.
         pred_boxes: Prediction boxes (x1, y1, x2, y2, class_id, confidence) in the native frame.
         native_size: ``(width, height)`` of the frame the boxes are measured in.
-        matches: Matched pairs from compute_matches (score_predictions detail=True).
+        matches: ``compute_matches``'s own ``tp`` entries (``{gt_idx, pred_idx, ...}``), indexing
+            into ``gt_boxes``/``pred_boxes`` in the order they were built from the same lists.
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
     """
@@ -281,17 +282,16 @@ def render_comparison(
             label += f" {box['confidence']:.2f}"
         draw.text((x1, y2 + 2), label, fill=pred_color, font=font)
 
-    # Draw match lines (center-to-center)
+    # Draw match lines (center-to-center), resolved from the gt/pred lists already in hand.
     if matches:
         for m in matches:
-            gt = m.get("gt", m.get("ground_truth", {}))
-            pred = m.get("pred", m.get("prediction", {}))
-            if gt and pred:
-                gt_cx = (gt.get("x1", 0) + gt.get("x2", 0)) / 2 * sx
-                gt_cy = (gt.get("y1", 0) + gt.get("y2", 0)) / 2 * sy
-                pr_cx = (pred.get("x1", 0) + pred.get("x2", 0)) / 2 * sx
-                pr_cy = (pred.get("y1", 0) + pred.get("y2", 0)) / 2 * sy
-                draw.line([(gt_cx, gt_cy), (pr_cx, pr_cy)], fill=match_color, width=1)
+            gt = gt_boxes[m["gt_idx"]]
+            pred = pred_boxes[m["pred_idx"]]
+            gt_cx = (gt["x1"] + gt["x2"]) / 2 * sx
+            gt_cy = (gt["y1"] + gt["y2"]) / 2 * sy
+            pr_cx = (pred["x1"] + pred["x2"]) / 2 * sx
+            pr_cy = (pred["y1"] + pred["y2"]) / 2 * sy
+            draw.line([(gt_cx, gt_cy), (pr_cx, pr_cy)], fill=match_color, width=1)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)

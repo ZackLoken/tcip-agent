@@ -471,8 +471,8 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
 
     A non-``uint8`` raster is scaled by ``band_stats.full_scale_denominator`` (the ``none``
     stretch), one denominator for the whole array rather than one per band, so a plain serve never
-    shifts the colors the file holds. ``bounds`` carries the sampled maximum a float raster's
-    denominator comes from when the pixels in hand are one region of it.
+    shifts the colors the file holds. ``bounds`` carries the sampled ``(minimum, maximum)`` a
+    float raster's denominator comes from when the pixels in hand are one region of it.
     """
     import numpy as np
 
@@ -536,7 +536,12 @@ def serve_image(
     from PIL import Image
 
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.band_stats import STRETCH_MODES, band_ranges, composite_display_rgb
+    from tcip_mcp.pipelines.band_stats import (
+        STRETCH_MODES,
+        band_ranges,
+        composite_display_rgb,
+        full_scale_denominator,
+    )
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
     from tcip_mcp.pipelines.derivations import probe_channels
     from tcip_mcp.pipelines.image_utils import resolve_image_source
@@ -650,8 +655,12 @@ def serve_image(
             # Only the bands a plain serve displays: a fourth band is dropped before the viewer
             # sees it, so its level must not set the scale the other three are divided by.
             ranges = band_ranges(pixels) if sampled is None else sampled.ranges
-            applied = [(0.0, max(ranges[i].maximum for i in idxs))]
-            rgb = _plain_rgb(pixels, dtype, applied[0])
+            band_bounds = (
+                min(ranges[i].minimum for i in idxs), max(ranges[i].maximum for i in idxs))
+            rgb = _plain_rgb(pixels, dtype, band_bounds)
+            divisor = full_scale_denominator(
+                pixels, dtype, sampled_maximum=band_bounds[1], sampled_minimum=band_bounds[0])
+            applied = [(0.0, divisor)]
             stats_source = (
                 StatsSource(read="served_array") if sampled is None else sampled.stats_source())
 

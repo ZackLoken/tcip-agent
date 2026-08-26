@@ -60,13 +60,15 @@ def _preview_renderer_stretch(band):
 
 def _bands() -> dict[str, np.ndarray]:
     """One band per case the stretch has to survive: each integer width, a float raster, a band
-    with no spread at all, a float band whose values are negative, and an all-zero float band."""
+    with no spread at all, a float band whose values are negative, a float band with both signs,
+    and an all-zero float band."""
     rng = np.random.default_rng(0)
     return {
         "uint8": rng.integers(0, 256, size=(7, 5)).astype(np.uint8),
         "uint16": rng.integers(0, 65536, size=(7, 5)).astype(np.uint16),
         "float32": (rng.standard_normal((7, 5)) * 100.0).astype(np.float32),
         "float32_negative": (rng.standard_normal((7, 5)) - 5.0).astype(np.float32),
+        "float32_mixed_sign": (rng.standard_normal((7, 5)) * 5.0).astype(np.float32),
         "uint16_constant": np.full((7, 5), 321, dtype=np.uint16),
         "float32_zeros": np.zeros((7, 5), dtype=np.float32),
     }
@@ -78,9 +80,24 @@ BANDS = _bands()
 @pytest.mark.parametrize("mode", STRETCH_MODES)
 @pytest.mark.parametrize("name", sorted(BANDS))
 def test_stretch_band_is_byte_identical_to_the_composite_display_expression(name, mode):
+    if name == "float32_negative" and mode == "none":
+        pytest.skip("covered by its own independent expectation, not the helper's own arithmetic")
     band = BANDS[name]
     assert np.array_equal(stretch_band(band, mode, band.dtype),
                           _composite_route_stretch(band, mode, band.dtype))
+
+
+def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
+    """A band with no positive data divides by a positive number (the magnitude of its own
+    minimum), so every pixel is negative before the clip and the render is uniformly black."""
+    band = BANDS["float32_negative"]
+    assert np.array_equal(stretch_band(band, "none", band.dtype), np.zeros_like(band, dtype=np.uint8))
+
+
+def test_a_none_stretch_of_a_mixed_sign_float_band_still_divides_by_its_positive_maximum():
+    band = BANDS["float32_mixed_sign"]
+    assert np.array_equal(stretch_band(band, "none", band.dtype),
+                          _composite_route_stretch(band, "none", band.dtype))
 
 
 @pytest.mark.parametrize("name", sorted(BANDS))
@@ -112,7 +129,7 @@ def _derived_bounds(band, mode, orig_dtype) -> tuple[float, float]:
     if mode == "none":
         if np.issubdtype(orig_dtype, np.integer):
             return 0.0, float(np.iinfo(orig_dtype).max) or 1.0
-        return 0.0, float(raw.max()) or 1.0
+        return float(raw.min()), float(raw.max())
     if mode == "percent_clip":
         lo, hi = np.percentile(raw, list(DISPLAY_CLIP_PERCENTILES))
         return float(lo), float(hi)

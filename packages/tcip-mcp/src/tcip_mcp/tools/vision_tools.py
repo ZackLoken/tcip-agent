@@ -477,13 +477,15 @@ def _viz_comparison(
 
     pred_file = find_prediction(image_path)
     pred_dicts: list[dict] = []
+    tp_matches: list[dict] = []
     if pred_file is not None:
         preds = _boxable(read_labels(str(pred_file)))
         pred_dicts = [_box_dict(a, index) for a in preds]
         # Match at the caller's conf operating point (not compute_matches' silent 0.25 default).
         match_result = compute_matches(gt, preds, iou_threshold=iou_threshold,
                                        conf_threshold=conf_threshold)
-        tp = len(match_result["tp"])
+        tp_matches = match_result["tp"]
+        tp = len(tp_matches)
         fp = len(match_result["fp"])
         fn = len(match_result["fn"])
     else:
@@ -491,7 +493,7 @@ def _viz_comparison(
 
     read = _display_for_path(image_path)
     out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
-                            matches=[], class_names=_name_map(idx))
+                            matches=tp_matches, class_names=_name_map(idx))
 
     return {
         "image_path": out,

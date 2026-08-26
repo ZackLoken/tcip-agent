@@ -79,26 +79,36 @@ def clip_bounds(band, percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILE
     return float(lo), float(hi)
 
 
-def full_scale_denominator(band, source_dtype, *, sampled_maximum: float | None = None) -> float:
+def full_scale_denominator(band, source_dtype, *, sampled_maximum: float | None = None,
+                           sampled_minimum: float | None = None) -> float:
     """The divisor that puts a band on its own full scale with no data-range stretch applied.
 
     An integer raster divides by its dtype's maximum, the scale ``image_utils.pil_to_tensor``
-    applies for training; a float raster has no such ceiling and divides by its own maximum. A band
-    whose maximum is zero divides by 1.0, so an empty float band renders black instead of raising.
+    applies for training; a float raster has no such ceiling and divides by its own maximum, so a
+    mixed-sign band (a vegetation index, say) renders and reports bounds exactly as it always has.
+    A band with no positive data divides by the magnitude of its minimum instead, so it lands on a
+    positive scale rather than flipping the sign of every pixel; a band whose whole range is
+    exactly zero still divides by 1.0, so an empty float band renders black instead of raising.
 
-    ``sampled_maximum`` is a maximum read from somewhere other than ``band``: the caller's own
-    sampled statistic for the whole raster, which a caller rendering one region of a float raster
-    passes so every region divides by one number instead of by its own local maximum. It never
-    displaces the dtype ceiling an integer raster divides by, whose value does not depend on the
-    pixels in hand at all.
+    ``sampled_maximum``/``sampled_minimum`` are read from somewhere other than ``band``: the
+    caller's own sampled statistics for the whole raster, which a caller rendering one region of a
+    float raster passes so every region divides by the same numbers instead of by its own local
+    range. They never displace the dtype ceiling an integer raster divides by, whose value does
+    not depend on the pixels in hand at all.
     """
     import numpy as np
 
     if np.issubdtype(source_dtype, np.integer):
         return float(np.iinfo(source_dtype).max) or 1.0
-    if sampled_maximum is not None:
-        return float(sampled_maximum) or 1.0
-    return float(np.asarray(band).max()) or 1.0
+    if sampled_maximum is None:
+        sampled_maximum = float(np.asarray(band).max())
+    if sampled_maximum > 0:
+        return float(sampled_maximum)
+    if sampled_minimum is None:
+        sampled_minimum = float(np.asarray(band).min())
+    if sampled_minimum < 0:
+        return float(-sampled_minimum)
+    return 1.0
 
 
 def _stretch_between(raw, low: float, high: float):
@@ -127,16 +137,19 @@ def stretch_band(band, mode: str, source_dtype, bounds: tuple[float, float] | No
     from somewhere with a wider view of the raster than this band: pass it to render one region of
     a raster against the whole raster's bounds instead of against the region's own, so two regions
     of one raster are stretched alike. ``minmax`` and ``percent_clip`` take the pair as their span;
-    ``none`` reads only ``high``, as the sampled maximum a float raster divides by, and an integer
-    raster ignores the pair entirely for its dtype ceiling. Omitting it derives the same bounds
-    from ``band`` and stretches between exactly those, so the two forms agree by construction.
+    ``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
+    from, and an integer raster ignores the pair entirely for its dtype ceiling. Omitting it
+    derives the same bounds from ``band`` and stretches between exactly those, so the two forms
+    agree by construction.
     """
     import numpy as np
 
     raw = np.asarray(band).astype(np.float64)
     if mode == "none":
+        sampled_maximum, sampled_minimum = (None, None) if bounds is None else (bounds[1], bounds[0])
         out = raw / full_scale_denominator(
-            raw, source_dtype, sampled_maximum=None if bounds is None else bounds[1]) * 255.0
+            raw, source_dtype, sampled_maximum=sampled_maximum,
+            sampled_minimum=sampled_minimum) * 255.0
     elif mode == "percent_clip":
         low, high = clip_bounds(raw) if bounds is None else bounds
         out = _stretch_between(raw, low, high)
