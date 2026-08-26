@@ -550,7 +550,7 @@ def test_an_oversized_raster_without_overviews_names_the_build_endpoint_for_its_
 
     resp = client.get("/api/images/bands", params={"path": str(path)})
     assert resp.status_code == 400
-    assert resp.headers["x-tcip-image-error"] == "overviews_required"
+    assert resp.headers[images_route.IMAGE_ERROR_HEADER] == images_route.OVERVIEWS_REQUIRED
     assert "POST /api/images/overviews" in resp.json()["detail"]
 
 
@@ -638,7 +638,7 @@ def test_a_scaled_read_of_an_oversized_raster_without_overviews_names_the_build_
     _wide_raster(path)
     resp = client.get("/api/images", params={"path": str(path)})
     assert resp.status_code == 400
-    assert resp.headers["x-tcip-image-error"] == "overviews_required"
+    assert resp.headers[images_route.IMAGE_ERROR_HEADER] == images_route.OVERVIEWS_REQUIRED
     assert "POST /api/images/overviews" in resp.json()["detail"]
 
 

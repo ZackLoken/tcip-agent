@@ -1,16 +1,21 @@
 """Generate the browser's backend-declared types from the pydantic models that declare them.
 
 ``routes/_coverage_models.py`` and ``routes/coverage.py`` declare the view-coverage record's
-shape once, in Python, ``routes/review.py`` declares the review verdict's action vocabulary, and
-``tcip_web.state.GuiVocabulary`` declares the GUI's tab/mode vocabulary; this script projects
+shape once, in Python; ``routes/review.py`` declares the review verdict's action vocabulary;
+``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame vocabularies; and
+``tcip_web.state.GuiVocabulary`` declares the GUI's tab/mode vocabulary. This script projects
 them into ``frontend/src/api/types.generated.ts`` through each model's own JSON schema, so the
 browser's types are held to the backend's rather than hand-transcribed and left to drift. The
 mapper covers only the schema shapes these models use (string/number/integer/boolean, a nullable
-union, a nested model by ``$ref``, an array, a fixed-length tuple, and a string-enum union);
-annotation keywords such as ``title``, ``default`` and ``additionalProperties`` are ignored rather
-than mapped, and any other shape refuses by name. ``tcip_mcp.web_client.TAB_NAMES`` and
-``tcip_web.jobstore.TERMINAL_STATUSES`` are projected alongside the models as runtime tuples,
-and ``tcip_web.jobstore.JobStatus`` as a bare union type, none of them schema-derived.
+union, a nested model by ``$ref``, an array, a fixed-length tuple, a string-enum union, a
+single-member ``Literal`` discriminator rendered as its literal type, and a free-form object
+(``additionalProperties`` true, no ``properties``) rendered as ``Record<string, unknown>``);
+annotation keywords such as ``title`` and ``default`` are ignored rather than mapped, and any
+other shape (including an object with its own fixed, non-``$ref`` property set) refuses by name.
+``tcip_mcp.web_client.TAB_NAMES`` and ``PLATFORM_PANEL_EVENTS``, ``routes/images.py``'s
+``IMAGE_ERROR_HEADER`` and ``OVERVIEWS_REQUIRED``, and ``tcip_web.jobstore.TERMINAL_STATUSES``
+are projected alongside the models as runtime constants, and ``tcip_web.jobstore.JobStatus`` as a
+bare union type, none of them schema-derived.
 
 Run it after changing a declared model; it rewrites the module in place.
 ``tests/test_generated_frontend_types.py`` fails when the checked-in module is not what the
@@ -69,10 +74,28 @@ def render_cache_version() -> int:
     return RENDER_CACHE_VERSION
 
 
+def image_error_header() -> str:
+    from tcip_web.routes.images import IMAGE_ERROR_HEADER
+
+    return IMAGE_ERROR_HEADER
+
+
+def overviews_required() -> str:
+    from tcip_web.routes.images import OVERVIEWS_REQUIRED
+
+    return OVERVIEWS_REQUIRED
+
+
 def tab_names() -> tuple[str, ...]:
     from tcip_mcp.web_client import TAB_NAMES
 
     return TAB_NAMES
+
+
+def platform_panel_events() -> tuple[str, ...]:
+    from tcip_mcp.web_client import PLATFORM_PANEL_EVENTS
+
+    return PLATFORM_PANEL_EVENTS
 
 
 def terminal_statuses() -> tuple[str, ...]:
@@ -147,13 +170,18 @@ def render() -> str:
     defs = combined["$defs"]
     body = "\n".join(_interface(m.__name__, defs[m.__name__]) for m in models)
     constant = f"export const RENDER_CACHE_VERSION = {render_cache_version()};\n\n"
+    header_const = f"export const IMAGE_ERROR_HEADER = {json.dumps(image_error_header())};\n\n"
+    overviews_const = f"export const OVERVIEWS_REQUIRED = {json.dumps(overviews_required())};\n\n"
     tabs = ", ".join(json.dumps(t) for t in tab_names())
     tab_names_const = f"export const TAB_NAMES = [{tabs}] as const;\n\n"
+    panel_events = ", ".join(json.dumps(t) for t in platform_panel_events())
+    panel_events_const = f"export const PLATFORM_PANEL_EVENTS = [{panel_events}] as const;\n\n"
     terminal = ", ".join(json.dumps(t) for t in terminal_statuses())
     terminal_const = f"export const TERMINAL_STATUSES = [{terminal}] as const;\n\n"
     job_status = " | ".join(json.dumps(t) for t in job_status_members())
     job_status_alias = f"export type JobStatus = {job_status};\n\n"
-    return HEADER + constant + tab_names_const + terminal_const + job_status_alias + body
+    return (HEADER + constant + header_const + overviews_const + tab_names_const
+            + panel_events_const + terminal_const + job_status_alias + body)
 
 
 def main() -> int:

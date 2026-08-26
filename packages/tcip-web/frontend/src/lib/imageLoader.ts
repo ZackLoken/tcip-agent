@@ -5,6 +5,7 @@
  * created here is revoked once its bitmap decodes or the load is abandoned.
  */
 
+import { IMAGE_ERROR_HEADER } from "@/api/types.generated";
 import type { CoverageViewing, StatsSource } from "@/api/types.generated";
 
 export interface ImageServeFacts {
@@ -79,7 +80,7 @@ function readFacts(headers: Headers): FactsResult {
       servedSizeRaw,
       statsSource,
       displayBounds,
-      imageError: headers.get("X-TCIP-Image-Error"),
+      imageError: headers.get(IMAGE_ERROR_HEADER),
     },
   };
 }

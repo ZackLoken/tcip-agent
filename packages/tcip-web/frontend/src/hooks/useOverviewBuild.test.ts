@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 import * as client from "@/api/client";
+import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
 import { STALL_MS, useOverviewBuild } from "@/hooks/useOverviewBuild";
 
 const URL = "/api/images?path=C:/data/mosaic.tif";
@@ -34,7 +35,7 @@ describe("useOverviewBuild", () => {
     vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
     vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("running", 0.4));
 
-    const { result } = renderHook(() => useOverviewBuild(URL, PATH, "overviews_required"));
+    const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
     await waitFor(() => expect(result.current.building).toBe(true));
     expect(client.api.images.buildOverviews).toHaveBeenCalledWith(PATH);
     await waitFor(() => expect(result.current.progress).toBe(0.4));
@@ -44,7 +45,7 @@ describe("useOverviewBuild", () => {
     vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
     vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("completed", 1));
 
-    const { result } = renderHook(() => useOverviewBuild(URL, PATH, "overviews_required"));
+    const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
     await waitFor(() => expect(result.current.reloadToken).toBe(1));
     expect(result.current.building).toBe(false);
     expect(result.current.error).toBeNull();
@@ -56,7 +57,7 @@ describe("useOverviewBuild", () => {
       job("failed", 0.2, "no room on the imagery volume"),
     );
 
-    const { result } = renderHook(() => useOverviewBuild(URL, PATH, "overviews_required"));
+    const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
     await waitFor(() => expect(result.current.error).toBe("no room on the imagery volume"));
     expect(result.current.building).toBe(false);
     expect(result.current.reloadToken).toBe(0);
@@ -68,7 +69,7 @@ describe("useOverviewBuild", () => {
       vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
       vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("running", 0.25));
 
-      const { result } = renderHook(() => useOverviewBuild(URL, PATH, "overviews_required"));
+      const { result } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
       await act(() => vi.advanceTimersByTimeAsync(STALL_MS * 2));
       expect(result.current.building).toBe(false);
       expect(result.current.error).toContain("stopped reporting progress");
@@ -82,9 +83,7 @@ describe("useOverviewBuild", () => {
     const build = vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
     vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("failed", 0, "denied"));
 
-    const { result, rerender } = renderHook(() =>
-      useOverviewBuild(URL, PATH, "overviews_required"),
-    );
+    const { result, rerender } = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
     await waitFor(() => expect(result.current.error).toBe("denied"));
     rerender();
     rerender();
