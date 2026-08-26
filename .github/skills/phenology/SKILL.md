@@ -84,9 +84,9 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 |-------|-------|------|
 | `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images + plant CSVs → persisted `plant_mapping.json` |
 | `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): mapping.json + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
-| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, `write_phenology_csv`, `write_phenology_curve_csv` |
+| `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, and the gated delivery doors `write_phenology_csv` / `write_phenology_curve_csv` (both refuse without a passing operationalization basis) |
 | `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping` |
-| Web Results routes | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/per_plant_curves`, `/onset_dates`: the human UI; delegates to the same shared modules |
+| Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/per_plant_curves`, `/onset_dates`, `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (operationalization records, trait-spec statements, delivery events, registered models) not enumerated here |
 
 Milestone math lives once, in the `phenology` module; plant mapping lives once, in the
 `plant_mapping` module. The MCP tools and the web routes all call them, so a mapping and a
