@@ -597,9 +597,9 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `scan_dataset` | `data_tools.py:159` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
-| `validate_data_quality` | `data_tools.py:225` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:342` | yes | Compute a leakage-free, annotation-stratified train/val split. |
+| `scan_dataset` | `data_tools.py:189` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
+| `validate_data_quality` | `data_tools.py:255` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:394` | yes | Compute a leakage-free, annotation-stratified train/val split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -621,10 +621,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:409` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:545` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1486` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1778` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `force_redraw_cal_holdout_split` | `inference_tools.py:473` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `run_inference` | `inference_tools.py:678` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1635` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1927` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -699,14 +699,14 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `preflight_config` | `training_tools.py:48` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:426` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:654` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:790` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:804` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:833` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1211` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2261` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `preflight_config` | `training_tools.py:68` | yes | Validate a training configuration before launching. |
+| `launch_training` | `training_tools.py:518` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:746` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:882` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:896` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:925` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1303` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2478` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -1172,9 +1172,9 @@ Writers: `set_image_status`,
 `routes/classes.py:337`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy; every confirmed negative is read before the split's stem lists,
 manifest or file tree are written, by `negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:481`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:621`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:551`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:698`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:470`; `_status_bucket_for`,
@@ -1646,7 +1646,7 @@ Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val}.json`, 
 `split_stem_list_key`, `data_tools.py:35`, under whatever directory the caller asked the
 partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:374`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:394`, when `output_path` is given or `materialize=True`.
 The manifest records `seed`, `group_by` (the resolved policy), `group_key_map` when one was
 supplied, `dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
 `assign_class_ids` map the draw resolved), `members` (one block per capture date holding
@@ -1970,8 +1970,8 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2498` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:1979` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2508` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:2128` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
