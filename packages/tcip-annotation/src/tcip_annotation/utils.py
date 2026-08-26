@@ -12,6 +12,9 @@ def _read_orientation_tag(img: Image.Image) -> int | None:
     """The image's EXIF Orientation tag value, or ``None`` if it carries no EXIF data or no
     Orientation tag. The one orientation read `auto_orient_image` and `get_image_dimensions`
     both use, so the frame one rotates and the frame the other measures can't disagree.
+
+    Reads the tag through ``_getexif``, a JPEG-family (JPEG, MPO) accessor PIL's TIFF plugin
+    does not implement; the photographic path this serves admits only those containers.
     """
     try:
         exif = img._getexif()
