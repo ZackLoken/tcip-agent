@@ -962,9 +962,9 @@ Names not re-exported in `__all__` but importable directly from their defining s
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
 from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:51`
-(`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object the
-56 `@mcp.tool()` decorators in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` register
-against.
+(`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
+`@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
+(`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
 
 `python -m tcip_web`: `packages/tcip-web/src/tcip_web/__main__.py` defines `main()`
 (line 71) which pins the platform state root via `tcip_mcp.project_paths.pin_project_root`

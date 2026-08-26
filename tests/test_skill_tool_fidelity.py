@@ -5,8 +5,11 @@ the registry does not hold is a fabrication or a rename residue; a registered to
 names as `` `name` `` or `` `name( `` is an orphan, usually a rename whose new name nobody wrote
 down. Reach is stated here, not just in the script: the fabrication half only reads Tools
 tables (a table whose header's first column is literally "Tool"), so a fabricated or retired
-name sitting in ordinary running prose, outside any such table, is out of its reach; a green
-run over that shape is not coverage of it. The orphan half has no such gap, since it searches
+name sitting in ordinary running prose, outside any such table, is out of its reach; the same
+half also misses a table documenting tools under a different header, the phenology skill's
+piece inventory (headed "Piece") being the live case, since that table names real tools
+alongside internal module names and a content-based match flags the module names too. A green
+run over either shape is not coverage of it. The orphan half has no such gap, since it searches
 every surface's whole text, table or prose alike.
 """
 
@@ -55,7 +58,7 @@ def test_orphan_allow_list_is_empty():
 
 
 def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(tmp_path):
-    """Fails before the fix: a Tools table naming a retired tool had nothing checking it."""
+    """A Tools table naming a retired tool is reported as fabricated."""
     fixture = tmp_path / "SKILL.md"
     fixture.write_text(
         "## Tools\n\n"
@@ -108,9 +111,27 @@ def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(tmp_pa
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
+def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(tmp_path):
+    """The stated second reach gap: a table documenting tools under a header other than "Tool"
+    (the phenology skill's piece inventory, headed "Piece", is the live case) is invisible to
+    the fabrication half even when it names a retired tool, so a green run over that shape is
+    not coverage of it either."""
+    fixture = tmp_path / "SKILL.md"
+    fixture.write_text(
+        "## Pieces\n\n"
+        "| Piece | Where | Role |\n"
+        "|-------|-------|------|\n"
+        "| `sam_auto_label` | somewhere | a name retired long ago |\n"
+        "| `run_inference` | somewhere | a real, registered tool |\n",
+        encoding="utf-8",
+    )
+    assert guardrail.fabricated_tool_names([fixture]) == {}
+
+
 def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(monkeypatch, tmp_path):
-    """Fails before the fix: a rename that fixed every stale mention of the old name but never
-    wrote the new one down anywhere was invisible to a check that only looked for fabrications."""
+    """A registered tool named nowhere in any surface is reported as an orphan: the shape a
+    rename leaves behind when every stale mention of the old name is fixed but the new name is
+    never written down anywhere."""
     from tcip_mcp import server
 
     monkeypatch.setattr(server, "list_registered_tools", lambda: ["run_inference", "orphaned_tool"])

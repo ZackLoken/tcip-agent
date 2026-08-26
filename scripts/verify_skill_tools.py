@@ -16,12 +16,19 @@ fabrication check and a membership check, for tool names instead of trait names:
   form). A registered tool no surface names this way is an orphan: usually a rename whose old
   docs were fixed but whose new name was never written down anywhere.
 
-Reach, stated plainly: the fabrication check only reads Tools tables; a fabricated or retired
-name in running prose outside a table is invisible to it. Widening it to the call/chain
-position (a token followed by `(`, or named in a `->` chain) was measured to catch about
-thirty-five legitimate non-tool identifiers (`train(ctx)`, `grid_to_pixel`, `plant_id`, ...)
-for every real problem, so it stays out of scope; the orphan check is what catches a rename
-missed everywhere, table or prose alike.
+Reach, stated plainly, two gaps: the fabrication check only reads Tools tables, so a fabricated
+or retired name in running prose outside a table is invisible to it; and a table documenting
+tools under another header is also invisible to it, since header text is how a table is
+recognized as one at all. The phenology skill's piece inventory (headed "Piece", not "Tool") is
+that second case: it names real tools (`build_plant_mapping`, `compute_phenology`) alongside
+internal module names in the same first column, and a fabricated or retired name there would go
+unchecked. Matching by content instead of header (treating a table as a tool table once any data
+row's first cell names a registered tool) would flag that table's module-name rows as
+fabrications, rejecting valid prose rather than only catching a real problem, so it is not
+used. Widening to the call/chain position (a token followed by `(`, or
+named in a `->` chain) mostly catches legitimate non-tool identifiers (`train(ctx)`,
+`grid_to_pixel`, `plant_id`, ...) rather than real fabrications, so it also stays out of scope;
+the orphan check is what catches a rename missed everywhere, table or prose alike.
 
 CLI: `python scripts/verify_skill_tools.py`, exit 0 clean, 1 fabricated or orphaned names found.
 """
@@ -44,7 +51,11 @@ _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def prose_surfaces() -> list[Path]:
-    """Every agent-facing surface a tool name is documented (or fabricated) in."""
+    """Every agent-facing surface a tool name is documented (or fabricated) in.
+
+    A tool module's own docstrings and runtime return strings (`vision_tools.py`, `viz.py`) are
+    not among these surfaces: a retired tool name surviving there is invisible to this checker.
+    """
     surfaces = sorted((REPO_ROOT / ".github" / "skills").rglob("SKILL.md"))
     surfaces += sorted((REPO_ROOT / "packages").glob("*/CLAUDE.md"))
     surfaces.append(REPO_ROOT / "CLAUDE.md")
