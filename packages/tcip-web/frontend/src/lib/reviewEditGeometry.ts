@@ -1,10 +1,14 @@
 /**
- * Pure geometry for the Review tab's in-place shape editor. Extracted so the drag math
- * that authors ground truth (corner-anchored resize, bounds-clamped moves, handle hit
+ * Pure geometry for in-place box/polygon editing, shared by the Annotate and Review tabs'
+ * editors. Extracted so the drag math (corner-anchored resize, bounds-clamped moves, handle hit
  * tests) is unit-testable without Konva.
  */
 
 import { pointInPolygon, polygonBbox } from "@/lib/polygonGeometry";
+
+/** The smallest side, in image pixels, a box may be drawn, resized or moved to and still be
+ *  kept: below it, a commit is refused with a toast rather than writing a sliver. */
+export const MIN_BOX_SIDE = 3;
 
 export type EditShape =
   | { kind: "box"; box: [number, number, number, number] }

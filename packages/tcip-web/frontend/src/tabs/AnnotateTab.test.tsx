@@ -863,6 +863,66 @@ describe("AnnotateTab authoring writes what the annotator meant", () => {
     ]);
   });
 
+  it("keeps a freshly drawn box exactly at the minimum side", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    const stage = screen.getByTestId("canvas-stage");
+
+    fireEvent.mouseDown(stage, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: 103, clientY: 103 });
+    await nextFrame();
+    fireEvent.mouseUp(stage, { clientX: 103, clientY: 103 });
+    await flush();
+
+    expect(useStore.getState().canvas.boxes).toEqual([
+      { x1: 100, y1: 100, x2: 103, y2: 103, subject: "subject_a", attributes: {} },
+    ]);
+    expect(useStore.getState().toasts).toHaveLength(0);
+  });
+
+  it("refuses a freshly drawn box smaller than the minimum, with a toast", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    const stage = screen.getByTestId("canvas-stage");
+
+    fireEvent.mouseDown(stage, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: 102, clientY: 102 });
+    await nextFrame();
+    fireEvent.mouseUp(stage, { clientX: 102, clientY: 102 });
+    await flush();
+
+    expect(useStore.getState().canvas.boxes).toHaveLength(0);
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/too small/i);
+  });
+
+  it("undoes a resize that shrinks a box below the minimum, with a toast", async () => {
+    useStore.getState().setRegistry({ subject_a: {} });
+    render(<AnnotateTab />);
+    await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));
+    await flush();
+    act(addBox); // {x1:10, y1:10, x2:50, y2:50}
+    const stage = screen.getByTestId("canvas-stage");
+
+    fireEvent.mouseDown(stage, { clientX: 30, clientY: 30, button: 0 }); // press inside selects
+    fireEvent.mouseUp(stage, { clientX: 30, clientY: 30 });
+    await flush();
+
+    fireEvent.mouseDown(stage, { clientX: 50, clientY: 50, button: 0 }); // bottom-right corner
+    fireEvent.mouseMove(stage, { clientX: 11, clientY: 11 });
+    await nextFrame();
+    fireEvent.mouseUp(stage, { clientX: 11, clientY: 11 });
+    await flush();
+
+    expect(useStore.getState().canvas.boxes).toEqual([
+      { x1: 10, y1: 10, x2: 50, y2: 50, subject: "subject_a", attributes: {} },
+    ]);
+    expect(useStore.getState().toasts.at(-1)?.message).toMatch(/too small/i);
+  });
+
   it("carries a geometry-less image rating into the save payload", async () => {
     render(<AnnotateTab />);
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(1));

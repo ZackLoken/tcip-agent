@@ -658,6 +658,23 @@ describe("ReviewTab mark-missed-object affordance", () => {
     expect(actionSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps a missed-object box drawn exactly at the minimum side", async () => {
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+
+    fireEvent.click(markBtn());
+    const stage = screen.getByTestId("canvas-stage");
+    fireEvent.mouseDown(stage, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(stage, { clientX: 13, clientY: 13 });
+    fireEvent.mouseUp(stage, { clientX: 13, clientY: 13 });
+
+    expect(screen.getByText("Marking missed object")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("Save this missed object to ground truth (Enter)"));
+
+    await waitFor(() => expect(actionSpy).toHaveBeenCalledTimes(1));
+    expect(actionSpy.mock.calls[0][0]).toMatchObject({ edited_box: [10, 10, 13, 13] });
+  });
+
   it("a box too small to save is rejected before it ever reaches Save", async () => {
     render(<ReviewTab />);
     await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
