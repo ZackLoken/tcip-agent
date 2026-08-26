@@ -152,6 +152,7 @@ export function AnnotateToolbar({
       setActiveSubject(trimmed);
       return;
     }
+    const previousSubject = activeSubject;
     const next = { ...registry, [trimmed]: {} };
     setRegistry(next, registryVersion);
     setActiveSubject(trimmed);
@@ -170,6 +171,7 @@ export function AnnotateToolbar({
         useStore
           .getState()
           .pushToast(`Could not add subject: ${e instanceof Error ? e.message : String(e)}`);
+        setActiveSubject(previousSubject);
         try {
           const fresh = await classesApi.load(
             dataset.project_root,

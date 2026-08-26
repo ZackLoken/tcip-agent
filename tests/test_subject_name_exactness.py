@@ -42,6 +42,7 @@ def test_subject_names_differing_only_by_case_stay_distinct(
                 "Catkin": {"description": "a second spelling a human typed"},
                 "bush": {"description": "one plant crown"},
             },
+            "version": None,
         },
     )
     assert save.status_code == 200, save.text
@@ -91,7 +92,7 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     first = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"catkin": {"description": "first pass"}}},
+              "subjects": {"catkin": {"description": "first pass"}}, "version": None},
     )
     assert first.status_code == 200, first.text
 
@@ -99,7 +100,8 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
               "subjects": {"catkin": {"description": "corrected"},
-                           "hazel_leaf": {"description": "one leaf blade"}}},
+                           "hazel_leaf": {"description": "one leaf blade"}},
+              "version": first.json()["version"]},
     )
     assert second.status_code == 200, second.text
     assert second.json()["n_subjects"] == 2

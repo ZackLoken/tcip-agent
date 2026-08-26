@@ -46,14 +46,14 @@ export const classesApi = {
     );
   },
 
-  // `version`: the token `load` returned beside this registry. A stale one is refused (409)
-  // rather than silently overwritten; omit it for an unconditional write.
+  // `version`: the token `load` returned beside this registry, required on every call.
+  // `null` asserts the registry was absent at load, never an unconditional write.
   save: (
     project_root: string,
     subjects: Registry,
-    dataset_root?: string | null,
-    annotations_dir?: string | null,
-    version?: string | null,
+    dataset_root: string | null | undefined,
+    annotations_dir: string | null | undefined,
+    version: string | null,
   ) =>
     postJson<{ status: string; n_subjects: number; classes_path: string; version: string }>(
       ROUTES.postClassesSave,

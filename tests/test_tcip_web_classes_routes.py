@@ -53,6 +53,7 @@ def test_save_then_load_round_trip(client: TestClient, tmp_path: Path) -> None:
                 },
                 "bush": {"description": "one hazelnut bush crown"},
             },
+            "version": None,
         },
     )
     assert save.status_code == 200
@@ -74,7 +75,8 @@ def test_save_refuses_an_empty_registry(client: TestClient, tmp_path: Path) -> N
     """A registry write states subjects; it never clears them, at either door."""
     r = client.post(
         "/api/classes/save",
-        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subjects": {}},
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path), "subjects": {},
+              "version": None},
     )
     assert r.status_code == 400
     assert not (tmp_path / "classes.json").exists()
@@ -86,14 +88,15 @@ def test_save_refuses_dropping_a_declared_subject(client: TestClient, tmp_path: 
     first = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "b"}}},
+              "subjects": {"leaf": {"description": "one leaf"}, "bush": {"description": "b"}},
+              "version": None},
     )
     assert first.status_code == 200
 
     dropped = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"bush": {"description": "b"}}},
+              "subjects": {"bush": {"description": "b"}}, "version": first.json()["version"]},
     )
     assert dropped.status_code == 400
     assert "leaf" in dropped.text
@@ -109,7 +112,7 @@ def test_load_returns_the_version_and_save_round_trips_it(
     save = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"leaf": {"description": "one leaf"}}},
+              "subjects": {"leaf": {"description": "one leaf"}}, "version": None},
     )
     assert save.status_code == 200
 
@@ -135,7 +138,7 @@ def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> Non
     client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"leaf": {"description": "one leaf"}}},
+              "subjects": {"leaf": {"description": "one leaf"}}, "version": None},
     )
     stale_load = client.get(
         "/api/classes/load",
@@ -157,13 +160,50 @@ def test_save_refuses_a_stale_version(client: TestClient, tmp_path: Path) -> Non
     assert conflicted.status_code == 409
 
 
+def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A null version names an absent registry, not an unconditional write: a browser that never
+    loaded a registry still refuses when an agent has written one in the meantime."""
+    from tcip_mcp.class_registry import read_registry
+    from tcip_mcp.tools.annotation_tools import write_class_map
+
+    result = write_class_map(str(tmp_path), {"leaf": {"description": "written by the agent"}})
+    assert "error" not in result
+
+    # Additive (keeps "leaf"), so only the version check can refuse this, not the by-name drop rail.
+    resp = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"leaf": {"description": "written by the agent"},
+                           "bush": {"description": "written by the browser"}},
+              "version": None},
+    )
+    assert resp.status_code == 409
+    assert read_registry(tmp_path / "classes.json").subject("bush") is None
+
+
+def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A null version asserts the registry is still absent; over an actually absent one the write
+    lands rather than being treated as unconditional."""
+    resp = client.post(
+        "/api/classes/save",
+        json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
+              "subjects": {"bush": {"description": "first write"}}, "version": None},
+    )
+    assert resp.status_code == 200
+
+
 def test_save_refuses_malformed_registry(client: TestClient, tmp_path: Path) -> None:
     """A malformed registry (here: an attribute with no ``values``) is refused, not silently
     written: a bad registry would assign ids over garbage."""
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "dataset_root": str(tmp_path),
-              "subjects": {"catkin": {"attributes": {"elongation": {"type": "categorical"}}}}},
+              "subjects": {"catkin": {"attributes": {"elongation": {"type": "categorical"}}}},
+              "version": None},
     )
     assert r.status_code == 400
 
@@ -179,6 +219,7 @@ def test_registry_holds_multiple_subjects(client: TestClient, tmp_path: Path) ->
                 "catkin": {"description": "a catkin"},
                 "bush": {"description": "a bush"},
             },
+            "version": None,
         },
     )
     assert save.status_code == 200
@@ -199,7 +240,7 @@ def test_dataset_root_derived_from_annotation_dir(client: TestClient, tmp_path: 
     r = client.post(
         "/api/classes/save",
         json={"project_root": str(tmp_path), "annotations_dir": str(ann),
-              "subjects": {"catkin": {"description": "a catkin"}}},
+              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
     )
     assert r.status_code == 200
     assert (tmp_path / "classes.json").is_file()
@@ -431,7 +472,7 @@ def test_save_classes_confines_dataset_root_to_allowed_roots(
     resp = client.post(
         "/api/classes/save",
         json={"project_root": str(outside), "dataset_root": str(outside),
-              "subjects": {"catkin": {"description": "a catkin"}}},
+              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
     )
     assert resp.status_code == 403
 
@@ -559,7 +600,7 @@ def test_save_classes_writes_a_dataset_scoped_audit_entry(client: TestClient, tm
     client.post(
         "/api/classes/save",
         json={"project_root": str(project_root), "dataset_root": str(dataset_root),
-              "subjects": {"catkin": {"description": "a catkin"}}},
+              "subjects": {"catkin": {"description": "a catkin"}}, "version": None},
     )
     entries = _read_audit_entries(dataset_root)
     assert len(entries) == 1
