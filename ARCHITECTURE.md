@@ -706,11 +706,11 @@ registered at HEAD.
 | GET | `/api/state` | `get_state` | `app.py:138` |
 | POST | `/api/state/tab` | `set_active_tab` | `app.py:147` |
 | WS | `/ws/state` | `state_ws` | `app.py:155` |
-| GET | `/health` | `health` | `app.py:234` |
-| GET | `/` | `index` | `app.py:251` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:274` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:318` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:327` |
+| GET | `/health` | `health` | `app.py:249` |
+| GET | `/` | `index` | `app.py:257` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:280` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:324` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:333` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -1634,7 +1634,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:732` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:297` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:303` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:869`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
@@ -1985,7 +1985,7 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:204` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:213` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
@@ -2033,7 +2033,7 @@ Phase 3 verdict: single.
 ## S61. Bash guard and PowerShell guard protected-path sets
 
 Must agree: the two shells fence the same platform paths.
-Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:255` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
+Side A: `packages/tcip-web/src/tcip_web/agent_bash_guard.py:338` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
 Side B: `packages/tcip-web/src/tcip_web/agent_powershell_guard.py:149` (`kind = fence_rules.classify(target, root=root, mode=mode)`).
 Phase 3 verdict: single.
 
@@ -2041,7 +2041,7 @@ Phase 3 verdict: single.
 
 Must agree: what the tool-level deny list blocks and what the shell guards block cover the same paths.
 Side A: `packages/tcip-web/src/tcip_web/agent_terminal.settings.json` (`permissions.deny` lists `Edit(packages/**)` and similar).
-Side B: `packages/tcip-web/src/tcip_web/agent_fence_rules.py:158` (`def _declared_targets() -> "tuple[list[str], list[str], list[str]]":`, which splits those deny rules into the sets `classify` fences).
+Side B: `packages/tcip-web/src/tcip_web/agent_fence_rules.py:165` (`def _declared_targets() -> "tuple[list[str], list[str], list[str]]":`, which splits those deny rules into the sets `classify` fences).
 Phase 3 verdict: single.
 
 ## S63. Fence settings materialization for the spawned terminal  <!-- queued: P5-328 unify -->
