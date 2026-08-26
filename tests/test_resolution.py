@@ -341,6 +341,23 @@ def test_dataset_hash_content_addressed(tmp_path):
     assert dataset_hash(d) != h1  # canonical JSON content changes the identity (not read as empty)
 
 
+def test_dataset_hash_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
+    """A bucket's own provenance stamp is not a label, and with no explicit stems dataset_hash
+    walks the directory itself: its bytes must never enter a ground-truth identity."""
+    from tcip_annotation import json_io
+    from tcip_annotation.json_io import SIDECAR_FILENAMES
+    from tcip_annotation.state import Annotation, BBox
+
+    d = tmp_path / "labels"
+    d.mkdir()
+    json_io.write_annotations(d / "a.json", [Annotation(subject="catkin", geometry=BBox(10, 10, 30, 30))],
+                              100, 100)
+    before = dataset_hash(d)
+    for name in SIDECAR_FILENAMES:
+        (d / name).write_text('{"conf": {"value": 0.5}}', encoding="utf-8")
+    assert dataset_hash(d) == before
+
+
 # --- validate_resolved_bundle live checks ---
 
 def test_validate_in_chans_vs_probed_bands():

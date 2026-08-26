@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import tcip_store
-from tcip_annotation.json_io import SIDECAR_FILENAMES
+from tcip_annotation.json_io import SIDECAR_FILENAMES as _SIDECAR_FILENAMES
 from tcip_store import (
     RECORD_JSON,
     Key,
@@ -553,10 +553,12 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     between machines but the GT identity does not. Missing labels are hashed as empty (they are valid
     negatives), so their presence/absence still contributes to identity.
     """
+    from tcip_annotation.json_io import prediction_documents
+
     labels_dir = Path(labels_dir)
     if stems is None:
-        # Canonical labels are per-image JSON.
-        stems = sorted(p.stem for p in labels_dir.glob("*.json"))
+        # Canonical labels are per-image JSON; a bucket's own sidecar stamps are not labels.
+        stems = sorted(p.stem for p in prediction_documents(labels_dir))
     else:
         stems = sorted(stems)
     h = hashlib.sha256()
@@ -610,8 +612,10 @@ def _labels_term(annotations_root: Path) -> str | None:
     label_dirs = subdirs if subdirs else [annotations_root]
     h = hashlib.sha256()
     any_labels = False
+    from tcip_annotation.json_io import prediction_documents
+
     for d in label_dirs:
-        if not any(d.glob("*.json")):
+        if not prediction_documents(d):
             continue
         any_labels = True
         # A real subdir name can never be empty, so the flat root keys with "" rather than its own
@@ -767,7 +771,6 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
 
 
 # --- the prediction bucket's provenance stamps (the delivery gate reads these, not a caller string) ---
-# SIDECAR_FILENAMES is re-exported here for every existing caller of this module's own name.
 
 _SIDECAR_LOCATOR = RootedFileLocator(suffix=".json")
 """A stamp sits directly in the bucket it describes, addressed by its own document name."""
@@ -783,13 +786,14 @@ _SIDECAR_STORES: dict[str, str] = {
             locator=_SIDECAR_LOCATOR,
         )
     ).name
-    for document in (filename[: -len(".json")] for filename in sorted(SIDECAR_FILENAMES))
+    for document in (filename[: -len(".json")] for filename in sorted(_SIDECAR_FILENAMES))
 }
 """One store per measurement dimension, never one store holding every dimension's fields: the
 dimensions are structurally independent (a physical scale is a fact about the imagery, a classifier
 stamp is about a state call, the count operating point is about a threshold), and a single document
 is exactly what would let a generic writer conflate them. The document names come from
-:data:`SIDECAR_FILENAMES`, the one declared set, rather than a second enumeration of them here."""
+:data:`tcip_annotation.json_io.SIDECAR_FILENAMES`, the one declared set, rather than a second
+enumeration of them here."""
 
 
 def sidecar_key(pred_dir: str | Path, document: str = "operating_point") -> Key:

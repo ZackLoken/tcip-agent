@@ -787,8 +787,10 @@ def run_inference(
         # on can we compare real hashes and flag cross-dataset inheritance.
         from tcip_mcp.pipelines.image_utils import stem_of
 
+        from tcip_annotation.json_io import prediction_documents
+
         inf_stems = [stem_of(pp) for pp in image_paths]
-        cal_label_stems = {pp.stem for pp in Path(calibration_labels_dir).glob("*.json")}
+        cal_label_stems = {pp.stem for pp in prediction_documents(calibration_labels_dir)}
         same_images = calibration_images_dir is None or (
             images_dir is not None and Path(calibration_images_dir) == Path(images_dir))
         if same_images and inf_stems and set(inf_stems) == cal_label_stems:
