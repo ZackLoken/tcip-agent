@@ -699,12 +699,12 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:48` | yes | Validate a training configuration before launching. |
 | `launch_training` | `training_tools.py:426` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:644` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:780` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:794` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:823` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1192` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2242` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `check_training_status` | `training_tools.py:654` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:790` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:804` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:833` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1211` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2261` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -876,8 +876,8 @@ registered at HEAD.
 | GET | `/image_status` | `get_image_status` | `routes/review.py:1197` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1250` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1280` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1400` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1428` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1442` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1470` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1698,7 +1698,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:759` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:303` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:350` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:897`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
