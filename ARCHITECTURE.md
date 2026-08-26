@@ -1349,7 +1349,10 @@ are listed here with the rest rather than taking numbers of their own.
 - `split.json` (`split_key`, line 232): written by `training_tools._persist_split_manifest`,
   `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:1249`. Read by `read_split_manifest`,
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
-  both take the manifest from.
+  both take the manifest from. When the run named a split manifest (`data.split.manifest_dir`),
+  this record's `manifest_binding` carries the binding's counts and its two content hashes (never
+  the manifest's own member lists, which live in the `split_manifest` record itself, see §"split
+  manifest / split stem list, `.tcip/artifacts/split_manifest.json` / `split_stem_list.json`").
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
   run's evidence. Written only by the module-private `_append_validation`, `experiments.py:943`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
@@ -1382,7 +1385,9 @@ Seam S30 ("split.json train/val manifest"), verdict `both-sides-one-implementati
 `_persist_split_manifest` and the real readers (`operating_point.py`'s disjointness check,
 `block_calibration.py`'s `resolve_block_calibration_records`) against the same file. Gap: nothing
 exercises a mismatch between `dataset_hash`/`dataset_id`/`dataset_fingerprint` values recorded by
-the writer and any downstream consumer keying off them.
+the writer and any downstream consumer keying off them. `manifest_binding`, the block a run bound
+to a named `split_manifest` record (format 26) carries here, is exercised by
+`tests/test_split_manifest_binding.py`'s own writer/reader pair, not by this seam's tests.
 
 ## 16. `.tcip/models/registry.json`, trained-model registry
 
@@ -1610,9 +1615,10 @@ written that way, so the fresh-interpreter claim is measured rather than inferre
 (sibling sidecars to `operating_point.json`, named in `pipelines/operating_point.py`, not opened
 for this section); `pipelines/region_completeness.py`'s own digest-writing logic beyond the
 `dataset_layout.py` cross-reference already given for format 8; any format defined inside
-`pipelines/postprocessing/`, `pipelines/feedback/`, or `pipelines/data/splits.py`'s own output
-tree beyond the `image_status.json` carry-over covered in format 5. No seam id covers this
-placeholder entry since it names no single format.
+`pipelines/postprocessing/`, `pipelines/feedback/`, or `pipelines/data/splits.py`'s own materialized
+tree beyond the `image_status.json` carry-over covered in format 5 (`split_manifest.json`/
+`split_stem_list.json` are covered in format 26). No seam id covers this placeholder entry since
+it names no single format.
 
 ## 25. `.tcip/project.json`, per-project record (site)
 
@@ -1630,6 +1636,32 @@ Readers: `read_record`, `project_record.py:116`; `site_fields`, `project_record.
 one reader every surface (the picker, `inspect_project`, the doctor) calls, and never raises.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: the record is new.
+
+## 26. `split_manifest.json` / `split_stem_list.json`, a partition `make_splits` drew
+
+Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val}.json`, addressed by
+`split_manifest_key`/`split_stem_list_key`,
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:35`, `:35`, under whatever directory the
+caller asked the partition to be written to; no dataset resolver owns this layout.
+
+Writer: `make_splits`, `data_tools.py:374`, when `output_path` is given or `materialize=True`.
+The manifest records `seed`, `group_by` (the resolved policy), `group_key_map` when one was
+supplied, `dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
+`assign_class_ids` map the draw resolved), `members` (one block per capture date holding
+`labels_root`, `images_root`, and that date's own `dataset_hash`), `splits` (`train`/`val`
+identities, `<date>/<stem>`, the bare `<stem>` under a flat tree), and `admission_counts` (the
+summed `trainable_stems` counts across every date). Each `split_stem_list.json` document holds one
+side's identities, the same list `splits` already carries.
+
+Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:66`, the one reader a training or
+tuning run's `data.split.manifest_dir` resolves through (`training_tools._auto_train_val`), which
+refuses by name when the record is absent, undecodable, not a mapping, or lacks `subject` or
+`members`; `scripts/plant_aware_group_splits.py` reads no manifest back, it only writes one
+through `make_splits`.
+
+No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
+`tests/test_split_manifest_binding.py` calls the real writer and the real consumer
+(`_auto_train_val`'s manifest branch) against the same files.
 
 ## Formats with a general path-resolution seam but no per-format seam entry above
 
@@ -1964,7 +1996,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: a bespoke train(ctx) callable is importable and accepts the TrainContext the envelope hands it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:403` (`training_source = run.config.get("training_source")`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:100` (`training_source = config.get("training_source")`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:120` (`training_source = config.get("training_source")`).
 Phase 3 verdict: duplicated.
 
 ## S43. dataset_source bespoke dataset seam

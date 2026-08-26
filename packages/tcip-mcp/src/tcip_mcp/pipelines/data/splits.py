@@ -314,6 +314,105 @@ def date_of_manifest_key(key: str) -> str | None:
     return key or None
 
 
+@dataclass(frozen=True)
+class ManifestBinding:
+    """What binding a run to a split manifest resolved for one capture date: the run's own
+    train/val membership, as bare stems under that date, plus the counts a run's ``split.json``
+    records beside them. Never the manifest's own member lists (those already live in the
+    manifest itself); ``assigned``/``train_bound``/``val_bound``/``other_dates`` are the small,
+    checkpoint-safe summary :func:`bind_manifest_stems`'s caller persists instead.
+    """
+
+    train: list[str]
+    val: list[str]
+    assigned: int
+    train_bound: int
+    val_bound: int
+    other_dates: int
+
+
+def bind_manifest_stems(
+    manifest: dict, date: str | None, subject: str, attribute: str | None,
+    admitted: Sequence[str], *, admission_counts: dict[str, int] | None = None,
+) -> ManifestBinding:
+    """Bind a run's admitted stems for one capture date to a split manifest's recorded partition.
+
+    ``admitted`` is the run's own draw for ``date`` (the task path's admission, e.g.
+    ``trainable_stems``' return), never re-derived here. Refuses, in order:
+
+    - the manifest's ``subject``/``attribute`` disagree with the run's;
+    - the manifest holds no members under ``date`` (its ``members`` keys, via
+      :func:`manifest_date_key`, name what it does hold);
+    - a stem the run admits that the manifest assigns to neither ``train`` nor ``val`` (training
+      it would put it on a side the manifest never chose; the remedy is regenerating the split
+      over the current data, which draws through the same admission);
+    - a manifest member under ``date`` that the run does not admit (the data moved under the
+      manifest: a label emptied, a confirmation withdrawn, an assessment removed), naming
+      ``admission_counts`` when the caller supplied it;
+    - an empty side (``train`` or ``val``) once the two are narrowed to ``date``.
+
+    Because the manifest was drawn through the same admission with the same subject/attribute
+    scope, the last two refusals fire only when the data moved since the split was drawn, and the
+    remedy they name (regenerate the split) exists.
+    """
+    manifest_subject, manifest_attribute = manifest.get("subject"), manifest.get("attribute")
+    if (manifest_subject, manifest_attribute) != (subject, attribute):
+        raise ValueError(
+            f"split manifest was drawn for subject={manifest_subject!r}, attribute="
+            f"{manifest_attribute!r}, but this run is subject={subject!r}, attribute="
+            f"{attribute!r}: a run only binds to its own subject's (and attribute's) manifest."
+        )
+    members = manifest.get("members") or {}
+    date_key = manifest_date_key(date)
+    if date_key not in members:
+        raise ValueError(
+            f"split manifest holds no members under date {date!r}; it holds members under "
+            f"{sorted(members)}. Regenerate the split over this date, or launch against the "
+            "date the manifest was drawn for."
+        )
+
+    splits = manifest.get("splits") or {}
+    train_ids, val_ids = set(splits.get("train") or []), set(splits.get("val") or [])
+    this_date_ids = {i for i in train_ids | val_ids if member_identity_parts(i)[0] == date}
+    other_dates = len(train_ids | val_ids) - len(this_date_ids)
+
+    admitted_ids = {member_identity(date, s) for s in admitted}
+    unassigned = sorted(admitted_ids - train_ids - val_ids)
+    if unassigned:
+        preview = [member_identity_parts(i)[1] for i in unassigned[:10]]
+        more = f" (+{len(unassigned) - 10} more)" if len(unassigned) > 10 else ""
+        raise ValueError(
+            f"{len(unassigned)} stem(s) this run admits are assigned to neither side of the split "
+            f"manifest: {preview}{more}. Training would put them on a side the manifest never "
+            "chose; regenerate the split over the current data (make_splits draws through the "
+            "same admission this run does)."
+        )
+    not_admitted = sorted(this_date_ids - admitted_ids)
+    if not_admitted:
+        preview = [member_identity_parts(i)[1] for i in not_admitted[:10]]
+        more = f" (+{len(not_admitted) - 10} more)" if len(not_admitted) > 10 else ""
+        counts_note = f" This run's own admission counts: {admission_counts}." \
+            if admission_counts is not None else ""
+        raise ValueError(
+            f"{len(not_admitted)} member(s) the split manifest assigned under date {date!r} are "
+            f"not in this run's admitted samples: {preview}{more}. The data changed since the "
+            f"split was drawn (a label emptied, a confirmation withdrawn, an assessment "
+            f"removed); regenerate the split over the current data.{counts_note}"
+        )
+
+    train_bound = sorted(member_identity_parts(i)[1] for i in this_date_ids & train_ids)
+    val_bound = sorted(member_identity_parts(i)[1] for i in this_date_ids & val_ids)
+    if not train_bound or not val_bound:
+        raise ValueError(
+            f"binding to the split manifest under date {date!r} leaves an empty side "
+            f"(train={len(train_bound)}, val={len(val_bound)}); a run needs both."
+        )
+    return ManifestBinding(
+        train=train_bound, val=val_bound, assigned=len(this_date_ids),
+        train_bound=len(train_bound), val_bound=len(val_bound), other_dates=other_dates,
+    )
+
+
 # -- spatial (within-image) strip split ---------------------------------------
 
 _SPATIAL_IDENTITY_SEP = "::"

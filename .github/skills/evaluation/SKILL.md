@@ -94,7 +94,9 @@ When metrics are poor, investigate systematically:
 ## Comparison Protocol
 
 When comparing models:
-1. Same dataset split (use `make_splits` with fixed seed)
+1. Same dataset split: draw one manifest with `make_splits` and name it from every compared run
+   with `data.split.manifest_dir`, so each binds to the identical membership rather than each
+   redrawing its own from a shared seed
 2. Same evaluation set
 3. Compare using the metric that governs this trait/task's phenotype (see Metrics by Task Type
    above), not necessarily the labeled comparability metric
