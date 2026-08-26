@@ -247,6 +247,29 @@ def test_main_cli_end_to_end(tmp_path: Path, two_plant_csv: Path) -> None:
     assert ts.exists(split_manifest_key(out_dir))
 
 
+def test_main_cli_default_invocation_writes_its_two_partitions(
+    tmp_path: Path, two_plant_csv: Path,
+) -> None:
+    """No ratio flags named: the script's own defaults (0.8/0.2/0.0) still write a real train/val
+    split, and no test partition."""
+    from tcip_mcp.tools.data_tools import split_manifest_key, split_stem_list_key
+
+    dataset_root = tmp_path / "dataset"
+    for date, tiepoint in (("2026-02-01", P1_TIEPOINT), ("2026-03-01", P1_TIEPOINT)):
+        _write_dataset_stem(dataset_root, date, f"p1_{date}", tiepoint)
+    for date, tiepoint in (("2026-02-01", P2_TIEPOINT), ("2026-03-01", P2_TIEPOINT)):
+        _write_dataset_stem(dataset_root, date, f"p2_{date}", tiepoint)
+
+    out_dir = tmp_path / "cli_defaults_out"
+    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--output-path", str(out_dir)])
+
+    assert rc == 0
+    assert ts.exists(split_stem_list_key(out_dir, "train"))
+    assert ts.exists(split_stem_list_key(out_dir, "val"))
+    manifest = ts.read(split_manifest_key(out_dir))
+    assert set(manifest["splits"]) == {"train", "val"}
+
+
 def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, two_plant_csv: Path) -> None:
     dataset_root = tmp_path / "dataset"
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)

@@ -17,8 +17,8 @@ map to ``make_splits(group_key_map=...)``, which already refuses loudly (via
 
 Usage:
     python scripts/plant_aware_group_splits.py <dataset_root> --plant-csv <plants.csv> \
-        [--plant-csv <more_plants.csv> ...] [--train-ratio 0.7] [--val-ratio 0.2] \
-        [--test-ratio 0.1] [--seed 42] [--tolerance-m 5.0] [--output-path <dir>] \
+        [--plant-csv <more_plants.csv> ...] [--train-ratio 0.8] [--val-ratio 0.2] \
+        [--test-ratio 0.0] [--seed 42] [--tolerance-m 5.0] [--output-path <dir>] \
         [--materialize] [--no-copy] [--subject <subject>]
 """
 
@@ -125,9 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("dataset_root", help="Dataset root (canonical images/, annotations/ layout).")
     parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",
                          help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
-    parser.add_argument("--train-ratio", type=float, default=0.7)
+    parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--val-ratio", type=float, default=0.2)
-    parser.add_argument("--test-ratio", type=float, default=0.1)
+    parser.add_argument("--test-ratio", type=float, default=0.0,
+                         help="Must be 0: no launch path honours a held-out test list, so "
+                              "make_splits writes train and val only.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tolerance-m", type=float, default=None,
                          help="Max GPS distance (m) to the nearest plant. Defaults to "
@@ -135,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
                               "assign_detections_to_plants already use.")
     parser.add_argument("--output-path", default=None, help="Where make_splits writes manifests.")
     parser.add_argument("--materialize", action="store_true",
-                         help="Also lay out a {train,val,test}/{images,labels}/ tree.")
+                         help="Also lay out a {train,val}/{images,labels}/ tree.")
     parser.add_argument("--no-copy", action="store_true",
                          help="Symlink instead of copy when materializing.")
     parser.add_argument("--subject", default=None,

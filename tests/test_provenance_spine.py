@@ -192,7 +192,7 @@ def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     manifest = ts.read(split_manifest_key(out))
     assert manifest["seed"] == 7
     assert manifest["dataset_hash"] == result["dataset_hash"]
-    assert set(manifest["splits"]) == {"train", "val", "test"}
+    assert set(manifest["splits"]) == {"train", "val"}
 
 
 # ── R2: delivery CSVs carry the producing-model provenance columns ────────────

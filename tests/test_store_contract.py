@@ -1605,7 +1605,8 @@ REGISTERED = {
         "splits/train.json", root_of=_split_dir),
     "split_manifest": Registered(
         {"seed": 42, "dataset_hash": "9f2c", "group_by": "stem_prefix",
-         "splits": {"train": ["a_1", "ü_2"], "val": [], "test": []}},
+         "labels_root": "ü/annotations", "dataset_fingerprint": "7ac1",
+         "splits": {"train": ["a_1", "ü_2"], "val": []}},
         lambda root: data_tools.split_manifest_key(_split_dir(root)),
         "splits/split_manifest.json", root_of=_split_dir),
     "curated_manifest": Registered(

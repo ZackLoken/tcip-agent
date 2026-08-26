@@ -18,10 +18,11 @@ from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 
 
-# 4 source prefixes (srcA..srcD) × 3 tiles × 1 GT box each: 4 leakage groups, uniform density.
+# 4 source prefixes (srcA..srcD) x 3 tiles x 1 GT box each: 4 leakage groups, uniform density.
+# No test partition: make_splits' default 0.8/0.2 train/val split carries every group into one.
 GOLDEN_MAKE_SPLITS = {
-    "splits": {"train": 6, "val": 3, "test": 3},
-    "foreground_annotations": {"train": 6, "val": 3, "test": 3},
+    "splits": {"train": 9, "val": 3},
+    "foreground_annotations": {"train": 9, "val": 3},
     "total_stems": 12,
     "total_annotations": 12,
     "groups": 4,
@@ -32,15 +33,15 @@ GOLDEN_MAKE_SPLITS = {
 
 # split_dataset (seed=1) and make_splits (seed=1) assign the same groups per split.
 GOLDEN_TREE = sorted([
-    "train.json", "val.json", "test.json", "split_manifest.json",
+    "train.json", "val.json", "split_manifest.json",
     "train/images/srcB_0_0.jpg", "train/images/srcB_1_0.jpg", "train/images/srcB_2_0.jpg",
+    "train/images/srcC_0_0.jpg", "train/images/srcC_1_0.jpg", "train/images/srcC_2_0.jpg",
     "train/images/srcD_0_0.jpg", "train/images/srcD_1_0.jpg", "train/images/srcD_2_0.jpg",
     "train/labels/srcB_0_0.json", "train/labels/srcB_1_0.json", "train/labels/srcB_2_0.json",
+    "train/labels/srcC_0_0.json", "train/labels/srcC_1_0.json", "train/labels/srcC_2_0.json",
     "train/labels/srcD_0_0.json", "train/labels/srcD_1_0.json", "train/labels/srcD_2_0.json",
     "val/images/srcA_0_0.jpg", "val/images/srcA_1_0.jpg", "val/images/srcA_2_0.jpg",
     "val/labels/srcA_0_0.json", "val/labels/srcA_1_0.json", "val/labels/srcA_2_0.json",
-    "test/images/srcC_0_0.jpg", "test/images/srcC_1_0.jpg", "test/images/srcC_2_0.jpg",
-    "test/labels/srcC_0_0.json", "test/labels/srcC_1_0.json", "test/labels/srcC_2_0.json",
 ])
 
 
@@ -93,11 +94,11 @@ def test_make_splits_materialize_tree_golden(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"
     result = make_splits(str(root), output_path=str(out), seed=1, materialize=True)
-    assert result["splits"] == {"train": 6, "val": 3, "test": 3}
+    assert result["splits"] == {"train": 9, "val": 3}
     assert result["total_stems"] == 12
     assert result["seed"] == 1
     assert result["output_dir"] == str(out)
-    assert result["structure"] == f"{out}/{{train,val,test}}/{{images,labels}}/"
+    assert result["structure"] == f"{out}/{{train,val}}/{{images,labels}}/"
     assert _tree(out) == GOLDEN_TREE
-    for split in ("train", "val", "test"):
+    for split in ("train", "val"):
         assert json.loads((out / f"{split}.json").read_text())
