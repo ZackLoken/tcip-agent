@@ -116,6 +116,27 @@ def test_resolve_git_bash_prefers_the_derived_path_when_it_exists(tmp_path, monk
     assert gate_baseline._resolve_git_bash() == str(bash_exe)
 
 
+def test_resolve_git_bash_on_a_posix_host_is_the_bash_on_path(monkeypatch):
+    """A Linux or macOS host runs each step through the bash on PATH, the shell the CI runner
+    itself gives the run: text, with no Git-for-Windows lookup."""
+    gate_baseline = _load()
+    monkeypatch.setattr(gate_baseline.os, "name", "posix")
+    monkeypatch.setattr(gate_baseline.shutil, "which", lambda name: "/usr/bin/bash")
+    monkeypatch.setattr(
+        gate_baseline.subprocess, "run",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no git probe on a posix host")),
+    )
+    assert gate_baseline._resolve_git_bash() == "/usr/bin/bash"
+
+
+def test_resolve_git_bash_on_a_posix_host_refuses_with_no_bash_on_path(monkeypatch):
+    gate_baseline = _load()
+    monkeypatch.setattr(gate_baseline.os, "name", "posix")
+    monkeypatch.setattr(gate_baseline.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit, match="bash was not found on PATH"):
+        gate_baseline._resolve_git_bash()
+
+
 def test_python_jobs_matrix_leg_env_carries_the_resolved_store_backend():
     gate_baseline = _load()
     by_key = {stage.key: stage for stage in gate_baseline.build_plan()}

@@ -8,10 +8,11 @@ does not hide the timing of the rest.
 The ``environment`` job is out of scope: it creates the conda environment this gate's own
 process already runs inside, so there is nothing local to run in its place.
 
-Each step's ``run:`` text goes through Git Bash, never through PowerShell or cmd, since that is
-the shell GitHub's own Linux runners give the same text. A bare ``bash`` resolved from ``PATH``
-can be a WSL launcher or a System32 shim on some machines, reading Windows paths differently; the
-path this script resolves is Git's own bash.exe, derived from the ``git`` on this machine's PATH.
+Each step's ``run:`` text goes through bash, never through PowerShell or cmd, since that is the
+shell GitHub's own Linux runners give the same text. On a Linux or macOS host the bash on
+``PATH`` is that shell. On Windows a bare ``bash`` resolved from ``PATH`` can be a WSL launcher
+or a System32 shim, reading Windows paths differently, so the path this script resolves there is
+Git's own bash.exe, derived from the ``git`` on this machine's PATH.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -163,11 +165,22 @@ def mypy_pin() -> "str | None":
 
 
 def _resolve_git_bash() -> str:
-    """Git Bash's own ``bash.exe``, derived from ``git --exec-path`` (whose parent's parent is
-    the Git installation root) rather than a bare ``PATH`` lookup, since a bare ``bash`` can
-    resolve to WSL's launcher or a System32 shim on some machines. The hardcoded default install
-    path is the stated fallback when the derivation finds nothing there.
+    """The bash that runs each step's ``run:`` text.
+
+    On a non-Windows host that is the ``bash`` on ``PATH``, the same shell the CI runner gives
+    the text. On Windows it is Git Bash's own ``bash.exe``, derived from ``git --exec-path``
+    (whose parent's parent is the Git installation root) rather than a bare ``PATH`` lookup,
+    since a bare ``bash`` can resolve to WSL's launcher or a System32 shim on some machines; the
+    hardcoded default install path is the stated fallback when the derivation finds nothing
+    there. Refuses by name on either host when no bash is found.
     """
+    if os.name != "nt":
+        found = shutil.which("bash")
+        if found:
+            return found
+        raise SystemExit(
+            "bash was not found on PATH; this gate runs each step's run: text through bash."
+        )
     candidates: "list[pathlib.Path]" = []
     try:
         probe = subprocess.run(
