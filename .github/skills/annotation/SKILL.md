@@ -9,10 +9,13 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 The on-disk default for both GT and predictions is one per-image, COCO-shaped `.json`
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
-`accepted_at` provenance per object. `stage_proposals`, `accept_proposals`, and
-`export_predictions` all read/write this schema; a dataset-level COCO training set is
-assembled from these per-image files (`datasets.py`'s `to_coco_dataset`), not authored
-directly. An unspecified format resolves to `.json` (`dataset_layout.py`'s `label_ext()`).
+`accepted_at` provenance per object. `stage_proposals` and `accept_proposals` write this
+schema without reading any label document (`accept_proposals` reads back the proposal
+record its own prior run staged, not a label file); `export_predictions` reads it only
+when it calibrates a confidence operating point, through `run_inference`. A dataset-level
+COCO training set is assembled from these per-image files (`datasets.py`'s
+`to_coco_dataset`), not authored directly. An unspecified format resolves to `.json`
+(`dataset_layout.py`'s `label_ext()`).
 
 ## Import/export formats
 
@@ -33,9 +36,9 @@ importers, so nothing constrains you to a format someone else's tool happened to
 ## Coordinate frame: upright, EXIF applied once
 
 Every coordinate (normalized or pixel) lives in the EXIF-upright frame. Images are
-decoded through one door, `load_image` (`image_utils.py`) / `get_image_dimensions`, both
-via `auto_orient_image`, which applies the EXIF orientation exactly once, so the GUI
-canvas, the model, tiling, and viz all share one pixel space. This matters most for
+decoded through one door, `load_image` (`image_utils.py`) / `get_image_dimensions`, and
+both orient through one shared EXIF orientation-tag read, so the GUI canvas, the model,
+tiling, and viz all share one pixel space. This matters most for
 Orientation-6 phone/camera JPEGs whose stored frame is transposed (e.g. 5712×4284 ↔
 4284×5712): denormalizing an upright-authored box against the raw sensor frame scatters
 every box. Do not re-open images with a bare `PIL.Image.open` for anything coordinate-
