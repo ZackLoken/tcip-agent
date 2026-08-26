@@ -20,6 +20,7 @@ from tcip_web.app import app
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 GENERATED = FRONTEND_SRC / "api" / "routes.ts"
+PROXY_GENERATED = FRONTEND_SRC / "api" / "devProxy.generated.ts"
 VITE_CONFIG = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"
 GENERATOR = REPO_ROOT / "scripts" / "generate_frontend_routes.py"
 
@@ -81,16 +82,70 @@ def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
     assert not offenders, "these write a backend path instead of using ROUTES:\n" + "\n".join(offenders)
 
 
+def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> None:
+    """The checked-in dev-proxy module is a projection of the app's routes, not a hand-edited
+    copy: a socket route added under a new prefix that never reached the module would leave the
+    dev server unable to proxy it."""
+    generated = _generator().render_proxy(app)
+    assert PROXY_GENERATED.read_text(encoding="utf-8") == generated, (
+        "packages/tcip-web/frontend/src/api/devProxy.generated.ts is out of date; "
+        "run python scripts/generate_frontend_routes.py"
+    )
+
+
+def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
+    """The one assertion that reads the real ``vite.config.ts``: its ``server.proxy`` is built
+    from the generated entries, not a literal of its own that could drift from them."""
+    vite_text = VITE_CONFIG.read_text(encoding="utf-8")
+    assert "./src/api/devProxy.generated" in vite_text, (
+        "vite.config.ts no longer imports the generated proxy module"
+    )
+    proxy_block = re.search(r"proxy:\s*(.*?),\n\s*\},", vite_text, re.S)
+    assert proxy_block is not None, "the Vite server.proxy assignment is no longer where this test reads it"
+    assert "DEV_PROXY" in proxy_block.group(1), (
+        "vite.config.ts's real server.proxy is not built from the generated DEV_PROXY entries"
+    )
+
+
+def test_the_real_apis_websocket_routes_make_the_api_prefix_proxy_websockets() -> None:
+    """Three sockets are mounted under ``/api`` rather than under ``/ws``, so the generated
+    ``/api`` entry must itself carry ``ws: true`` or the dev server never proxies them."""
+    entries = dict(_generator().collect_proxy_entries(app))
+    assert entries.get("/api") is True
+
+
+def test_the_frontend_serving_paths_are_never_proxy_entries() -> None:
+    """A route the app itself serves the frontend or its health probe through never becomes a
+    proxy entry, so the dev server keeps serving its own root, modules and HMR there."""
+    from tcip_web.app import FRONTEND_SERVING_PATHS
+
+    fresh = FastAPI()
+
+    @fresh.get("/")
+    def _root() -> dict:
+        return {}
+
+    @fresh.get("/health")
+    def _health() -> dict:
+        return {}
+
+    @fresh.get("/api/orchard/blocks")
+    def _list_blocks() -> dict:
+        return {}
+
+    prefixes = {path for path, _ws in _generator().collect_proxy_entries(fresh)}
+    assert prefixes == {"/api"}
+    assert not (prefixes & FRONTEND_SERVING_PATHS)
+
+
 def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> None:
-    """The paths the frontend references all fall under a prefix the Vite proxy forwards.
+    """The paths the frontend references all fall under a prefix the generated dev proxy forwards.
 
     Sockets are the case worth stating: two of them are mounted under the API prefix rather than
     under /ws, so a proxy rule for /ws alone would leave them unreachable in development.
     """
-    proxy_block = re.search(r"proxy:\s*\{(.*?)\n\s*\},", VITE_CONFIG.read_text(encoding="utf-8"), re.S)
-    assert proxy_block is not None, "the Vite proxy block is no longer where this test reads it"
-    prefixes = tuple(re.findall(r'"([^"]+)":', proxy_block.group(1)))
-    assert prefixes, "no proxied prefixes parsed out of vite.config.ts"
+    prefixes = tuple(path for path, _ws in _generator().collect_proxy_entries(app))
+    assert prefixes, "no proxied prefixes derived from the registered routes"
 
     by_name = {name: path for name, path, _ in _generator().collect_routes(app)}
     referenced = {

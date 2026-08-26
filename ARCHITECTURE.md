@@ -536,12 +536,12 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `read_annotations` | `annotation_tools.py:93` | yes | Load the ground-truth labels and predictions for a single image. |
 | `save_annotations` | `annotation_tools.py:139` | yes | Write an image's annotations to its single per-image label file (all subjects, one file). |
-| `score_predictions` | `annotation_tools.py:424` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
-| `segment_prompt` | `annotation_tools.py:456` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
-| `push_panel_data` | `annotation_tools.py:552` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
-| `focus` | `annotation_tools.py:583` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
-| `stage_proposals` | `annotation_tools.py:788` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:977` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `score_predictions` | `annotation_tools.py:438` | yes | Score on-disk predictions against on-disk ground truth (COCOeval). |
+| `segment_prompt` | `annotation_tools.py:471` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
+| `push_panel_data` | `annotation_tools.py:567` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
+| `focus` | `annotation_tools.py:601` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
+| `stage_proposals` | `annotation_tools.py:806` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+| `write_class_map` | `annotation_tools.py:995` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)
 
@@ -663,11 +663,11 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `visualize` | `vision_tools.py:293` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `render_failure_cases` | `vision_tools.py:507` | yes | Find and render the worst predictions for failure analysis. |  <!-- queued: P5-45 demote-to-script -->
-| `propose_annotations` | `vision_tools.py:732` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `accept_proposals` | `vision_tools.py:933` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1061` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1191` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `render_failure_cases` | `vision_tools.py:509` | yes | Find and render the worst predictions for failure analysis. |  <!-- queued: P5-45 demote-to-script -->
+| `propose_annotations` | `vision_tools.py:734` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
+| `accept_proposals` | `vision_tools.py:935` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
+| `capture_live_canvas` | `vision_tools.py:1063` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:1193` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 8 + 3 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 8 + 1 + 6 = 59 tools across 16 modules.
 
@@ -703,14 +703,14 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:134` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:143` |
-| WS | `/ws/state` | `state_ws` | `app.py:151` |
+| GET | `/api/state` | `get_state` | `app.py:138` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:147` |
+| WS | `/ws/state` | `state_ws` | `app.py:155` |
 | GET | `/health` | `health` | `app.py:234` |
-| GET | `/` | `index` | `app.py:242` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:265` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:309` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:318` |
+| GET | `/` | `index` | `app.py:251` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:274` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:318` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:327` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -766,11 +766,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `` (root) | `serve_image` | `routes/images.py:484` |
-| GET | `/dimensions` | `get_dimensions` | `routes/images.py:685` |
-| GET | `/bands` | `get_bands` | `routes/images.py:705` |
-| POST | `/overviews` | `build_image_overviews` | `routes/images.py:838` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:862` |
+| GET | `` (root) | `serve_image` | `routes/images.py:492` |
+| GET | `/dimensions` | `get_dimensions` | `routes/images.py:702` |
+| GET | `/bands` | `get_bands` | `routes/images.py:722` |
+| POST | `/overviews` | `build_image_overviews` | `routes/images.py:855` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:879` |
 
 ### routes/inference.py, prefix `/api/inference` (4 HTTP + 1 WS)
 
@@ -844,11 +844,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/status` | `get_status` | `routes/terminal.py:252` |
-| POST | `/sessions` | `create_session` | `routes/terminal.py:266` |
-| GET | `/sessions` | `list_terminal_sessions` | `routes/terminal.py:289` |
-| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:298` |
-| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:326` |
+| GET | `/status` | `get_status` | `routes/terminal.py:253` |
+| POST | `/sessions` | `create_session` | `routes/terminal.py:282` |
+| GET | `/sessions` | `list_terminal_sessions` | `routes/terminal.py:305` |
+| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:314` |
+| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:342` |
 
 ### routes/training.py, prefix `/api/training` (8 HTTP + 1 WS)
 
@@ -862,7 +862,7 @@ registered at HEAD.
 | POST | `/runs/{run_id}/cancel` | `cancel_run_route` | `routes/training.py:128` |
 | GET | `/runs/{run_id}/metrics` | `get_run_metrics` | `routes/training.py:143` |  <!-- queued: P5-110 delete -->
 | POST | `/compare` | `compare_runs_route` | `routes/training.py:166` |
-| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:220` |
+| WS | `/runs/{run_id}/stream` (full path `/api/training/runs/{run_id}/stream`) | `training_stream_ws` | `routes/training.py:245` |
 
 ### routes/tuning.py, prefix `/api/tuning` (9 routes)
 
@@ -1025,7 +1025,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 Readers: `tcip_annotation.json_io.read_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:308`;
 `tcip_annotation.format_io.load_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:263`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:273`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:944`.
 
@@ -1047,12 +1047,12 @@ different consumer path in the same test.
 Path: caller-supplied, single dataset-level `.json` file, not per-image.
 
 Writers: `tcip_annotation.format_io.write_coco`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:200`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:210`;
 `tcip_annotation.format_io.save_annotations` (`fmt="coco"`), `format_io.py:283`;
 `tcip_annotation.json_io.to_coco_dataset` (returns dict, performs no file I/O),
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:413`.
 
-Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:158`;
+Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:168`;
 `tcip_annotation.format_io.load_annotations` (`fmt="coco"` or auto-detected via `detect_format`,
 `format_io.py:61`), `format_io.py:263`.
 
@@ -1146,7 +1146,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:278`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:174`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:977`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:995`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1448,7 +1448,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:259`.
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:106`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:110`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1606,7 +1606,7 @@ end.
 
 Must agree: all three processes resolve `.tcip/` against the same directory.
 Side A: `packages/tcip-mcp/src/tcip_mcp/project_paths.py:30` (`ENV_VAR = "TCIP_PROJECT_ROOT"`).
-Side B: `packages/tcip-web/src/tcip_web/routes/images.py:160` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
+Side B: `packages/tcip-web/src/tcip_web/routes/images.py:168` (`_render_cache_dir` calls `project_paths.resolve_state_or`, the pinned resolver at `project_paths.py:68`, rather than reading the environment variable itself).
 Phase 3 verdict: single.
 
 ## S02. Workspace root and the .active project marker
@@ -1627,15 +1627,15 @@ Phase 3 verdict: single.
 
 Must agree: sender and receiver accept the same set of panel names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:166` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:30` (`from tcip_mcp.web_client import VALID_PANELS`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:33` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
-Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:711` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:288` (`if event.event_type == "review_focus":`).
-Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:848`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
+Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:729` (`result = post_panel_event("app", "annotate_focus", payload)`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:297` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:866`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
 
@@ -1676,7 +1676,7 @@ Phase 3 verdict: single.
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:140` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1087` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1089` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -1942,15 +1942,15 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:150` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:154` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:175` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
 ## S49. Terminal PTY WebSocket protocol  <!-- queued: P5-289 unify -->
 
 Must agree: control-message type names and field names match, and output frames are treated as raw text rather than JSON.
-Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:325` (`@router.websocket("/ws/{session_id}")`).
-Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:319` (`send({ type: "input", data });`).
+Side A: `packages/tcip-web/src/tcip_web/routes/terminal.py:341` (`@router.websocket("/ws/{session_id}")`).
+Side B: `packages/tcip-web/frontend/src/components/TerminalRail.tsx:322` (`send({ type: "input", data });`).
 Phase 3 verdict: duplicated.
 
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
@@ -1963,43 +1963,43 @@ Phase 3 verdict: duplicated.
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
 
 Must agree: the status payload the MCP tool returns is renderable by the browser's training view.
-Side A: `packages/tcip-web/src/tcip_web/routes/training.py:219` (`@router.websocket("/runs/{run_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/training.py:244` (`@router.websocket("/runs/{run_id}/stream")`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py` (`check_training_status` supplies the status payload).
 Phase 3 verdict: duplicated.
 
 ## S52. Image-serve response headers  <!-- queued: P5-301 unify -->
 
 Must agree: header names and value encodings match.
-Side A: `packages/tcip-web/src/tcip_web/routes/images.py:663` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
-Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:54` (`const statsSourceRaw = headers.get("X-TCIP-Stats-Source");`).
+Side A: `packages/tcip-web/src/tcip_web/routes/images.py:680` (`"X-TCIP-Stats-Source": json.dumps(stats_source.model_dump(), allow_nan=False),`).
+Side B: `packages/tcip-web/frontend/src/lib/imageLoader.ts:55` (`const statsSourceRaw = headers.get("X-TCIP-Stats-Source");`).
 Phase 3 verdict: duplicated.
 
 ## S53. Optimistic-concurrency token for label saves
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:186` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:577` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:576` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
-Side A: `packages/tcip-web/frontend/vite.config.ts:22` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:200` (`def _find_static_dir() -> Path:`).
+Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:204` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
-Side A: `packages/tcip-web/frontend/vite.config.ts:16` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:150` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:154` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
 
 Must agree: the tab a panel event targets, the tab the browser can restore, and the tab the backend persists are the same set of names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:158` (`ActiveTab = Literal["annotate", "review", "training", "tuning", "inference", "results", "meta"]`, with `TAB_NAMES = get_args(ActiveTab)` beside it, `tcip_web.state` importing both).
-Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:9` (`export const TAB_NAMES = [`, generated from the same declaration).
+Side B: `packages/tcip-web/frontend/src/api/types.generated.ts:14` (`export const TAB_NAMES = [`, generated from the same declaration).
 Phase 3 verdict: duplicated.
 
 ## S57. Review match computation and its response shape
@@ -2027,7 +2027,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:153` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:157` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets

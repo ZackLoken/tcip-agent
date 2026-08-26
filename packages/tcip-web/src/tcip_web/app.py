@@ -231,6 +231,11 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# The paths this app serves the built frontend and its health probe through, so the generated
+# dev proxy never claims them and Vite keeps serving its own root, modules and HMR.
+FRONTEND_SERVING_PATHS = frozenset({"/", "/health"})
+
+
 # ── Health ──
 
 
