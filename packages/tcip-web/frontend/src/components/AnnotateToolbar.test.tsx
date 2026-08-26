@@ -4,10 +4,12 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
-import { classesApi } from "@/api/classes";
+import { classesApi, type ImageStatus } from "@/api/classes";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
+import { imagePath } from "@/lib/paths";
 import { useStore } from "@/store";
+import type { DatasetSelection } from "@/store/types";
 
 const initialStoreState = useStore.getState();
 
@@ -309,5 +311,111 @@ describe("AnnotateToolbar band picker (progressive disclosure)", () => {
   it("stays hidden while the Editor shelf itself is collapsed, even for a multispectral dataset", () => {
     renderToolbar(FOUR_BANDS, defaultBandSelection(FOUR_BANDS.bands));
     expect(screen.queryByLabelText("R band")).not.toBeInTheDocument();
+  });
+});
+
+function seedImageDataset(opts: { subject: string; currentStatus?: ImageStatus; stale?: boolean }) {
+  const dataset: DatasetSelection = {
+    project_root: "C:/proj",
+    dataset_root: "C:/data",
+    subject: opts.subject,
+    date: "2026-01-01",
+    image_list: ["img1.jpg"],
+    current_image_index: 0,
+    images_dir: "C:/data/images/2026-01-01",
+    annotations_dir: "C:/data/annotations/2026-01-01",
+    predictions_dir: null,
+  };
+  const byImage: Record<string, ImageStatus> = {};
+  if (opts.currentStatus) byImage["img1.jpg"] = opts.currentStatus;
+  useStore.setState((s) => ({
+    gui: { ...s.gui, dataset },
+    canvas: { ...s.canvas, loadedImagePath: imagePath(dataset, "img1.jpg") },
+    imageStatus: {
+      ...s.imageStatus,
+      byImage,
+      staleMarks: opts.stale ? ["img1.jpg"] : [],
+    },
+  }));
+}
+
+function setCanvasBoxSubjects(subjects: string[]) {
+  useStore.setState((s) => ({
+    canvas: {
+      ...s.canvas,
+      boxes: subjects.map((subject) => ({ x1: 0, y1: 0, x2: 10, y2: 10, subject, attributes: {} })),
+    },
+  }));
+}
+
+describe("AnnotateToolbar Complete toggle, subject-scoped", () => {
+  it("writes negative for the dataset's subject when the canvas holds only another subject's shapes", async () => {
+    seedImageDataset({ subject: "subject_a" });
+    setCanvasBoxSubjects(["subject_b"]);
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Complete"));
+    });
+
+    expect(setStatus).toHaveBeenCalledWith(
+      "C:/proj",
+      "img1.jpg",
+      "negative",
+      "subject_a",
+      "2026-01-01",
+      "C:/data",
+      "C:/data/annotations/2026-01-01",
+      undefined,
+    );
+  });
+});
+
+describe("AnnotateToolbar stale re-confirm", () => {
+  it("writes negative for the dataset's subject and clears the mark when the canvas holds only another subject's shapes", async () => {
+    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
+    setCanvasBoxSubjects(["subject_b"]);
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
+    });
+
+    expect(setStatus).toHaveBeenCalledWith(
+      "C:/proj",
+      "img1.jpg",
+      "negative",
+      "subject_a",
+      "2026-01-01",
+      "C:/data",
+      "C:/data/annotations/2026-01-01",
+      undefined,
+    );
+    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
+  });
+
+  it("writes complete and clears the mark when the canvas holds this subject's shapes", async () => {
+    seedImageDataset({ subject: "subject_a", currentStatus: "complete", stale: true });
+    setCanvasBoxSubjects(["subject_a"]);
+    const setStatus = vi.spyOn(classesApi, "setImageStatus").mockResolvedValue({});
+    renderToolbar();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Re-confirm" }));
+    });
+
+    expect(setStatus).toHaveBeenCalledWith(
+      "C:/proj",
+      "img1.jpg",
+      "complete",
+      "subject_a",
+      "2026-01-01",
+      "C:/data",
+      "C:/data/annotations/2026-01-01",
+      undefined,
+    );
+    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@
  * Lives directly under the global TopBar; Undo/Redo/Save are wired up from AnnotateTab.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { classesApi, subjectColor, type ImageStatus } from "@/api/classes";
@@ -104,6 +104,7 @@ export function AnnotateToolbar({
   const setSnap = useStore((s) => s.setSnap);
   const setStream = useStore((s) => s.setStream);
   const imageStatus = useStore((s) => s.imageStatus);
+  const staleMarks = useStore((s) => s.imageStatus.staleMarks);
   const setStatusFilter = useStore((s) => s.setStatusFilter);
   const setImageStatus = useStore((s) => s.setImageStatus);
   const undo = useStore((s) => s.undo);
@@ -136,6 +137,9 @@ export function AnnotateToolbar({
   const loadedImagePath = useStore((s) => s.canvas.loadedImagePath);
   const canvasReady = !!loadedImagePath && loadedImagePath === imagePath(dataset, currentImage);
   const nav = useImageNav();
+  const isStale = useCallback((name: string) => staleMarks.includes(name), [staleMarks]);
+  const staleNav = useImageNav({ activeFilter: "all", isNavigable: isStale });
+  const currentIsStale = !!currentImage && staleMarks.includes(currentImage);
 
   const activeCount = activeSubject ? (subjectCounts.get(activeSubject) ?? 0) : 0;
 
@@ -180,26 +184,11 @@ export function AnnotateToolbar({
     }
   }
 
-  async function toggleComplete(next: boolean) {
-    if (!currentImage || !dataset.project_root) return;
-    const hasContent =
-      canvasBoxes.length +
-        canvasPolygons.length +
-        canvasPoints.length +
-        canvasImageAnnotations.length >
-      0;
-    const newStatus: ImageStatus = next
-      ? hasContent
-        ? "complete"
-        : "negative"
-      : hasContent
-        ? "partial"
-        : "unannotated";
+  // Shared write path for the Complete toggle and the stale re-confirm action, both scoped to
+  // dataset.subject so a write here can't read back as a confirmation about a different subject.
+  async function writeCompleteStatus(newStatus: ImageStatus) {
+    if (!currentImage || !dataset.project_root || !dataset.subject) return;
     setImageStatus(currentImage, newStatus);
-    if (next) {
-      const warning = completeWarning?.();
-      if (warning) useStore.getState().pushToast(warning, "info");
-    }
     try {
       await classesApi.setImageStatus(
         dataset.project_root,
@@ -216,6 +205,31 @@ export function AnnotateToolbar({
         .getState()
         .pushToast(`Could not update status: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  async function toggleComplete(next: boolean) {
+    if (!dataset.subject) return;
+    const hasContent = (subjectCounts.get(dataset.subject) ?? 0) > 0;
+    const newStatus: ImageStatus = next
+      ? hasContent
+        ? "complete"
+        : "negative"
+      : hasContent
+        ? "partial"
+        : "unannotated";
+    if (next) {
+      const warning = completeWarning?.();
+      if (warning) useStore.getState().pushToast(warning, "info");
+    }
+    await writeCompleteStatus(newStatus);
+  }
+
+  // A stale complete already reads as checked, so one click of the toggle would write
+  // unannotated instead of restating the subject's current content.
+  async function reconfirmStale() {
+    if (!dataset.subject) return;
+    const hasContent = (subjectCounts.get(dataset.subject) ?? 0) > 0;
+    await writeCompleteStatus(hasContent ? "complete" : "negative");
   }
 
   return (
@@ -406,6 +420,24 @@ export function AnnotateToolbar({
           >
             {currentImage}
           </span>
+          {currentIsStale && (
+            <>
+              <span
+                className="rounded bg-tcip-warn/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-tcip-warn"
+                title="The label file changed since this image was confirmed."
+              >
+                Stale
+              </span>
+              <button
+                type="button"
+                className="tcip-btn text-[11px]"
+                onClick={() => void reconfirmStale()}
+                title="Restate this image's current subject content as its status"
+              >
+                Re-confirm
+              </button>
+            </>
+          )}
           <button
             className="tcip-btn text-[11px]"
             onClick={() => nav.stepImage(-1)}
@@ -442,6 +474,25 @@ export function AnnotateToolbar({
           >
             ▶
           </button>
+          {staleNav.total > 0 && (
+            <>
+              <span
+                className="font-mono text-[11px] text-tcip-warn"
+                title="Confirmed images whose label file now disagrees with the stored status"
+              >
+                {staleNav.total} stale
+              </span>
+              <button
+                type="button"
+                className="tcip-btn text-[11px]"
+                onClick={() => staleNav.stepImage(1)}
+                aria-label="Next stale image"
+                title="Jump to the next image needing re-confirmation"
+              >
+                ▶!
+              </button>
+            </>
+          )}
         </div>
 
         {/* Complete */}

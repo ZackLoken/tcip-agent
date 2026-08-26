@@ -198,6 +198,10 @@ interface PerImageStatusState {
   byImage: Record<string, ImageStatus>;
   /** Filter applied in top bar. */
   activeFilter: "all" | ImageStatus;
+  /** Confirmed names (complete/negative) whose derived token disagrees with the stored one: the
+   *  label file changed since a human finished the image, so it needs a fresh look rather than a
+   *  silent rewrite. Populated by the hydrate reconcile, cleared name-by-name as each is written. */
+  staleMarks: string[];
 }
 
 interface ReviewImageStatusState {
@@ -332,7 +336,7 @@ export interface AppState {
   subjectAttributes: (subject: string | null) => Record<string, AttributeDef>;
 
   /** Per-image status helpers. */
-  setImageStatuses: (byImage: Record<string, ImageStatus>) => void;
+  setImageStatuses: (byImage: Record<string, ImageStatus>, staleMarks?: string[]) => void;
   setImageStatus: (image: string, status: ImageStatus) => void;
   setStatusFilter: (filter: "all" | ImageStatus) => void;
 
@@ -437,7 +441,7 @@ export const useStore = create<AppState>()((set, get) => ({
       bandSelection: { byBandSet: { ...s.bandSelection.byBandSet, [signature]: selection } },
     })),
   registry: { subjects: {}, loaded: false, version: null },
-  imageStatus: { byImage: {}, activeFilter: "all" },
+  imageStatus: { byImage: {}, activeFilter: "all", staleMarks: [] },
   reviewStatus: { byImage: {}, hasDetections: {}, activeFilter: "all" },
   annotateUi: {
     visible: true,
@@ -620,12 +624,14 @@ export const useStore = create<AppState>()((set, get) => ({
     return get().registry.subjects[subject]?.attributes ?? {};
   },
 
-  setImageStatuses: (byImage) => set(() => ({ imageStatus: { byImage, activeFilter: "all" } })),
+  setImageStatuses: (byImage, staleMarks = []) =>
+    set(() => ({ imageStatus: { byImage, activeFilter: "all", staleMarks } })),
   setImageStatus: (image, status) =>
     set((s) => ({
       imageStatus: {
         ...s.imageStatus,
         byImage: { ...s.imageStatus.byImage, [image]: status },
+        staleMarks: s.imageStatus.staleMarks.filter((name) => name !== image),
       },
     })),
   setStatusFilter: (activeFilter) =>

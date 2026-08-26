@@ -1,7 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 
 import { classesApi } from "@/api/classes";
-import type { ImageStatus } from "@/api/classes";
 import { ROUTES } from "@/api/routes";
 import { PLATFORM_PANEL_EVENTS, TAB_NAMES } from "@/api/types.generated";
 import { sessionsApi } from "@/api/sessions";
@@ -15,6 +14,7 @@ import { Toasts } from "@/components/Toasts";
 import { TopBar } from "@/components/TopBar";
 import { stateSocket } from "@/api/ws";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
+import { useImageStatusHydrate } from "@/hooks/useImageStatusHydrate";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { attachCtrlWheelGuard } from "@/lib/ctrlWheelGuard";
@@ -69,7 +69,6 @@ function App() {
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
   const datasetDate = useStore((s) => s.gui.dataset.date);
   const setRegistry = useStore((s) => s.setRegistry);
-  const setImageStatuses = useStore((s) => s.setImageStatuses);
   const endedSessionForRoot = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -226,7 +225,7 @@ function App() {
     return () => window.removeEventListener("beforeunload", guardUnload);
   }, []);
 
-  // Hydrate the subject registry + per-image status whenever the dataset selection changes.
+  // Hydrate the subject registry whenever the dataset selection changes.
   useEffect(() => {
     if (!projectRoot || imageList.length === 0) return;
     void (async () => {
@@ -242,70 +241,23 @@ function App() {
             .getState()
             .setActiveSubject(subject && names.includes(subject) ? subject : (names[0] ?? null));
         }
-
-        // A fresh project with no subject authored yet has nothing to scope image status to:
-        // skip the load/reconcile/write sequence entirely rather than writing a bucket no
-        // subject-scoped read (get_image_status) ever comes back to.
-        if (subject) {
-          // Scoped to the selected subject: a Complete recorded while annotating leaf says
-          // nothing about bush, and reading a global map re-applied it to subjects the breeder
-          // never looked at, then wrote the result back over their original confirmations.
-          const saved = await classesApi.loadImageStatus(
-            projectRoot,
-            subject,
-            datasetDate,
-            datasetRoot,
-            annotationsDir,
-          );
-          const savedMap = saved.statuses ?? {};
-          // Reconcile every image against the label files, honoring confirmed reviews via
-          // complete_override, so a wrongly-saved "negative" whose files have content heals
-          // to partial instead of silently locking the canvas forever.
-          const confirmed = imageList.filter(
-            (name) => savedMap[name] === "complete" || savedMap[name] === "negative",
-          );
-          const derivedRes = await classesApi.deriveImageStatus({
-            project_root: projectRoot,
-            annotations_dir: annotationsDir,
-            subject,
-            image_list: imageList,
-            complete_override: confirmed,
-          });
-          const reconciled = (derivedRes.statuses ?? {}) as Record<string, ImageStatus>;
-          const changed = Object.fromEntries(
-            Object.entries(reconciled).filter(([name, st]) => savedMap[name] !== st),
-          ) as Record<string, ImageStatus>;
-          if (Object.keys(changed).length) {
-            await classesApi.setImageStatusBulk(
-              projectRoot,
-              changed,
-              subject,
-              datasetDate,
-              datasetRoot,
-              annotationsDir,
-              useStore.getState().user || undefined,
-            );
-          }
-          setImageStatuses(reconciled);
-        }
       } catch (err) {
-        console.warn("registry / image-status hydrate failed", err);
-        useStore
-          .getState()
-          .pushToast("Could not load the registry / image status for this project.");
+        console.warn("registry hydrate failed", err);
+        useStore.getState().pushToast("Could not load the registry for this project.");
       }
     })();
-  }, [
+  }, [projectRoot, datasetKey, imageList, subject, datasetRoot, annotationsDir, setRegistry]);
+
+  // A fresh project with no subject yet has nothing to scope image status to: the hook itself
+  // skips its load/reconcile/write sequence with no subject set.
+  useImageStatusHydrate({
     projectRoot,
-    datasetKey,
-    imageList,
     subject,
     datasetRoot,
     datasetDate,
     annotationsDir,
-    setRegistry,
-    setImageStatuses,
-  ]);
+    imageList,
+  });
 
   // Only Annotate / Review / Results need an imagery dataset+date and show the picker until
   // one is set. Keyed by TabName, so an added tab with no entry here fails the typecheck.
