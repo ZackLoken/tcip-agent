@@ -211,6 +211,29 @@ class TestRenderComparison:
         result = render_comparison(pixels, gt, pred, native_size=native, output_path=out)
         assert Path(result).is_file()
 
+    def test_a_tp_entry_draws_a_line_between_the_boxes_it_indexes(self, viz_dataset: Path):
+        """``matches`` carries ``compute_matches``'s own index-shaped ``tp`` entries; the line is
+        resolved from ``gt_boxes``/``pred_boxes`` by ``gt_idx``/``pred_idx``, not from a box pair
+        embedded in the match entry itself."""
+        from tcip_annotation.viz import render_comparison
+
+        pixels, native = _display(str(viz_dataset / "images" / "img_001.jpg"))
+        gt = [{"x1": 100, "y1": 100, "x2": 200, "y2": 200, "class_id": 0}]
+        pred = [{"x1": 110, "y1": 110, "x2": 210, "y2": 210, "class_id": 0, "confidence": 0.9}]
+        tp = [{"gt_idx": 0, "pred_idx": 0, "iou": 0.7, "class_name": "0", "conf": 0.9}]
+
+        with_line = str(viz_dataset / "test_comp_with_line.png")
+        render_comparison(pixels, gt, pred, native_size=native, matches=tp, output_path=with_line)
+        without_line = str(viz_dataset / "test_comp_without_line.png")
+        render_comparison(pixels, gt, pred, native_size=native, output_path=without_line)
+
+        yellow = (255, 255, 0)
+        midpoint = (155, 155)  # halfway between the gt and pred centers, (150,150) and (160,160)
+        with Image.open(with_line) as im:
+            assert im.convert("RGB").getpixel(midpoint) == yellow
+        with Image.open(without_line) as im:
+            assert im.convert("RGB").getpixel(midpoint) != yellow
+
 
 class TestRenderGrid:
     def test_grid(self, viz_dataset: Path):
