@@ -43,6 +43,14 @@ browser builds (``api.images.url``), so a browser cache entry from before the bu
 response to a request built after it either.
 """
 
+IMAGE_ERROR_HEADER = "X-TCIP-Image-Error"
+"""The response header a refusal here names its condition through, since a DOM ``Image`` sees
+only that a load failed. Read by ``scripts/generate_frontend_types.py``."""
+
+OVERVIEWS_REQUIRED = "overviews_required"
+"""The one condition this header carries: a read that needs a raster's overview pyramid and
+has none. Read by ``scripts/generate_frontend_types.py``."""
+
 _CACHE_BUDGET_DIVISOR = 20
 """The rendered-variant cache's byte budget is the cache volume's free space divided by this.
 
@@ -279,7 +287,7 @@ def _overviews_required(path: str, detail: str) -> HTTPException:
     Carries the condition as a header because a DOM ``Image`` sees only that a load failed, and
     names the endpoint that builds the pyramid in the detail for whoever reads that instead.
     """
-    return HTTPException(400, detail, headers={"X-TCIP-Image-Error": "overviews_required"})
+    return HTTPException(400, detail, headers={IMAGE_ERROR_HEADER: OVERVIEWS_REQUIRED})
 
 
 def _reduced_reads_available(raster) -> bool:

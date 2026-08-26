@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
+import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
 
 /** How often the build's progress is read back. Long enough that a minutes-long pyramid build
  *  is not polled thousands of times, short enough that the bar moves while it runs. */
@@ -52,7 +53,7 @@ export function useOverviewBuild(
   }, [imageUrl]);
 
   useEffect(() => {
-    if (imageError !== "overviews_required" || !imageUrl || !imagePath) return;
+    if (imageError !== OVERVIEWS_REQUIRED || !imageUrl || !imagePath) return;
     if (attempted.current === imageUrl) return;
     attempted.current = imageUrl;
 
