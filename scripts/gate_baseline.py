@@ -164,6 +164,12 @@ def mypy_pin() -> "str | None":
     return None
 
 
+def _host_is_windows() -> bool:
+    """Whether this host resolves bash the Windows way; a test pins this rather than ``os.name``,
+    which ``pathlib`` reads to pick its path class."""
+    return os.name == "nt"
+
+
 def _resolve_git_bash() -> str:
     """The bash that runs each step's ``run:`` text.
 
@@ -174,7 +180,7 @@ def _resolve_git_bash() -> str:
     hardcoded default install path is the stated fallback when the derivation finds nothing
     there. Refuses by name on either host when no bash is found.
     """
-    if os.name != "nt":
+    if not _host_is_windows():
         found = shutil.which("bash")
         if found:
             return found
