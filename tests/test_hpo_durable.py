@@ -11,21 +11,7 @@ import pytest
 import tcip_store as ts
 
 
-def _real_base_config(tmp_path: Path) -> dict:
-    """A base config the door's own structural preflight admits: an importable builder and a
-    data section whose directories exist, so these tests exercise the sweep search itself
-    rather than the door's refusal."""
-    imgs, lbls = tmp_path / "images", tmp_path / "labels"
-    imgs.mkdir(exist_ok=True)
-    lbls.mkdir(exist_ok=True)
-    return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-    }
-
-
-def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, monkeypatch):
+def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, real_hpo_base_config, monkeypatch):
     import tcip_mcp.tools.training_tools as tt
 
     captured: dict = {}
@@ -36,7 +22,7 @@ def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, monkeypatch):
                 "study_name": kw.get("study_name")}
 
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
-    tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1, output_dir=str(tmp_path))
+    tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
 
     # A unique study name + storage_path under output_dir were threaded into the search.
     assert captured["study_name"].startswith("hpo_")
@@ -49,7 +35,9 @@ def test_run_hpo_threads_storage_path_and_writes_result(tmp_path, monkeypatch):
     assert result["best_params"] == {"lr": 0.01}
 
 
-def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(tmp_path, monkeypatch):
+def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
     import tcip_mcp.tools.training_tools as tt
 
     captured: dict = {}
@@ -58,11 +46,13 @@ def test_run_hpo_defaults_storage_to_platform_root_when_no_output_dir(tmp_path, 
     # Pin the platform root so the store lands under this tmp dir, not the real repo.
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
 
-    tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1)  # no output_dir
+    tt.run_hpo(base_config=real_hpo_base_config, n_trials=1)  # no output_dir
     assert (tmp_path / ".tcip" / "hpo").as_posix() in captured["storage_path"].replace("\\", "/")
 
 
-def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(tmp_path, monkeypatch):
+def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
     """A sweep is on disk from the moment it starts, with its trials under its own
     directory: an agent-launched sweep has no other way to be seen while it runs."""
     import tcip_mcp.tools.training_tools as tt
@@ -82,7 +72,7 @@ def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(tmp_path, m
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
 
-    result = tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1,
+    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1,
                         output_dir=str(tmp_path))
     study = result["study_name"]
 
@@ -102,7 +92,9 @@ def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(tmp_path, m
     assert finished["result"]["best_params"] == {"lr": 0.1}
 
 
-def test_run_hpo_marks_the_manifest_failed_when_the_search_raises(tmp_path, monkeypatch):
+def test_run_hpo_marks_the_manifest_failed_when_the_search_raises(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
     import tcip_mcp.tools.training_tools as tt
 
     captured: dict = {}
@@ -114,7 +106,7 @@ def test_run_hpo_marks_the_manifest_failed_when_the_search_raises(tmp_path, monk
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", exploding_search)
 
     with pytest.raises(RuntimeError):
-        tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1, output_dir=str(tmp_path))
+        tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
 
     manifest = ts.read(tt.sweep_manifest_key(captured["study_name"], str(tmp_path)))
     assert manifest["status"] == "failed"
@@ -144,7 +136,9 @@ def test_run_hpo_refuses_before_minting_when_the_base_config_fails_preflight(tmp
     assert list(tmp_path.glob("hpo_*")) == []
 
 
-def test_run_hpo_checks_a_swept_placeholder_axis_at_its_resolved_value(tmp_path, monkeypatch):
+def test_run_hpo_checks_a_swept_placeholder_axis_at_its_resolved_value(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
     """A param_space sampling the builder itself resolves a real one before the door checks it,
     so a base config carrying only a placeholder there is not refused for that reason."""
     import tcip_mcp.tools.training_tools as tt
@@ -157,7 +151,7 @@ def test_run_hpo_checks_a_swept_placeholder_axis_at_its_resolved_value(tmp_path,
     result = tt.run_hpo(
         base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
                                       "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-                    "data": _real_base_config(tmp_path)["data"]},
+                    "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {
             "type": "categorical", "choices": ["tests.bespoke_models:build_bespoke_detection"]}},
         n_trials=1, output_dir=str(tmp_path),
@@ -167,7 +161,7 @@ def test_run_hpo_checks_a_swept_placeholder_axis_at_its_resolved_value(tmp_path,
 
 
 def test_run_hpo_refuses_when_every_sampled_value_of_a_swept_axis_still_fails(
-    tmp_path, monkeypatch
+    tmp_path, real_hpo_base_config, monkeypatch
 ):
     """The same swept-builder shape, but no sampled value resolves to anything importable: the
     door still refuses, rather than admitting a sweep with nothing legitimate to search."""
@@ -184,7 +178,7 @@ def test_run_hpo_refuses_when_every_sampled_value_of_a_swept_axis_still_fails(
     result = tt.run_hpo(
         base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
                                       "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-                    "data": _real_base_config(tmp_path)["data"]},
+                    "data": real_hpo_base_config["data"]},
         param_space={"model_source.builder": {"type": "categorical", "choices": ["still:bad"]}},
         n_trials=1, output_dir=str(tmp_path),
     )
@@ -193,7 +187,66 @@ def test_run_hpo_refuses_when_every_sampled_value_of_a_swept_axis_still_fails(
     assert not ran
 
 
-def test_run_hpo_passes_agent_search_and_scheduler_choices(tmp_path, monkeypatch):
+def test_run_hpo_refuses_when_a_non_first_swept_choice_fails_preflight(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
+    """The whole space is checked, not only the first sampled corner: a second choice that fails
+    to import must still be caught, even though the first choice the old, narrower check saw
+    is a real builder."""
+    import tcip_mcp.tools.training_tools as tt
+
+    ran = []
+
+    def fake_search(**kw):
+        ran.append(1)
+        return {"best_params": {}, "best_value": 0.1, "n_trials": 1}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    result = tt.run_hpo(
+        base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                    "data": real_hpo_base_config["data"]},
+        param_space={"model_source.builder": {
+            "type": "categorical",
+            "choices": ["tests.bespoke_models:build_bespoke_detection", "still:bad"]}},
+        n_trials=1, output_dir=str(tmp_path),
+    )
+
+    assert "error" in result
+    assert "still:bad" in result["error"]
+    assert not ran
+
+
+def test_run_hpo_admits_a_swept_axis_whose_every_choice_resolves(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
+    """Admits valid work: every categorical choice checked, and every one of them importable, so
+    the sweep runs rather than being refused for having more than one choice."""
+    import tcip_mcp.tools.training_tools as tt
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search",
+        lambda **kw: {"best_params": {}, "best_value": 0.1, "n_trials": 1},
+    )
+
+    result = tt.run_hpo(
+        base_config={"model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
+                                      "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+                    "data": real_hpo_base_config["data"]},
+        param_space={"model_source.builder": {
+            "type": "categorical",
+            "choices": ["tests.bespoke_models:build_bespoke_detection",
+                        "tests.bespoke_models:build_bare_score_thresh_detector"]}},
+        n_trials=1, output_dir=str(tmp_path),
+    )
+
+    assert "error" not in result
+
+
+def test_run_hpo_passes_agent_search_and_scheduler_choices(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
     """search_alg + scheduler are the agent's choice and reach tune_search verbatim."""
     import tcip_mcp.tools.training_tools as tt
 
@@ -201,7 +254,7 @@ def test_run_hpo_passes_agent_search_and_scheduler_choices(tmp_path, monkeypatch
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search",
                         lambda **kw: (captured.update(kw), {"study_name": kw["study_name"]})[1])
 
-    tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=3,
+    tt.run_hpo(base_config=real_hpo_base_config, n_trials=3,
                output_dir=str(tmp_path), search_alg="bayesopt", scheduler="median",
                max_concurrent=2)
     assert captured["search_alg"] == "bayesopt"

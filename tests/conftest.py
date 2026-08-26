@@ -188,6 +188,21 @@ def seed_catkin_operationalization(tmp_path: Path, seed_catkin_trait_spec):
     seed_confirmed_crossing(tmp_path, "catkin")
 
 
+@pytest.fixture
+def real_hpo_base_config(tmp_path: Path) -> dict:
+    """A base config the sweep door's own structural preflight admits: an importable builder and
+    a data section whose directories exist, so a sweep test exercises the search itself rather
+    than the door's refusal."""
+    imgs, lbls = tmp_path / "images", tmp_path / "labels"
+    imgs.mkdir(exist_ok=True)
+    lbls.mkdir(exist_ok=True)
+    return {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
+    }
+
+
 #: The single detection subject the canonical test dataset declares (``data_dir``).
 DATA_DIR_SUBJECT = "catkin"
 
