@@ -348,4 +348,68 @@ def test_tensorboard_for_an_unknown_sweep_is_a_404(client, hpo_root, tb_launches
         resp = client.post(url, json={})
         assert resp.status_code == 404
         assert "hpo_missing" in resp.json()["detail"]
-    assert tb_launches == []
+
+
+def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
+    client, hpo_root, tmp_path, monkeypatch, tb_launches
+) -> None:
+    """A sweep this process launched is addressed by the root it launched under: its detail
+    and its TensorBoard route keep answering after this process repins to another project,
+    rather than looking for its manifest under wherever the platform root has since moved."""
+    import uuid
+
+    from tcip_mcp import workspace
+    from tcip_web.routes import tuning
+
+    launch_root = tmp_path
+    fixed_uuid = uuid.uuid4()
+    monkeypatch.setattr(uuid, "uuid4", lambda: fixed_uuid)
+    expected_id = f"hpo-{fixed_uuid.hex[:8]}"
+
+    def fake_run_hpo(**kwargs):
+        import tcip_store
+        from tcip_mcp.tools.training_tools import sweep_manifest_key
+
+        sweep = hpo_root / expected_id
+        tb_dir = sweep / "trial_aaa_00000" / "tensorboard"
+        tb_dir.mkdir(parents=True)
+        (tb_dir / "marker.txt").write_text("x", encoding="utf-8")
+        tcip_store.replace(
+            sweep_manifest_key(expected_id),
+            {"study_name": expected_id, "status": "completed", "n_trials": 1},
+        )
+        return {"study_name": expected_id}
+
+    monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
+
+    resp = client.post(
+        "/api/tuning/launch",
+        json={
+            "base_config": {"model_source": {"builder": "x:y"}, "data": {}, "training": {}},
+            "param_space": {"training.batch_size": [2, 4]},
+            "n_trials": 1,
+            "output_dir": "",
+            "search_alg": "random",
+            "scheduler": "asha",
+        },
+    )
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+    assert sweep_id == expected_id
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert tuning._sweeps[sweep_id].platform_root == str(launch_root)
+
+    other_proj = workspace.project_path("chestnut_burr_other")
+    (other_proj / ".tcip").mkdir(parents=True)
+    workspace.set_active_project("chestnut_burr_other")
+
+    body = client.get(f"/api/tuning/sweeps/{sweep_id}").json()
+    assert body["sweep_id"] == sweep_id
+    assert body["status"] == "completed"
+
+    tb_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/tensorboard", json={})
+    assert tb_resp.status_code == 200
+    (logdir, _), = tb_launches
+    link = Path(logdir) / "trial_aaa_00000"
+    assert link.is_dir()
+    assert (link / "marker.txt").is_file()  # resolves through to the launch root's own trial

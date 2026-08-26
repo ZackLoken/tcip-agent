@@ -16,16 +16,13 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
-
-if TYPE_CHECKING:
-    from tcip_store import Key
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +34,19 @@ HPO_REGISTRY = "hpo_sweeps"
 """The job registry this module persists its sweeps to."""
 
 
+def _current_root() -> str:
+    from tcip_web import jobstore
+    return jobstore.current_root()
+
+
 @dataclass
 class HPOJob:
     sweep_id: str
     status: str = "pending"
     error: Optional[str] = None
     result: dict[str, Any] = field(default_factory=dict)
+    # The platform root this sweep launched under, resolved on the request thread.
+    platform_root: str = field(default_factory=_current_root)
 
 
 _sweeps: dict[str, HPOJob] = {}
@@ -73,7 +77,8 @@ def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:
 
 def _summary(job: HPOJob) -> dict:
     return {"sweep_id": job.sweep_id, "status": job.status,
-            "error": job.error, "has_result": bool(job.result)}
+            "error": job.error, "has_result": bool(job.result),
+            "platform_root": job.platform_root}
 
 
 def _manifest_summary(manifest: dict) -> dict:
@@ -91,8 +96,9 @@ def _sweeps_dir() -> Path:
     return hpo_root()
 
 
-def _read_manifest(sweep_id: str) -> dict | None:
-    """The sweep's manifest, or ``None`` if no sweep by that name is on disk.
+def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | None:
+    """The sweep's manifest, or ``None`` if no sweep by that name is on disk under ``root``
+    (default: the current platform root).
 
     ``sweep_id`` is untrusted, and the store's own key constructor is what refuses one that
     would address a record outside the HPO store. A manifest that will not decode is reported
@@ -104,7 +110,7 @@ def _read_manifest(sweep_id: str) -> dict | None:
     from tcip_mcp.tools.training_tools import sweep_manifest_key
 
     try:
-        key = sweep_manifest_key(sweep_id)
+        key = sweep_manifest_key(sweep_id, root=root)
     except BadKey as exc:
         raise HTTPException(400, f"invalid sweep_id: {sweep_id}") from exc
     try:
@@ -118,14 +124,24 @@ def _read_manifest(sweep_id: str) -> dict | None:
 def _sweep_root(sweep_id: str) -> Path:
     """The directory a sweep's trials live in, once a manifest proves the sweep exists.
 
+    A sweep this process's own live registry still remembers is addressed under the root it
+    launched under (``job.platform_root``, stamped once at launch), so a running or finished
+    sweep stays reachable through the sweep detail, trial view and TensorBoard routes across
+    a repin to another project. A sweep the registry has forgotten (never launched here, or
+    launched before a restart) is addressed under the current root instead, the only root a
+    bare disk listing can mean.
+
     The sweep's own resolved location is what this is, not a path recorded inside the
     manifest: an absolute path in a file is not a path this process should follow.
     """
     from tcip_mcp.tools.training_tools import sweep_dir
 
-    if _read_manifest(sweep_id) is None:
+    with _lock:
+        job = _sweeps.get(sweep_id)
+    root = job.platform_root if job is not None else None
+    if _read_manifest(sweep_id, root=root) is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
-    return sweep_dir(sweep_id)
+    return sweep_dir(sweep_id, root=root)
 
 
 def _disk_sweeps() -> list[dict]:
@@ -143,37 +159,43 @@ def _disk_sweeps() -> list[dict]:
     return found
 
 
-def _persist(registry_key: "Key") -> None:
-    """Write the live registry to the key the caller resolved.
+def _persist() -> None:
+    """Write the live registry, grouped by each sweep's own launch root.
 
-    The key carries the root it was resolved against, so a background worker persists where its
-    launch decided rather than wherever this process's environment points by the time it writes.
+    A sweep's summary carries the root it launched under, resolved once at launch, so this
+    reaches the right root's file even from a background worker after this process has since
+    adopted another project.
     """
     from tcip_web import jobstore
     with _lock:
         summaries = [_summary(j) for j in _sweeps.values()]
-    jobstore.persist_to(registry_key, summaries)
+    jobstore.persist_grouped(HPO_REGISTRY, summaries)
 
 
-def rehydrate() -> None:
-    """Seed the sweep registry from the last persisted summaries after a restart.
+def rehydrate_for_current_root() -> None:
+    """Merge this root's persisted sweeps, not already live, into memory.
 
-    Worker threads are gone, so a persisted non-terminal sweep is dead: surfaced as
-    ``interrupted``. Trial results aren't persisted, so a rehydrated sweep has no result.
+    Called at startup and again after this process repins to another root. Worker threads
+    behind a persisted non-terminal sweep are gone, so it is surfaced as ``interrupted``.
+    Trial results aren't persisted, so a rehydrated sweep has no result. Merges by sweep id
+    rather than requiring an empty registry first, so it never displaces a sweep still live
+    from another root.
     """
     from tcip_web import jobstore
 
+    root = jobstore.current_root()
     with _lock:
-        if _sweeps:
-            return
         for s in jobstore.load(HPO_REGISTRY):
             sid = s.get("sweep_id")
-            if not sid:
+            if not sid or sid in _sweeps:
                 continue
             status = s.get("status", "interrupted")
             if status not in jobstore.TERMINAL_STATUSES:
                 status = "interrupted"
-            _sweeps[sid] = HPOJob(sweep_id=sid, status=status, error=s.get("error"))
+            _sweeps[sid] = HPOJob(
+                sweep_id=sid, status=status, error=s.get("error"),
+                platform_root=s.get("platform_root") or root,
+            )
 
 
 class LaunchHPOPayload(BaseModel):
@@ -185,17 +207,16 @@ class LaunchHPOPayload(BaseModel):
     scheduler: str = "asha"
 
 
-def _worker(job: HPOJob, payload: LaunchHPOPayload, registry_key: "Key", output_dir: str) -> None:
+def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
     """Run one sweep to completion off the request thread.
 
-    Everything this thread writes with arrives as an argument: the registry key it persists
-    through and the resolved directory the sweep runs under. Neither is re-derived here, so a
-    launch's writes land under the root that launch named rather than under whatever the
-    environment names later.
+    ``job.platform_root``, resolved on the request thread at launch, is what
+    :func:`_persist` groups this sweep's summary under, so this thread's writes land under
+    the root that launch named rather than under whatever the environment names later.
     """
     try:
         job.status = "running"
-        _persist(registry_key)
+        _persist()
         from tcip_mcp.tools.training_tools import run_hpo
 
         res = run_hpo(
@@ -213,7 +234,7 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload, registry_key: "Key", output_
         job.status = "failed"
         job.error = str(exc)
     finally:
-        _persist(registry_key)
+        _persist()
 
 
 @router.post("/launch")
@@ -231,18 +252,14 @@ def launch_hpo(payload: LaunchHPOPayload) -> dict:
         except ValueError as exc:
             raise HTTPException(403, str(exc)) from exc
 
-    # Resolved on the request thread: what the worker is handed, rather than what it looks up.
-    registry_key = jobstore.job_registry_key(HPO_REGISTRY)
     output_dir = payload.output_dir or str(hpo_root())
 
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
     with _lock:
         _sweeps[job.sweep_id] = job
-        jobstore.evict_terminal(_sweeps)  # bound the registry (drop oldest terminal sweeps)
-    _persist(registry_key)
-    t = threading.Thread(
-        target=_worker, args=(job, payload, registry_key, output_dir), daemon=True
-    )
+        jobstore.evict_terminal(_sweeps, job.platform_root)  # bound this root's own share
+    _persist()
+    t = threading.Thread(target=_worker, args=(job, payload, output_dir), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
             _workers.pop(sweep_id, None)
@@ -253,19 +270,26 @@ def launch_hpo(payload: LaunchHPOPayload) -> dict:
 
 @router.get("/sweeps")
 def list_sweeps() -> dict:
-    """Sweeps this process launched, backfilled with the ones on disk.
+    """Sweeps this process launched under its current root, backfilled with the ones on disk.
 
     A sweep the agent launched exists only as a manifest, and a sweep launched here has a
-    manifest too, so a live entry wins by sweep_id and each sweep is listed once.
+    manifest too, so a live entry wins by sweep_id and each sweep is listed once. The disk
+    listing (``hpo_root()``) is already scoped to the current root, so only the live half
+    needs its own root filter.
     """
+    from tcip_web import jobstore
+
+    root = jobstore.current_root()
     with _lock:
-        live = [_summary(j) for j in _sweeps.values()]
+        live = [_summary(j) for j in _sweeps.values() if j.platform_root == root]
     live_ids = {s["sweep_id"] for s in live}
     return {"sweeps": live + [d for d in _disk_sweeps() if d["sweep_id"] not in live_ids]}
 
 
 @router.get("/sweeps/{sweep_id}")
 def get_sweep(sweep_id: str) -> dict:
+    """One sweep by id: a live entry (whichever root it launched under) wins, else its
+    manifest under the current root."""
     with _lock:
         j = _sweeps.get(sweep_id)
     if j is not None:

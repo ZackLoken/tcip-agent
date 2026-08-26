@@ -1305,6 +1305,11 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 # is a different, more consequential capability deliberately left agent-only for now.
 
 
+def _pq_current_root() -> str:
+    from tcip_web import jobstore
+    return jobstore.current_root()
+
+
 @dataclass
 class PriorityQueueJob:
     job_id: str
@@ -1319,6 +1324,8 @@ class PriorityQueueJob:
     total_candidates: int = 0
     reviewed_skipped: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
+    # The platform root this job launched under, resolved on the request thread.
+    platform_root: str = field(default_factory=_pq_current_root)
 
 
 _pq_jobs: dict[str, PriorityQueueJob] = {}
@@ -1329,7 +1336,7 @@ def _pq_summary(job: PriorityQueueJob) -> dict:
     return {
         "job_id": job.job_id, "status": job.status, "error": job.error,
         "queue": job.queue, "total_candidates": job.total_candidates,
-        "reviewed_skipped": job.reviewed_skipped,
+        "reviewed_skipped": job.reviewed_skipped, "platform_root": job.platform_root,
     }
 
 
@@ -1337,20 +1344,55 @@ def _pq_persist() -> None:
     from tcip_web import jobstore
     with _pq_lock:
         summaries = [_pq_summary(j) for j in _pq_jobs.values()]
-    jobstore.persist("review_priority_jobs", summaries)
+    jobstore.persist_grouped("review_priority_jobs", summaries)
 
 
 def _pq_register(job: PriorityQueueJob) -> None:
     from tcip_web import jobstore
     with _pq_lock:
         _pq_jobs[job.job_id] = job
-        jobstore.evict_terminal(_pq_jobs)  # bound the registry (drop oldest terminal jobs)
+        jobstore.evict_terminal(_pq_jobs, job.platform_root)  # bound this root's own share
     _pq_persist()
 
 
 def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
+    from tcip_web import jobstore
+    root = jobstore.current_root()
     with _pq_lock:
-        return _pq_jobs.get(job_id)
+        job = _pq_jobs.get(job_id)
+    return job if job is not None and job.platform_root == root else None
+
+
+def rehydrate_for_current_root() -> None:
+    """Merge this root's persisted priority-queue jobs, not already live, into memory.
+
+    Called at startup and again after this process repins to another root, the same
+    treatment ``routes.inference``/``routes.tuning`` give their own registries. The worker
+    thread behind a persisted non-terminal job is gone, so it is surfaced as ``interrupted``;
+    the queue it built isn't persisted, so a rehydrated job has an empty one.
+    """
+    from tcip_web import jobstore
+
+    root = jobstore.current_root()
+    with _pq_lock:
+        for s in jobstore.load("review_priority_jobs"):
+            jid = s.get("job_id")
+            if not jid or jid in _pq_jobs:
+                continue
+            status = s.get("status", "interrupted")
+            if status not in jobstore.TERMINAL_STATUSES:
+                status = "interrupted"
+            _pq_jobs[jid] = PriorityQueueJob(
+                job_id=jid,
+                checkpoint_path="",
+                images_dir="",
+                dataset_root="",
+                status=status,
+                error=s.get("error"),
+                total_candidates=s.get("total_candidates", 0),
+                reviewed_skipped=s.get("reviewed_skipped", 0),
+                platform_root=s.get("platform_root") or root,
+            )
 
 
 def _pq_worker(job: PriorityQueueJob) -> None:

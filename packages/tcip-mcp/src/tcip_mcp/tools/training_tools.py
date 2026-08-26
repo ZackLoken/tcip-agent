@@ -536,6 +536,11 @@ def launch_training(
     # fresh-id-relaunch branch.
     store.replace(launch_config_key(run.output_dir), config)
 
+    # Captured once, beside the child's environment snapshot: the watchdog below writes about
+    # this run under the root it launched under, even if this process later adopts another.
+    from tcip_mcp.project_paths import project_root
+
+    launch_root = project_root()
     child_env = _child_env_for_launch(config)
 
     proc = subprocess.Popen(
@@ -551,7 +556,7 @@ def launch_training(
     run.pid = proc.pid
 
     if max_wall_clock_seconds is not None:
-        _watch_wall_clock(proc, run, experiment_id, max_wall_clock_seconds)
+        _watch_wall_clock(proc, run, experiment_id, max_wall_clock_seconds, root=launch_root)
 
     # Launch TensorBoard for live monitoring
     tb_info = {}
@@ -615,12 +620,17 @@ def _child_env_for_launch(config: dict) -> dict[str, str]:
 
 
 def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
-                      timeout_seconds: float) -> None:
+                      timeout_seconds: float, *, root: Path | str) -> None:
     """Daemon watcher: hard-terminates ``proc`` if it outlives ``timeout_seconds`` and
     records the reason through the same status channel every other terminal state uses, never an
     in-memory-only mark, since ``check_training_status`` always defers to disk for a pid-bearing
     run and would otherwise never surface it. No cooperative grace period: a hung process isn't
-    responding to cooperative signals, so this is a hard kill, not the cancel path."""
+    responding to cooperative signals, so this is a hard kill, not the cancel path.
+
+    ``root`` is the platform root this run launched under, captured once at launch: this
+    process may have since adopted a different project, and the write belongs to the run's
+    own root regardless.
+    """
     def _watch() -> None:
         try:
             proc.wait(timeout=timeout_seconds)
@@ -631,7 +641,7 @@ def _watch_wall_clock(proc: subprocess.Popen, run: Any, experiment_id: str,
             run.error = reason
             try:
                 from tcip_mcp.experiments import update_status
-                update_status(experiment_id, "failed", error=reason)
+                update_status(experiment_id, "failed", error=reason, root=root)
             except Exception:
                 logger.warning("wall-clock timeout status update failed for %s",
                                experiment_id, exc_info=True)
@@ -906,23 +916,30 @@ class _AccessTrackingConfig(dict):
         return super().__contains__(key)
 
 
-def hpo_root(output_dir: str = "") -> Path:
+def hpo_root(output_dir: str = "", *, root: Path | str | None = None) -> Path:
     """Where HPO sweeps live: ``output_dir`` when the caller named one, else ``.tcip/hpo``
-    under the platform state root. A relative ``output_dir`` resolves against the project
-    root, never the server process's cwd.
+    under ``root`` (default: the platform state root). A relative ``output_dir`` resolves
+    against the project root, never the server process's cwd.
+
+    ``root`` lets a caller that already knows which project a sweep belongs to (its own
+    registry entry's launch root) resolve its directory there, rather than under whatever
+    root this process currently has pinned.
 
     The one resolver for that decision. Anything that has to find a sweep on disk (the
     Tuning routes included) calls this rather than rebuilding the same default.
     """
     from tcip_mcp.project_paths import project_root, resolve_output_path
 
-    return resolve_output_path(output_dir) if output_dir else project_root() / ".tcip" / "hpo"
+    if output_dir:
+        return resolve_output_path(output_dir)
+    base = Path(root) if root is not None else project_root()
+    return base / ".tcip" / "hpo"
 
 
-def sweep_dir(study_name: str, output_dir: str = "") -> Path:
+def sweep_dir(study_name: str, output_dir: str = "", *, root: Path | str | None = None) -> Path:
     """One sweep's own directory: its manifest, its ``trial_<id>`` dirs, and (because Ray
     is handed ``storage_path=hpo_root`` and ``name=study_name``) Ray's experiment store."""
-    return hpo_root(output_dir) / study_name
+    return hpo_root(output_dir, root=root) / study_name
 
 
 SWEEP_MANIFEST_STORE = "hpo_sweep_manifest"
@@ -988,7 +1005,9 @@ def _sweep_name(study_name: str) -> str:
     return study_name
 
 
-def sweep_manifest_key(study_name: str, output_dir: str = "") -> Key:
+def sweep_manifest_key(
+    study_name: str, output_dir: str = "", *, root: Path | str | None = None
+) -> Key:
     """The manifest a sweep is listed and read back from.
 
     Keyed off the HPO root, the scope every sweep-level record hangs off, and declared here
@@ -996,7 +1015,7 @@ def sweep_manifest_key(study_name: str, output_dir: str = "") -> Key:
     ``last_writer_wins``: ``run_hpo`` holds the manifest in memory for the whole sweep and
     writes the whole document at each state change, so nothing merges into what is on disk.
     """
-    return Key(SWEEP_MANIFEST_STORE, str(hpo_root(output_dir).resolve()),
+    return Key(SWEEP_MANIFEST_STORE, str(hpo_root(output_dir, root=root).resolve()),
                (_sweep_name(study_name), "manifest"))
 
 

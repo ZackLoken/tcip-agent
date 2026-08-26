@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Mapping
 
 from mcp.server import MCPServer
 
@@ -48,7 +49,7 @@ def list_registered_tools() -> list[str]:
     return sorted(t.name for t in asyncio.run(mcp.list_tools()))
 
 
-def binds_from_marker(environ: dict) -> bool:
+def binds_from_marker(environ: Mapping[str, str]) -> bool:
     """Whether this MCP server should bind its platform-state root from the workspace's
     active-project marker at startup: true only inside the platform's own agent terminal,
     named by ``agent_identity.TERMINAL_SESSION_ENV`` in the environment. A session launched
