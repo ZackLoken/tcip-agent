@@ -26,6 +26,12 @@ GENERATOR = REPO_ROOT / "scripts" / "generate_frontend_routes.py"
 
 _LITERAL_RE = re.compile(r"""["'`](/(?:api|ws)/[^"'`]*)["'`]""")
 _ROUTES_USE_RE = re.compile(r"\bROUTES\.([A-Za-z0-9_]+)")
+_PROXY_ENTRY_RE = re.compile(r'\{\s*path:\s*"([^"]+)",\s*ws:\s*(true|false)\s*\}')
+_PROXY_BUILD_RE = re.compile(
+    r"Object\.fromEntries\(\s*DEV_PROXY\.map\(\(\s*\{\s*path,\s*ws\s*\}\s*\)\s*=>\s*"
+    r"\[\s*path\s*,\s*\{\s*target:\s*BACKEND\s*,\s*changeOrigin:\s*true\s*,\s*ws\s*\}\s*\]\s*\)\s*,?\s*\)",
+    re.S,
+)
 
 
 def _generator():
@@ -93,17 +99,25 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> N
     )
 
 
+def _proxy_entries_from_generated_module() -> tuple[tuple[str, bool], ...]:
+    """The ``DEV_PROXY`` entries as the checked-in generated module actually declares them."""
+    text = PROXY_GENERATED.read_text(encoding="utf-8")
+    return tuple((path, ws == "true") for path, ws in _PROXY_ENTRY_RE.findall(text))
+
+
 def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
-    """The one assertion that reads the real ``vite.config.ts``: its ``server.proxy`` is built
-    from the generated entries, not a literal of its own that could drift from them."""
+    """The one assertion that reads the real ``vite.config.ts``: its ``server.proxy`` is built by
+    mapping each ``DEV_PROXY`` entry's own ``path``/``ws`` fields into a proxy rule, structurally,
+    never by a literal of its own a substring match could mistake for the real thing."""
     vite_text = VITE_CONFIG.read_text(encoding="utf-8")
     assert "./src/api/devProxy.generated" in vite_text, (
         "vite.config.ts no longer imports the generated proxy module"
     )
     proxy_block = re.search(r"proxy:\s*(.*?),\n\s*\},", vite_text, re.S)
     assert proxy_block is not None, "the Vite server.proxy assignment is no longer where this test reads it"
-    assert "DEV_PROXY" in proxy_block.group(1), (
-        "vite.config.ts's real server.proxy is not built from the generated DEV_PROXY entries"
+    assert _PROXY_BUILD_RE.search(proxy_block.group(1)), (
+        "vite.config.ts's real server.proxy is not built from each DEV_PROXY entry's own "
+        "path/ws fields: " + proxy_block.group(1)
     )
 
 
@@ -142,10 +156,12 @@ def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> Non
     """The paths the frontend references all fall under a prefix the generated dev proxy forwards.
 
     Sockets are the case worth stating: two of them are mounted under the API prefix rather than
-    under /ws, so a proxy rule for /ws alone would leave them unreachable in development.
+    under /ws, so a proxy rule for /ws alone would leave them unreachable in development. The
+    prefixes come from the checked-in proxy module, what the config's own ``server.proxy`` is
+    held to build from, rather than only from the generator function that produced it.
     """
-    prefixes = tuple(path for path, _ws in _generator().collect_proxy_entries(app))
-    assert prefixes, "no proxied prefixes derived from the registered routes"
+    prefixes = tuple(path for path, _ws in _proxy_entries_from_generated_module())
+    assert prefixes, "no proxied prefixes parsed out of the generated proxy module"
 
     by_name = {name: path for name, path, _ in _generator().collect_routes(app)}
     referenced = {
