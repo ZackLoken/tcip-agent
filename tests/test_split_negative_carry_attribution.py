@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
@@ -242,3 +243,47 @@ def test_a_confirmation_under_an_undated_bucket_survives_a_dated_labels_path(tmp
 
     assert list(carried) == [f"{NEGATIVE_STEM}.jpg"]
     assert carried[f"{NEGATIVE_STEM}.jpg"]["recorded_by"] == CONFIRMED_BY
+
+
+def test_a_contradicted_negative_is_excluded_from_the_carry_and_named_in_the_result(
+    tmp_path: Path,
+):
+    """A stored negative whose label file now holds the subject is not carried into the split as a
+    negative (it lands there as an ordinary annotated stem, through its real content), and the
+    contradiction is named in the result rather than left for a separate doctor pass."""
+    root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
+    labels_dir = root / "annotations" / DATE
+    json_io.write_annotations(
+        labels_dir / f"{NEGATIVE_STEM}.json",
+        [Annotation(subject=SUBJECT, geometry=BBox(5, 7, 25, 51))], 96, 64,
+    )
+    out = tmp_path / "splits"
+
+    result = make_splits(
+        str(root), output_path=str(out), materialize=True, subject=SUBJECT,
+        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
+    )
+
+    assert result.get("contradicted_negatives") == [f"{NEGATIVE_STEM}.jpg"]
+    holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
+    assert not ts.exists(image_status_key(out / holder))
+
+
+def test_a_failed_carry_computation_writes_no_split_tree(tmp_path: Path, monkeypatch):
+    """The carry is computed before any split-tree file is written, so a failure while computing
+    it must never leave a partial tree on disk."""
+    import tcip_mcp.tools.data_tools as data_tools_mod
+
+    root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
+    out = tmp_path / "splits"
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(data_tools_mod, "_compute_negative_carry", _boom)
+    with pytest.raises(RuntimeError, match="boom"):
+        make_splits(str(root), output_path=str(out), materialize=True, subject=SUBJECT,
+                    train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3)
+
+    assert not (out / "train").exists()
+    assert not (out / "val").exists()

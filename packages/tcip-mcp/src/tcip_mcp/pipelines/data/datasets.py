@@ -231,6 +231,7 @@ def trainable_stems(
     labels_dir, images_dir, stems=None, *, subject: str | None = None, date,
     coco: dict | None = None,
     attribute: str | None = None, id_map: dict[str, int] | None = None,
+    contradicted_out: set[str] | None = None,
 ) -> tuple[list[str], dict[str, int]]:
     """The stems that may train, plus the partition that produced them.
 
@@ -257,6 +258,12 @@ def trainable_stems(
     tree that carries no date, and is passed through to ``confirmed_negative_names`` as the bucket
     key rather than recovered from ``labels_dir``.
 
+    A confirmed negative whose label file now holds ``subject``, contradicting the store, is
+    excluded from ``negatives`` the same way a quarantined one is; the stem still trains, admitted
+    by its real content through the ``has_objects`` branch below rather than as a negative. Pass
+    ``contradicted_out`` to learn which names those were, for a caller to surface as its own
+    warning: the exclusion here is silent about admission only, never about the disagreement.
+
     ``skipped_incomplete_attribute`` is the whole-image attribute-completeness rail: with
     ``attribute`` set, an image carrying any instance never assessed for it has incomplete ground
     truth for this scope and is dropped entirely, never trained on its labelled subset (which
@@ -275,7 +282,8 @@ def trainable_stems(
     candidates = list(stems) if stems is not None else sorted(names)
     quarantined: set[str] = set()
     negatives = confirmed_negative_names(labels_dir, subject=subject, date=date,
-                                         quarantined_out=quarantined)
+                                         quarantined_out=quarantined,
+                                         contradicted_out=contradicted_out)
     counts = {"annotated": 0, "confirmed_negative": 0, "skipped_unannotated": 0,
               "skipped_unconfirmed_empty": 0, "skipped_incomplete_attribute": 0,
               "quarantined_stale_definition": 0}
@@ -440,6 +448,7 @@ def _raw_status_store(labels_dir) -> object:
 
 def confirmed_negative_records_every_date(
     labels_dir, *, subject: str, quarantined_out: set[str] | None = None,
+    contradicted_out: set[str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """This subject's confirmed negatives from every bucket the store names it under, by image name.
 
@@ -447,34 +456,68 @@ def confirmed_negative_records_every_date(
     confirmations into one bucket (``make_splits(materialize=True)``). The dates come from
     :func:`~tcip_mcp.dataset_layout.bucket_dates_for_subject`, the keys writers actually stated, so
     no bucket is missed and none is invented; each one is then read through
-    :func:`confirmed_negative_records`, quarantine included, rather than by a second reader.
+    :func:`confirmed_negative_records`, quarantine and the label-content exclusion included, rather
+    than by a second reader.
 
     An image name confirmed under more than one date resolves to the last date's record, which is
-    the same merge a caller reading each date itself would perform.
+    the same merge a caller reading each date itself would perform. Pass ``contradicted_out`` (a
+    set, mutated in place) to learn which names were excluded because their label file now holds
+    the subject, contradicting the stored negative.
     """
     from tcip_mcp.dataset_layout import bucket_dates_for_subject
 
     out: dict[str, dict[str, str]] = {}
     for date in bucket_dates_for_subject(_raw_status_store(labels_dir), subject):
         out.update(confirmed_negative_records(
-            labels_dir, subject=subject, date=date, quarantined_out=quarantined_out))
+            labels_dir, subject=subject, date=date, quarantined_out=quarantined_out,
+            contradicted_out=contradicted_out))
     return out
 
 
 def confirmed_negative_names(
     labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
+    contradicted_out: set[str] | None = None,
 ) -> set[str]:
     """Image names a human marked negative (empty + Complete) for this subject.
 
     The name projection of :func:`confirmed_negative_records`, which it calls rather than reading
-    the store a second time, for the admission decisions that need only the names.
+    the store a second time, for the admission decisions that need only the names. A name whose
+    label file holds the subject, contradicting the stored negative, is excluded from the return
+    value the same way a quarantined name is; pass ``contradicted_out`` to learn which.
     """
     return set(confirmed_negative_records(
-        labels_dir, subject=subject, date=date, quarantined_out=quarantined_out))
+        labels_dir, subject=subject, date=date, quarantined_out=quarantined_out,
+        contradicted_out=contradicted_out))
+
+
+def _exclude_contradicted(
+    records: dict[str, dict[str, str]], subject: str, labels_dir,
+    contradicted_out: set[str] | None,
+) -> dict[str, dict[str, str]]:
+    """Drops a name whose label file holds ``subject``, the disagreement ``scripts.doctor``'s
+    ``check_negatives`` flags, through the same ``annotations_hold_subject`` predicate. Not
+    lost: its label file carries real content, so a trainable-stems enumeration over the same
+    directory admits it by that content instead."""
+    from tcip_annotation import json_io
+    from tcip_mcp.dataset_layout import annotations_hold_subject, label_filename
+
+    def _label_holds_subject(name: str) -> bool:
+        label = Path(labels_dir) / label_filename(Path(name).stem)
+        return label.is_file() and annotations_hold_subject(
+            json_io.read_annotations(str(label)), subject
+        )
+
+    contradicted = [name for name in records if _label_holds_subject(name)]
+    if not contradicted:
+        return records
+    if contradicted_out is not None:
+        contradicted_out.update(contradicted)
+    return {name: r for name, r in records.items() if name not in contradicted}
 
 
 def confirmed_negative_records(
     labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
+    contradicted_out: set[str] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Image names a human marked negative for this subject, each with the record that says so.
 
@@ -520,8 +563,8 @@ def confirmed_negative_records(
 
     from tcip_mcp.class_registry import attribute_schema_digest, read_registry
     from tcip_mcp.dataset_layout import (
-        annotations_hold_subject, classes_path, dataset_root_of, image_status_digest_key,
-        is_confirmed_negative, label_filename, status_confirmations, status_bucket, status_of,
+        classes_path, dataset_root_of, image_status_digest_key,
+        is_confirmed_negative, status_confirmations, status_bucket, status_of,
     )
 
     root = dataset_root_of(labels_dir)
@@ -549,24 +592,6 @@ def confirmed_negative_records(
     if not negatives:
         return negatives
 
-    # A label file holding the subject contradicts a stored negative, the disagreement
-    # scripts.doctor's check_negatives flags, through the same annotations_hold_subject predicate.
-    from tcip_annotation import json_io
-
-    def _label_holds_subject(name: str) -> bool:
-        label = Path(labels_dir) / label_filename(Path(name).stem)
-        return label.is_file() and annotations_hold_subject(
-            json_io.read_annotations(str(label)), subject
-        )
-
-    contradicted = sorted(name for name in negatives if _label_holds_subject(name))
-    if contradicted:
-        raise ValueError(
-            f"{contradicted} are recorded negative for {subject!r} but the label file holds "
-            f"{subject!r} annotations, contradicting the confirmation; re-review before this "
-            f"run can carry them as negatives."
-        )
-
     stamped_by_image: dict = {}
     try:
         stamps = tcip_store.read(image_status_digest_key(root), default={})
@@ -577,7 +602,8 @@ def confirmed_negative_records(
         if isinstance(bucket_stamps, dict):
             stamped_by_image = bucket_stamps
     if not stamped_by_image:
-        return negatives  # nothing stamped in this bucket -> no signal -> admit (a rail admits valid work)
+        # nothing stamped -> no quarantine signal -> admit, but still check for contradiction
+        return _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)
 
     current_digest = None
     cp = classes_path(root)
@@ -587,11 +613,10 @@ def confirmed_negative_records(
         except (OSError, ValueError):
             current_digest = None
     if current_digest is None:
-        return negatives  # nothing current to compare against -> admit
+        return _exclude_contradicted(negatives, subject, labels_dir, contradicted_out)  # admit
 
-    # Per-image, not per-bucket: a bucket holds every image ever touched under this subject/date, so
-    # a later, unrelated write to the same bucket must never resurrect a different image's stale,
-    # never-re-reviewed confirmation just because the bucket as a whole got re-stamped.
+    # A bucket holds every image ever touched under the subject/date: a later unrelated write
+    # must not resurrect a different image's stale, never-re-reviewed confirmation.
     trusted: dict[str, dict[str, str]] = {}
     for name, record in negatives.items():
         stamped = stamped_by_image.get(name)
@@ -600,7 +625,7 @@ def confirmed_negative_records(
                 quarantined_out.add(name)
         else:
             trusted[name] = record
-    return trusted
+    return _exclude_contradicted(trusted, subject, labels_dir, contradicted_out)
 
 
 def assemble_coco(

@@ -244,12 +244,21 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             and task_for_coverage in ("detection", "instance_seg")):
         images_dir, labels_dir = data_cfg.get("images_dir"), data_cfg.get("labels_dir")
         if images_dir and labels_dir and Path(images_dir).is_dir() and Path(labels_dir).is_dir():
+            contradicted_negatives: set[str] = set()
             try:
                 from tcip_mcp.pipelines.data.datasets import trainable_stems
                 stems, sample_counts = trainable_stems(
-                    labels_dir, images_dir, subject=data_cfg.get("subject"), date=data_cfg.get("date"))
-            except Exception:
+                    labels_dir, images_dir, subject=data_cfg.get("subject"),
+                    date=data_cfg.get("date"), contradicted_out=contradicted_negatives)
+            except (OSError, ValueError):
                 stems, sample_counts = None, None
+            if contradicted_negatives:
+                warnings.append(
+                    f"data: {sorted(contradicted_negatives)} are recorded negative for the "
+                    "subject but their label file now holds subject annotations; the stored "
+                    "negative is stale, they train on their labelled content instead, and the "
+                    "confirmation needs re-review."
+                )
             if sample_counts:
                 dropped = {k: v for k, v in sample_counts.items()
                           if k not in ("annotated", "confirmed_negative") and v}

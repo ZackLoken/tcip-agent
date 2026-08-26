@@ -111,9 +111,10 @@ def check_negatives(root: Path, findings: list) -> None:
 def check_status_tokens(root: Path, findings: list) -> None:
     """Flag two ways the status store can no longer be trusted at face value: an entry a reader
     doesn't recognize (dropped silently by any merge), and a stored ``"complete"`` whose label
-    file holds no annotation of the confirmed subject (a stale token, possibly reconciled since by
-    the GUI's own hydrate, possibly not). A report, not a rewrite: the record names who confirmed
-    it, and this doctor is not that person.
+    file holds no annotation of the confirmed subject (a stale token). The GUI's own hydrate
+    surfaces the same disagreement for re-confirmation but never rewrites it, so this finding may
+    already be one the breeder has seen and not yet acted on, not a new discovery. A report, not a
+    rewrite either way: the record names who confirmed it, and this doctor is not that person.
     """
     from tcip_annotation import json_io
     from tcip_annotation.json_io import UnreadableLabelDocument

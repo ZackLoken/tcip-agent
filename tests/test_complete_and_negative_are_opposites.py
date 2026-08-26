@@ -150,11 +150,12 @@ def test_confirmed_negative_with_an_empty_label_file_still_carries(
     assert confirmed_negative_names(labels, subject="subject_a", date=None) == {"img_blank.jpg"}
 
 
-def test_confirmed_negative_refuses_when_the_label_file_holds_the_subject(
+def test_confirmed_negative_excludes_a_name_the_label_file_now_contradicts(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A stored negative and a label file that now carries the subject disagree about the same
-    image; a training run must not silently pick the store's side of that disagreement."""
+    image; the name is excluded from the negative set (never trained as an empty image on the
+    store's say-so) and reported through ``contradicted_out`` rather than silently dropped."""
     labels = tmp_path / "annotations"
     labels.mkdir()
     write_annotations(str(labels / "img_bush.json"), [_box("bush", 5, 9, 640, 480)], 900, 500)
@@ -165,5 +166,38 @@ def test_confirmed_negative_refuses_when_the_label_file_holds_the_subject(
         900, 500,
     )
 
-    with pytest.raises(ValueError, match="img_bush.jpg"):
-        confirmed_negative_names(labels, subject="subject_a", date=None)
+    contradicted: set[str] = set()
+    negatives = confirmed_negative_names(
+        labels, subject="subject_a", date=None, contradicted_out=contradicted)
+    assert negatives == set()
+    assert contradicted == {"img_bush.jpg"}
+
+
+def test_a_contradicted_negative_still_trains_on_its_actual_content(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The exclusion never drops the image: its label file holds real content, so a trainable-stems
+    enumeration over the same directory admits it by that content, the rail admitting valid work
+    rather than silently shrinking the run's negative count."""
+    from tcip_mcp.pipelines.data.datasets import trainable_stems
+
+    labels = tmp_path / "annotations"
+    labels.mkdir()
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "img_bush.jpg").write_bytes(b"")
+    write_annotations(str(labels / "img_bush.json"), [_box("bush", 5, 9, 640, 480)], 900, 500)
+    _store(client, tmp_path, "subject_a", {"img_bush.jpg": "negative"})
+    write_annotations(
+        str(labels / "img_bush.json"),
+        [_box("bush", 5, 9, 640, 480), _box("subject_a", 12, 30, 48, 140)],
+        900, 500,
+    )
+
+    contradicted: set[str] = set()
+    stems, counts = trainable_stems(
+        labels, images, subject="subject_a", date=None, contradicted_out=contradicted)
+    assert stems == ["img_bush"]
+    assert counts["annotated"] == 1
+    assert counts["confirmed_negative"] == 0
+    assert contradicted == {"img_bush.jpg"}
