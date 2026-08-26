@@ -1417,8 +1417,10 @@ def run_full_frame_evaluation(
     from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS, image_name_map, trainable_stems
 
     names = image_name_map(img_dir)
+    contradicted_negatives: set[str] = set()
     if lbl_dir.is_dir():
-        keep, sample_counts = trainable_stems(lbl_dir, img_dir, subject=subject, date=date)
+        keep, sample_counts = trainable_stems(
+            lbl_dir, img_dir, subject=subject, date=date, contradicted_out=contradicted_negatives)
         paths = [img_dir / names[s] for s in keep if s in names]
     else:
         # No label store, so no rail to apply and no ground truth either. Filtering to nothing here
@@ -1484,6 +1486,9 @@ def run_full_frame_evaluation(
         # disclosed here, not silently scored against its labeled subset).
         "scored_images": len(per_image), "sample_counts": sample_counts,
         "n_excluded_incomplete_attribute": n_excluded_incomplete,
+        # Names recorded negative whose label file now holds subject content; scored on that
+        # content, not filtered out, but the stale confirmation needs re-review.
+        "contradicted_negatives": sorted(contradicted_negatives),
     }
     # For a count trait, the delivery-grade count that gates the phenotype is the derived
     # criterion's tp/fp/fn (center-match, for a trait so configured), not AP@0.5, kept alongside, clearly labeled.

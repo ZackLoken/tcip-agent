@@ -421,7 +421,9 @@ def make_splits(
     }
 
     if materialize:
-        # Lay out a {train,val}/{images,labels}/ tree from the split assignment.
+        # The carry is computed before anything is written: a refusal here must leave no
+        # partial split tree on disk.
+        negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name in kept_splits:
             split_stems = parts[split_name]
@@ -439,7 +441,9 @@ def make_splits(
                     dst_lbl = lbl_dir / src_lbl.name
                     if not dst_lbl.exists():
                         place_fn(str(src_lbl), str(dst_lbl))
-        _carry_confirmed_negatives(label_map, out_dir, parts, image_map, subject)
+        _apply_negative_carry(negative_carry, out_dir, subject)
+        if negative_carry is not None and negative_carry.contradicted:
+            result["contradicted_negatives"] = sorted(negative_carry.contradicted)
         result["output_dir"] = str(out_dir)
         result["structure"] = f"{out_dir}/{{train,val}}/{{images,labels}}/"
 
@@ -538,48 +542,59 @@ def _make_spatial_split(
     }
 
 
-def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
-                               image_map: dict, subject: str | None) -> None:
-    """Copy the source subject's confirmed negatives into each split's own status store.
+class _NegativeCarry:
+    """What :func:`_compute_negative_carry` found, before anything is written: each split's own
+    slice of the source subject's confirmed negatives, the schema digest to stamp them with, and
+    the names the label content contradicted (excluded from every slice, reported to the caller)."""
+
+    def __init__(self, by_split: dict[str, dict[str, dict[str, str]]], contradicted: set[str],
+                digest: str | None, src_classes: Path | None) -> None:
+        self.by_split = by_split
+        self.contradicted = contradicted
+        self.digest = digest
+        self.src_classes = src_classes
+
+
+def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
+                            subject: str | None) -> "_NegativeCarry | None":
+    """Reads the source subject's confirmed negatives and assigns each to the split holding its
+    image, entirely before any split-tree file is written (see the call site).
 
     A split tree is ``{train,val,test}/labels`` by construction and cannot recover the subject from
     its path, so the confirmations are carried explicitly under the threaded ``subject`` (keyed by
     ``status_bucket(subject, None)``, since the split carries no date). Without this, every image a
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
-    No subject threaded -> nothing to attribute the confirmations to, so none are carried.
+    No subject threaded -> nothing to attribute the confirmations to, so ``None`` is returned.
 
     A split partitions whatever the source dataset holds, across every capture date at once, and
     lands it in one undated bucket. So the source side reads every bucket the store names this
     subject under, the keys writers actually stated, rather than a date derived from each label
     directory's path: a confirmation recorded under a key that does not spell the directory it sits
-    in is still the human's, and deriving the key would drop it.
-
-    Each confirmation is copied whole, so the split records who confirmed the image and when, the
-    source dataset's own answer, rather than re-attributing the human's work to the split writer.
+    in is still the human's, and deriving the key would drop it. A name whose label file now holds
+    the subject is excluded the way :func:`confirmed_negative_records_every_date` always excludes
+    one, named in the returned carry's ``contradicted`` rather than silently dropped.
     """
     if not subject:
-        return
+        return None
     from tcip_mcp.class_registry import (
-        RegistryError, attribute_schema_digest, copy_registry, read_registry,
+        RegistryError, attribute_schema_digest, read_registry,
     )
-    from tcip_mcp.dataset_layout import (
-        classes_path, dataset_root_of,
-        replace_image_status_store, stamp_image_status_digests, status_bucket,
-    )
+    from tcip_mcp.dataset_layout import classes_path, dataset_root_of
     from tcip_mcp.pipelines.data.datasets import confirmed_negative_records_every_date
 
     src_dirs = {Path(p).parent for p in label_map.values()}
     if not src_dirs:
-        return
+        return None
     negatives: dict[str, dict[str, str]] = {}
+    contradicted: set[str] = set()
     for d in sorted(src_dirs):
-        negatives.update(confirmed_negative_records_every_date(d, subject=subject))
+        negatives.update(confirmed_negative_records_every_date(
+            d, subject=subject, contradicted_out=contradicted))
     if not negatives:
-        return
+        return _NegativeCarry(by_split={}, contradicted=contradicted, digest=None, src_classes=None)
 
-    # Resolve one source dataset's registry (best-effort) to carry a fresh per-image schema stamp
-    # alongside the negatives: without this, a split tree has no classes.json to compare against
-    # and quarantine can never fire on it (a permanent no-op, not "admit until proven stale").
+    # A best-effort registry read: without a stamp, a split tree can never quarantine a stale
+    # confirmation later (a permanent no-op, not "admit until proven stale").
     digest = None
     src_classes: Path | None = None
     for d in src_dirs:
@@ -597,15 +612,33 @@ def _carry_confirmed_negatives(label_map: dict, out_dir: Path, parts: dict,
             digest, src_classes = candidate, cp
             break
 
-    bucket_key = status_bucket(subject, None)
+    by_split: dict[str, dict[str, dict[str, str]]] = {}
     for split_name, split_stems in parts.items():
         names = {Path(image_map[s]).name for s in split_stems if s in image_map}
         carried = {n: negatives[n] for n in sorted(set(negatives) & names)}
-        if not carried:
-            continue
+        if carried:
+            by_split[split_name] = carried
+    return _NegativeCarry(by_split=by_split, contradicted=contradicted, digest=digest,
+                          src_classes=src_classes)
+
+
+def _apply_negative_carry(carry: "_NegativeCarry | None", out_dir: Path,
+                          subject: str | None) -> None:
+    """Writes what :func:`_compute_negative_carry` found into each split's own status store. Each
+    confirmation is copied whole, so the split records who confirmed the image and when, the source
+    dataset's own answer, rather than re-attributing the human's work to the split writer."""
+    if carry is None or not carry.by_split or not subject:
+        return
+    from tcip_mcp.class_registry import copy_registry
+    from tcip_mcp.dataset_layout import (
+        classes_path, replace_image_status_store, stamp_image_status_digests, status_bucket,
+    )
+
+    bucket_key = status_bucket(subject, None)
+    for split_name, carried in carry.by_split.items():
         split_root = out_dir / split_name
         split_root.mkdir(parents=True, exist_ok=True)
         replace_image_status_store(split_root, {bucket_key: carried})
-        if digest is not None and src_classes is not None:
-            copy_registry(src_classes, classes_path(split_root))
-            stamp_image_status_digests(split_root, bucket_key, carried, digest)
+        if carry.digest is not None and carry.src_classes is not None:
+            copy_registry(carry.src_classes, classes_path(split_root))
+            stamp_image_status_digests(split_root, bucket_key, carried, carry.digest)

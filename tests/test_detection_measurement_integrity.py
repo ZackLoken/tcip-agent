@@ -252,6 +252,47 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
     assert ts.exists(evaluation_results_key(tmp_path / "out"))
 
 
+def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names_it(
+    tmp_path, monkeypatch
+):
+    """A stored negative whose label file now holds the subject is excluded from the negative
+    count (scored on its real content, not silently dropped) and named in the result's
+    contradicted_negatives so a reviewer sees the stale confirmation without a separate doctor
+    pass."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.dataset_layout import CONFIRMED_NEGATIVE, record_image_statuses, status_bucket
+    from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    Image.new("RGB", (128, 128)).save(images_dir / "a.png")
+    json_io.write_annotations(str(labels_dir / "a.json"), [], 128, 128, keep_empty=True)
+    record_image_statuses(tmp_path, status_bucket("catkin", None), {"a.png": CONFIRMED_NEGATIVE},
+                          recorded_by="user:breeder")
+    json_io.write_annotations(
+        str(labels_dir / "a.json"),
+        [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128,
+    )
+
+    class _Stub:
+        def predict_tiled(self, path, **kw):
+            return {"image": path, "width": 128, "height": 128,
+                    "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
+                                  subject="catkin", tile_size=64, overlap=0.2)
+    assert r["contradicted_negatives"] == ["a.png"]
+    # scored against the real content, not held out as a still-trusted negative
+    assert r["scored_images"] == 1 and r["tp"] == 1 and r["fn"] == 0
+
+
 def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
     """run_full_frame_evaluation must not let a bare `except Exception` around
     _resolve_registry_id_map swallow an attribute-classification registry refusal and silently

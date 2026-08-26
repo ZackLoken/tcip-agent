@@ -182,6 +182,39 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
     assert any("skipped_unannotated" in w for w in r["warnings"])
 
 
+def test_preflight_config_warns_of_a_negative_the_label_file_now_contradicts(tmp_path):
+    """A stored negative whose label file now holds the subject is a stale confirmation: excluded
+    from the negative count (it trains on its real content instead) but named for the agent at the
+    validation door rather than swallowed."""
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.dataset_layout import CONFIRMED_NEGATIVE, record_image_statuses, status_bucket
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "labels"
+    imgs.mkdir()
+    lbls.mkdir()
+    Image.new("RGB", (20, 20)).save(imgs / "bush.jpg")
+    json_io.write_annotations(lbls / "bush.json", [], 20, 20, keep_empty=True)
+    record_image_statuses(tmp_path, status_bucket("catkin", None), {"bush.jpg": CONFIRMED_NEGATIVE},
+                          recorded_by="user:breeder")
+    json_io.write_annotations(
+        lbls / "bush.json", [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin"},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is True  # informational only, never gating
+    assert any("bush.jpg" in w and "stale" in w for w in r["warnings"]), r["warnings"]
+
+
 def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
     pytest.importorskip("torch")
     from PIL import Image

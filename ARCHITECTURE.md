@@ -650,13 +650,13 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:48` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:397` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:615` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:751` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:765` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:794` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1163` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2200` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:406` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:624` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:760` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:774` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:803` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1172` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2209` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -1114,11 +1114,12 @@ Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
 `packages/tcip-web/src/tcip_web/routes/classes.py:333`; `set_image_status_bulk`,
-`routes/classes.py:364`; `tcip_mcp.tools.data_tools._carry_confirmed_negatives`
-(split-materialized copy), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:499`.
+`routes/classes.py:364`; `tcip_mcp.tools.data_tools._apply_negative_carry`
+(split-materialized copy, computed by `_compute_negative_carry` at `data_tools.py:558` before
+the split tree is written), `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:625`.
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:464`; `_status_bucket_for`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:477`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:269`;
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, which enumerates every bucket of a
@@ -1913,7 +1914,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the builder the reader resolves off `data.dataset_source` returns a Dataset the trainer's loaders accept.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:310` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1641` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1666` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
 Phase 3 verdict: duplicated.
 
 ## S44. Model-contract smoke batch versus the trainer's real batch
@@ -1984,7 +1985,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the token the browser echoes is the same token the backend minted for that label file.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:190` (`"base_mtime": token,`, the token the load route mints; the save route compares the echoed one at `routes/annotate.py:200`).
-Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:576` (`base_mtime: paths.mtime,`).
+Side B: `packages/tcip-web/frontend/src/tabs/AnnotateTab.tsx:577` (`base_mtime: paths.mtime,`).
 Phase 3 verdict: single.
 
 ## S54. Built frontend bundle location  <!-- queued: P5-305 unify -->
