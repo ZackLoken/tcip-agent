@@ -157,7 +157,7 @@ def test_make_splits_reports_an_unreadable_label_reached_only_through_stratifica
     bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
     bad.write_bytes(b"{not json")
 
-    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"))
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin")
 
     assert "error" in result
     assert str(bad) in result["error"]
