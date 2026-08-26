@@ -1,6 +1,6 @@
 """Plant-aware group-key derivation for ``make_splits``, over per-stem georeferenced rasters.
 
-A train/val/test split that groups only by tile prefix (``make_splits``' default) never notices
+A train/val split that groups only by tile prefix (``make_splits``' default) never notices
 that two differently-named images from two different capture dates are photos of the *same*
 physical plant: nothing in either stem says so. When a dataset's images are themselves individually
 georeferenced rasters (e.g. per-plant/per-region GeoTIFF chips cut from a larger orthomosaic, which
@@ -125,7 +125,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("dataset_root", help="Dataset root (canonical images/, annotations/ layout).")
     parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",
                          help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
-    parser.add_argument("--train-ratio", type=float, default=0.8)
+    parser.add_argument("--train-ratio", type=float, default=0.8,
+                         help="Defaults to 0.8, the complement of --val-ratio's unchanged 0.2 "
+                              "once --test-ratio is 0.")
     parser.add_argument("--val-ratio", type=float, default=0.2)
     parser.add_argument("--test-ratio", type=float, default=0.0,
                          help="Must be 0: no launch path honours a held-out test list, so "

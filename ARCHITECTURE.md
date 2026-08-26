@@ -72,7 +72,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/band_groups.py | Sensor-agnostic band-group correlation: sibling single-band raster files that are really one logical multi-band capture (some multispectral drone sensors write one file per band instead of one multi-band file per image), and the ``.bandgroup`` manifest that records a found group. | 0 | 13 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py | Multi-task datasets with standardized interfaces. | 11 | 10 |  <!-- queued: P5-224 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/samplers.py | Task-aware data samplers: class-imbalance handling plus read-locality ordering. | 2 | 3 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val/test splitting. | 6 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py | Group-aware, annotation-stratified train/val splitting. | 6 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/data/tiling.py | Sliding-window tiling geometry for small-object detection (SAHI-style). | 0 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/derivations.py | Tier-A data/model derivations, read the artifact in hand, compute the value. | 6 | 9 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/display_bounds.py | Pixel bounds for what the platform serves to a screen or writes as an agent-facing artifact. | 0 | 4 |
@@ -822,14 +822,14 @@ registered at HEAD.
 | POST | `/matches` | `compute_image_matches` | `routes/review.py:457` |
 | POST | `/action` | `record_action` | `routes/review.py:583` |
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:718` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:770` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:791` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:842` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1180` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1227` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1257` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1377` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1405` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:781` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:802` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:853` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1197` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1244` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1274` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1394` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1422` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1022,7 +1022,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:824`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:829`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
@@ -1496,13 +1496,13 @@ Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
 composing a state dir of its own.
 
 Writer: `ReviewEngine._save_image`, `review_engine.py:285`, called by `mark_image_reviewed`
-(`review_engine.py:331`), `unmark_image_reviewed` (`review_engine.py:368`),
-`record_detection_action` (`review_engine.py:635`), `check_image_review_complete`
-(`review_engine.py:772`); `save_review_state`, `review_engine.py:305`, flushes every shard.
+(`review_engine.py:331`), `unmark_image_reviewed` (`review_engine.py:373`),
+`record_detection_action` (`review_engine.py:640`), `check_image_review_complete`
+(`review_engine.py:777`); `save_review_state`, `review_engine.py:305`, flushes every shard.
 
 Readers: `ReviewEngine.load_review_state`, `review_engine.py:264`, which enumerates the store's
-keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:519`,
-and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:500`.
+keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:524`,
+and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:505`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
@@ -1928,7 +1928,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S45. Review verdicts promoted into a calibration reference
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
-Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:635` (`def record_detection_action(`, the one writer of a stored verdict entry).
+Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:640` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:74` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 18), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 

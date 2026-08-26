@@ -154,12 +154,13 @@ run_hpo(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
 
 ## Dataset Splits
 
-Use `make_splits` to create train/val/test splits:
-- Default: 70/20/10, leakage-free (sibling tiles of one source image stay in the same split)
+Use `make_splits` to create train/val splits: no launch path honours a held-out test list, so
+`test_ratio` is refused unless it is 0.
+- Default: 80/20, leakage-free (sibling tiles of one source image stay in the same split)
 - `stratify_foreground=True` (default) balances splits by each source's foreground annotation
   count, not per-class distribution
-- `materialize=True` also lays out a `{train,val,test}/{images,labels}/` tree; the labels
-  inside are the platform's own per-image JSON, not YOLO's `.txt` format
+- `materialize=True` also lays out a `{train,val}/{images,labels}/` tree; the labels inside
+  are the platform's own per-image JSON, not YOLO's `.txt` format
 - Reproducible with random seed
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the

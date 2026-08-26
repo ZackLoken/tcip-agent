@@ -264,21 +264,22 @@ def make_splits(
     overlap: float | None = None,
     buffer: int | None = None,
 ) -> dict:
-    """Compute a leakage-free, annotation-stratified train/val/test split.
+    """Compute a leakage-free, annotation-stratified train/val split.
 
-    Non-destructive by default: emits ``{train,val,test}.json`` stem manifests plus a stats
+    Non-destructive by default: emits ``{train,val}.json`` stem manifests plus a stats
     dict. Sibling tiles of one source image are kept in the same split (no tree-/canopy-level
     leakage), and, when ``stratify_foreground`` is set, splits are balanced by annotation
     count so dense and sparse sources are proportionally represented.
 
     With ``materialize=True`` it additionally lays out a
-    ``{train,val,test}/{images,labels}/`` tree under ``output_path`` (defaulting to
+    ``{train,val}/{images,labels}/`` tree under ``output_path`` (defaulting to
     ``folder_path/splits``), copying (or symlinking, ``copy_files=False``) each stem's image and
     label, and adds ``output_dir`` / ``structure`` to the return.
 
     Args:
         folder_path: Path to the dataset root directory.
-        train_ratio: Fraction for training set.
+        train_ratio: Fraction for training set. Defaults to 0.8, the complement of the
+            unchanged 0.2 validation default once ``test_ratio`` is 0.
         val_ratio: Fraction for validation set.
         test_ratio: Must be 0. No launch path honours a held-out test list, so make_splits
             writes train and val only; a non-zero value is refused rather than writing a
@@ -294,7 +295,7 @@ def make_splits(
         output_path: Where to write manifests (and, when materializing, the file tree).
             Defaults to ``folder_path/splits`` when materializing, else manifests are
             written only if this is set.
-        materialize: Also copy/symlink files into a {train,val,test}/{images,labels}/ tree.
+        materialize: Also copy/symlink files into a {train,val}/{images,labels}/ tree.
         copy_files: Copy files (True) or create symlinks (False) when materializing.
         subject: The object the confirmed negatives are keyed under. A materialized split tree
             can't recover the subject from its own path, so an image a human confirmed negative
@@ -324,12 +325,12 @@ def make_splits(
     if spatial:
         return _make_spatial_split(
             folder_path, tile_size=tile_size, overlap=overlap,
-            fractions=(train_ratio, val_ratio, test_ratio),
+            fractions=(train_ratio, val_ratio),
             seed=seed, buffer=buffer, output_path=output_path, materialize=materialize,
         )
 
     if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
-        return {"error": "Ratios must sum to 1.0"}
+        return {"error": "test_ratio must be 0 and train_ratio + val_ratio must sum to 1.0."}
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
@@ -452,10 +453,10 @@ def make_splits(
 
 def _make_spatial_split(
     folder_path: str, *, tile_size: int | None, overlap: float | None,
-    fractions: tuple[float, float, float], seed: int, buffer: int | None,
+    fractions: tuple[float, float], seed: int, buffer: int | None,
     output_path: str | None, materialize: bool,
 ) -> dict:
-    """``make_splits(spatial=True)``'s body: a within-image train/val/test split for one source.
+    """``make_splits(spatial=True)``'s body: a within-image train/val split for one source.
 
     No dataset is constructed here (this tool never builds a ``TiledDetectionDataset``), so the
     tile lattice is the pure geometry :func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`
@@ -494,7 +495,8 @@ def _make_spatial_split(
 
     try:
         split = spatial_strip_split(
-            width, height, tile_size, overlap, fractions=fractions, seed=seed, buffer=buffer,
+            width, height, tile_size, overlap, fractions=fractions, split_names=("train", "val"),
+            seed=seed, buffer=buffer,
         )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -560,7 +562,7 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
     """Reads the source subject's confirmed negatives and assigns each to the split holding its
     image, entirely before any split-tree file is written (see the call site).
 
-    A split tree is ``{train,val,test}/labels`` by construction and cannot recover the subject from
+    A split tree is ``{train,val}/labels`` by construction and cannot recover the subject from
     its path, so the confirmations are carried explicitly under the threaded ``subject`` (keyed by
     ``status_bucket(subject, None)``, since the split carries no date). Without this, every image a
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
