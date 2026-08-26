@@ -524,7 +524,7 @@ f943c12d4693409bcf2a0c1a4229d26b61d34cc1.
 the 57 `@mcp.tool()` decorator sites found in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`.
 Every one of the 57 `@mcp.tool()` sites is immediately followed by an `@audited` decorator
 (0 exceptions, verified by pairing each `@mcp.tool()` line with the line after it across
-all 15 tool modules; ten of the sites read `@audited(scope_arg=...)`, so a check must match
+all 15 tool modules; eleven of the sites read `@audited(scope_arg=...)`, so a check must match
 the decorator name rather than the whole line).
 
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
@@ -821,15 +821,15 @@ registered at HEAD.
 |---|---|---|---|
 | POST | `/matches` | `compute_image_matches` | `routes/review.py:447` |
 | POST | `/action` | `record_action` | `routes/review.py:573` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:677` |
-| POST | `/backup_labels` | `backup_labels` | `routes/review.py:727` |
-| POST | `/save_gt` | `save_gt` | `routes/review.py:748` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:796` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1133` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1171` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1199` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1319` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1347` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:708` |
+| POST | `/backup_labels` | `backup_labels` | `routes/review.py:760` |
+| POST | `/save_gt` | `save_gt` | `routes/review.py:781` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:832` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1170` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1208` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1236` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1356` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1384` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1018,7 +1018,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:818`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:824`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:258`.
 
@@ -1123,7 +1123,7 @@ before the outgoing digest is gone.
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:651`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
-`packages/tcip-web/src/tcip_web/routes/review.py:677`, derives it from the GT file through
+`packages/tcip-web/src/tcip_web/routes/review.py:708`, derives it from the GT file through
 `annotations_hold_subject`, scoped to the confirmed subject, and the browser posts that value on
 through `set_image_status`.
 
@@ -1489,13 +1489,13 @@ Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
 composing a state dir of its own.
 
 Writer: `ReviewEngine._save_image`, `review_engine.py:285`, called by `mark_image_reviewed`
-(`review_engine.py:331`), `unmark_image_reviewed` (`review_engine.py:362`),
-`record_detection_action` (`review_engine.py:629`), `check_image_review_complete`
-(`review_engine.py:766`); `save_review_state`, `review_engine.py:305`, flushes every shard.
+(`review_engine.py:331`), `unmark_image_reviewed` (`review_engine.py:368`),
+`record_detection_action` (`review_engine.py:635`), `check_image_review_complete`
+(`review_engine.py:772`); `save_review_state`, `review_engine.py:305`, flushes every shard.
 
 Readers: `ReviewEngine.load_review_state`, `review_engine.py:264`, which enumerates the store's
-keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:513`,
-and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:494`.
+keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:519`,
+and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:500`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
@@ -1921,7 +1921,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S45. Review verdicts promoted into a calibration reference
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
-Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:629` (`def record_detection_action(`, the one writer of a stored verdict entry).
+Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:635` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:74` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 18), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 
