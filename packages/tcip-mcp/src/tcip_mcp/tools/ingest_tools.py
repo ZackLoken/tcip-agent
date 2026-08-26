@@ -16,12 +16,17 @@ from pathlib import Path
 
 from tcip_store import store
 
+from tcip_annotation.json_io import SIDECAR_FILENAMES
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
+
+# A label file bearing one of these exact stems would be indistinguishable from a prediction
+# bucket's own provenance stamp; no image is ingested under one.
+_RESERVED_STAMP_STEMS = frozenset(name[: -len(".json")] for name in SIDECAR_FILENAMES)
 
 
 _DT_ORIGINAL = 0x9003  # EXIF DateTimeOriginal tag id
@@ -217,9 +222,10 @@ def ingest_images(
             ``False``; a project with no such capture pays nothing for this pass.
 
     Returns a manifest: ``{project_path, name, image_root, total, found, copied,
-    moved, buckets, undated, skipped_collisions, errors, unreadable_dates, move, band_groups}``,
-    where ``unreadable_dates`` names each ingested file whose capture date could not be read and
-    the reason.
+    moved, buckets, undated, skipped_collisions, reserved_name_skips, errors, unreadable_dates,
+    move, band_groups}``, where ``unreadable_dates`` names each ingested file whose capture date
+    could not be read and the reason, and ``reserved_name_skips`` names each file not ingested
+    because its stem is reserved for a prediction bucket's own provenance stamp.
     """
     from tcip_store import StoreError
 
@@ -258,17 +264,22 @@ def ingest_images(
     copied = 0
     moved = 0
     skipped_collisions: list[dict] = []
+    reserved_name_skips: list[dict] = []
     errors: list[dict] = []
     unreadable_dates: list[dict] = []
     touched_buckets: set[str] = set()
-    # Collisions are keyed by stem within a bucket (case-insensitively): labels and
-    # predictions pair to an image by stem alone (see dataset_layout), so two sources with
-    # the same stem but different extensions would otherwise silently share one label file.
+    # Collisions are keyed by stem within a bucket (case-insensitively): two sources with the
+    # same stem but different extensions would otherwise silently share one label file.
     placed: set[tuple[str, str]] = set()
 
     for src_path in sources:
         bucket, date_unreadable = _bucket_for(src_path, date_from)
         stem_key = (bucket, src_path.stem.lower())
+        if src_path.stem in _RESERVED_STAMP_STEMS:
+            # This exact stem is a bucket's own provenance stamp in every bucket
+            # (json_io.SIDECAR_FILENAMES), reserved so no bucket walk can mistake one for a label.
+            reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
+            continue
         dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
         if stem_key in placed or dest.exists():
             # No-overwrite: a stem collision (two sources → same bucket/stem) or a
@@ -341,6 +352,7 @@ def ingest_images(
         "buckets": dict(sorted(buckets.items())),
         "undated": undated,
         "skipped_collisions": skipped_collisions,
+        "reserved_name_skips": reserved_name_skips,
         "errors": errors,
         "unreadable_dates": unreadable_dates,
         "move": not copy,

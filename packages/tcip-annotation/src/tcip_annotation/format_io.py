@@ -73,8 +73,10 @@ def detect_format(path: str) -> AnnotFormat:
     format, it is a document nobody can read, and a caller must not learn that fact only as
     "cannot determine the annotation format".
     """
+    from tcip_annotation.json_io import prediction_documents
+
     p = Path(path)
-    candidates = sorted(p.glob("*.json")) if p.is_dir() else [p]
+    candidates = prediction_documents(p) if p.is_dir() else [p]
     for candidate in candidates:
         fmt = _detect_json_format(candidate)
         if fmt is not None:

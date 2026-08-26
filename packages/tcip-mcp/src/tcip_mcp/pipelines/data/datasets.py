@@ -188,12 +188,9 @@ def first_labels_json(labels_dir) -> Path | None:
     that in fact holds a document nobody can make sense of, the opposite of what "the first" here
     is supposed to name.
     """
-    from tcip_annotation.json_io import load_label_document
+    from tcip_annotation.json_io import load_label_document, prediction_documents
 
-    d = Path(labels_dir)
-    if not d.is_dir():
-        return None
-    candidates = sorted(d.glob("*.json"))
+    candidates = prediction_documents(labels_dir)
     if not candidates:
         return None
     jp = candidates[0]
@@ -648,7 +645,7 @@ def assemble_coco(
     labels_dir = Path(labels_dir)
     images_dir = Path(images_dir)
     if stems is None:
-        stems = sorted(p.stem for p in labels_dir.glob("*.json"))
+        stems = sorted(p.stem for p in json_io.prediction_documents(labels_dir))
     # Real on-disk names: to_coco_dataset matches these against the confirmed-negative store, and a
     # constructed name would silently match nothing for an uppercase extension.
     names = image_name_map(images_dir)

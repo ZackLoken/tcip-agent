@@ -961,14 +961,17 @@ def subjects_on_date(dataset_root: str | Path, date: Optional[str]) -> list[str]
     per-date label scan, shared by ``subjects_with_labels`` and the GUI's subject selector.
 
     Reads each ``annotations/<date>/<stem>.json`` through ``json_io.read_annotations`` (the single
-    reader), so the subjects offered are the subjects genuinely labeled there, sorted."""
+    reader), so the subjects offered are the subjects genuinely labeled there, sorted. Raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when a present label file on this
+    date will not read; a missing ``annotations/<date>/`` directory reads as no subjects.
+    """
     from tcip_annotation import json_io
 
     d = annotation_dir(dataset_root, date)
     if not d.is_dir():
         return []
     found: set[str] = set()
-    for f in d.glob("*.json"):
+    for f in json_io.prediction_documents(d):
         for a in json_io.read_annotations(str(f)):
             found.add(a.subject)
     return sorted(found)

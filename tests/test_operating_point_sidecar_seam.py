@@ -9,8 +9,8 @@ from __future__ import annotations
 import pytest
 import tcip_store
 
+from tcip_annotation.json_io import SIDECAR_FILENAMES
 from tcip_mcp.pipelines.resolution import (
-    SIDECAR_FILENAMES,
     VALIDATED_EXPLICIT_GEOMETRY,
     VALIDATED_FALSE,
     VALIDATED_HELD_OUT,

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tcip_annotation.json_io import SIDECAR_FILENAMES
 from tcip_mcp import prediction_buckets
-from tcip_mcp.pipelines.resolution import SIDECAR_FILENAMES
 from tcip_mcp.prediction_buckets import bucket_content_digest
 
 
