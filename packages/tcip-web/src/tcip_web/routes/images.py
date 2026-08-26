@@ -419,7 +419,8 @@ def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
                     ) -> "list[tuple[float, float]]":
     """The ``(low, high)`` pair per selected band a region render stretches between, in the same
     order as ``idxs``: the clip cut points for ``percent_clip``, the sampled range otherwise
-    (``none`` reads only the high end, and only for a float raster)."""
+    (``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
+    from, and an integer raster ignores the pair for its dtype ceiling)."""
     if stretch == "percent_clip":
         return [stats.clip_bounds[i] for i in idxs]
     return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
@@ -472,11 +473,14 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     A non-``uint8`` raster is scaled by ``band_stats.full_scale_denominator`` (the ``none``
     stretch), one denominator for the whole array rather than one per band, so a plain serve never
     shifts the colors the file holds. ``bounds`` carries the sampled ``(minimum, maximum)`` a
-    float raster's denominator comes from when the pixels in hand are one region of it.
+    float raster's denominator comes from when the pixels in hand are one region of it. Returns
+    the rendered pixels and the divisor the render divided by, so a caller reporting what was
+    applied reads the same number the render used rather than deriving its own; ``None`` for a
+    ``uint8`` raster, which applies no stretch at all.
     """
     import numpy as np
 
-    from tcip_mcp.pipelines.band_stats import stretch_band
+    from tcip_mcp.pipelines.band_stats import full_scale_denominator, stretch_band
 
     arr = np.asarray(pixels)
     if arr.shape[-1] == 1:
@@ -484,8 +488,11 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     elif arr.shape[-1] == 4:
         arr = arr[:, :, :3]
     if arr.dtype == np.uint8:
-        return np.ascontiguousarray(arr)
-    return stretch_band(arr, "none", dtype, bounds)
+        return np.ascontiguousarray(arr), None
+    divisor = full_scale_denominator(
+        arr, dtype, sampled_maximum=None if bounds is None else bounds[1],
+        sampled_minimum=None if bounds is None else bounds[0])
+    return stretch_band(arr, "none", dtype, (0.0, divisor)), divisor
 
 
 @router.get("")
@@ -645,10 +652,17 @@ def serve_image(
             applied = (_served_array_bounds(pixels, idxs, stretch) if sampled is None
                        else _sampled_bounds(sampled, idxs, stretch))
             rgb = composite_display_rgb(pixels, idxs, stretch, applied)
+            if stretch == "none":
+                # The divisor each band actually rendered against, not its sampled (min, max).
+                applied = [
+                    (0.0, full_scale_denominator(pixels, dtype, sampled_maximum=hi,
+                                                 sampled_minimum=lo))
+                    for lo, hi in applied
+                ]
             stats_source = (
                 StatsSource(read="served_array") if sampled is None else sampled.stats_source())
         elif integer:
-            rgb = _plain_rgb(pixels, dtype, None)
+            rgb, _divisor = _plain_rgb(pixels, dtype, None)
             stats_source = StatsSource(read="none" if dtype == np.uint8 else "dtype_full_scale")
             applied = []
         else:
@@ -657,9 +671,7 @@ def serve_image(
             ranges = band_ranges(pixels) if sampled is None else sampled.ranges
             band_bounds = (
                 min(ranges[i].minimum for i in idxs), max(ranges[i].maximum for i in idxs))
-            rgb = _plain_rgb(pixels, dtype, band_bounds)
-            divisor = full_scale_denominator(
-                pixels, dtype, sampled_maximum=band_bounds[1], sampled_minimum=band_bounds[0])
+            rgb, divisor = _plain_rgb(pixels, dtype, band_bounds)
             applied = [(0.0, divisor)]
             stats_source = (
                 StatsSource(read="served_array") if sampled is None else sampled.stats_source())

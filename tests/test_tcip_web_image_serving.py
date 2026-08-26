@@ -285,6 +285,20 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(client: TestClien
     assert _display_bounds(resp) == [[0.0, 1000.0]]
 
 
+def test_a_non_positive_float_bands_display_bounds_are_its_own_divisor(
+    client: TestClient, tmp_path: Path,
+):
+    """A float band with no positive data renders black and reports (0.0, divisor), the pair it
+    actually stretched between, not its own negative sampled range."""
+    path = tmp_path / "negative.tif"
+    arr = (-np.abs(np.random.default_rng(0).standard_normal((32, 40))) - 1.0).astype(np.float32)
+    tifffile.imwrite(str(path), arr)
+    resp = client.get("/api/images", params={"path": str(path)})
+    served = _served(resp)
+    assert np.allclose(served, 0, atol=2)
+    assert _display_bounds(resp) == [[0.0, float(-arr.min())]]
+
+
 def test_a_single_band_raster_serves_as_replicated_grey(client: TestClient, tmp_path: Path):
     path = tmp_path / "grey.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 90, dtype=np.uint8))
@@ -414,6 +428,25 @@ def test_a_whole_view_reports_the_bounds_of_the_array_it_served(client: TestClie
                                    "overview_scale": None}
     reported = [tuple(pair) for pair in _display_bounds(resp)]
     assert reported == [(float(arr[:, :, i].min()), float(arr[:, :, i].max())) for i in range(3)]
+
+
+def test_a_composited_non_positive_float_bands_display_bounds_are_its_own_divisor(
+    client: TestClient, tmp_path: Path,
+):
+    """The composite route under ``stretch=none`` reports (0.0, divisor) for a selected band with
+    no positive data, the same rule the plain serve reports it under, not its sampled (min, max)."""
+    path = tmp_path / "capture.tif"
+    rng = np.random.default_rng(5)
+    arr = rng.uniform(1.0, 100.0, size=(24, 40, 3)).astype(np.float32)
+    arr[:, :, 0] = -np.abs(arr[:, :, 0]) - 1.0
+    tifffile.imwrite(str(path), arr)
+    resp = client.get("/api/images", params={
+        "path": str(path), "bands": "0,1,2", "stretch": "none"})
+    assert resp.status_code == 200
+    reported = [tuple(pair) for pair in _display_bounds(resp)]
+    assert reported[0] == (0.0, float(-arr[:, :, 0].min()))
+    assert reported[1] == (0.0, float(arr[:, :, 1].max()))
+    assert reported[2] == (0.0, float(arr[:, :, 2].max()))
 
 
 def test_a_percent_clip_region_stretches_between_the_cached_cut_points(

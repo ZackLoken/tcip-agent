@@ -81,9 +81,10 @@ class CoverageViewing(BaseModel):
     one-element list is one bound applied to every displayed band. Each low/high value in a pair is
     a finite number or ``null``; a ``null`` bound means the stretch found no finite value for that
     half of that band's range (a raster whose sampled or served pixels held a NaN or an infinity).
-    Under the ``none`` stretch the low is always zero, whatever the band's own range: a band with
-    no positive data still divides by a positive number (the magnitude of its sampled minimum), so
-    its pair holds no pixel of the band between its low and high.
+    A plain view of a non-``uint8`` raster, and a band composite under ``stretch="none"``, both
+    report the low as always zero: a band with no positive data still divides by a positive number
+    (the magnitude of its sampled minimum), so its pair holds no pixel of the band between its low
+    and high.
     """
 
     model_config = ConfigDict(extra="forbid")
