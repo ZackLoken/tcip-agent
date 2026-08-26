@@ -100,8 +100,10 @@ trait_name, fields)`, the one audited write path for a `TraitSpec`'s fields (`co
 `localization`, `positive_class_name`, ...; the positive class must be a value one of the measured
 subject's attributes declares in the delivered dataset's own class registry, checked when the
 crossing statement is made and again at every delivery). It refuses if the trait has no existing
-spec file (creating a new trait is a separate, still-manual step) and re-validates the merged spec
-against `crops.yml` before writing. Never hand-write the trait's spec YAML directly.
+spec file; register one first with `author_trait_spec(project_root, trait, delivers, rationale,
+...)`, which records the breeder's own account of the trait's measurement for their later
+confirmation in the GUI. `update_trait_spec_fields` re-validates the merged spec against
+`crops.yml` before writing. Never hand-write the trait's spec YAML directly.
 
 Don't confuse `score_predictions` (IoU GT-vs-prediction *eval* matching) with plant-GPS
 mapping; they are unrelated.
