@@ -587,7 +587,7 @@ def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:
-        _watch_wall_clock(proc, run, "exp_timeout", 0.2)
+        _watch_wall_clock(proc, run, "exp_timeout", 0.2, root=tmp_path)
         deadline = time.monotonic() + 10
         while proc.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)
@@ -607,6 +607,60 @@ def test_max_wall_clock_seconds_terminates_hung_run(tmp_path, monkeypatch):
             if status.get("error"):
                 break
             time.sleep(0.1)
+        assert "max_wall_clock_seconds" in status.get("error", "")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_max_wall_clock_seconds_writes_to_the_launch_root_after_an_adopt(tmp_path, monkeypatch):
+    """The watchdog's write belongs to the project the run launched under, not wherever this
+    process's platform root has since moved to: a repin between the launch and the timeout
+    must not drop the failure or leave the launch project's record stuck at ``running``."""
+    monkeypatch.chdir(tmp_path)
+    import subprocess
+    import sys
+    import time
+
+    from tcip_mcp import workspace
+    from tcip_mcp.experiments import create_experiment, status_key, update_status
+    from tcip_mcp.pipelines.training.generic_trainer import attach_run
+    from tcip_mcp.tools.training_tools import _watch_wall_clock
+    from tcip_store import DecodeError, read
+
+    launch_root = tmp_path
+    create_experiment("exp_timeout_other_root", {"model_source": {"builder": "x:y"}})
+    update_status("exp_timeout_other_root", "running")
+    run = attach_run("run_timeout_other_root", {"model_source": {"builder": "x:y"}}, str(tmp_path))
+
+    other_proj = workspace.project_path("chestnut_burr_other")
+    (other_proj / ".tcip").mkdir(parents=True)
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        _watch_wall_clock(proc, run, "exp_timeout_other_root", 0.2, root=launch_root)
+        workspace.set_active_project("chestnut_burr_other")  # repins this process elsewhere
+
+        deadline = time.monotonic() + 10
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert proc.poll() is not None, "watcher did not terminate the hung process"
+        assert run.status == "failed"
+
+        status: dict = {}
+        for _ in range(50):
+            try:
+                status = read(status_key("exp_timeout_other_root", root=launch_root), default={})
+            except DecodeError:
+                status = {}
+            if status.get("error"):
+                break
+            time.sleep(0.1)
+        assert status.get("state") == "failed"
         assert "max_wall_clock_seconds" in status.get("error", "")
     finally:
         if proc.poll() is None:

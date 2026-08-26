@@ -682,10 +682,10 @@ Docstring is the function's docstring first line, verbatim.
 | `register_dataset` | `project_tools.py:94` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
 | `init_project` | `project_tools.py:196` | yes | Initialise a TCIP project directory. |
 | `set_active_project` | `project_tools.py:230` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:310` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:357` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:491` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:618` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `view_gui_state` | `project_tools.py:316` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:363` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:497` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:624` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### scale_tools.py (1 tool)
 
@@ -751,14 +751,14 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:143` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:152` |
-| WS | `/ws/state` | `state_ws` | `app.py:160` |
-| GET | `/health` | `health` | `app.py:254` |
-| GET | `/` | `index` | `app.py:262` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:285` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:329` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:338` |
+| GET | `/api/state` | `get_state` | `app.py:145` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:154` |
+| WS | `/ws/state` | `state_ws` | `app.py:162` |
+| GET | `/health` | `health` | `app.py:256` |
+| GET | `/` | `index` | `app.py:264` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:327` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:374` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:383` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -824,11 +824,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:419` |  <!-- queued: P5-105 delete -->
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:519` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:524` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:538` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:548` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:435` |  <!-- queued: P5-105 delete -->
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:535` |
+| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:540` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:554` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:564` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -916,15 +916,15 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:220` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:255` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:268` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:297` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:330` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:354` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:432` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:448` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:462` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:241` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:272` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:290` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:321` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:354` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:378` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:456` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:472` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:486` |
 
 ### 11 routes with no located frontend caller
 
@@ -1009,7 +1009,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:64`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:65`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
 `@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
@@ -1328,19 +1328,19 @@ are listed here with the rest rather than taking numbers of their own.
 - `config.json` (`config_key`, `experiments.py:114`): written by `create_experiment`,
   `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:463` (rewrites only
   while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:942`, and `compare_experiments`, `experiments.py:1376`.
+  `experiments.py:942`, and `compare_experiments`, `experiments.py:1391`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (364), `update_status`
-  (`experiments.py:490`), `stamp_run_identity` (`experiments.py:606`), `_touch_heartbeat`
+  (`experiments.py:490`), `stamp_run_identity` (`experiments.py:621`), `_touch_heartbeat`
   (`experiments.py:749`). Read by `get_experiment` (1201), `reconstruct_run_status`
-  (`experiments.py:712`), `resolve_experiment_dir_for_run` (`experiments.py:630`). `state` is
+  (`experiments.py:712`), `resolve_experiment_dir_for_run` (`experiments.py:645`). `state` is
   terminal-locked once `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (364) and
-  `update_lineage`, `experiments.py:1125`. Read by `get_experiment` (1201) and
-  `get_experiment_lineage`, `experiments.py:1463`.
+  `update_lineage`, `experiments.py:1140`. Read by `get_experiment` (1201) and
+  `get_experiment_lineage`, `experiments.py:1478`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (364) and
-  `record_artifact`, `experiments.py:1091`. Read by `get_experiment` (1201).
+  `record_artifact`, `experiments.py:1106`. Read by `get_experiment` (1201).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
-  `log_metrics`, `experiments.py:834`. Read by `read_metrics`, `experiments.py:821`, which
+  `log_metrics`, `experiments.py:849`. Read by `read_metrics`, `experiments.py:836`, which
   `get_experiment` (1201, paginated) and `reconstruct_run_status` (712, last row only) go through.
 - `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
@@ -1351,13 +1351,13 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:928`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:943`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:882`),
+  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:897`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
   documents whose gate runs the check, `null` for `resolve_scale`. Read by `read_validations`,
-  `experiments.py:910`, `find_validation`, `experiments.py:978` (matching rows by recomputed
-  `validation_digest`, `experiments.py:918`), and included whole by `get_experiment` (1201). The
+  `experiments.py:910`, `find_validation`, `experiments.py:993` (matching rows by recomputed
+  `validation_digest`, `experiments.py:933`), and included whole by `get_experiment` (1201). The
   one member appendable after a terminal state, because a validation is a statement made about a
   run after it ended.
 
@@ -1394,7 +1394,7 @@ transaction on the key `registry_index_key` mints, same file, line 36, so a conc
 entries are not clobbered. `register_model` takes `metrics_source` as a required keyword,
 `"trainer"` / `"training_source"` / `"caller"` / `None`, naming which path produced `metrics`
 without claiming anyone verified it; only the two production callers set it,
-`register_model_from_experiment` (`experiments.py:1181`, reading whether the run's config carries
+`register_model_from_experiment` (`experiments.py:1196`, reading whether the run's config carries
 `training_source`) and the `register_model` tool's explicit mode (`tools/model_tools.py:18`,
 `"caller"` when `metrics` is non-empty). `register_model_from_experiment` no longer falls back to
 the run's `metrics.jsonl` log for a checkpoint with no metrics dict; such a registration carries
@@ -1512,7 +1512,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:259`.
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:115`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:117`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1585,9 +1585,9 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.js
 
 Path: `<workspace_root>/.active`, a workspace-root sibling, not inside `.tcip/`.
 
-Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:224`.
+Writer: `set_active_project`, `packages/tcip-mcp/src/tcip_mcp/workspace.py:249`.
 
-Readers: `read_active_project`, `workspace.py:160`; `resolve_project_path`, `workspace.py:216`.
+Readers: `read_active_project`, `workspace.py:160`; `resolve_project_path`, `workspace.py:241`.
 
 Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_tcip_web_projects_routes.py:160`,
@@ -1691,7 +1691,7 @@ Phase 3 verdict: single.
 
 Must agree: sender and receiver accept the same set of panel names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:165` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:33` (`VALID_PANELS,`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:34` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
@@ -1718,14 +1718,14 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:834` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:849` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
 ## S09. Web job registries persisted to .tcip/state/<name>.json  <!-- queued: P5-325 unify -->
 
 Must agree: job summaries are written and reloaded against the same pinned platform root.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:46` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:32`; the platform root it keys on is resolved by `project_root`, not composed).
+Side A: `packages/tcip-web/src/tcip_web/jobstore.py:59` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:32`; the platform root it keys on is resolved by `project_root`, not composed).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.persist`/`jobstore.load`).
 Phase 3 verdict: duplicated.
 
@@ -1733,7 +1733,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:104` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:326` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:332` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
@@ -1879,7 +1879,7 @@ Phase 3 verdict: single.
 ## S30. split.json train/val manifest
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1484` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1499` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
 Phase 3 verdict: single.
 
@@ -2006,7 +2006,7 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:159` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:161` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:175` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2020,8 +2020,8 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:547` (`@router.websocket("/jobs/{job_id}/stream")`).
-Side B: `packages/tcip-web/src/tcip_web/jobstore.py:61` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:563` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side B: `packages/tcip-web/src/tcip_web/jobstore.py:75` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
@@ -2049,14 +2049,14 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:218` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:220` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:159` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:161` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
@@ -2091,7 +2091,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:162` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:164` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets
@@ -2118,7 +2118,7 @@ Phase 3 verdict: duplicated.
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:36` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:37` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 

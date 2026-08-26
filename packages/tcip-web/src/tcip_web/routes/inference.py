@@ -46,6 +46,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/inference", tags=["inference"])
 
 
+def _current_root() -> str:
+    from tcip_web import jobstore
+    return jobstore.current_root()
+
+
 # ── Job registry ────────────────────────────────────────────────────────
 
 
@@ -84,6 +89,9 @@ class InferenceJob:
     dropped_boxes: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
+    # The platform root this job launched under, resolved on whichever thread constructs it
+    # (the request thread for a real launch); a rehydrated job restates the persisted value.
+    platform_root: str = field(default_factory=_current_root)
 
 
 _jobs: dict[str, InferenceJob] = {}
@@ -109,6 +117,7 @@ def _summary(job: InferenceJob) -> dict:
         "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
         "images_dir": job.images_dir, "output_dir": job.output_dir, "error": job.error,
         "warning": job.warning, "dropped_nonpositive_boxes": job.dropped_boxes,
+        "platform_root": job.platform_root,
     }
 
 
@@ -116,42 +125,48 @@ def _persist() -> None:
     from tcip_web import jobstore
     with _job_lock:
         summaries = [_summary(j) for j in _jobs.values()]
-    jobstore.persist("inference_jobs", summaries)
+    jobstore.persist_grouped("inference_jobs", summaries)
 
 
 def _register(job: InferenceJob) -> None:
     from tcip_web import jobstore
     with _job_lock:
         _jobs[job.job_id] = job
-        jobstore.evict_terminal(_jobs)  # bound the registry (drop oldest terminal jobs)
+        jobstore.evict_terminal(_jobs, job.platform_root)  # bound this root's own share
     _persist()
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
+    from tcip_web import jobstore
+    root = jobstore.current_root()
     with _job_lock:
-        return _jobs.get(job_id)
+        job = _jobs.get(job_id)
+    return job if job is not None and job.platform_root == root else None
 
 
 def _list_jobs() -> list[InferenceJob]:
+    from tcip_web import jobstore
+    root = jobstore.current_root()
     with _job_lock:
-        return list(_jobs.values())
+        return [j for j in _jobs.values() if j.platform_root == root]
 
 
-def rehydrate() -> None:
-    """Seed the registry from the last persisted summaries after a backend restart.
+def rehydrate_for_current_root() -> None:
+    """Merge this root's persisted jobs, not already live, into memory.
 
-    The worker threads are gone, so a persisted non-terminal job is dead: it is
-    surfaced as ``interrupted``. Only the fields the API exposes are restored (the
-    per-image results list isn't persisted), so ``/preview`` comes back empty.
+    Called at startup and again after this process repins to another root: the worker
+    threads behind a persisted non-terminal job are gone, so it is surfaced as
+    ``interrupted``. Only the fields the API exposes are restored (the per-image results list
+    isn't persisted), so ``/preview`` comes back empty. Merges by job id rather than requiring
+    an empty registry first, so it never displaces a job still live from another root.
     """
     from tcip_web import jobstore
 
+    root = jobstore.current_root()
     with _job_lock:
-        if _jobs:
-            return
         for s in jobstore.load("inference_jobs"):
             jid = s.get("job_id")
-            if not jid:
+            if not jid or jid in _jobs:
                 continue
             status = s.get("status", "interrupted")
             if status not in jobstore.TERMINAL_STATUSES:
@@ -168,6 +183,7 @@ def rehydrate() -> None:
                 overlap=0.0,
                 total=s.get("total", 0),
                 done=s.get("done", 0),
+                platform_root=s.get("platform_root") or root,
                 status=status,
                 error=s.get("error"),
                 warning=s.get("warning"),

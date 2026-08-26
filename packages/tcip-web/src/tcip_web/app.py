@@ -51,10 +51,11 @@ async def _lifespan(_app: FastAPI):
 
     configure_gdal_cache()
     try:
-        from tcip_web.routes import inference, tuning
+        from tcip_web.routes import inference, review, tuning
 
-        inference.rehydrate()
-        tuning.rehydrate()
+        inference.rehydrate_for_current_root()
+        tuning.rehydrate_for_current_root()
+        review.rehydrate_for_current_root()
         # Training runs aren't rehydrated from a state file: the training list route
         # reconstructs past runs on demand from the immutable .tcip/experiments/ records.
     except Exception:  # pragma: no cover - rehydrate is best-effort
@@ -307,13 +308,12 @@ def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
         return {"platform_root_problem": str(exc)}
 
     repin_platform_root(marker_root)
-    # The per-registry rehydrate_for_current_root() calls land here; for now this repin can
-    # leave a registry rehydrated from whichever root emptied it first (see rehydrate() below).
     try:
-        from tcip_web.routes import inference, tuning
+        from tcip_web.routes import inference, review, tuning
 
-        inference.rehydrate()
-        tuning.rehydrate()
+        inference.rehydrate_for_current_root()
+        tuning.rehydrate_for_current_root()
+        review.rehydrate_for_current_root()
     except Exception:  # pragma: no cover - rehydrate is best-effort, same as at startup
         logger.exception("job registry rehydrate failed after a platform-root repin")
 

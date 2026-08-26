@@ -307,9 +307,14 @@ def read_member(key: Key, default: Any = None) -> Any:
         return default
 
 
-def experiment_exists(experiment_id: str) -> bool:
-    """Whether this id names a real experiment record, by its config snapshot."""
-    return store.exists(config_key(experiment_id))
+def experiment_exists(experiment_id: str, *, root: Path | str | None = None) -> bool:
+    """Whether this id names a real experiment record, by its config snapshot.
+
+    ``root`` defaults to the current platform root; a caller resolving a run under a root
+    other than the one it started under (a launch's own watchdog, after the process has
+    since adopted a different project) passes the launch root explicitly.
+    """
+    return store.exists(config_key(experiment_id, root=root))
 
 
 def _current_state(experiment_id: str) -> str | None:
@@ -509,7 +514,13 @@ def _mark_completed(status: dict[str, Any]) -> None:
     status["ended"] = now
 
 
-def update_status(experiment_id: str, state: str, *, error: str | None = None) -> dict[str, Any]:
+def update_status(
+    experiment_id: str,
+    state: str,
+    *,
+    error: str | None = None,
+    root: Path | str | None = None,
+) -> dict[str, Any]:
     """Update experiment state (created → running → completed | failed).
 
     A repeat of the record's current state is idempotent: nothing restamps (not ``heartbeat``,
@@ -523,11 +534,15 @@ def update_status(experiment_id: str, state: str, *, error: str | None = None) -
     ``error`` records a specific failure reason (e.g. a wall-clock-timeout kill) into
     ``status.json["error"]``; outside the idempotent-repeat case above, omitted/``None`` never
     clears a previously-recorded error, only an explicit new value overwrites it.
+
+    ``root`` defaults to the current platform root; a launch's wall-clock watchdog passes the
+    root it captured at launch, so its write reaches the run's own record even after this
+    process has since adopted a different project.
     """
-    if not experiment_exists(experiment_id):
+    if not experiment_exists(experiment_id, root=root):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    key = status_key(experiment_id)
+    key = status_key(experiment_id, root=root)
     current: str | None = None
     refused = False
     with store.transaction(key) as txn:

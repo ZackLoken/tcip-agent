@@ -880,7 +880,7 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
                 return _overview_summary(existing)
         job = OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src))
         _overview_jobs[job.job_id] = job
-        jobstore.evict_terminal(_overview_jobs)
+        jobstore.evict_terminal(_overview_jobs, None)  # this registry carries no root of its own
     thread = threading.Thread(target=_overview_worker, args=(job,), daemon=True)
     job.thread = thread
     thread.start()
