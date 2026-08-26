@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
@@ -18,8 +20,9 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 # test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
-N_IMAGES = 20
-OBJECTS_PER_IMAGE = 80
+_DENSE_RECORDS_DEFAULTS = inspect.signature(dense_records).parameters
+N_IMAGES = _DENSE_RECORDS_DEFAULTS["n_images"].default
+OBJECTS_PER_IMAGE = _DENSE_RECORDS_DEFAULTS["objects_per_image"].default
 
 
 def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
@@ -56,7 +59,7 @@ def _records(idp="c", *, shift: float = 0.0):
     return [a, b]
 
 
-def test_good_cal_holdout_is_distinct_on_geometry_not_a_shared_shift():
+def test_good_cal_holdout_hashes_are_disjoint_and_detection_counts_differ():
     from tcip_mcp.pipelines.operating_point import _record_content_hash
 
     cal, hold = good_cal_holdout()

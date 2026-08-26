@@ -18,7 +18,7 @@ import pytest
 
 torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
-from tests._dense_op_fixtures import dense_records  # noqa: E402
+from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
 from tcip_mcp.pipelines.operating_point import (  # noqa: E402
     _conf_censored,
     _floor_mismatch,
@@ -29,9 +29,6 @@ from tcip_mcp.pipelines.operating_point import (  # noqa: E402
 # No built-in traits: seed_catkin_trait_spec (conftest.py) writes a real catkin.yml into this
 # test's pinned project root so resolve_operating_point("catkin", ...) keeps resolving by default.
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
-
-N_IMAGES = 20
-OBJECTS_PER_IMAGE = 80
 
 
 # ── unit: the two independent censoring predicates ─────────────────────────
@@ -64,20 +61,10 @@ def test_floor_mismatch_predicate():
 # the low-score FP is filtered out), comfortably above a real 0.01 calibration floor, exercising the
 # "genuinely floored reference must still validate" direction.
 
-def _cal_holdout(fp_score: float):
-    miss = [0] * N_IMAGES
-    fp = [1] * N_IMAGES
-    cal = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=fp_score)
-    hold = dense_records(n_images=N_IMAGES, objects_per_image=OBJECTS_PER_IMAGE, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=fp_score)
-    return cal, hold
-
-
 def test_reference_floored_at_the_real_calibration_floor_still_validates():
     # A genuinely floored, honestly-asserted reference must still be able to validate: a naive fix
     # could otherwise make validation permanently unreachable.
-    cal, hold = _cal_holdout(fp_score=0.05)
+    cal, hold = good_cal_holdout(fp_score=0.05)
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
@@ -95,7 +82,7 @@ def test_reference_floored_at_the_real_calibration_floor_still_validates():
 def test_no_staged_conf_floor_asserted_fails_closed():
     # No floor asserted must fail closed (the honest default), named conf_floor_unstated,
     # distinct from conf_censored (a stated floor the pick does not clear).
-    cal, hold = _cal_holdout(fp_score=0.05)
+    cal, hold = good_cal_holdout(fp_score=0.05)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold)
     conf = b.get("conf")
@@ -109,7 +96,7 @@ def test_no_staged_conf_floor_asserted_fails_closed():
 def test_reference_truncated_above_the_picked_conf_is_refused():
     # Same geometry as the passing case, but the asserted floor sits at the picked conf, so the
     # sweep could not have seen anything below it, and it must refuse even though the holdout bias is 0.
-    cal, hold = _cal_holdout(fp_score=0.05)
+    cal, hold = good_cal_holdout(fp_score=0.05)
     b = resolve_operating_point("catkin", tiled=True, dataset_hash="h1", calibration_records=cal,
                                 holdout_records=hold, staged_conf_floor=0.95)
     conf = b.get("conf")
@@ -128,7 +115,7 @@ def test_asserted_vs_observed_floor_mismatch_is_surfaced_but_never_gates():
     # notice, but a pinned +/-0.05 band is an ordinary property of a model's score distribution as
     # often as it is evidence of tampering, so it must not by itself refuse a reference whose pick
     # (0.9) is genuinely above the floor and whose count bias otherwise passes cleanly.
-    cal, hold = _cal_holdout(fp_score=0.5)
+    cal, hold = good_cal_holdout(fp_score=0.5)
     # tiled=False: this test is about conf-calibration shippability, not tiling (tile_size
     # only gates a bundle when tiled).
     b = resolve_operating_point("catkin", dataset_hash="h1", calibration_records=cal,
