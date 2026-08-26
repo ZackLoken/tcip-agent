@@ -11,6 +11,8 @@ from ``miss_pattern``/``fp_pattern`` rather than pinned by re-running the code u
 
 from __future__ import annotations
 
+import inspect
+
 
 def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
     return [cx - s / 2, cy - s / 2, s, s]
@@ -47,8 +49,8 @@ def dense_records(
     A caller must not raise ``shift`` past the center-match tolerance without also shifting the
     paired detection to match: past that point every "match" becomes a miss (the shifted GT) plus an
     unmatched detection (the un-shifted one) instead of a true positive, silently turning a clean
-    fixture into an fp+fn pair. At the shipped default ``shift=5.0`` this is well inside tolerance and
-    harmless.
+    fixture into an fp+fn pair. The default (0.0) applies no shift at all; only a caller that
+    passes a nonzero value takes on that constraint.
     """
     miss_pattern = list(miss_pattern) if miss_pattern is not None else [0] * n_images
     fp_pattern = list(fp_pattern) if fp_pattern is not None else [0] * n_images
@@ -77,9 +79,7 @@ def dense_records(
     return records
 
 
-def good_cal_holdout(
-    *, n_images: int = 20, objects_per_image: int = 80
-) -> tuple[list[dict], list[dict]]:
+def good_cal_holdout(*, fp_score: float = 0.05) -> tuple[list[dict], list[dict]]:
     """A dense, realistic calibration/holdout pair: a good detector with one low-conf spurious
     detection per image (a realistic false-positive profile) that vanishes once conf crosses it,
     so the count-unbiased pick lands at the high, correct-match score (0.9), comfortably above a
@@ -90,12 +90,20 @@ def good_cal_holdout(
     ``_content_overlap`` hashes, without needing a per-box coordinate shift. This proves that a
     validated reference of genuinely distinct content passes the gate; it does not exercise
     whether an operating point derived on one population transfers to another, a claim no fixture
-    here makes.
+    here makes. ``fp_score`` is a caller argument (not a fixed default) so a test asserting
+    behavior at a different asserted floor still gets this same distinct-content grid.
     """
+    n_images = 20
+    objects_per_image = 80
     miss = [0] * n_images
     fp = [1] * n_images
     cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image - 8, id_prefix="h",
-                         spacing=45.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=fp_score)
+    # 10% fewer objects than calibration's grid, so its geometry hash differs from calibration's.
+    hold_objects_per_image = objects_per_image - objects_per_image // 10
+    # 5px more spacing than dense_records' own default, which calibration uses unmodified.
+    hold_spacing = inspect.signature(dense_records).parameters["spacing"].default + 5.0
+    hold = dense_records(n_images=n_images, objects_per_image=hold_objects_per_image, id_prefix="h",
+                         spacing=hold_spacing, miss_pattern=miss, fp_pattern=fp, score=0.9,
+                         fp_score=fp_score)
     return cal, hold

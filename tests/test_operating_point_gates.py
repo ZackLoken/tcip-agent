@@ -66,7 +66,7 @@ def _records(idp="c", *, shift: float = 0.0):
 def _cal_picks_conf_point_nine():
     """20-image dense calibration reference whose count-unbiased pick is exactly 0.9 (one low-conf
     spurious detection per image, filtered out once conf crosses its 0.05 score), the same
-    pattern ``test_operating_point.py``'s ``_good_cal_holdout`` uses."""
+    pattern ``tests/_dense_op_fixtures.py``'s ``good_cal_holdout`` uses."""
     n, obj = 20, 80
     return dense_records(n_images=n, objects_per_image=obj, id_prefix="c",
                          miss_pattern=[0] * n, fp_pattern=[1] * n, score=0.9, fp_score=0.05)
