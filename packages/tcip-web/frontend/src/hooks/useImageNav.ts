@@ -47,8 +47,17 @@ export function computeFilteredIndices(
 
 /** The image index `delta` steps away within `indices`, or null if it wouldn't move.
  *  When the current index isn't in the filtered set (e.g. just after changing the
- *  filter), stepping enters the set at the nearest member in the direction of travel. */
-export function stepTarget(indices: number[], currentIndex: number, delta: number): number | null {
+ *  filter), stepping enters the set at the nearest member in the direction of travel.
+ *  `wrap` (default false) carries a step past either end around to the other end instead of
+ *  clamping there, for a control whose members are scattered and each equally worth reaching
+ *  (e.g. the images still needing re-confirmation), rather than a linear traversal with real
+ *  ends. */
+export function stepTarget(
+  indices: number[],
+  currentIndex: number,
+  delta: number,
+  wrap = false,
+): number | null {
   if (indices.length === 0) return null;
   const pos = indices.indexOf(currentIndex);
   let nextPos: number;
@@ -62,7 +71,9 @@ export function stepTarget(indices: number[], currentIndex: number, delta: numbe
     for (let k = 0; k < indices.length; k++) if (indices[k] < currentIndex) last = k;
     nextPos = last >= 0 ? last : 0;
   }
-  nextPos = Math.max(0, Math.min(indices.length - 1, nextPos));
+  nextPos = wrap
+    ? ((nextPos % indices.length) + indices.length) % indices.length
+    : Math.max(0, Math.min(indices.length - 1, nextPos));
   const next = indices[nextPos];
   return next === currentIndex ? null : next;
 }
@@ -84,6 +95,8 @@ export interface ImageNavOptions {
   activeFilter?: string;
   isNavigable?: (name: string) => boolean;
   order?: number[];
+  /** Step past either end of the filtered set around to the other end (see stepTarget). */
+  wrap?: boolean;
 }
 
 export function useImageNav(options?: ImageNavOptions) {
@@ -97,6 +110,7 @@ export function useImageNav(options?: ImageNavOptions) {
   const activeFilter: string = options?.activeFilter ?? storeFilter;
   const isNavigable = options?.isNavigable;
   const order = options?.order;
+  const wrap = options?.wrap ?? false;
 
   const filteredIndices = useMemo(
     () => computeFilteredIndices(imageList, byImage, activeFilter, isNavigable, order),
@@ -116,8 +130,8 @@ export function useImageNav(options?: ImageNavOptions) {
   );
 
   const stepImage = useCallback(
-    (delta: number) => goTo(stepTarget(filteredIndices, currentIndex, delta)),
-    [filteredIndices, currentIndex, goTo],
+    (delta: number) => goTo(stepTarget(filteredIndices, currentIndex, delta, wrap)),
+    [filteredIndices, currentIndex, goTo, wrap],
   );
 
   const jumpToPosition = useCallback(

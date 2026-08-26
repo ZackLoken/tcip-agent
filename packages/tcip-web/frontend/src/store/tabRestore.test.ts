@@ -129,4 +129,12 @@ describe("saved review filters on reopening a dataset", () => {
     expect(s().gui.review).toEqual(LIVE_FILTERS);
     expect(s().imageStatus.activeFilter).toBe("all");
   });
+
+  it("does not carry a prior dataset's stale marks into a newly selected one", () => {
+    useStore.setState((st) => ({
+      imageStatus: { ...st.imageStatus, staleMarks: ["a.jpg"] },
+    }));
+    s().applyRestoredDataset(selection({ subject: "subject_b" }));
+    expect(s().imageStatus.staleMarks).toEqual([]);
+  });
 });

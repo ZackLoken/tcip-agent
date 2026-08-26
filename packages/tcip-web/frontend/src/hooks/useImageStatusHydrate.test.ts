@@ -74,4 +74,10 @@ describe("useImageStatusHydrate", () => {
     renderHook(() => useImageStatusHydrate({ ...PARAMS, subject: null }));
     expect(load).not.toHaveBeenCalled();
   });
+
+  it("clears a prior dataset's stale marks even when this one has no subject selected yet", () => {
+    useStore.setState((s) => ({ imageStatus: { ...s.imageStatus, staleMarks: ["img1.jpg"] } }));
+    renderHook(() => useImageStatusHydrate({ ...PARAMS, subject: null }));
+    expect(useStore.getState().imageStatus.staleMarks).toEqual([]);
+  });
 });
