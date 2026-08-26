@@ -45,8 +45,24 @@ def test_environment_win_lock_name_matches():
     assert data["name"] == _environment_name()
 
 
-# Enumerated, not derived: none of these lines carries a structured key the name could be read
-# from, only prose or an invocation naming it.
+def _standalone_name_pattern() -> "re.Pattern[str]":
+    """The name as its own token, never a hyphenated continuation of a longer identifier (an
+    "X-tcip-agent-client-name" HTTP header names something else)."""
+    return re.compile(r"(?<![\w-])" + re.escape(_environment_name()) + r"(?![\w-])")
+
+
+def _sites_in(path: Path) -> "list[tuple[Path, int]]":
+    """Every line of ``path`` carrying the standalone name, derived rather than pinned, for a
+    document whose line numbers move with every edit above them."""
+    pattern = _standalone_name_pattern()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [(path, n) for n, line in enumerate(lines, start=1) if pattern.search(line)]
+
+
+_ARCHITECTURE_SITES = _sites_in(REPO_ROOT / "ARCHITECTURE.md")
+
+# Enumerated, not derived, since none of these lines carries a structured key the name could be
+# read from; ARCHITECTURE.md's sites are derived above because its line numbers shift under edits.
 _PROSE_COPY_SITES = [
     (REPO_ROOT / "README.md", 72),
     (REPO_ROOT / "README.md", 83),
@@ -54,9 +70,7 @@ _PROSE_COPY_SITES = [
     (REPO_ROOT / "environment.yml", 4),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 42),
     (REPO_ROOT / "packages" / "tcip-web" / "README.md", 43),
-    (REPO_ROOT / "ARCHITECTURE.md", 981),
-    (REPO_ROOT / "ARCHITECTURE.md", 2072),
-    (REPO_ROOT / "ARCHITECTURE.md", 2073),
+    *_ARCHITECTURE_SITES,
     (REPO_ROOT / "scripts" / "distill_learnings.py", 8),
     (REPO_ROOT / "scripts" / "smoke_fence_e2e.py", 9),
     (REPO_ROOT / "scripts" / "smoke_phenology_e2e.py", 15),
