@@ -985,6 +985,30 @@ def test_prediction_documents_excludes_every_sidecar_filename(tmp_path: Path) ->
     assert [p.name for p in documents] == ["IMG_0001.json"]
 
 
+def test_prediction_documents_excludes_a_case_variant_sidecar_filename(tmp_path: Path) -> None:
+    """The exclusion is case-insensitive: a stamp saved under a different case still names the
+    file a case-insensitive filesystem would collide it with."""
+    from tcip_annotation.json_io import prediction_documents
+
+    bucket = tmp_path / "bucket"
+    bucket.mkdir()
+    write_annotations(bucket / "IMG_0001.json", [Annotation(subject="catkin", geometry=BBox(1, 1, 2, 2))],
+                      10, 10)
+    (bucket / "Operating_Point.json").write_text("{}", encoding="utf-8")
+
+    documents = prediction_documents(bucket)
+
+    assert [p.name for p in documents] == ["IMG_0001.json"]
+
+
+def test_is_sidecar_name_is_case_insensitive() -> None:
+    from tcip_annotation.json_io import is_sidecar_name
+
+    assert is_sidecar_name("Operating_Point.json")
+    assert is_sidecar_name("OPERATING_POINT.JSON")
+    assert not is_sidecar_name("IMG_0001.json")
+
+
 def test_prediction_documents_on_a_missing_directory_is_empty(tmp_path: Path) -> None:
     from tcip_annotation.json_io import prediction_documents
 

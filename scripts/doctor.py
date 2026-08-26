@@ -114,6 +114,36 @@ def check_negatives(root: Path, findings: list) -> None:
                             "(a confirmed negative should have an empty label file)"))
 
 
+def check_reserved_names(root: Path, findings: list) -> None:
+    """Flag every image and label document whose stem is reserved for a prediction bucket's own
+    provenance stamp (``tcip_annotation.json_io.is_sidecar_name``).
+
+    Ingest and band grouping both refuse to mint one, but data not brought in through the
+    platform (a hand-placed file, an older export) can still carry one, and every walk that
+    enumerates a bucket through ``prediction_documents`` silently excludes it rather than raising.
+    This check walks with ``rglob``, so it sees exactly what those walks hide.
+    """
+    from tcip_annotation.json_io import is_sidecar_name
+    from tcip_mcp.dataset_layout import annotation_root, image_root
+    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+
+    images = image_root(root)
+    if images.is_dir():
+        for p in sorted(images.rglob("*")):
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTS and is_sidecar_name(f"{p.stem}.json"):
+                findings.append(("error", f"{p.relative_to(root)}: image stem is reserved for a "
+                                "prediction bucket's own provenance stamp; its label can never be "
+                                "read through any bucket walk"))
+
+    ann_root = annotation_root(root)
+    if ann_root.is_dir():
+        for p in sorted(ann_root.rglob("*.json")):
+            if p.is_file() and is_sidecar_name(p.name):
+                findings.append(("error", f"{p.relative_to(root)}: label filename is reserved for "
+                                "a prediction bucket's own provenance stamp; it is excluded from "
+                                "every bucket walk and its annotations are unreadable through them"))
+
+
 def check_status_tokens(root: Path, findings: list) -> None:
     """Flag two ways the status store can no longer be trusted at face value: an entry a reader
     doesn't recognize (dropped silently by any merge), and a stored ``"complete"`` whose label
@@ -413,8 +443,8 @@ def main() -> int:
 
     findings: list[tuple[str, str]] = []
     invalid = staleness_findings(root)
-    for check in (check_negatives, check_status_tokens, check_registry, check_provenance,
-                 check_state, check_region_completeness, check_trait_specs,
+    for check in (check_negatives, check_status_tokens, check_reserved_names, check_registry,
+                 check_provenance, check_state, check_region_completeness, check_trait_specs,
                  check_trait_spec_statements, check_project_record):
         reason = invalid.get(check.__name__)
         if reason:

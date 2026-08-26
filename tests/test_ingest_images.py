@@ -303,6 +303,21 @@ def test_ingest_refuses_a_stem_reserved_for_a_bucket_provenance_stamp(tmp_path):
     assert (Path(manifest["project_path"]) / "images" / "undated" / "ordinary.png").is_file()
 
 
+def test_ingest_refuses_a_case_variant_of_a_reserved_stem(tmp_path):
+    """The reserved-name check is case-insensitive: a source stem differing only in case from a
+    bucket's own provenance stamp would still collide with it on a case-insensitive filesystem."""
+    src = tmp_path / "raw"
+    _make_image(src / "Operating_Point.png")
+    _make_image(src / "ordinary.png")
+
+    manifest = ingest_images(source=str(src), name="proj_reserved_variant", site="north orchard")
+
+    assert len(manifest["reserved_name_skips"]) == 1
+    assert manifest["reserved_name_skips"][0]["stem"] == "Operating_Point"
+    assert not (Path(manifest["project_path"]) / "images" / "undated" / "Operating_Point.png").is_file()
+    assert (Path(manifest["project_path"]) / "images" / "undated" / "ordinary.png").is_file()
+
+
 def test_ingest_same_stem_different_ext_is_a_collision(tmp_path):
     # Labels pair by stem alone, so IMG_1.jpg and IMG_1.tif in one bucket must not both
     # land (they'd share one label file). One placed, the other reported.

@@ -295,6 +295,33 @@ def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
     assert sorted(result["formed"][0]["bands"]) == ["Green", "NIR", "Red", "RedEdge"]
 
 
+def test_a_group_whose_canonical_stem_is_reserved_is_not_written(tmp_path):
+    """A group whose siblings' common prefix names a bucket's own provenance stamp is not written
+    as a manifest: minting a logical image under that stem would make its label indistinguishable
+    from the stamp everywhere a prediction bucket is walked. The members stay standalone files."""
+    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+
+    d = tmp_path / "images"
+    d.mkdir()
+    gid = "reserved-stem-capture"
+    for band_name, wl, filename in (
+        ("Green", 560, "operating_point_G.tif"), ("NIR", 860, "operating_point_NIR.tif"),
+    ):
+        _write_band_file_with_identity(
+            d / filename, gid, band_name, wl,
+            utc="2023-05-23T17:06:28.931664", lat=43.196946355, lon=-90.058003633,
+        )
+
+    result = detect_and_write_band_groups(d)
+    assert result["formed"] == []
+    assert not list(d.glob("*.bandgroup"))
+    assert len(result["reserved_name_skips"]) == 1
+    assert result["reserved_name_skips"][0]["stem"] == "operating_point"
+    assert sorted(d.iterdir()) == sorted(
+        [d / "operating_point_G.tif", d / "operating_point_NIR.tif"]
+    )
+
+
 def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     """Refuse, don't guess: a file with no embedded correlation metadata and no explicit
     manifest stays exactly as independent as it is today; no filename-pattern fallback."""
@@ -307,7 +334,7 @@ def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     tifffile.imwrite(str(d / "plain_b.tif"), arr)
 
     result = detect_and_write_band_groups(d)
-    assert result == {"formed": [], "refused": [], "manifests": []}
+    assert result == {"formed": [], "refused": [], "manifests": [], "reserved_name_skips": []}
 
 
 def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
@@ -431,7 +458,9 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
     Image.new("RGB", (16, 16)).save(src / "a.jpg")
 
     manifest = ingest_images(source=str(src), name="plain_proj_default", site="north orchard")
-    assert manifest["band_groups"] == {"formed": [], "refused": [], "manifests": []}
+    assert manifest["band_groups"] == {
+        "formed": [], "refused": [], "manifests": [], "reserved_name_skips": [],
+    }
 
 
 def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(tmp_path, monkeypatch):

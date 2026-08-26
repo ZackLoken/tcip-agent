@@ -84,8 +84,14 @@ def _scan_dataset(root: str) -> dict:
     informational best guess (the per-image tree's first-sorted label's shape, or the root
     candidate's when there is no per-image tree), not a claim every label file shares it;
     :func:`validate_data_quality` decides format per file instead.
+
+    ``labels`` is a raw ``rglob``, so it counts a file whose name is reserved for a prediction
+    bucket's own provenance stamp the way :func:`~tcip_mcp.dataset_layout.subjects_on_date` and
+    every bucket walk through ``prediction_documents`` would not; ``reserved_name_labels`` names
+    each one, so a caller comparing this census against those walks can tell the difference is a
+    known exclusion rather than a disagreement.
     """
-    from tcip_annotation.json_io import prediction_documents
+    from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import annotation_root, image_root, prediction_root
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
@@ -95,6 +101,7 @@ def _scan_dataset(root: str) -> dict:
     images: list[str] = []
     labels: list[str] = []
     preds: list[str] = []
+    reserved_name_labels: list[str] = []
     detected_format: str | None = None
 
     # Find images (recurse to catch the canonical images/<date>/ layout).
@@ -112,6 +119,7 @@ def _scan_dataset(root: str) -> dict:
             str(f) for f in sorted(ann_dir.rglob("*.json"))
             if f.is_file() and BASELINE_DIRNAME not in f.parts
         ]
+        reserved_name_labels = [f for f in labels if is_sidecar_name(Path(f).name)]
         if labels:
             try:
                 from tcip_annotation.format_io import detect_format
@@ -140,7 +148,10 @@ def _scan_dataset(root: str) -> dict:
             for f in prediction_documents(bucket)
         ]
 
-    return {"images": images, "labels": labels, "predictions": preds, "format": detected_format}
+    return {
+        "images": images, "labels": labels, "predictions": preds, "format": detected_format,
+        "reserved_name_labels": reserved_name_labels,
+    }
 
 
 @mcp.tool()
@@ -153,6 +164,10 @@ def scan_dataset(folder_path: str) -> dict:
 
     Expects the canonical layout (see tcip_mcp.dataset_layout):
         images/<date>/  annotations/<date>/<stem>.json  predictions/<model>/<date>/<stem>.json
+
+    ``reserved_name_labels`` names every label counted in ``labels_count`` whose filename is
+    reserved for a prediction bucket's own provenance stamp: this census walks with ``rglob`` and
+    counts it, while the bucket walks this platform reads labels through exclude it.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -182,6 +197,7 @@ def scan_dataset(folder_path: str) -> dict:
         "paired_images": paired,
         "unlabelled_images": unlabelled,
         "image_stems_sample": sorted(image_stems.keys())[:10],
+        "reserved_name_labels": scan["reserved_name_labels"],
     }
 
 
@@ -222,7 +238,10 @@ def validate_data_quality(folder_path: str) -> dict:
     same list. ``format`` is the distinct shapes actually found among the label files this call
     could classify: one shape's name when every file agrees, the shapes sorted when they do not,
     and ``None`` when no label file's format could be determined at all (labels present but
-    undetectable, or no labels present).
+    undetectable, or no labels present). ``reserved_name_labels`` names every one of those files
+    whose filename is reserved for a prediction bucket's own provenance stamp, the same
+    ``scan_dataset`` field: this scan's per-file checks still run on it (it is a present file the
+    census counted), but no bucket walk elsewhere in the platform would ever read it as a label.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -314,6 +333,7 @@ def validate_data_quality(folder_path: str) -> dict:
         "issues": issues,
         "issue_count": len(issues),
         "is_valid": all(i["level"] != "error" for i in issues),
+        "reserved_name_labels": scan["reserved_name_labels"],
     }
 
 

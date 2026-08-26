@@ -177,6 +177,18 @@ declaring its own copy.
 """
 
 
+def is_sidecar_name(filename: str) -> bool:
+    """Whether ``filename`` names one of a bucket's own provenance stamps.
+
+    Case-insensitive: the filesystem this platform's stamps are written on may itself be
+    case-insensitive, so a stamp write named in lowercase would replace a document named in
+    another case, and comparing the stored case alone would then read the collided document as
+    an ordinary label. The one predicate every reserved-name check shares, so ingest, band
+    grouping and this enumeration cannot disagree about which stem is reserved.
+    """
+    return filename.lower() in SIDECAR_FILENAMES
+
+
 def prediction_documents(bucket: str | Path) -> list[Path]:
     """Every per-image document in a prediction bucket, sorted, its own sidecar stamps excluded.
 
@@ -187,7 +199,7 @@ def prediction_documents(bucket: str | Path) -> list[Path]:
     d = Path(bucket)
     if not d.is_dir():
         return []
-    return sorted(f for f in d.glob("*.json") if f.is_file() and f.name not in SIDECAR_FILENAMES)
+    return sorted(f for f in d.glob("*.json") if f.is_file() and not is_sidecar_name(f.name))
 
 
 def _load(path: str) -> dict | None:
