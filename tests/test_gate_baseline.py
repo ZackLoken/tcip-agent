@@ -100,9 +100,9 @@ def test_every_stage_key_is_unique_per_job_step_and_leg():
 
 
 def test_resolve_git_bash_prefers_the_derived_path_when_it_exists(tmp_path, monkeypatch):
-    """The Windows derivation, exercised on any host by pinning the platform name."""
+    """The Windows derivation, exercised on any host by pinning the host predicate."""
     gate_baseline = _load()
-    monkeypatch.setattr(gate_baseline.os, "name", "nt")
+    monkeypatch.setattr(gate_baseline, "_host_is_windows", lambda: True)
     exec_path = tmp_path / "Git" / "mingw64" / "libexec" / "git-core"
     exec_path.mkdir(parents=True)
     bash_exe = exec_path.parent.parent / "bin" / "bash.exe"
@@ -122,7 +122,7 @@ def test_resolve_git_bash_on_a_posix_host_is_the_bash_on_path(monkeypatch):
     """A Linux or macOS host runs each step through the bash on PATH, the shell the CI runner
     itself gives the run: text, with no Git-for-Windows lookup."""
     gate_baseline = _load()
-    monkeypatch.setattr(gate_baseline.os, "name", "posix")
+    monkeypatch.setattr(gate_baseline, "_host_is_windows", lambda: False)
     monkeypatch.setattr(gate_baseline.shutil, "which", lambda name: "/usr/bin/bash")
     monkeypatch.setattr(
         gate_baseline.subprocess, "run",
@@ -133,7 +133,7 @@ def test_resolve_git_bash_on_a_posix_host_is_the_bash_on_path(monkeypatch):
 
 def test_resolve_git_bash_on_a_posix_host_refuses_with_no_bash_on_path(monkeypatch):
     gate_baseline = _load()
-    monkeypatch.setattr(gate_baseline.os, "name", "posix")
+    monkeypatch.setattr(gate_baseline, "_host_is_windows", lambda: False)
     monkeypatch.setattr(gate_baseline.shutil, "which", lambda name: None)
     with pytest.raises(SystemExit, match="bash was not found on PATH"):
         gate_baseline._resolve_git_bash()
