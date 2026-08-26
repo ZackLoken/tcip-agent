@@ -401,7 +401,7 @@ def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp
                     if k.parts[1] == "Z.jpg"]
     shard = tcip_store.read(shard_key)
     assert shard["state"]["producer_identity"]["prediction_digest"] is None
-    assert shard["state"]["adjudication_covered"] is True
+    assert shard["state"]["adjudication_covered"] == {"*": True}
 
     resp = client.post("/api/review/validate_reference", json={
         "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir})
@@ -409,6 +409,23 @@ def test_route_validates_a_review_that_includes_a_confirmed_negative(client, tmp
     body = resp.json()
     assert body["validated"] is True
     assert body["buckets_stamped"] == [pred_dir]
+
+
+def test_route_validates_a_subject_less_confirmed_negative_for_any_named_subject(
+    client, tmp_path: Path
+):
+    """A subject-less Complete's ``"*"`` coverage claim is a claim about every subject, so naming
+    a subject on the validation request must not withhold the confirmed negative from it."""
+    proj, pred_dir = _make_dense_reviewed_project(tmp_path)
+
+    negative = client.post("/api/review/mark_complete", json={
+        "dataset_root": proj, "image_name": "Z.jpg", "pred_dir": pred_dir})
+    assert negative.status_code == 200, negative.text
+
+    resp = client.post("/api/review/validate_reference", json={
+        "dataset_root": proj, "trait": "catkin", "pred_dir": pred_dir, "subject": "catkin"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["validated"] is True
 
 
 def test_route_with_no_pred_dir_stamps_nothing_and_says_why(client, tmp_path: Path):

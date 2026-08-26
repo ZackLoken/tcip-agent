@@ -673,13 +673,45 @@ class MarkCompletePayload(BaseModel):
     subject: Optional[str] = None
 
 
+def _is_negative_for_subject(
+    pred_dir: Optional[str], image_name: str, subject: Optional[str]
+) -> bool:
+    """Whether ``pred_dir``'s predictions for ``image_name`` hold nothing for ``subject``, the fact
+    a zero-verdict Complete is confirming.
+
+    No prediction bucket at all is unconditionally negative, there is nothing to check against. A
+    subject-less Complete checks the whole file (the claim a subject-less Complete makes, about
+    every subject). A named subject is resolved through the bucket's own recorded name->id map
+    (``phenology.bucket_id_map``, the same map ``_resolve_verdict_class_id`` reads for a verdict's
+    class identity), never a plain string match of a registry subject name against a decoded class
+    name: a subject the map does not recognize (an attribute-scoped bucket's map is keyed by
+    attribute values, not the object's subject name) is unresolvable, so this raises rather than
+    reading an unassessed subject as an accidental negative.
+    """
+    if not pred_dir:
+        return True
+    pred_file = Path(pred_dir) / f"{Path(image_name).stem}.json"
+    if subject is None:
+        return not _has_objects(pred_file)
+    from tcip_mcp.pipelines.postprocessing.phenology import bucket_id_map
+
+    id_map = bucket_id_map(Path(pred_dir))
+    if id_map is None or subject not in id_map:
+        raise ValueError(
+            f"{subject!r} is not a subject this prediction bucket's own recorded class map "
+            f"resolves ({pred_dir}), so whether it is negative for that subject cannot be said."
+        )
+    return not any(a.subject == subject for a in read_annotations(str(pred_file)))
+
+
 @router.post("/mark_complete")
 def mark_complete(payload: MarkCompletePayload) -> dict:
     """Mark (or unmark) an image fully reviewed; covers negatives / bulk-accept cases.
 
-    Adjudication coverage is recorded per prediction bucket and image, never per subject: the
-    verdict store keys a completion by ``(bucket, image)`` with no subject field, so there is
-    nowhere to hold a subject-scoped coverage fact even when the request names one.
+    Adjudication coverage is recorded per subject: a map from subject name (or ``"*"`` for a
+    subject-less Complete, a claim about every subject) to whether that zero-verdict completion
+    was a genuine negative for it, so a later Complete under another subject on the same image
+    adds its own entry rather than overwriting the first.
     """
     gt_path = _guard_path(payload.gt_path)
     pred_dir = _guard_path(payload.pred_dir)
@@ -689,13 +721,14 @@ def mark_complete(payload: MarkCompletePayload) -> dict:
         producer_identity = _resolve_producer_identity_for_dir(pred_dir, payload.image_name)
         # Adjudication-covered only for a genuine negative: a bulk-accept with no individual
         # verdicts on an image the bucket did predict on is not covered.
-        is_negative = True
-        if pred_dir:
-            pred_file = Path(pred_dir) / f"{Path(payload.image_name).stem}.json"
-            is_negative = not _has_objects(pred_file)
+        try:
+            is_negative = _is_negative_for_subject(pred_dir, payload.image_name, payload.subject)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        slot_key = payload.subject or "*"
         engine.mark_image_reviewed(bucket, payload.image_name,
                                    producer_identity=producer_identity,
-                                   adjudication_covered=is_negative)
+                                   adjudication_covered={slot_key: is_negative})
     else:
         engine.unmark_image_reviewed(bucket, payload.image_name)
     # The annotation status is derived from the GT file, scoped to the confirmed subject.
@@ -779,6 +812,9 @@ class ValidateReferenceRequest(BaseModel):
     # The prediction bucket whose review is being promoted: the per-image prediction dir the
     # delivery gate reads an ``operating_point.json`` from.
     pred_dir: Optional[str] = None
+    # The object identity this reference validates (the GUI's own dataset.subject); a zero-verdict
+    # image's coverage claim is read for this subject, not whichever one confirmed it.
+    subject: Optional[str] = None
 
 
 class ValidateReferenceResponse(BaseModel):
@@ -988,6 +1024,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         # True when the buckets named more than one producing run, false when none named one: both
         # collapse review_experiment_id to None above, but only the first is a real disagreement.
         "experiment_id_ambiguous": len(bucket_exp_ids) > 1,
+        "subject": req.subject,
     }
     try:
         bundle = resolve_operating_point_from_review(
@@ -1018,7 +1055,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
 
     op_prov = bundle.to_provenance()["operating_point"]
     ref_hash = review_reference_hash(
-        review_to_records(review_state, bucket_identities=bucket_identities))
+        review_to_records(review_state, bucket_identities=bucket_identities, subject=req.subject))
     now_iso = datetime.now(timezone.utc).isoformat()
     record_digests: dict[str, str] = {}
     stamped: list[str] = []

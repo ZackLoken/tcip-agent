@@ -294,6 +294,73 @@ def test_confirmed_negative_image_carries_its_own_producer_identity():
     assert recs_other == []
 
 
+# ── subject-scoped zero-verdict coverage ─────────────────────────────
+
+
+def test_covers_reads_the_subjects_own_entry():
+    from tcip_mcp.pipelines.feedback.review_calibration import covers
+
+    slot = {"catkin": True, "leaf": False}
+    assert covers(slot, "catkin") is True
+    assert covers(slot, "leaf") is False
+
+
+def test_covers_falls_back_to_the_star_entry_for_a_subject_less_complete():
+    # A subject-less Complete's "*" entry is a claim about every subject, so any subject's
+    # coverage check must read it as covered.
+    from tcip_mcp.pipelines.feedback.review_calibration import covers
+
+    slot = {"*": True}
+    assert covers(slot, "catkin") is True
+    assert covers(slot, None) is True
+
+
+def test_covers_reads_false_for_an_unrecorded_subject_and_no_star_entry():
+    from tcip_mcp.pipelines.feedback.review_calibration import covers
+
+    slot = {"leaf": True}
+    assert covers(slot, "catkin") is False
+
+
+def test_covers_reads_false_for_no_recorded_map_at_all():
+    from tcip_mcp.pipelines.feedback.review_calibration import covers
+
+    assert covers(None, "catkin") is False
+
+
+def test_covers_refuses_a_bare_boolean_by_name():
+    # A bare boolean is not a shape any writer produces; reading one as covering everything or
+    # nothing would guess at the subject a bare flag never named.
+    from tcip_mcp.pipelines.feedback.review_calibration import covers
+
+    with pytest.raises(ValueError, match="adjudication_covered"):
+        covers(True, "catkin")
+
+
+def test_zero_verdict_image_coverage_is_read_for_the_subject_the_reference_validates():
+    # A file holding another subject's boxes must not read as covered for the subject actually
+    # being validated: the reproduced defect this map fixes.
+    state = {"image": {"NEG.jpg": {
+        "img_status": "completed", "detections": [],
+        "producer_identity": _IDENTITY_A,
+        "adjudication_covered": {"catkin": True, "leaf": False},
+    }}}
+    catkin_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="catkin")
+    assert catkin_recs[0]["adjudication_covered"] is True
+    leaf_recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="leaf")
+    assert leaf_recs[0]["adjudication_covered"] is False
+
+
+def test_zero_verdict_image_with_a_subject_less_star_entry_covers_the_validated_subject():
+    state = {"image": {"NEG.jpg": {
+        "img_status": "completed", "detections": [],
+        "producer_identity": _IDENTITY_A,
+        "adjudication_covered": {"*": True},
+    }}}
+    recs = review_to_records(state, bucket_identities=[_IDENTITY_A], subject="catkin")
+    assert recs[0]["adjudication_covered"] is True
+
+
 # ── FN-adjudication coverage ────────────────────────────────────────
 
 
