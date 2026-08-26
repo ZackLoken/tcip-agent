@@ -193,12 +193,33 @@ def _matches_any_bucket(identity: dict | None, bucket_identities: list[dict]) ->
     return any(_same_producer(identity, target) for target in bucket_identities)
 
 
+def covers(slot: Any, subject: str | None) -> bool:
+    """True when a zero-verdict image's own recorded ``adjudication_covered`` map confirms
+    coverage for ``subject``, ``None`` read as ``"*"``: the writer's entry for that exact subject,
+    or the entry a subject-less Complete wrote (a claim about every subject).
+
+    ``slot`` is that map, or ``None`` for an image with no such record. A bare boolean is not a
+    shape any writer produces; reading one as covering everything, or nothing, would guess at the
+    subject the writer confirmed, so it is refused by name instead.
+    """
+    if slot is None:
+        return False
+    if not isinstance(slot, dict):
+        raise ValueError(
+            f"adjudication_covered is {slot!r}, not the subject-keyed map a coverage check "
+            "expects; a bare boolean here would guess which subject it was confirming."
+        )
+    key = subject if subject is not None else "*"
+    return bool(slot.get(key)) or bool(slot.get("*"))
+
+
 def review_to_records(
     review_state: dict,
     *,
     bucket_identities: list[dict],
     image_dims: dict[str, tuple[int, int]] | None = None,
     only_completed: bool = True,
+    subject: str | None = None,
 ) -> list[dict]:
     """Reconstruct per-image COCO records (gt=affirmed, dt=model predictions) from review verdicts.
 
@@ -234,12 +255,18 @@ def review_to_records(
         the identical ``pred_bbox_norm=None, gt_bbox_norm=<box>`` shape once persisted, so inferring
         coverage from that shape would silently count an FN correction as if it were a
         swept-for-a-missed-object attestation.
-      - a zero-verdict (``mark_complete``) image: the recorded ``adjudication_covered`` fact the
-        route stamped at completion time, ``True`` only for a genuine negative
-        (the route confirmed the bucket held zero predictions for this image, so there was nothing
-        to individually adjudicate and Complete is itself the confirming act), never for a bulk-
-        accept of a populated image the breeder never individually reviewed. A missing/unset fact
-        is ``False``, fails closed, matching every other unrecorded-fact rule here.
+      - a zero-verdict (``mark_complete``) image: the recorded ``adjudication_covered`` map the
+        route stamped at completion time, read through :func:`covers` for ``subject`` (``"*"`` when
+        ``subject`` is ``None``): ``True`` only when that subject's own entry, or a subject-less
+        Complete's ``"*"`` entry, says the bucket held zero predictions resolving to it, never for a
+        bulk-accept of a populated image the breeder never individually reviewed. A missing map,
+        or a map with neither key set, is ``False``, fails closed, matching every other
+        unrecorded-fact rule here.
+
+    ``subject`` (default ``None``, read as ``"*"``) is the object identity this reference is being
+    built to validate, the GUI's own ``dataset.subject``: threaded to :func:`covers` so a zero-
+    verdict image's coverage is judged against the subject actually being validated, not against
+    whichever subject (or none) a different Complete on that image confirmed.
 
     ``resolve_operating_point_from_review`` passes this field to ``resolve_operating_point`` as a
     gate, every record must satisfy it or the whole reference is refused, never a per-record
@@ -279,7 +306,8 @@ def review_to_records(
                 continue
             records.append({"width": int(img_w), "height": int(img_h),
                             "image_id": Path(img_name).stem, "gt": [], "dt": [],
-                            "adjudication_covered": bool(img_data.get("adjudication_covered"))})
+                            "adjudication_covered": covers(
+                                img_data.get("adjudication_covered"), subject)})
             continue
 
         scoped = [e for e in detections
@@ -404,6 +432,7 @@ def resolve_operating_point_from_review(
     experiment_id: str | None = None,
     staged_conf_floor: float | None = None,
     experiment_id_ambiguous: bool = False,
+    subject: str | None = None,
 ) -> ResolvedBundle:
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
@@ -452,6 +481,9 @@ def resolve_operating_point_from_review(
     run's disjointness); carried onto the sealed train-disjointness fact so
     :func:`describe_review_validation` can tell the two apart in its breeder-facing sentence,
     never asserted by the resolver itself.
+
+    ``subject`` (default ``None``) is forwarded to :func:`review_to_records`, see there: the
+    object identity a zero-verdict image's own coverage claim is judged against.
     """
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.operating_point import (
@@ -459,7 +491,7 @@ def resolve_operating_point_from_review(
     )
 
     records = review_to_records(review_state, image_dims=image_dims, only_completed=only_completed,
-                                bucket_identities=bucket_identities)
+                                bucket_identities=bucket_identities, subject=subject)
     ref_hash = review_reference_hash(records)
     by_id = {str(r.get("image_id", "")): r for r in records}
     stems = sorted(by_id)

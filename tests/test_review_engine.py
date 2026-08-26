@@ -213,6 +213,17 @@ def test_shard_keys_colliding_after_sanitization_stay_distinct(tmp_path: Path) -
     assert not reloaded.is_image_reviewed(BUCKET, "a_b.jpg")
 
 
+def test_mark_image_reviewed_merges_a_second_subjects_coverage_without_erasing_the_first(
+    engine: ReviewEngine,
+) -> None:
+    """A second Complete under another subject on the same image adds its own entry to the
+    coverage map rather than overwriting what the first one confirmed."""
+    engine.mark_image_reviewed(BUCKET, "IMG_0300.JPG", adjudication_covered={"catkin": True})
+    engine.mark_image_reviewed(BUCKET, "IMG_0300.JPG", adjudication_covered={"leaf": False})
+    img_data = engine.raw_state["verdicts"][(BUCKET, "IMG_0300.JPG")]
+    assert img_data["adjudication_covered"] == {"catkin": True, "leaf": False}
+
+
 def test_build_detection_list_tp_fp_fn(engine: ReviewEngine, ctx: ReviewContext) -> None:
     matches = compute_matches(ctx.gt, ctx.preds, iou_threshold=0.5, conf_threshold=0.25)
     assert len(matches["tp"]) == 1

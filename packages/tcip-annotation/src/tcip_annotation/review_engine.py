@@ -330,7 +330,7 @@ class ReviewEngine:
 
     def mark_image_reviewed(self, bucket: str, img_name: str, *,
                             producer_identity: Optional[dict] = None,
-                            adjudication_covered: Optional[bool] = None) -> None:
+                            adjudication_covered: Optional[dict[str, bool]] = None) -> None:
         """Mark ``img_name`` fully reviewed under ``bucket`` (e.g. a confirmed negative /
         bulk-accept).
 
@@ -340,13 +340,16 @@ class ReviewEngine:
         it has nowhere else to record which model it was reviewed against; this stamps that fact at
         the image level instead. ``None`` (the default) leaves any existing stamp untouched.
 
-        ``adjudication_covered``: whether this zero-verdict completion is a genuine negative the
-        caller has already confirmed (the prediction bucket held zero detections for this image, so
-        Complete is itself the confirming act), never inferred by this package. A bulk-accept of an
-        image the bucket did predict on, completed with no individual verdicts, must pass ``False``
-        (or omit it): stamping every zero-verdict Complete as covered would let an unreviewed
-        bulk-accept dilute a real reference's statistics. ``None`` (the default) leaves any existing
-        stamp untouched.
+        ``adjudication_covered``: a map from subject name (``"*"`` for a subject-less Complete, a
+        claim about every subject) to whether this zero-verdict completion is a genuine negative
+        the caller has already confirmed for it (the prediction bucket held zero detections
+        resolving to that subject on this image, so Complete is itself the confirming act), never
+        inferred by this package. A bulk-accept of an image the bucket did predict on, completed
+        with no individual verdicts, must pass ``False`` for its subject (or omit the call
+        entirely): stamping every zero-verdict Complete as covered would let an unreviewed
+        bulk-accept dilute a real reference's statistics. Merged into any existing map rather than
+        replacing it, so a second Complete under another subject adds its own entry without
+        touching the first. ``None`` (the default) leaves any existing map untouched.
         """
         verdicts = self._review_state.setdefault("verdicts", {})
         img_data = verdicts.setdefault(
@@ -356,7 +359,10 @@ class ReviewEngine:
         if producer_identity is not None:
             img_data["producer_identity"] = producer_identity
         if adjudication_covered is not None:
-            img_data["adjudication_covered"] = adjudication_covered
+            existing = img_data.get("adjudication_covered")
+            merged = dict(existing) if isinstance(existing, dict) else {}
+            merged.update(adjudication_covered)
+            img_data["adjudication_covered"] = merged
         self._save_image(bucket, img_name)
 
     def unmark_image_reviewed(self, bucket: str, img_name: str) -> None:
