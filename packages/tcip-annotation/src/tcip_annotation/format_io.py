@@ -26,7 +26,12 @@ import tcip_store
 from tcip_store import Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
-from tcip_annotation.json_io import ANNOTATIONS_KEY, read_annotations, write_annotations
+from tcip_annotation.json_io import (
+    ANNOTATIONS_KEY,
+    UnreadableLabelDocument,
+    read_annotations,
+    write_annotations,
+)
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
 AnnotFormat = Literal["coco", "json"]
@@ -201,21 +206,28 @@ def parse_coco_annotations(
 ) -> list[Annotation]:
     """Parse one image's COCO annotations into name-based :class:`Annotation` records.
 
-    ``subject`` is the ``category_id``'s name from the file's own ``categories``. An annotation whose
-    ``category_id`` has no category name is skipped, since a name-based label is undecodable without it. A
-    polygon geometry wins over a box when both are present (the polygon is the source of truth).
+    ``subject`` is the ``category_id``'s name from the file's own ``categories``, the same contract
+    the per-image reader holds for a record it cannot coerce: a record whose ``category_id`` will
+    not coerce to ``int``, or whose ``category_id`` has no name in this document's ``categories``,
+    raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` naming the record's index,
+    rather than reading the document short. A polygon geometry wins over a box when both are
+    present (the polygon is the source of truth).
     """
     anns, _, _ = _coco_image_annotations(coco, image_id, file_name)
     id2name = _coco_categories(coco)
     out: list[Annotation] = []
-    for ann in anns:
+    for i, ann in enumerate(anns):
         try:
             cid = int(ann.get("category_id"))
         except (TypeError, ValueError):
-            continue
+            raise UnreadableLabelDocument(
+                f"record {i}'s category_id {ann.get('category_id')!r} will not coerce to int"
+            ) from None
         subject = id2name.get(cid)
         if not subject:
-            continue
+            raise UnreadableLabelDocument(
+                f"record {i}'s category_id {cid} has no name in this document's categories"
+            )
         geometry: BBox | Polygon | None = None
         segs = ann.get("segmentation")
         rings: list[list[tuple[float, float]]] = []
@@ -319,8 +331,8 @@ def load_annotations(
 
     For COCO, either ``image_id`` or ``file_name`` must identify the target image. A present,
     unreadable document raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, from
-    ``detect_format`` when ``fmt`` is omitted or from the claim check or ``read_annotations``
-    below when it is stated.
+    ``detect_format`` when ``fmt`` is omitted, from the claim check when it is stated, or from
+    ``read_annotations``/``parse_coco_annotations`` below either way.
 
     A caller-supplied ``fmt`` is a claim the document must satisfy, not a bypass of detection,
     checked through the same :func:`_detect_json_format` a format-free call resolves through (the
