@@ -1,6 +1,6 @@
 """Visualization rendering: draws annotations and predictions on images.
 
-All functions return the output file path for consumption by view_image.
+All functions return the output file path for the agent's own image-capable read tool to consume.
 Default output directory: .tcip/artifacts/viz/
 
 The renderers take display pixels, never a path: whoever holds the raster decodes it, bounds its

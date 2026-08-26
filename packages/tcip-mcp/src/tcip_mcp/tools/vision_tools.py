@@ -1,7 +1,7 @@
 """Vision tools: render annotations and predictions for visual analysis.
 
-Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the
-path so the agent can use view_image to visually inspect it.
+Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the path so the agent
+can call its client's own image-capable read tool on it to visually inspect it.
 """
 
 from __future__ import annotations
@@ -304,7 +304,7 @@ def visualize(
 
     One entry point for the common renders (replaces the former visualize_annotations /
     visualize_predictions / visualize_comparison / visualize_dataset_sample). Saves to
-    .tcip/artifacts/viz/ and returns ``image_path`` for view_image.
+    .tcip/artifacts/viz/ and returns ``image_path`` for the agent's own image-capable read tool.
 
     Args:
         source: What to render:
@@ -757,8 +757,8 @@ def propose_annotations(
     """Propose candidate annotations on an image for review, using a chosen auto-labeling engine.
 
     Runs the engine's whole-image proposal pass, renders the numbered candidates, and returns the
-    render path and neutral candidate data. Use view_image on the render, then call
-    accept_proposals to assign classes and stage the accepted ones as predictions.
+    render path and neutral candidate data. Read the render with your own image-capable read
+    tool, then call accept_proposals to assign classes and stage the accepted ones as predictions.
 
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
     dataset, capture date and stem, alongside the content identity of the pixels the engine ran
@@ -1086,8 +1086,8 @@ def capture_live_canvas(
     display-resolved shapes with the exact colors/tags it renders, including unsaved edits and
     an in-progress drawing) to ``.tcip/state/canvas_live.json``. This tool reads the region being
     shown at up to ``max_edge``, renders that state over it, and returns the artifact path for
-    ``view_image``, plus the classes schema, review legend, per-tag/per-creator counts, and the
-    state's age.
+    the agent's own image-capable read tool, plus the classes schema, review legend,
+    per-tag/per-creator counts, and the state's age.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting
@@ -1174,7 +1174,7 @@ def capture_live_canvas(
         f"Rendered the last known {state.get('tab')} canvas for {state.get('image')} "
         f"({len(shapes)} shapes, {age}s old; the GUI did not answer the refresh ping; it may be "
         "closed, on another tab, or on a different project)."
-    ) + " Call view_image on image_path to see it."
+    ) + " Read image_path with your own image-capable read tool to see it."
     return {
         "image_path": out,
         "source_image": src_image,
