@@ -200,6 +200,32 @@ def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
     assert len(calls) == 5, "each of the 5 label files must be parsed exactly once, not per route"
 
 
+def test_dataset_select_carries_a_label_problem_with_no_subject_named(
+    client: TestClient, dataset_root: Path, tmp_path: Path,
+) -> None:
+    """A corrupt label makes the date's own subject list empty, which is exactly the date a
+    subject-less default-open selects; the advisory must name the problem even then, not only
+    when a subject happens to be named."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    ann = dataset_root / "annotations" / "2-11-26"
+    ann.mkdir(parents=True)
+    (ann / "IMG_0000.json").write_text("not json {][", encoding="utf-8")
+
+    resp = client.post(
+        "/api/dataset/select",
+        json={
+            "project_root": str(project), "dataset_root": str(dataset_root),
+            "subject": None, "date": "2-11-26",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["annotations_present"] is False
+    assert body["label_problem"] is not None
+    assert str(ann / "IMG_0000.json") in body["label_problem"]
+
+
 def test_dataset_list_images(client: TestClient, dataset_root: Path) -> None:
     resp = client.get(
         "/api/dataset/images",

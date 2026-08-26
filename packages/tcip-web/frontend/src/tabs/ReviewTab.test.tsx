@@ -214,6 +214,31 @@ describe("ReviewTab empty states", () => {
   });
 });
 
+describe("ReviewTab image-status batch fetch", () => {
+  it("clears a prior dataset's facts and toasts on a rejected fetch, rather than leaving them", async () => {
+    useStore.setState({
+      reviewStatus: {
+        byImage: {},
+        hasDetections: { "img2.jpg": false },
+        unreadable: ["C:/data/other/annotations/2025-12-01/img2.json"],
+        activeFilter: "all",
+      },
+    });
+    statusesSpy.mockRejectedValue(new Error("the backend is unreachable"));
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(statusesSpy).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
+        "Could not load review status: the backend is unreachable",
+      ),
+    );
+    expect(useStore.getState().reviewStatus.hasDetections).toEqual({});
+    expect(useStore.getState().reviewStatus.unreadable).toEqual([]);
+  });
+});
+
 describe("ReviewTab review-route scoping", () => {
   const gtAnn: Annotation = { subject: "subject_a", bbox: [10, 10, 50, 50], attributes: {} };
 

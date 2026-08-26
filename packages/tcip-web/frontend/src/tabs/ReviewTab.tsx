@@ -593,8 +593,14 @@ export function ReviewTab() {
           has[name] = unreadableStems.has(stem) || stems.has(stem);
         }
         setReviewImageStatuses(byImage, has, res.unreadable);
-      } catch {
-        /* leave prior statuses; nav stays permissive (every image reviewable) until this resolves */
+      } catch (e) {
+        if (cancelled) return;
+        // A prior dataset's facts must never gate navigation in this one: clear rather than
+        // leave them in place, and name the failure so the breeder knows nav is unfiltered.
+        setReviewImageStatuses({}, {}, []);
+        useStore
+          .getState()
+          .pushToast(`Could not load review status: ${e instanceof Error ? e.message : String(e)}`);
       }
     })();
     return () => {

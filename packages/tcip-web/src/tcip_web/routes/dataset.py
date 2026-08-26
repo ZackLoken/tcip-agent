@@ -270,16 +270,17 @@ async def select_dataset(req: SelectionRequest) -> dict:
     # instead of leaving a silent blank canvas.
     annotations_present = False
     label_problem: Optional[str] = None
-    if req.subject and req.date:
+    if req.date:
         from tcip_annotation.json_io import UnreadableLabelDocument
 
         try:
-            annotations_present = req.subject in subjects_with_labels(
-                root, req.date, reader=cached_label_annotations)
+            labels_this_date = subjects_with_labels(root, req.date, reader=cached_label_annotations)
         except UnreadableLabelDocument as exc:
             # Advisory only, stated above: an unreadable label must not block a selection.
-            annotations_present = False
+            labels_this_date = []
             label_problem = str(exc)
+        if req.subject:
+            annotations_present = req.subject in labels_this_date
     predictions_present = bool(
         req.model_name and req.date and req.model_name in models_with_predictions(root, req.date)
     )
