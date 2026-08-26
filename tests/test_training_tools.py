@@ -465,6 +465,43 @@ def test_apply_hpo_params_unrecognized_key_reaches_top_level():
     assert "momentum" not in out.get("training", {})
 
 
+def test_apply_hpo_params_dotted_key_reaches_nested_field():
+    """A dotted param (e.g. a swept builder) reaches the nested field it names."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    base = {"model_source": {"builder": "old:builder", "task": "detection"}}
+    out = _apply_hpo_params(base, {"model_source.builder": "new:builder"})
+    assert out["model_source"]["builder"] == "new:builder"
+    assert out["model_source"]["task"] == "detection"  # the rest of the mapping survives
+
+
+def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediate():
+    """A dotted key whose path walks through a value that is not a mapping is refused by name,
+    naming the key and what was found there, rather than raising an opaque AttributeError."""
+    from tcip_mcp.tools.training_tools import _apply_hpo_params
+
+    base = {"model_source": "not-a-mapping"}
+    with pytest.raises(ValueError, match="model_source.builder"):
+        _apply_hpo_params(base, {"model_source.builder": "x:y"})
+
+
+def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bounds():
+    """The preflight must check the whole search space, not only the first sampled corner: one
+    point per categorical choice, and one point per numeric bound (low and high)."""
+    from tcip_mcp.tools.training_tools import _preflight_points
+
+    space = {
+        "model_source.builder": {"type": "categorical", "choices": ["a:b", "c:d", "e:f"]},
+        "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
+    }
+    points = _preflight_points(space)
+
+    builder_values = {p["model_source.builder"] for _, p in points if "model_source.builder" in p}
+    assert builder_values == {"a:b", "c:d", "e:f"}
+    lr_values = {p["lr"] for label, p in points if "lr" in p and "lr" in label}
+    assert lr_values == {1e-5, 1e-2}
+
+
 # --------------------------------------------------------------------------
 # _run_hpo_trial: reports the composite (lower=better) each epoch + final, with
 # failed / empty trials reporting +inf so a dead trial can never win a min sweep.

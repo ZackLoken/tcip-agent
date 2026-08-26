@@ -1230,12 +1230,18 @@ def run_hpo(
     check_json_value(param_space, path="param_space")
     check_json_value(base_config, path="base_config")
 
-    # Structural preflight, before anything is minted, over the base config with the search
-    # space's first sampled point applied: a placeholder axis is checked as a trial would see it.
-    preflight_cfg = _apply_hpo_params(base_config, _first_sampled_point(param_space))
-    preflight = preflight_config(preflight_cfg)
-    if not preflight["valid"]:
-        return {"error": "the sweep's base config fails preflight", "issues": preflight["issues"]}
+    # Structural preflight over every point the search space could resolve a trial's builder or
+    # data section to, not only the first sampled corner, before anything is minted.
+    for label, point in _preflight_points(param_space):
+        try:
+            preflight_cfg = _apply_hpo_params(base_config, point)
+        except ValueError as exc:
+            return {"error": f"the sweep's base config fails preflight at {label}: {exc}",
+                    "issues": []}
+        preflight = preflight_config(preflight_cfg)
+        if not preflight["valid"]:
+            return {"error": f"the sweep's base config fails preflight at {label}",
+                    "issues": preflight["issues"]}
 
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import resolve_selection_metric
@@ -1381,8 +1387,18 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
             # rather than landing as a literal top-level key nothing reads.
             *path, leaf = key.split(".")
             node = cfg
-            for part in path:
+            for i, part in enumerate(path):
+                if not isinstance(node, dict):
+                    raise ValueError(
+                        f"hpo param {key!r} cannot reach {'.'.join(path[:i])!r}: base_config "
+                        f"holds a {type(node).__name__} there, not a mapping to walk into"
+                    )
                 node = node.setdefault(part, {})
+            if not isinstance(node, dict):
+                raise ValueError(
+                    f"hpo param {key!r} cannot be set: base_config holds a "
+                    f"{type(node).__name__} at {'.'.join(path)!r}, not a mapping"
+                )
             node[leaf] = value
         else:
             cfg[key] = value
@@ -1412,6 +1428,36 @@ def _first_sampled_point(param_space: dict) -> dict:
         else:
             point[key] = spec.get("low", spec.get("choices", [None])[0])
     return point
+
+
+def _preflight_points(param_space: dict) -> list[tuple[str, dict]]:
+    """Every point ``run_hpo``'s preflight must check: the first sampled corner, plus one variant
+    per categorical choice and one per numeric bound, each holding every other axis at its first
+    sampled value.
+
+    Judging the whole space by its first sampled corner alone misses a broken choice that sits
+    anywhere but first: a categorical axis naming a builder or a data path is checked at every
+    value it could resolve a trial to, not just one, so a sweep whose first choice happens to
+    work but whose second does not is still caught before any trial runs.
+    """
+    base = _first_sampled_point(param_space)
+    points: list[tuple[str, dict]] = [("the first sampled point", dict(base))]
+    for key, spec in param_space.items():
+        if not isinstance(spec, dict):
+            continue
+        kind = spec.get("type")
+        if kind == "categorical":
+            for choice in spec.get("choices") or []:
+                variant = dict(base)
+                variant[key] = choice
+                points.append((f"{key}={choice!r}", variant))
+        elif kind in ("loguniform", "uniform", "int"):
+            for bound in ("low", "high"):
+                if bound in spec:
+                    variant = dict(base)
+                    variant[key] = spec[bound]
+                    points.append((f"{key} {bound}={spec[bound]!r}", variant))
+    return points
 
 
 def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:

@@ -12,19 +12,6 @@ from pathlib import Path
 import tcip_store as ts
 
 
-def _real_base_config(tmp_path: Path) -> dict:
-    """A base config the door's own structural preflight admits: an importable builder and a
-    data section whose directories exist."""
-    imgs, lbls = tmp_path / "images", tmp_path / "labels"
-    imgs.mkdir(exist_ok=True)
-    lbls.mkdir(exist_ok=True)
-    return {
-        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
-                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
-        "data": {"images_dir": str(imgs), "labels_dir": str(lbls)},
-    }
-
-
 def _stub_sweep(monkeypatch, observed: dict):
     """Run the sweep body without Ray: the search stub drives one trial through the objective."""
     import tcip_mcp.tools.training_tools as tt
@@ -42,14 +29,16 @@ def _stub_sweep(monkeypatch, observed: dict):
     return tt
 
 
-def test_a_sweeps_manifest_records_the_directory_that_holds_it(tmp_path: Path, monkeypatch) -> None:
+def test_a_sweeps_manifest_records_the_directory_that_holds_it(
+    tmp_path: Path, real_hpo_base_config, monkeypatch
+) -> None:
     """The manifest's ``sweep_dir`` is the sweep's own directory, not the shared root several
     sweeps share, and the trials of that sweep live under exactly that recorded directory."""
     observed: dict = {}
     tt = _stub_sweep(monkeypatch, observed)
     sweeps_root = tmp_path / "sweeps"
 
-    result = tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1,
+    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1,
                         output_dir=str(sweeps_root))
     study_name = result["study_name"]
 
@@ -62,13 +51,13 @@ def test_a_sweeps_manifest_records_the_directory_that_holds_it(tmp_path: Path, m
 
 
 def test_a_sweep_launched_without_an_output_dir_is_addressed_the_same_way(
-        tmp_path: Path, monkeypatch) -> None:
+        tmp_path: Path, real_hpo_base_config, monkeypatch) -> None:
     """The default store under the project root addresses a sweep exactly as an explicit
     ``output_dir`` does, so a reader needs no second convention for agent-launched sweeps."""
     observed: dict = {}
     tt = _stub_sweep(monkeypatch, observed)
 
-    result = tt.run_hpo(base_config=_real_base_config(tmp_path), n_trials=1)
+    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1)
 
     study_name = result["study_name"]
     manifest = ts.read(tt.sweep_manifest_key(study_name))
