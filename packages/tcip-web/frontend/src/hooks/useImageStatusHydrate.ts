@@ -19,7 +19,12 @@ export interface ImageStatusHydrateParams {
  * written back through the bulk route; a confirmed name (complete/negative) whose derived token
  * now disagrees is never rewritten, only added to `staleMarks` for the breeder to re-confirm.
  *
- * Skips entirely with no subject selected: nothing to scope image status to yet.
+ * Runs once per dataset selection (this hook's own dependencies): a label file edited afterward,
+ * in this session or by the agent, is not checked again until the next selection of this dataset.
+ *
+ * Skips entirely with no subject selected: nothing to scope image status to yet. Either way,
+ * `staleMarks` is cleared first, so a mark left over from a previously selected dataset can never
+ * be read against a same-named image in this one.
  */
 export function useImageStatusHydrate({
   projectRoot,
@@ -30,6 +35,7 @@ export function useImageStatusHydrate({
   imageList,
 }: ImageStatusHydrateParams): void {
   useEffect(() => {
+    useStore.getState().clearStaleMarks();
     if (!projectRoot || !subject || imageList.length === 0) return;
     let cancelled = false;
     void (async () => {

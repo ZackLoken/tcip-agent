@@ -72,6 +72,16 @@ describe("stepTarget (shared by arrows + Prev/Next)", () => {
     expect(stepTarget(priority, 0, 1)).toBe(2);
     expect(stepTarget(priority, 0, -1)).toBe(3);
   });
+
+  it("wraps past the last member back to the first when wrap is set", () => {
+    expect(stepTarget([2, 7], 7, 1, true)).toBe(2);
+  });
+  it("wraps past the first member back to the last when wrap is set", () => {
+    expect(stepTarget([2, 7], 2, -1, true)).toBe(7);
+  });
+  it("still returns null for a single-member set that is already current, wrap or not", () => {
+    expect(stepTarget([2], 2, 1, true)).toBeNull();
+  });
 });
 
 describe("jumpTarget (counter box)", () => {

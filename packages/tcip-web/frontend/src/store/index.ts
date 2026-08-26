@@ -342,6 +342,12 @@ export interface AppState {
   setImageStatuses: (byImage: Record<string, ImageStatus>, staleMarks?: string[]) => void;
   setImageStatus: (image: string, status: ImageStatus) => void;
   setStatusFilter: (filter: "all" | ImageStatus) => void;
+  /** Drops every stale mark, e.g. on dataset selection so a prior dataset's marks are never read
+   *  against a same-named image in the newly selected one. */
+  clearStaleMarks: () => void;
+  /** Re-adds a name to `staleMarks`, for a re-confirm write that failed to persist: the mark it
+   *  was about to clear still describes reality, since nothing was actually confirmed. */
+  markStale: (image: string) => void;
 
   /** Review-status helpers (image-level Reviewed/Unreviewed navigation). */
   setReviewImageStatuses: (
@@ -543,6 +549,9 @@ export const useStore = create<AppState>()((set, get) => ({
         imageStatus: {
           ...s.imageStatus,
           activeFilter: restored?.statusFilter ?? s.imageStatus.activeFilter,
+          // A stale mark names an image in the dataset it was computed for; carrying it into a
+          // newly selected dataset could flag a same-named image that was never checked.
+          staleMarks: [],
         },
       };
     }),
@@ -640,6 +649,16 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
   setStatusFilter: (activeFilter) =>
     set((s) => ({ imageStatus: { ...s.imageStatus, activeFilter } })),
+  clearStaleMarks: () => set((s) => ({ imageStatus: { ...s.imageStatus, staleMarks: [] } })),
+  markStale: (image) =>
+    set((s) => ({
+      imageStatus: {
+        ...s.imageStatus,
+        staleMarks: s.imageStatus.staleMarks.includes(image)
+          ? s.imageStatus.staleMarks
+          : [...s.imageStatus.staleMarks, image].sort(),
+      },
+    })),
 
   setReviewImageStatuses: (byImage, hasDetections, unreadable = []) =>
     set((s) => ({ reviewStatus: { ...s.reviewStatus, byImage, hasDetections, unreadable } })),
