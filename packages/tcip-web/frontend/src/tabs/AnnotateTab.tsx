@@ -40,7 +40,7 @@ import {
   pointInRings,
   ringsBbox,
 } from "@/lib/polygonGeometry";
-import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/reviewEditGeometry";
+import { applyEditDrag, hitTestEdit, MIN_BOX_SIDE, type EditDrag } from "@/lib/reviewEditGeometry";
 import { useStore } from "@/store";
 import type { Box, Mode, PointShape, PolygonShape, PredictionReference } from "@/store/types";
 
@@ -48,7 +48,6 @@ const SNAP_RADIUS_CANVAS = 15;
 const VERTEX_HANDLE_RADIUS = 4;
 const EDGE_INSERT_THRESHOLD = 6;
 const STREAM_MIN_DIST_CANVAS = 6; // screen px between vertices laid down in Stream (freehand) mode
-const MIN_BOX_SIDE = 3;
 // Screen-px grab radius for a placed point: the whole mark is its own handle, so this matches the
 // mark's outer reach (see the tick geometry in PointOverlay) rather than a hidden smaller target.
 const POINT_HIT_CANVAS = 11;
@@ -1241,8 +1240,18 @@ export function AnnotateTab() {
       return;
     }
     if (boxDragRef.current) {
+      const draggedIdx = boxDragRef.current.idx;
       boxDragRef.current = null;
       didDragRef.current = false;
+      const resized = useStore.getState().canvas.boxes[draggedIdx];
+      if (
+        resized &&
+        (resized.x2 - resized.x1 < MIN_BOX_SIDE || resized.y2 - resized.y1 < MIN_BOX_SIDE)
+      ) {
+        undo();
+        useStore.getState().pushToast("Box too small to keep; the resize was undone.");
+        return;
+      }
       useStore.getState().recomputeDirty();
       // The drag suppressed full pushes; the settled geometry ships now.
       canvasPusherRef.current.schedule(() => buildCanvasBodyRef.current(), true);
@@ -1264,7 +1273,9 @@ export function AnnotateTab() {
         subject: drawing.subject,
         attributes: {},
       };
-      if (box.x2 - box.x1 > MIN_BOX_SIDE && box.y2 - box.y1 > MIN_BOX_SIDE) {
+      if (box.x2 - box.x1 < MIN_BOX_SIDE || box.y2 - box.y1 < MIN_BOX_SIDE) {
+        useStore.getState().pushToast("Box too small to keep. Drag out a bigger area.");
+      } else {
         addBox(box);
         incrementAnnotationsAdded(1);
         coverage.noteAuthoringCommit();

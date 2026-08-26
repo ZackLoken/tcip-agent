@@ -31,6 +31,7 @@ import {
   applyEditDrag,
   clampShapeToImage,
   hitTestEdit,
+  MIN_BOX_SIDE,
   type EditDrag,
   type EditShape,
 } from "@/lib/reviewEditGeometry";
@@ -66,7 +67,6 @@ const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashe
   { key: "fn", label: "Missed by the model", tag: "FN" },
   { key: "active", label: "Under review", tag: "active", dashed: true },
 ];
-const MIN_BOX_SIDE = 3;
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
 
 /** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN,
