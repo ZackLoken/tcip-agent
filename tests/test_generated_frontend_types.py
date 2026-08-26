@@ -2,10 +2,12 @@
 
 ``scripts/generate_frontend_types.py`` renders ``frontend/src/api/types.generated.ts`` from
 ``routes/_coverage_models.py``, ``routes/coverage.py``, ``routes/review.py``,
-``tcip_web.state.GuiVocabulary``, ``tcip_mcp.web_client`` and ``tcip_web.jobstore``; these tests
-hold that projection to what the models produce now, and keep another frontend module from
-declaring an interface with the same field set as a generated one, or a bare union alias with
-the same members as one of a generated interface's own literal-union fields.
+``routes/training.py``, ``routes/terminal.py`` and ``tcip_web.state.GuiVocabulary`` (the declared
+pydantic models), plus a handful of runtime constants from ``routes/images.py``,
+``tcip_mcp.web_client`` and ``tcip_web.jobstore``; these tests hold that projection to what the
+models produce, and keep another frontend module from declaring an interface with the same
+field set as a generated one, or a bare union alias with the same members as one of a generated
+interface's own literal-union fields.
 """
 
 from __future__ import annotations
@@ -95,6 +97,23 @@ def test_a_free_form_object_renders_as_a_record_of_unknown() -> None:
     schema = _FreeFormObject.model_json_schema()
     assert (generator._ts_type(schema["properties"]["payload"], "_FreeFormObject.payload")
             == "Record<string, unknown>")
+
+
+def test_reordering_platform_panel_events_does_not_change_a_named_constants_value() -> None:
+    """Each named ``PANEL_EVENT_*`` constant is read off its own module attribute, never off
+    ``PLATFORM_PANEL_EVENTS``'s position, so a consumer importing one by name is unaffected by
+    how that tuple is ordered."""
+    from tcip_mcp import web_client
+
+    generator = _generator()
+    before = generator.platform_panel_event_constants()
+    original = web_client.PLATFORM_PANEL_EVENTS
+    try:
+        web_client.PLATFORM_PANEL_EVENTS = tuple(reversed(original))
+        after = generator.platform_panel_event_constants()
+    finally:
+        web_client.PLATFORM_PANEL_EVENTS = original
+    assert before == after
 
 
 def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:

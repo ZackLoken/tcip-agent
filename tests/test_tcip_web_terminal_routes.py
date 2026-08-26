@@ -118,6 +118,23 @@ def test_resize_does_not_crash_stream(client):
         _read_until(ws, "echo:after resize")
 
 
+def test_a_resize_that_raises_does_not_end_the_stream(client, monkeypatch):
+    """A resize failure at the session boundary (a ``ValueError``/``TypeError``, whatever its
+    source) must be swallowed there rather than ending the websocket loop."""
+    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
+    session = terminal_routes._SESSIONS[sid]
+
+    def _raise(rows: int, cols: int) -> None:
+        raise ValueError("boom")
+
+    monkeypatch.setattr(session, "resize", _raise)
+    with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:
+        _read_until(ws, "FAKE_TERMINAL_READY")
+        ws.send_json({"type": "resize", "rows": 40, "cols": 120})
+        ws.send_json({"type": "input", "data": "after raising resize\r"})
+        _read_until(ws, "echo:after raising resize")
+
+
 def test_process_exit_is_visible_in_stream(client):
     sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
     with client.websocket_connect(f"ws://127.0.0.1/api/terminal/ws/{sid}") as ws:

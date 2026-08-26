@@ -13,6 +13,12 @@ export const OVERVIEWS_REQUIRED = "overviews_required";
 
 export const TAB_NAMES = ["annotate", "review", "training", "tuning", "inference", "results", "meta"] as const;
 
+export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
+export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
+export const PANEL_EVENT_REVIEW_FOCUS = "review_focus";
+export const PANEL_EVENT_ACTIVE_PROJECT_CHANGED = "active_project_changed";
+export const PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request";
+
 export const PLATFORM_PANEL_EVENTS = ["labels_written", "annotate_focus", "review_focus", "active_project_changed", "canvas_state_request"] as const;
 
 export const TERMINAL_STATUSES = ["cancelled", "completed", "failed", "interrupted"] as const;

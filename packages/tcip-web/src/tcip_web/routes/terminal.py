@@ -375,7 +375,10 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
                     resize_frame = TerminalResizeFrame.model_validate(msg)
                 except ValidationError:
                     continue
-                session.resize(_clamp(resize_frame.rows), _clamp(resize_frame.cols))
+                try:
+                    session.resize(_clamp(resize_frame.rows), _clamp(resize_frame.cols))
+                except (TypeError, ValueError):
+                    pass
     except WebSocketDisconnect:
         pass
     finally:
