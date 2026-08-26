@@ -1204,7 +1204,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:266`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:162`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1010`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1026`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
