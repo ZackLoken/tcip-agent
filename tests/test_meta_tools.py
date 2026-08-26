@@ -30,15 +30,41 @@ def test_claude_reports_writes_one_json_document(tmp_path: Path):
         context={"trait": "efb_damage", "crop": "hazelnut"},
     )
 
-    report_path = Path(result["report_path"])
-    assert report_path.suffix == ".json"
-    assert report_path.parent == tmp_path / ".tcip" / "reports"
     assert result["category"] == "missing_tool"
+    if result["report_path"] is not None:
+        report_path = Path(result["report_path"])
+        assert report_path.suffix == ".json"
+        assert report_path.parent == tmp_path / ".tcip" / "reports"
+        assert report_path.stem == result["report_id"]
 
-    entry = read_report(str(tmp_path), report_path.stem)
+    entry = read_report(str(tmp_path), result["report_id"])
     assert entry["category"] == "missing_tool"
     assert entry["context"]["trait"] == "efb_damage"
     assert "timestamp" in entry
+
+
+def test_a_report_under_the_database_backend_names_its_id_and_no_file(tmp_path: Path):
+    """Under the database backend the record lives in the store and no file exists, so the tool
+    answers the record id and no path rather than a path a caller cannot open."""
+    from tcip_store.sqlite_backend import SqliteBackend
+
+    ts.bind(SqliteBackend())
+    stored = claude_reports(str(tmp_path), category="missing_tool", detail="x")
+    assert stored["report_path"] is None
+    assert read_report(str(tmp_path), stored["report_id"])["detail"] == "x"
+    listed = load_project_memory("reports", str(tmp_path))["reports"][0]
+    assert listed["report_id"] == stored["report_id"] and listed["path"] is None
+
+
+def test_a_report_under_the_file_backend_names_the_file_it_wrote(tmp_path: Path):
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    written = claude_reports(str(tmp_path), category="missing_tool", detail="y")
+    assert Path(written["report_path"]).is_file()
+    assert Path(written["report_path"]).stem == written["report_id"]
+    listed = load_project_memory("reports", str(tmp_path))["reports"][0]
+    assert listed["path"] == written["report_path"]
 
 
 def test_claude_reports_rejects_invalid_category(tmp_path: Path):
@@ -76,8 +102,9 @@ def test_project_retrospective_creates_new_file(tmp_path: Path):
         would_do_differently="Start with larger initial label batch.",
     )
 
-    retro_path = Path(result["retrospective_path"])
-    assert retro_path.name == "chestnut-bur-phase0.md"
+    assert result["project_id"] == "chestnut-bur-phase0"
+    if result["retrospective_path"] is not None:
+        assert Path(result["retrospective_path"]).name == "chestnut-bur-phase0.md"
     assert result["appended_to_existing"] is False
 
     content = read_retrospective(str(tmp_path), "chestnut-bur-phase0")
@@ -343,7 +370,7 @@ def test_claude_reports_defaults_user_disagreement_false(tmp_path: Path):
     result = claude_reports(str(tmp_path), category="missing_tool", detail="x")
     assert result["user_disagreement"] is False
 
-    entry = read_report(str(tmp_path), Path(result["report_path"]).stem)
+    entry = read_report(str(tmp_path), result["report_id"])
     assert entry["user_disagreement"] is False
 
 
@@ -356,7 +383,7 @@ def test_claude_reports_records_user_disagreement(tmp_path: Path):
     )
     assert result["user_disagreement"] is True
 
-    entry = read_report(str(tmp_path), Path(result["report_path"]).stem)
+    entry = read_report(str(tmp_path), result["report_id"])
     assert entry["user_disagreement"] is True
 
 
