@@ -47,8 +47,10 @@ def _write_port_file(port: int) -> None:
     refusing to serve would be worse than serving on a port they have to be told. It is logged
     rather than swallowed, because that fallback silently misses a port picked by the OS.
     """
+    from tcip_mcp import workspace
+
     try:
-        replace(backend_port_key(), str(port))
+        replace(backend_port_key(workspace.workspace_root(create=False)), str(port))
     except Exception:
         logger.exception(
             "Could not publish port %s: MCP tools will fall back to TCIP_WEB_PORT or %s",
@@ -57,14 +59,8 @@ def _write_port_file(port: int) -> None:
 
 
 def main() -> None:
-    # Pin the platform state root before importing the app (which resolves EXPERIMENTS_DIR)
-    # and before writing the port file, so this backend agrees with the MCP server on one
-    # .tcip/ even when launched from a different directory. Inherited by uvicorn's reloader.
-    from tcip_mcp.project_paths import pin_project_root
-
-    pin_project_root()
-    # The port handoff is written here, before uvicorn imports the app that binds a backend
-    # for the served process, so this entry point binds its own.
+    # The port handoff is written here, before uvicorn imports the app (which pins the
+    # platform-state root and binds its own backend for the served process).
     bind_default()
     # A non-loopback host binds, and the app's trust boundary then serves this machine's own
     # connections and refuses network ones until the operator opts in (tcip_web.trust_boundary).

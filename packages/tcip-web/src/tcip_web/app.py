@@ -82,6 +82,11 @@ async def _lifespan(_app: FastAPI):
 # At import, not in the lifespan: a route may be exercised against this app without one running,
 # and a route that reaches a store with no backend bound would refuse rather than write.
 bind_default()
+# At import too, ahead of the lifespan's rehydrate: every way this app is served (python -m
+# tcip_web, bare uvicorn, --lifespan off, the reloader's child) binds the same root this way.
+from tcip_mcp.project_paths import pin_project_root  # noqa: E402
+
+pin_project_root(from_marker=True)
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 

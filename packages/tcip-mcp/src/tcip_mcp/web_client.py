@@ -15,17 +15,16 @@ The tab vocabulary (``ActiveTab``/``TAB_NAMES``) lives here for the same reason:
 ``tcip_web.state`` imports it rather than declaring its own.
 
 Port discovery order:
-  1. The port record under the pinned platform root: the port actually bound, so a substituted
-     port (the requested one was taken) is still the one found.
-  2. The same record under the repo root: the backend writes it at its startup root (the repo,
-     pre-adoption), so after ``set_active_project`` repins this process's root to a project the
-     pinned location no longer holds the record; without this fallback the ping silently degraded
-     to the default port whenever the backend ran on a non-default one.
-  3. ``TCIP_WEB_PORT`` environment variable: a request, read only once no record parses. The
+  1. The port record under the workspace root: the port actually bound, so a substituted port
+     (the requested one was taken) is still the one found. The workspace root, not the
+     platform-state root, because it is the one location every process on this machine
+     resolves identically; the platform root moves whenever a process adopts a project, which
+     would otherwise strand a reader pinned to a different one.
+  2. ``TCIP_WEB_PORT`` environment variable: a request, read only when no record parses. The
      record can fail to exist (a failed publication, or a backend started as bare ``uvicorn
      tcip_web.app:app --port N``, which never writes one), and the launcher keeps serving either
      way, so with no record the request is the best information there is.
-  4. Default: 8765.
+  3. Default: 8765.
 
 Host discovery:
   1. ``TCIP_WEB_HOST`` environment variable.
@@ -41,14 +40,11 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal, Optional, get_args
+from typing import Any, Literal, get_args
 
 import tcip_store
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store, text_codec
 from tcip_store.file_backend import RootedFileLocator
-
-from tcip_mcp.project_paths import project_root as _platform_root
-from tcip_mcp.project_paths import repo_root_from_here as _repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +72,15 @@ def backend_port_key(root: Path | str | None = None) -> Key:
     """Where the backend publishes the port it bound, for MCP tools in other processes.
 
     ``last_writer_wins``: one backend writes the whole value once per start and reads nothing
-    first. ``root`` defaults to the platform state root, so a process launched from another
-    directory reads the same handoff rather than a cwd-local one; the reader passes a root
-    explicitly when it walks its candidate roots.
+    first. ``root`` defaults to the workspace root: the one location every process on this
+    machine resolves identically, unlike the platform-state root, which moves whenever a
+    process adopts a project. The writer and the reader both pass it explicitly.
     """
-    resolved = Path(root) if root is not None else _platform_root()
-    return Key(BACKEND_PORT_STORE, str(resolved.resolve()), _PORT_PARTS)
+    if root is None:
+        from tcip_mcp import workspace
+
+        root = workspace.workspace_root(create=False)
+    return Key(BACKEND_PORT_STORE, str(Path(root).resolve()), _PORT_PARTS)
 
 
 _SNAPSHOT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
@@ -186,34 +185,28 @@ def resolve_web_host() -> str:
     return os.environ.get("TCIP_WEB_HOST", DEFAULT_HOST)
 
 
-def resolve_web_port(project_root: Optional[Path] = None) -> int:
+def resolve_web_port() -> int:
     """Return the port the FastAPI backend is listening on.
 
-    Parameters
-    ----------
-    project_root : Path, optional
-        Root the port record hangs off. Defaults to the pinned platform state root
-        (``$TCIP_PROJECT_ROOT`` or cwd), the same place the web backend writes it, so the port
-        is found regardless of the reader's cwd.
-
-    The record is the answer: it names the port the backend actually bound, which can differ
-    from any request when the requested one was taken and a free one substituted. ``TCIP_WEB_PORT``
-    is only ever a request, read when no record parses: the record can be absent (a failed
-    publication, or a backend started as bare ``uvicorn tcip_web.app:app --port N``, which writes
-    none), and the launcher serves either way, so with no record the request is the best
-    information there is. An absent record and an unparseable one both fall through to the next
-    candidate root, then to the env var, then to the default, rather than raising: this runs
-    before the backend is known to be up, so a missing handoff is an ordinary state, not a failure.
+    Reads the record under the workspace root, the same place the web backend writes it,
+    regardless of this process's own platform-state root. The record is the answer: it names
+    the port the backend actually bound, which can differ from any request when the requested
+    one was taken and a free one substituted. ``TCIP_WEB_PORT`` is only ever a request, read
+    when no record parses: the record can be absent (a failed publication, or a backend
+    started as bare ``uvicorn tcip_web.app:app --port N``, which writes none), and the
+    launcher serves either way, so with no record the request is the best information there
+    is. An absent record and an unparseable one both fall through to the env var, then to the
+    default, rather than raising: this runs before the backend is known to be up, so a missing
+    handoff is an ordinary state, not a failure.
     """
-    roots = [Path(project_root)] if project_root else [_platform_root(), _repo_root()]
-    for root in roots:
-        recorded = tcip_store.read(backend_port_key(root), default=None)
-        if recorded is None:
-            continue
+    from tcip_mcp import workspace
+
+    recorded = tcip_store.read(backend_port_key(workspace.workspace_root(create=False)), default=None)
+    if recorded is not None:
         try:
             return int(recorded.strip())
         except ValueError:
-            logger.warning("Cannot parse port recorded under %s; using default", root)
+            logger.warning("Cannot parse recorded port %r; using default", recorded)
 
     env = os.environ.get("TCIP_WEB_PORT")
     if env:
@@ -225,10 +218,10 @@ def resolve_web_port(project_root: Optional[Path] = None) -> int:
     return DEFAULT_PORT
 
 
-def backend_url(path: str, project_root: Optional[Path] = None) -> str:
+def backend_url(path: str) -> str:
     """Build a full URL to the tcip-web backend for the given path."""
     host = resolve_web_host()
-    port = resolve_web_port(project_root)
+    port = resolve_web_port()
     if not path.startswith("/"):
         path = "/" + path
     return f"http://{host}:{port}{path}"
@@ -239,7 +232,6 @@ def post_panel_event(
     event_type: str,
     data: dict[str, Any],
     *,
-    project_root: Optional[Path] = None,
     timeout: float = 2.0,
 ) -> dict[str, Any]:
     """POST a panel event to the running tcip-web backend.
@@ -260,7 +252,7 @@ def post_panel_event(
     if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("TCIP_ALLOW_PANEL_EVENTS"):
         return {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
 
-    url = backend_url(f"/api/events/{panel}", project_root=project_root)
+    url = backend_url(f"/api/events/{panel}")
     payload = json.dumps({"panel": panel, "event_type": event_type, "data": data}).encode("utf-8")
     from tcip_mcp import agent_identity
 

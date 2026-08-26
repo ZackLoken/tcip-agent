@@ -4,16 +4,28 @@ Durable *platform* state, the ``@audited`` log, the experiment store, and the mo
 registry, anchors here so a whole project is self-contained under one ``<root>/.tcip/``.
 
 Resolution order (``project_root`` / ``resolve_state``, evaluated at use time):
-  1. ``$TCIP_PROJECT_ROOT`` if set. Servers pin it to the repo root at startup
-     (``pin_project_root``) so processes launched from different dirs don't fragment the
-     record (the audit once found a stray ``frontend/.tcip/`` from exactly this). Adopting a
-     project (``set_active_project``) then *repins* it to ``<workspace>/<project>``, so the
-     audit log, experiments, and registry all land under that project.
+  1. ``$TCIP_PROJECT_ROOT`` if set.
   2. otherwise the current working directory, the historical default, so nothing changes
      for tests or an un-pinned run.
 
-The repin is an explicit action, not a passive marker read, so an in-flight training run
-keeps writing to the project it started under until the agent deliberately adopts another.
+A long-lived process binds the variable once at startup, through :func:`pin_project_root`.
+A process that opts in (``from_marker=True``: the web backend always, the MCP server inside
+the platform's own agent terminal) binds from the workspace's active-project marker when one
+names an adoptable project, else keeps whatever it inherited, else the repo root. A process
+that does not opt in keeps the historical ``setdefault``: the inherited variable, else the repo
+root. Either way the decision is recorded in a :class:`RootBinding`, kept module-level and
+returned by :func:`root_binding`, since no process in this repo configures logging and an info
+line would otherwise reach nothing; ``inspect_project`` and the workspace projects list route
+report it.
+
+Adopting a project (``workspace.set_active_project``) *repins* the adopting process's own
+variable to ``<workspace>/<project>`` through :func:`repin_platform_root`, so the audit log,
+experiments, and registry all land under that project from then on; a training run in flight
+keeps writing to the root it started under (the launch snapshots it once) until it is
+deliberately adopted. The repin is explicit, never a passive marker read: no operation other
+than an adopt itself changes a running process's root, so the window between one process
+adopting and another converging is stated rather than closed here.
+
 Data-side project state (images, ``gui.json``, reports, retrospectives) is addressed by an
 explicit ``project_path`` (the workspace project); after adoption the platform root equals
 that project, so the two coincide.
@@ -23,7 +35,9 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,15 +112,103 @@ def repo_root_from_here() -> Path:
     return Path.cwd()
 
 
-def pin_project_root() -> Path:
-    """Pin ``$TCIP_PROJECT_ROOT`` to the repo root (if not already set) and log it once.
+@dataclass(frozen=True)
+class RootBinding:
+    """How a process's platform-state root was decided by :func:`pin_project_root`.
 
-    Call at the top of a long-running entry point (MCP server, web backend) *before* the
-    audit/experiment modules resolve their paths, so all of them, and any child process,
-    agree on one ``.tcip/`` even if the launch cwd differs. This is the pre-adoption root;
-    ``set_active_project`` repins it to the adopted project. ``setdefault`` so it never
-    stomps a root a caller (or an earlier adoption) already chose.
+    ``source`` is ``"marker"`` (the workspace's active-project marker supplied the root),
+    ``"inherited"`` (the process kept a root it was launched with), or ``"repo_root"``
+    (neither was available). ``inherited_root`` is the variable's value before this bind,
+    ``None`` when nothing was inherited, kept so an overridden value stays visible.
+    ``marker_problem`` is ``None`` when the process either did not consult the marker or the
+    marker named no project; otherwise the text of why the marker could not be used: a store
+    refusal, a lock timeout, or a name :func:`tcip_mcp.workspace.adoptable_project_root`
+    refuses to open.
     """
-    root = os.environ.setdefault(ENV_VAR, str(repo_root_from_here()))
-    logger.info("TCIP platform state root: %s", root)
-    return Path(root)
+
+    root: Path
+    source: str
+    inherited_root: Optional[str]
+    marker_problem: Optional[str]
+
+
+_binding: Optional[RootBinding] = None
+
+
+def root_binding() -> Optional[RootBinding]:
+    """This process's :class:`RootBinding`, or ``None`` before :func:`pin_project_root` has
+    run: every test, and any standalone use, since neither calls it."""
+    return _binding
+
+
+def repin_platform_root(root: Path) -> None:
+    """Set ``$TCIP_PROJECT_ROOT`` to ``root``.
+
+    The one writer of the variable: :func:`pin_project_root`'s startup bind,
+    ``workspace.set_active_project``'s adopt, and the web backend's repin on the agent's
+    adopt signal all go through here, so there is one place that changes it.
+    """
+    os.environ[ENV_VAR] = str(root)
+
+
+def pin_project_root(*, from_marker: bool) -> RootBinding:
+    """Bind this process's platform-state root at startup and record how it was decided.
+
+    ``from_marker=True`` (the web backend always; the MCP server inside the platform's own
+    agent terminal, see ``server.binds_from_marker``): the workspace's active-project
+    marker's project, when :func:`tcip_mcp.workspace.active_project_if_present` (with
+    ``create=False``) finds one adoptable; otherwise the inherited variable, when set;
+    otherwise :func:`repo_root_from_here`. A store refusal, a lock timeout, or a marker
+    naming a project that is not adoptable is caught into the returned binding's
+    ``marker_problem`` rather than raised: the process must start regardless.
+
+    ``from_marker=False`` (every other process): the inherited variable, else the repo root,
+    the historical ``setdefault`` behaviour, now recorded rather than only applied.
+
+    Call once, after the process has bound a storage backend (a marker read needs one) and
+    before anything resolves a ``.tcip`` path. Returns the :class:`RootBinding`, which
+    :func:`root_binding` also keeps for later reporting.
+    """
+    global _binding
+    inherited = os.environ.get(ENV_VAR)
+    marker_problem: Optional[str] = None
+    root: Optional[Path] = None
+    source = ""
+
+    if from_marker:
+        from tcip_mcp import workspace
+
+        try:
+            found = workspace.active_project_if_present(create=False)
+        except Exception as exc:  # noqa: BLE001 - a store refusal or lock timeout; the process starts anyway
+            found = None
+            marker_problem = str(exc)
+        if found is not None:
+            _, root = found
+            source = "marker"
+        elif marker_problem is None:
+            # active_project_if_present folds "no marker" and "marker names a project that
+            # is not adoptable" into the same None; ask the raising predicate which it was.
+            try:
+                name = workspace.read_active_project(create=False)
+            except Exception as exc:  # noqa: BLE001 - same as above
+                marker_problem = str(exc)
+            else:
+                if name:
+                    try:
+                        workspace.adoptable_project_root(name)
+                    except ValueError as exc:
+                        marker_problem = str(exc)
+
+    if root is None:
+        if inherited:
+            root, source = Path(inherited), "inherited"
+        else:
+            root, source = repo_root_from_here(), "repo_root"
+
+    binding = RootBinding(
+        root=root, source=source, inherited_root=inherited, marker_problem=marker_problem
+    )
+    repin_platform_root(root)
+    _binding = binding
+    return binding

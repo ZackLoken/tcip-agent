@@ -48,17 +48,31 @@ def list_registered_tools() -> list[str]:
     return sorted(t.name for t in asyncio.run(mcp.list_tools()))
 
 
+def binds_from_marker(environ: dict) -> bool:
+    """Whether this MCP server should bind its platform-state root from the workspace's
+    active-project marker at startup: true only inside the platform's own agent terminal,
+    named by ``agent_identity.TERMINAL_SESSION_ENV`` in the environment. A session launched
+    there converges on the project the GUI has open; a developer's own session elsewhere keeps
+    resolving against the repo root or whatever it inherited, and ``inspect_project`` reports
+    the disagreement either way.
+    """
+    from tcip_mcp import agent_identity
+
+    return bool(environ.get(agent_identity.TERMINAL_SESSION_ENV))
+
+
 def main() -> None:
     """Start the MCP server on stdio transport."""
+    import os
+
     from tcip_store.binding import bind_default
 
     bind_default()
-    # Pin the platform-state root before any tool resolves a ``.tcip`` path, so a server
-    # launched from a subdir still agrees with the web backend on one root. ``set_active_project``
-    # later repins this to the adopted project.
+    # Pin before any tool resolves a .tcip path: inside the agent terminal this binds from
+    # the marker, elsewhere it keeps the historical setdefault; set_active_project repins later.
     from tcip_mcp.project_paths import pin_project_root
 
-    pin_project_root()
+    pin_project_root(from_marker=binds_from_marker(os.environ))
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 

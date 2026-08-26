@@ -205,3 +205,23 @@ def test_session_start_names_the_store_refusal_for_a_loose_file_only_workspace(
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     assert "could not be adopted" in ctx
     assert "adopt_store" in ctx
+
+
+def test_session_start_notes_which_processes_bind_from_the_marker(
+    tmp_path, monkeypatch, capsys
+):
+    """The terminal's inherited platform-state root is a copy taken at spawn, so it can
+    diverge from the marker until a process that binds from the marker converges: the web
+    backend at its own startup, an MCP server launched here only at its next start."""
+    proj = _workspace(tmp_path, monkeypatch)
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(other))
+
+    out = _run(monkeypatch, capsys, '{"source":"startup"}')
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert str(other) in ctx
+    assert proj in ctx
+    assert "web backend" in ctx and "its own startup" in ctx
+    assert "next start" in ctx
+    assert "set_active_project" in ctx

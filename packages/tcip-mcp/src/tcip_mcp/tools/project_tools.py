@@ -269,10 +269,10 @@ def _root_divergence_report() -> dict[str, str] | None:
     """Whether this process's platform-state root disagrees with the workspace's
     active-project marker.
 
-    Adopting a project repins the *adopting process's own* ``TCIP_PROJECT_ROOT``
-    (``workspace.set_active_project``); the web backend and the MCP server are separate
-    processes, so a GUI adoption does not repin this process, and this process's root can
-    keep naming a stale or different project until it is deliberately adopted here too.
+    Adopting a project repins the *adopting process's own* ``TCIP_PROJECT_ROOT`` at once
+    (``workspace.set_active_project``); a separate process converges only when it itself binds
+    from the marker, at its own startup or (the web backend) on the agent's adopt signal, so
+    this process's root can keep naming a stale or different project until then.
     ``None`` when there is no marker, the marker's name does not resolve, or the two agree.
 
     Reads with ``create=False`` so this check, run on every ``inspect_project`` call, cannot
@@ -360,7 +360,10 @@ def inspect_project(project_path: str = "") -> dict:
     Carries ``platform_root_diverges_from_marker`` when this process's platform-state root
     (``$TCIP_PROJECT_ROOT``) names a different project than the workspace's active-project
     marker: adoption repins only the adopting process, so the GUI and this process can end
-    up naming different projects until both explicitly adopt.
+    up naming different projects until both explicitly adopt. Carries
+    ``platform_root_binding``, this process's own :class:`tcip_mcp.project_paths.RootBinding`
+    as a dict, when :func:`tcip_mcp.project_paths.pin_project_root` has run: absent under
+    pytest and any standalone use, since neither calls it.
 
     For a project with ``.tcip``, carries ``site`` and ``site_problem`` from
     ``tcip_mcp.project_record.site_fields``: exactly one is set, and ``site_problem`` names why
@@ -370,6 +373,8 @@ def inspect_project(project_path: str = "") -> dict:
     Args:
         project_path: Root directory of the project. Empty defaults to the active project.
     """
+    from tcip_mcp.project_paths import root_binding
+
     project_path = _resolve_project_path(project_path)
     root = Path(project_path)
     tcip = root / ".tcip"
@@ -378,6 +383,14 @@ def inspect_project(project_path: str = "") -> dict:
     divergence = _root_divergence_report()
     if divergence:
         status["platform_root_diverges_from_marker"] = divergence
+    binding = root_binding()
+    if binding is not None:
+        status["platform_root_binding"] = {
+            "root": str(binding.root),
+            "source": binding.source,
+            "inherited_root": binding.inherited_root,
+            "marker_problem": binding.marker_problem,
+        }
     if not tcip.is_dir():
         return status
 

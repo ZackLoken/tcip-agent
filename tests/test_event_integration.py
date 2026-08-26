@@ -197,27 +197,27 @@ class TestPortDiscovery:
         from tcip_mcp.web_client import backend_port_key, resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
-        ts.replace(backend_port_key(root=tmp_path), "34567")
-        assert resolve_web_port(project_root=tmp_path) == 34567
+        ts.replace(backend_port_key(), "34567")
+        assert resolve_web_port() == 34567
 
-    def test_env_var_used_when_no_record_exists(self, tmp_path: Path, monkeypatch) -> None:
+    def test_env_var_used_when_no_record_exists(self, monkeypatch) -> None:
         """A failed publication or a bare ``uvicorn`` launch leaves no record: with none to trust,
         the request is the best information there is."""
         from tcip_mcp.web_client import resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
-        assert resolve_web_port(project_root=tmp_path) == 12345
+        assert resolve_web_port() == 12345
 
-    def test_port_file_used_when_env_absent(self, tmp_path: Path, monkeypatch) -> None:
+    def test_port_file_used_when_env_absent(self, monkeypatch) -> None:
         import tcip_store as ts
         from tcip_mcp.web_client import backend_port_key, resolve_web_port
 
-        ts.replace(backend_port_key(root=tmp_path), "34567")
+        ts.replace(backend_port_key(), "34567")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        assert resolve_web_port(project_root=tmp_path) == 34567
+        assert resolve_web_port() == 34567
 
     def test_the_port_the_backend_writes_is_the_port_a_tool_process_reads(
-        self, tmp_path: Path, monkeypatch,
+        self, monkeypatch,
     ) -> None:
         """The backend's own writer and the MCP-side resolver meet at one file.
 
@@ -228,21 +228,33 @@ class TestPortDiscovery:
         from tcip_web.__main__ import _write_port_file
 
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
         bound = 41871
         assert bound != DEFAULT_PORT
         _write_port_file(bound)
-        assert resolve_web_port(project_root=tmp_path) == bound
         assert resolve_web_port() == bound
 
-    def test_default_when_neither_available(self, tmp_path: Path, monkeypatch) -> None:
+    def test_port_record_found_regardless_of_this_process_own_platform_root(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The port handoff hangs off the workspace root, not the platform-state root a
+        project adopts into, so a reader pinned to a different project than the one active
+        when the backend started still finds the port it bound."""
+        import tcip_store as ts
+        from tcip_mcp import web_client
+
+        ts.replace(web_client.backend_port_key(), "23456")
+        monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
+        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "some_other_project"))
+        assert web_client.resolve_web_port() == 23456
+
+    def test_default_when_neither_available(self, monkeypatch) -> None:
         from tcip_mcp.web_client import DEFAULT_PORT, resolve_web_port
 
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        assert resolve_web_port(project_root=tmp_path) == DEFAULT_PORT
+        assert resolve_web_port() == DEFAULT_PORT
 
     def test_an_unreadable_recorded_port_falls_through_to_the_default(
-        self, tmp_path: Path, monkeypatch
+        self, monkeypatch
     ) -> None:
         """A handoff nothing can turn into a port is not a port.
 
@@ -252,9 +264,9 @@ class TestPortDiscovery:
         import tcip_store as ts
         from tcip_mcp.web_client import DEFAULT_PORT, backend_port_key, resolve_web_port
 
-        ts.replace(backend_port_key(root=tmp_path), "not a port")
+        ts.replace(backend_port_key(), "not a port")
         monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-        assert resolve_web_port(project_root=tmp_path) == DEFAULT_PORT
+        assert resolve_web_port() == DEFAULT_PORT
 
     def test_the_port_handoff_is_one_declaration_that_both_packages_reach(self) -> None:
         """The reader owns the declaration and the backend imports it.
@@ -522,25 +534,6 @@ class TestHpoToolOutputSchema:
 
 
 # ── Port fallback chain + pytest hermeticity ──────────
-
-
-def test_resolve_web_port_falls_back_to_repo_root(tmp_path, monkeypatch):
-    """After set_active_project repins the platform root to a project, the port file still
-    lives under the backend's startup (repo) root: the lookup must find it there instead of
-    silently degrading to the default port."""
-    import tcip_store as ts
-    from tcip_mcp import web_client
-
-    project = tmp_path / "adopted_project"          # pinned root: no port record here
-    project.mkdir()
-    repo = tmp_path / "repo"                        # backend's startup root: has the record
-    repo.mkdir()
-    ts.replace(web_client.backend_port_key(root=repo), "23456")
-
-    monkeypatch.delenv("TCIP_WEB_PORT", raising=False)
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
-    monkeypatch.setattr(web_client, "_repo_root", lambda: repo)
-    assert web_client.resolve_web_port() == 23456
 
 
 def test_post_panel_event_suppressed_under_pytest(monkeypatch):

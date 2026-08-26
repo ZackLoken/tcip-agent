@@ -1464,7 +1464,7 @@ REGISTERED = {
         f".tcip/state/proposals/2026-03-04/{PROPOSAL_STEM}.json"),
     "backend_port": Registered(
         "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
-        pin=_pin_platform_root),
+        pin=_pin_workspace),
     "experiment_config": Registered(
         {"model_source": {"builder": "my_module:build"}, "training": {"epochs": 3}},
         lambda root: experiments.config_key(EXPERIMENT),
@@ -1774,7 +1774,7 @@ def test_the_canonical_record_codec_writes_the_bytes_this_test_spells_out():
 def test_a_text_store_refuses_a_value_that_is_not_text_and_accepts_one_that_is(store, monkeypatch):
     """Calling str() on whatever arrived would fabricate a value out of its repr, the way a
     JSON default does, so a text store takes text and the caller formats the rest."""
-    _pin_platform_root(store.root, monkeypatch)
+    _pin_workspace(store.root, monkeypatch)
     key = web_client.backend_port_key()
 
     with pytest.raises(ts.StoreError):

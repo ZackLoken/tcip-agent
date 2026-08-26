@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import tcip_mcp.project_paths as pp
@@ -50,18 +51,74 @@ def test_repo_root_climbs_past_a_package_level_claude_md(tmp_path: Path, monkeyp
 
 def test_pin_sets_env_to_repo_root_when_unset(monkeypatch) -> None:
     monkeypatch.delenv(pp.ENV_VAR, raising=False)
-    try:
-        root = pp.pin_project_root()
-        assert os.environ.get(pp.ENV_VAR) == str(root)
-        assert (root / ".mcp.json").is_file() or (root / "CLAUDE.md").is_file()
-    finally:
-        os.environ.pop(pp.ENV_VAR, None)
+    binding = pp.pin_project_root(from_marker=False)
+    assert os.environ.get(pp.ENV_VAR) == str(binding.root)
+    assert binding.source == "repo_root"
+    assert binding.inherited_root is None
+    assert binding.marker_problem is None
+    assert (binding.root / ".mcp.json").is_file() or (binding.root / "CLAUDE.md").is_file()
 
 
 def test_pin_respects_a_preset_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(pp.ENV_VAR, str(tmp_path))
-    # setdefault: an operator-provided root is not overridden.
-    assert pp.pin_project_root() == tmp_path
+    # An operator-provided root is not overridden when the process does not opt into the marker.
+    binding = pp.pin_project_root(from_marker=False)
+    assert binding.root == tmp_path
+    assert binding.source == "inherited"
+    assert binding.inherited_root == str(tmp_path)
+    assert binding.marker_problem is None
+
+
+def test_pin_from_marker_prefers_the_marker_over_an_inherited_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from tcip_mcp import workspace
+
+    proj_root = workspace.project_path("hazelnut_demo")
+    (proj_root / ".tcip").mkdir(parents=True)
+    workspace.set_active_project("hazelnut_demo")  # also repins the variable to proj_root
+
+    inherited = tmp_path.parent / "elsewhere"
+    inherited.mkdir()
+    monkeypatch.setenv(pp.ENV_VAR, str(inherited))  # an inherited root predating this bind
+
+    binding = pp.pin_project_root(from_marker=True)
+    assert binding.root == proj_root
+    assert binding.source == "marker"
+    assert binding.inherited_root == str(inherited)
+    assert binding.marker_problem is None
+    assert os.environ.get(pp.ENV_VAR) == str(proj_root)
+
+
+def test_pin_from_marker_falls_back_to_repo_root_when_nothing_inherited(monkeypatch) -> None:
+    # The per-test workspace holds no marker: no project to bind from and nothing inherited.
+    monkeypatch.delenv(pp.ENV_VAR, raising=False)
+    binding = pp.pin_project_root(from_marker=True)
+    assert binding.source == "repo_root"
+    assert binding.inherited_root is None
+    assert binding.marker_problem is None
+    assert (binding.root / ".mcp.json").is_file() or (binding.root / "CLAUDE.md").is_file()
+
+
+def test_pin_from_marker_records_a_dangling_marker_and_keeps_the_inherited_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from tcip_mcp import workspace
+
+    proj_root = workspace.project_path("hazelnut_demo")
+    (proj_root / ".tcip").mkdir(parents=True)
+    workspace.set_active_project("hazelnut_demo")
+    shutil.rmtree(proj_root / ".tcip")  # the marker now names a project with nothing there
+
+    inherited = tmp_path.parent / "elsewhere"
+    inherited.mkdir()
+    monkeypatch.setenv(pp.ENV_VAR, str(inherited))
+
+    binding = pp.pin_project_root(from_marker=True)
+    assert binding.source == "inherited"
+    assert binding.root == inherited
+    assert binding.marker_problem is not None
+    assert "hazelnut_demo" in binding.marker_problem
 
 
 def test_resolve_state_relative_stays_cwd_relative_when_unpinned(monkeypatch) -> None:
