@@ -12,6 +12,7 @@ from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing.export import (
     export_detection_csv,
     mask_binarize_provenance,
+    positive_detections,
     write_predictions_json,
 )
 from tcip_mcp.pipelines.resolution import (
@@ -898,7 +899,11 @@ def run_inference(
         tile_batch_size=tile_batch_size, global_nms_iou=applied_nms_iou, postprocess=postprocess,
         tile_resize=tile_resize,
     )
-    total_detections = sum(r["count"] for r in results)
+    # A degenerate box is no detection, so it is excluded here too; left at the raw per-image
+    # count when masks are present, since only the writer's mask-to-polygon conversion decides.
+    total_detections = sum(
+        r["count"] if r.get("masks") is not None else positive_detections(r)[0] for r in results
+    )
 
     # Producing-model identity (resolved above, before calibration) travels with the result so every
     # downstream deliverable can name the exact checkpoint (content hash) + run behind the count.
@@ -1129,9 +1134,11 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     dropped = 0
     for r in result["results"]:
         out_json = out / f"{Path(r['image']).stem}.json"
+        # Read before the write: a drop can empty a mask list that was genuinely there, and
+        # has_masks must reflect what this run used, not what happened to survive the drop.
+        has_masks = has_masks or bool(r.get("masks"))
         dropped += write_predictions_json(out_json, r, created_by=producer, id_map=id_map)
         written.append(str(out_json))
-        has_masks = has_masks or bool(r.get("masks"))
 
     op_stamp = operating_point_stamp(
         result.get("operating_point"),
@@ -1391,8 +1398,10 @@ def _export_predictions_raster(
     sha = identity["sha256"]
     producer = prediction_producer(checkpoint_path, sha)
     pred_path = out / f"{Path(raster_path).stem}.json"
-    dropped_boxes = write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
+    # Read before the write: a drop can empty a mask list that was genuinely there, and has_masks
+    # must reflect what this run used, not what happened to survive the drop.
     has_masks = bool(result.get("masks"))
+    dropped_boxes = write_predictions_json(pred_path, result, created_by=producer, id_map=id_map)
 
     produced_at = datetime.now(timezone.utc).isoformat()
     op_stamp = operating_point_stamp(

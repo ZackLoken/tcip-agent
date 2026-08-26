@@ -374,3 +374,51 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     stamp = read_operating_point_sidecar(out_dir)
     assert stamp["operating_point"]["conf"]["source"] == "default"
     assert stamp["operating_point"]["max_dets"]["source"] == "default"
+
+
+def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degenerate_box(
+    tmp_path, monkeypatch,
+):
+    """A box that collapses to zero width is dropped when the prediction file is written, so the
+    job's own reported n_detections must reflect the drop too, not the model's raw output count."""
+    pytest.importorskip("fastapi")
+    import json
+
+    from PIL import Image
+
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    Image.new("RGB", (100, 100), (120, 120, 120)).save(images_dir / "img.jpg")
+    out_dir = tmp_path / "out"
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    class FakePredictor:
+        train_tile_size = 640
+
+        def __init__(self, checkpoint_path=None, **kwargs):
+            pass
+
+        def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):
+            return [{"image": p, "width": 100, "height": 100,
+                     "boxes": [[10.0, 10.0, 30.0, 30.0], [50.0, 50.0, 50.0, 60.0]],
+                     "scores": [0.9, 0.4], "labels": [1, 1], "count": 2}
+                    for p in paths]
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", FakePredictor)
+
+    job = InferenceJob(
+        job_id="degenerate", checkpoint_path=str(ckpt), images_dir=str(images_dir),
+        output_dir=str(out_dir), tile=True, conf=0.25, iou=0.7,
+        slice_hw=(640, 640), overlap=0.2, postprocess="nmm",
+    )
+    _worker(job)
+
+    assert job.status == "completed"
+    assert job.dropped_boxes == 1
+    assert job.results[0]["n_detections"] == 1
+    persisted = json.loads((out_dir / "img.json").read_text())["annotations"]
+    assert len(persisted) == 1
