@@ -81,6 +81,28 @@ def test_human_edited_box_takes_precedence_over_prediction(tmp_path):
     assert (g.x1, g.y1, g.x2, g.y2) == (5.0, 20.0, 45.0, 30.0)
 
 
+def test_a_degenerate_positive_box_is_reported_by_name_not_raised(tmp_path):
+    """A verdict box that denormalizes to zero extent must not abort the harvest: it is reported
+    by name rather than raised, and materializing the rest of the images still proceeds."""
+    src = tmp_path / "src"
+    _image(src, "bad.png", (100, 50))
+    _image(src, "good.png", (100, 50))
+    out = tmp_path / "out"
+    state = {"image": {
+        "bad.png": _completed([_accepted("catkin", [0.5, 0.5, 0.0, 0.3])]),  # zero-width box
+        "good.png": _completed([_accepted("catkin", [0.5, 0.5, 0.2, 0.3])]),
+    }}
+
+    r = materialize_dataset(state, str(src), str(out))
+
+    assert r["positive"] == 1
+    assert len(r["boundary_refused"]) == 1
+    assert r["boundary_refused"][0]["image"] == "bad.png"
+    assert not (out / "annotations" / "bad.json").exists()
+    good = json_io.read_annotations(str(out / "annotations" / "good.json"))
+    assert len(good) == 1
+
+
 def test_box_counts_track_every_positive_not_every_image(tmp_path):
     """``total_boxes`` sums boxes across images, and each manifest row reports its own count."""
     src = tmp_path / "src"

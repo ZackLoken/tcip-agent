@@ -132,7 +132,14 @@ def _find_source_image(source_images_dir: str, img_name: str) -> "Path | BandGro
         return None
 
 
-def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h: int) -> None:
+def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h: int) -> str | None:
+    """Write one image's positive boxes to its label file, returning the refusal message on
+    failure rather than letting it propagate.
+
+    A verdict's normalized box can denormalize to zero extent (the persistence boundary's own
+    refusal, ``check_box_extent`` inside ``write_annotations``); caught here so one degenerate
+    record does not abort a harvest of many images with an uncaught ``ValueError``.
+    """
     # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
     anns = [
         Annotation(subject=name,
@@ -140,7 +147,11 @@ def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h:
                                  (cx + w / 2) * img_w, (cy + h / 2) * img_h))
         for (name, cx, cy, w, h) in positives
     ]
-    write_annotations(str(path), anns, img_w, img_h, keep_empty=True)
+    try:
+        write_annotations(str(path), anns, img_w, img_h, keep_empty=True)
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 MATERIALIZER_IDENTITY = "materialize_review_dataset"
@@ -225,10 +236,11 @@ def materialize_dataset(
 
     place = shutil.copy2 if copy_files else os.symlink
     counts = {"positive": 0, "hard_negative": 0, "skipped": 0, "total_boxes": 0,
-              "missing_images": 0, "unconfirmed_negative": 0}
+              "missing_images": 0, "unconfirmed_negative": 0, "boundary_refused": 0}
     subjects: set[str] = set()
     manifest_images: list[dict] = []
     negative_verdicts: dict[str, dict] = {}
+    boundary_refused: list[dict] = []
 
     for img_name, info in partition.items():
         status = info["status"]
@@ -265,7 +277,11 @@ def materialize_dataset(
         img_w, img_h = image_dimensions(src)
 
         if status == "positive":
-            _write_positive_label(label_path, info["positives"], img_w, img_h)
+            refusal = _write_positive_label(label_path, info["positives"], img_w, img_h)
+            if refusal is not None:
+                counts["boundary_refused"] += 1
+                boundary_refused.append({"image": record_name, "reason": refusal})
+                continue
             counts["positive"] += 1
             counts["total_boxes"] += len(info["positives"])
             subjects.update(name for (name, *_rest) in info["positives"])
@@ -322,6 +338,7 @@ def materialize_dataset(
         "subjects": sorted(subjects),
         "verdict_subjects": sorted(verdict_subjects),
         "unconfirmed_negatives": unconfirmed,
+        "boundary_refused": boundary_refused,
         "images": manifest_images,
     }
     tcip_store.replace(curated_manifest_key(out), manifest)
@@ -331,6 +348,7 @@ def materialize_dataset(
         "subjects": sorted(subjects),
         "verdict_subjects": sorted(verdict_subjects),
         "unconfirmed_negatives": unconfirmed,
+        "boundary_refused": boundary_refused,
         "subject": neg_subject,
         "output_dir": str(out),
         "structure": f"{out}/images/ + {out}/annotations/",
