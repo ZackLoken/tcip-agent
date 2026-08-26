@@ -68,15 +68,15 @@ def _materialize(tmp_path: Path, *, subject: str | None) -> tuple[Path, dict]:
     out = tmp_path / "splits"
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=subject,
-        train_ratio=0.5, val_ratio=0.25, test_ratio=0.25, seed=3,
+        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
     )
     assert "error" not in result
-    assert all(result["splits"][name] > 0 for name in ("train", "val", "test"))
+    assert all(result["splits"][name] > 0 for name in ("train", "val"))
     return out, result
 
 
 def _split_holding(out: Path, image_name: str) -> str:
-    holders = [name for name in ("train", "val", "test")
+    holders = [name for name in ("train", "val")
                if (out / name / "images" / image_name).is_file()]
     assert len(holders) == 1, f"{image_name} landed in {holders}"
     return holders[0]
@@ -88,7 +88,7 @@ def test_confirmation_is_carried_only_into_the_split_that_holds_its_image(tmp_pa
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
-    with_store = [name for name in ("train", "val", "test")
+    with_store = [name for name in ("train", "val")
                   if ts.exists(image_status_key(out / name))]
 
     assert with_store == [holder]
@@ -158,7 +158,7 @@ def test_no_subject_threaded_carries_no_confirmation(tmp_path: Path):
     other subject."""
     out, _ = _materialize(tmp_path, subject=None)
 
-    assert [name for name in ("train", "val", "test")
+    assert [name for name in ("train", "val")
             if ts.exists(image_status_key(out / name))] == []
 
 
@@ -174,7 +174,7 @@ def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Pat
     out = tmp_path / "splits"
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
-        train_ratio=0.5, val_ratio=0.25, test_ratio=0.25, seed=3,
+        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
     )
     assert "error" not in result
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
@@ -219,7 +219,7 @@ def _carried_negative(tmp_path: Path, *, labels_date: str | None,
     out = tmp_path / "splits"
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
-        train_ratio=0.5, val_ratio=0.25, test_ratio=0.25, seed=3,
+        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
     )
     assert "error" not in result
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")

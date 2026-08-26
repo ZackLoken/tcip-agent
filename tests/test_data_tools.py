@@ -48,10 +48,12 @@ def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     assert result["total_stems"] == 3
     assert sum(result["splits"].values()) == 3
     assert result["output_dir"] == str(out)
-    for split in ("train", "val", "test"):
+    for split in ("train", "val"):
         assert ts.exists(split_stem_list_key(out, split))
         assert (out / split / "images").is_dir()
         assert (out / split / "labels").is_dir()
+    assert "test" not in result["splits"]
+    assert not (out / "test").exists()
     # Every image landed under exactly one split's images/ dir.
     placed = sorted(p.stem for p in out.rglob("images/*") if p.is_file())
     assert placed == ["img_001", "img_002", "img_003"]
@@ -65,8 +67,23 @@ def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     assert result["groups"] == 3
     assert sum(result["splits"].values()) == 3
     assert result["stratified"] is True
-    for split in ("train", "val", "test"):
+    for split in ("train", "val"):
         assert ts.exists(split_stem_list_key(out, split))
+    assert "test" not in result["splits"]
+
+    manifest = ts.read(split_manifest_key(out))
+    assert manifest["labels_root"] is not None
+    assert Path(manifest["labels_root"]).is_dir()
+    assert manifest["dataset_fingerprint"] is not None
+    assert "test" not in manifest["splits"]
+
+
+def test_make_splits_refuses_a_nonzero_test_ratio(data_dir: Path):
+    """No launch path honours a held-out test list: make_splits refuses one rather than writing
+    a partition nothing downstream reads."""
+    result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, test_ratio=0.1)
+    assert "error" in result
+    assert "test_ratio" in result["error"]
 
 
 def test_make_splits_bad_ratios(data_dir: Path):
@@ -102,7 +119,7 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 
     # No source prefix may appear in more than one split.
     seen: dict[str, str] = {}
-    for split in ("train", "val", "test"):
+    for split in ("train", "val"):
         for stem in ts.read(split_stem_list_key(out, split)):
             g = default_group_key(stem)
             assert seen.get(g, split) == split, f"group {g} spans splits"
@@ -122,12 +139,13 @@ def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
     assert result["group_by"] == "explicit_map"
 
     membership: dict[str, str] = {}
-    for split in ("train", "val", "test"):
+    for split in ("train", "val"):
         for stem in ts.read(split_stem_list_key(out, split)):
             membership[stem] = split
     assert membership["x_0_0"] == membership["y_0_0"]  # gA never straddles
     manifest = ts.read(split_manifest_key(out))
     assert manifest["group_by"] == "explicit_map"
+    assert manifest["group_key_map"] == group_key_map
 
 
 def test_make_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Path):
@@ -192,22 +210,18 @@ def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):
     manifest = ts.read(split_manifest_key(out))
     assert manifest["group_by"] == "spatial_strip"
     assert manifest["spatial"]["train_identities"] == train_ids
+    assert manifest["labels_root"] is not None
+    assert manifest["dataset_fingerprint"] is not None
 
 
-def test_make_splits_spatial_three_way(tmp_path: Path):
+def test_make_splits_spatial_refuses_a_nonzero_test_ratio(tmp_path: Path):
+    """The spatial branch refuses a held-out test fraction the same way the grouped path does:
+    no launch path honours a held-out test list."""
     root = _single_source_dataset(tmp_path / "ds", 4000, 3000)
     out = tmp_path / "m3"
     result = make_splits(str(root), spatial=True, tile_size=128, overlap=0.2,
                          train_ratio=0.7, val_ratio=0.2, test_ratio=0.1,
                          seed=1, output_path=str(out))
-    assert "error" not in result
-    assert all(result["splits"][name] > 0 for name in ("train", "val", "test"))
-    for name in ("train", "val", "test"):
-        assert ts.exists(split_stem_list_key(out, name))
-
-    train_ids = set(ts.read(split_stem_list_key(out, "train")))
-    val_ids = set(ts.read(split_stem_list_key(out, "val")))
-    test_ids = set(ts.read(split_stem_list_key(out, "test")))
-    assert train_ids.isdisjoint(val_ids)
-    assert train_ids.isdisjoint(test_ids)
-    assert val_ids.isdisjoint(test_ids)
+    assert "error" in result
+    assert "test_ratio" in result["error"]
+    assert not out.exists()

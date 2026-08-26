@@ -230,9 +230,9 @@ def validate_data_quality(folder_path: str) -> dict:
 @audited
 def make_splits(
     folder_path: str,
-    train_ratio: float = 0.7,
+    train_ratio: float = 0.8,
     val_ratio: float = 0.2,
-    test_ratio: float = 0.1,
+    test_ratio: float = 0.0,
     seed: int = 42,
     group_by: str = "tile_prefix",
     group_key_map: dict[str, str] | None = None,
@@ -262,7 +262,9 @@ def make_splits(
         folder_path: Path to the dataset root directory.
         train_ratio: Fraction for training set.
         val_ratio: Fraction for validation set.
-        test_ratio: Fraction for test set.
+        test_ratio: Must be 0. No launch path honours a held-out test list, so make_splits
+            writes train and val only; a non-zero value is refused rather than writing a
+            partition nothing downstream can consume.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing
             ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per image). Ignored when
@@ -280,7 +282,7 @@ def make_splits(
             can't recover the subject from its own path, so an image a human confirmed negative
             is silently dropped from the materialized set (reads as an unconfirmed empty label)
             unless this is passed. Only relevant with `materialize=True`.
-        spatial: Derive a within-image train/val/test split over one source's own tile lattice
+        spatial: Derive a within-image train/val split over one source's own tile lattice
             (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`) instead of grouping
             whole source images. Requires ``tile_size``/``overlap`` and a folder holding exactly
             one labeled image; refuses otherwise, naming a training run's own automatic route
@@ -288,14 +290,19 @@ def make_splits(
             dataset turns out to be single-source) as the alternative for the common multi-source
             case. Ignores ``group_by``/``group_key_map``/``stratify_foreground``/``copy_files``/
             ``subject``, and is not compatible with ``materialize`` (there is one source image,
-            not a set of files to lay out into a split tree); ``train_ratio``/``val_ratio``/
-            ``test_ratio`` still apply, a zero ratio drops that side entirely.
+            not a set of files to lay out into a split tree); ``train_ratio``/``val_ratio`` still
+            apply, a zero ratio drops that side entirely, and ``test_ratio`` is refused the same
+            way as the non-spatial path.
         tile_size: Tile edge in pixels, required when ``spatial=True``.
         overlap: Tile overlap fraction, required when ``spatial=True``.
         buffer: Minimum pixel gap kept at every boundary between two differently-assigned
             regions, ``spatial=True`` only. Defaults to ``tile_size`` (see
             :func:`spatial_strip_split`).
     """
+    if test_ratio != 0:
+        return {"error": "test_ratio must be 0: no launch path honours a held-out test list, so "
+                         "make_splits writes train and val only."}
+
     if spatial:
         return _make_spatial_split(
             folder_path, tile_size=tile_size, overlap=overlap,
@@ -350,27 +357,40 @@ def make_splits(
     # Content hash of the labels this split partitions: two runs with the same seed still yield
     # different splits over different GT, so the hash + seed together identify the partition.
     dataset_hash = None
+    labels_root: Path | None = None
     if label_map:
         from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
         labels_root = Path(next(iter(label_map.values()))).parent
         dataset_hash = _dataset_hash(labels_root, stems=stems)
 
+    # make_splits emits no test partition (see test_ratio, refused above); train and val are the
+    # only two names carried into the stem lists, the manifest and this call's own summary.
+    kept_splits = ("train", "val")
+
     counts = annotation_counts or {}
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
     manifest_dir = None
     if out_dir is not None:
+        from tcip_mcp.pipelines.resolution import dataset_fingerprint
+
         out_dir.mkdir(parents=True, exist_ok=True)
-        for split_name, split_stems in parts.items():
-            tcip_store.replace(split_stem_list_key(out_dir, split_name), sorted(split_stems))
-        tcip_store.replace(split_manifest_key(out_dir), {
+        for split_name in kept_splits:
+            tcip_store.replace(split_stem_list_key(out_dir, split_name), sorted(parts[split_name]))
+        manifest: dict[str, Any] = {
             "seed": seed, "dataset_hash": dataset_hash, "group_by": resolved_group_by,
-            "splits": {k: sorted(v) for k, v in parts.items()}})
+            "labels_root": str(labels_root) if labels_root is not None else None,
+            "dataset_fingerprint": dataset_fingerprint(folder_path),
+            "splits": {k: sorted(parts[k]) for k in kept_splits},
+        }
+        if group_key_map:
+            manifest["group_key_map"] = group_key_map
+        tcip_store.replace(split_manifest_key(out_dir), manifest)
         manifest_dir = str(out_dir)
 
     result = {
-        "splits": {k: len(v) for k, v in parts.items()},
+        "splits": {k: len(parts[k]) for k in kept_splits},
         "foreground_annotations": {
-            k: sum(int(counts.get(s, 0)) for s in v) for k, v in parts.items()
+            k: sum(int(counts.get(s, 0)) for s in parts[k]) for k in kept_splits
         },
         "total_stems": len(stems),
         "total_annotations": sum(int(v) for v in counts.values()),
@@ -383,9 +403,10 @@ def make_splits(
     }
 
     if materialize:
-        # Lay out a {train,val,test}/{images,labels}/ tree from the split assignment.
+        # Lay out a {train,val}/{images,labels}/ tree from the split assignment.
         place_fn = shutil.copy2 if copy_files else os.symlink
-        for split_name, split_stems in parts.items():
+        for split_name in kept_splits:
+            split_stems = parts[split_name]
             img_dir = out_dir / split_name / "images"
             lbl_dir = out_dir / split_name / "labels"
             img_dir.mkdir(parents=True, exist_ok=True)
@@ -402,7 +423,7 @@ def make_splits(
                         place_fn(str(src_lbl), str(dst_lbl))
         _carry_confirmed_negatives(label_map, out_dir, parts, image_map, subject)
         result["output_dir"] = str(out_dir)
-        result["structure"] = f"{out_dir}/{{train,val,test}}/{{images,labels}}/"
+        result["structure"] = f"{out_dir}/{{train,val}}/{{images,labels}}/"
 
     return result
 
@@ -480,12 +501,15 @@ def _make_spatial_split(
         "tiles_dropped_outside_regions": split.tiles_dropped_outside_regions,
     })
 
+    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+
     out_dir = Path(output_path) if output_path else Path(folder_path) / "splits"
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in split.regions:
         tcip_store.replace(split_stem_list_key(out_dir, name), sorted(ids[name]))
     tcip_store.replace(split_manifest_key(out_dir), {
-        "seed": seed, "group_by": "spatial_strip", "spatial": spatial_manifest})
+        "seed": seed, "group_by": "spatial_strip", "spatial": spatial_manifest,
+        "labels_root": str(labels_root), "dataset_fingerprint": dataset_fingerprint(folder_path)})
 
     return {
         "splits": {name: len(ids[name]) for name in split.regions},
