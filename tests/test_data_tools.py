@@ -67,6 +67,28 @@ def test_scan_dataset_and_validate_data_quality_count_the_same_labels(tmp_path: 
     assert scan_result["labels_count"] == quality_result["total_labels"] == 3
 
 
+def test_scan_and_validate_report_a_reserved_stem_the_census_still_counted(tmp_path: Path):
+    """The census walks with a raw glob and counts a label named like a bucket's own provenance
+    stamp, unlike every bucket walk through prediction_documents; reserved_name_labels names it so
+    a caller does not read the difference as a disagreement."""
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir = root / "annotations" / "2-11-26"
+    labels_dir.mkdir(parents=True)
+    json_io.write_annotations(
+        labels_dir / "operating_point.json",
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 32, 32,
+    )
+    reserved_label = str(labels_dir / "operating_point.json")
+
+    scan_result = scan_dataset(str(root))
+    quality_result = validate_data_quality(str(root))
+
+    assert scan_result["reserved_name_labels"] == [reserved_label]
+    assert quality_result["reserved_name_labels"] == [reserved_label]
+
+
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     out = tmp_path / "splits"
     result = make_splits(str(data_dir), output_path=str(out), materialize=True)

@@ -541,6 +541,25 @@ def test_doctor_flags_an_unreadable_label_behind_a_confirmed_negative(tmp_path):
     assert any("IMG_S" in ln for ln in unreadable), res.stdout
 
 
+def test_doctor_flags_an_image_and_a_label_with_a_reserved_stem(tmp_path):
+    """A stem reserved for a prediction bucket's own provenance stamp is excluded from every
+    bucket walk, so it is invisible to those readers; the doctor's own ``rglob`` walk still sees
+    it and reports it, since data not brought in through ingest can still carry one."""
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    Image.new("RGB", (32, 32)).save(image_dir(root, date) / "operating_point.jpg")
+    json_io.write_annotations(
+        annotation_path(root, date, "operating_point"),
+        [Annotation(subject="catkin", geometry=BBox(1, 1, 9, 9))], 32, 32,
+    )
+
+    res = _run(root, file_layout=True)
+    assert res.returncode == 2, res.stdout
+    findings = _lines(res.stdout, "reserved for a prediction bucket")
+    assert any("operating_point.jpg" in ln for ln in findings), res.stdout
+    assert any("operating_point.json" in ln for ln in findings), res.stdout
+
+
 def test_review_baselines_are_not_counted_as_label_records(tmp_path):
     """The pre-review snapshots under an annotations dir's .original are copies, not labels:
     an image whose only file there is a snapshot still has no label record and trains on

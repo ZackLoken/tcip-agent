@@ -412,11 +412,20 @@ def detect_and_write_band_groups(
     (strategy 1) runs over whatever candidates it leaves unclaimed. No match under either -> those
     files are left exactly as independent as they are today (strategy 3, refuse-don't-guess).
 
-    Returns ``{"formed": [...], "refused": [...], "manifests": [...]}``.
+    A group whose own stem (the siblings' common prefix, not any one source file's stem) is
+    reserved for a prediction bucket's provenance stamp (``tcip_annotation.json_io.
+    is_sidecar_name``) is not written as a manifest: minting a logical image under that stem would
+    make its label indistinguishable from the stamp everywhere a bucket is walked. Its members are
+    left exactly as the standalone files they were, and the group is reported in
+    ``"reserved_name_skips"`` instead of ``"formed"``.
+
+    Returns ``{"formed": [...], "refused": [...], "manifests": [...], "reserved_name_skips": [...]}``.
     """
+    from tcip_annotation.json_io import is_sidecar_name
+
     d = Path(images_dir)
     if not d.is_dir():
-        return {"formed": [], "refused": [], "manifests": []}
+        return {"formed": [], "refused": [], "manifests": [], "reserved_name_skips": []}
 
     already_claimed: set[str] = set()
     for mp in sorted(d.glob(f"*{MANIFEST_EXT}")):
@@ -437,8 +446,14 @@ def detect_and_write_band_groups(
 
     formed: list[dict] = []
     manifests: list[str] = []
+    reserved_name_skips: list[dict] = []
     for group in (*explicit_found, *embedded_found):
         stem = group["stem"]
+        if is_sidecar_name(f"{stem}.json"):
+            reserved_name_skips.append(
+                {"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]}
+            )
+            continue
         try:
             mp = write_band_group_manifest(
                 d, stem, group["bands"],
@@ -450,4 +465,7 @@ def detect_and_write_band_groups(
         formed.append({"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]})
         manifests.append(str(mp))
 
-    return {"formed": formed, "refused": refused, "manifests": manifests}
+    return {
+        "formed": formed, "refused": refused, "manifests": manifests,
+        "reserved_name_skips": reserved_name_skips,
+    }

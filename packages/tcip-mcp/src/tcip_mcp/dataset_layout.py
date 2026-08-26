@@ -981,14 +981,17 @@ def subjects_on_date(
     """Distinct subjects that actually appear in the per-image label files on ``date``: the one
     per-date label scan, shared by ``subjects_with_labels`` and the GUI's subject selector.
 
-    Every sidecar-named file (a bucket's own provenance stamp) is excluded from the walk, so it
-    contributes no subject and never raises. Reads each remaining ``annotations/<date>/<stem>.json``
-    through ``reader`` (``json_io.read_annotations`` by default; a caller with its own memoized
-    reader, keyed by path plus mtime and size, passes it here instead of parsing the same files
-    twice), so
-    the subjects offered are the subjects genuinely labeled there, sorted. Raises
+    Enumerates ``annotations/<date>/`` through ``json_io.prediction_documents`` and reads each
+    document through ``reader`` (``json_io.read_annotations`` by default; a caller with its own
+    memoized reader, keyed by path plus mtime and size, passes it here instead of parsing the
+    same files twice), so the subjects offered are the subjects genuinely labeled there,
+    sorted. Raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when a present label file on this
-    date will not read; a missing ``annotations/<date>/`` directory reads as no subjects.
+    date will not read; a missing ``annotations/<date>/`` directory reads as no subjects. A label
+    whose filename is a bucket's own provenance stamp (``json_io.is_sidecar_name``) is neither read
+    nor raised over: it is excluded from the walk entirely, the same as everywhere a prediction
+    bucket is enumerated. Such a file is a data-state fact the doctor reports, not one this scan
+    surfaces.
     """
     from tcip_annotation import json_io
 

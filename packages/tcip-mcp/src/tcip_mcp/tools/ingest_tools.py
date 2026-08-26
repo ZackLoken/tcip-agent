@@ -16,17 +16,13 @@ from pathlib import Path
 
 from tcip_store import store
 
-from tcip_annotation.json_io import SIDECAR_FILENAMES
+from tcip_annotation.json_io import is_sidecar_name
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 from tcip_mcp.server import mcp
 
 logger = logging.getLogger(__name__)
-
-# A label file bearing one of these exact stems would be indistinguishable from a prediction
-# bucket's own provenance stamp; no image is ingested under one.
-_RESERVED_STAMP_STEMS = frozenset(name[: -len(".json")] for name in SIDECAR_FILENAMES)
 
 
 _DT_ORIGINAL = 0x9003  # EXIF DateTimeOriginal tag id
@@ -224,8 +220,13 @@ def ingest_images(
     Returns a manifest: ``{project_path, name, image_root, total, found, copied,
     moved, buckets, undated, skipped_collisions, reserved_name_skips, errors, unreadable_dates,
     move, band_groups}``, where ``unreadable_dates`` names each ingested file whose capture date
-    could not be read and the reason, and ``reserved_name_skips`` names each file not ingested
-    because its stem is reserved for a prediction bucket's own provenance stamp.
+    could not be read and the reason, and ``reserved_name_skips`` names each source file not
+    ingested because its own stem is reserved for a prediction bucket's own provenance stamp.
+    A band group whose *formed* stem (the siblings' common prefix, not any one source file's own
+    stem) is reserved the same way is not written as a manifest either, its members staying the
+    standalone files they were placed as; ``band_groups.reserved_name_skips`` names each one
+    (a group, not a single file, so it carries the same shape as ``band_groups.formed`` rather
+    than joining the file-level ``reserved_name_skips`` above).
     """
     from tcip_store import StoreError
 
@@ -275,9 +276,9 @@ def ingest_images(
     for src_path in sources:
         bucket, date_unreadable = _bucket_for(src_path, date_from)
         stem_key = (bucket, src_path.stem.lower())
-        if src_path.stem in _RESERVED_STAMP_STEMS:
-            # This exact stem is a bucket's own provenance stamp in every bucket
-            # (json_io.SIDECAR_FILENAMES), reserved so no bucket walk can mistake one for a label.
+        if is_sidecar_name(f"{src_path.stem}.json"):
+            # This stem is a bucket's own provenance stamp in every bucket (json_io.
+            # SIDECAR_FILENAMES), reserved so no bucket walk can mistake one for a label.
             reserved_name_skips.append({"stem": src_path.stem, "source": str(src_path)})
             continue
         dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
@@ -329,7 +330,9 @@ def ingest_images(
         else:
             buckets[bucket] = buckets.get(bucket, 0) + 1
 
-    band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
+    band_groups_result: dict = {
+        "formed": [], "refused": [], "manifests": [], "reserved_name_skips": [],
+    }
     if detect_band_groups:
         from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
@@ -340,6 +343,8 @@ def ingest_images(
                 band_groups_result["formed"].append({**g, "bucket": bucket})
             band_groups_result["refused"].extend(result["refused"])
             band_groups_result["manifests"].extend(result["manifests"])
+            for g in result["reserved_name_skips"]:
+                band_groups_result["reserved_name_skips"].append({**g, "bucket": bucket})
 
     return {
         "project_path": str(dest_root),
