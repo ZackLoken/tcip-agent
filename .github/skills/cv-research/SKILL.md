@@ -70,7 +70,7 @@ for the full contract; the seams you use here are:
   `check_model_contract` require just that your module trains (finite-gradient loss) and emits
   inference output the library scorers consume. You don't call it by hand: `launch_training` smokes
   it automatically (`preflight_config(smoke=True)` builds the model + runs the contract at the
-  *resolved* in_chans/num_classes/img_size before the thread spawns), so a broken builder fails the
+  *resolved* in_chans/num_classes/img_size before the training subprocess spawns), so a broken builder fails the
   launch instead of wasting a run. From inside a custom loop, `ctx.check_contract()` self-proves at
   the same resolved dims; prove it learns cheaply first with `ctx.overfit_check()` (voluntary,
   non-gating). For a task outside the ones `build_dataset` routes, pass `sample_batch=`, an
