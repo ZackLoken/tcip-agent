@@ -728,7 +728,7 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
 
 
 @mcp.tool()
-@audited
+@audited(scope_arg="image_path")
 def propose_annotations(
     image_path: str,
     engine: str = "sam",

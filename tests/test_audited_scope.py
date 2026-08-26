@@ -83,6 +83,46 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
     assert _rows_for(platform_root, "save_annotations") == []
 
 
+def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_against(
+    platform_root: Path, dataset_root: Path
+) -> None:
+    """A proposal run is scoped like its sibling ``accept_proposals``: to the dataset the image
+    belongs to, not the platform log, driven through a dotted ``module:factory`` engine so the
+    test needs no torch."""
+    from tcip_mcp.tools.vision_tools import propose_annotations
+
+    image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
+    result = propose_annotations(image_path=str(image), engine="tests.proposal_stub:factory")
+    assert "error" not in result, result
+
+    rows = _rows_for(dataset_root, "propose_annotations")
+    assert len(rows) == 1, _entries(dataset_root)
+    assert rows[0]["scope"] == str(dataset_root.resolve())
+    assert _rows_for(platform_root, "propose_annotations") == []
+
+
+def test_propose_annotations_against_a_file_under_no_images_directory_stays_platform_scoped(
+    platform_root: Path, tmp_path: Path
+) -> None:
+    """A location that resolves to no dataset is never guessed into one, for propose_annotations
+    just as for its sibling: the call still succeeds and stays a platform event."""
+    from tcip_mcp.tools.vision_tools import propose_annotations
+
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    image = loose / "IMG_0002.JPG"
+    Image.new("RGB", (100, 80)).save(image)
+
+    result = propose_annotations(image_path=str(image), engine="tests.proposal_stub:factory")
+    assert "error" not in result, result
+    assert result["staged"] is False
+
+    rows = _rows_for(platform_root, "propose_annotations")
+    assert len(rows) == 1
+    assert "scope" not in rows[0]
+    assert _entries(loose) == []
+
+
 def test_read_only_tool_records_in_the_platform_log_with_the_platform_entry_shape(
     platform_root: Path, dataset_root: Path
 ) -> None:
