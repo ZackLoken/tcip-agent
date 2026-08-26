@@ -344,6 +344,9 @@ def _evaluate_folder(
     bucket subdirectories (``images/<bucket>/``, the dataset layout), one level: a loose image
     beside a dated bucket still scores, a ``.bandgroup``-grouped capture scores as one logical
     image, and a folder nested inside a bucket is not itself a bucket, so it is not descended.
+    Two raw images sharing a stem with different extensions in one bucket collapse to the single
+    logical image the layout keeps for that stem, since one label document holds one record per
+    stem and cannot represent two.
     """
     from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 

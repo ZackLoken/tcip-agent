@@ -138,12 +138,14 @@ def _coco_image_annotations(
 ) -> tuple[list[dict], int, int]:
     """Annotations for a single image from a COCO dict, plus ``(img_w, img_h)``.
 
-    ``file_name`` matches exactly first; failing that, a manifest-named logical image (whose own
-    on-disk name is its ``.bandgroup`` manifest, not a name an externally authored COCO document
-    would carry) matches the recorded ``file_name`` whose own stem equals its stem.
+    ``file_name`` matches exactly first. When it names a ``.bandgroup`` manifest (whose own
+    on-disk name never appears verbatim in an externally authored COCO document), it also ties by
+    stem to the one recorded ``file_name`` that shares that stem; more than one recorded image
+    sharing the stem is an unresolvable ambiguity and raises rather than picking one. An empty or
+    absent ``file_name``, and a recorded image with an empty ``file_name``, never take part in the
+    stem tie.
     """
     img_record = None
-    stem_tie = None
     for img in coco.get("images", []):
         if image_id is not None and img.get("id") == image_id:
             img_record = img
@@ -151,10 +153,19 @@ def _coco_image_annotations(
         if file_name is not None and img.get("file_name") == file_name:
             img_record = img
             break
-        if (stem_tie is None and file_name is not None
-                and Path(img.get("file_name", "")).stem == Path(file_name).stem):
-            stem_tie = img
-    img_record = img_record or stem_tie
+    if img_record is None and file_name and file_name.endswith(".bandgroup"):
+        stem = Path(file_name).stem
+        stem_matches = [
+            img for img in coco.get("images", [])
+            if img.get("file_name") and Path(img["file_name"]).stem == stem
+        ]
+        if len(stem_matches) > 1:
+            raise ValueError(
+                f"{file_name}: {len(stem_matches)} recorded images share the stem {stem!r}, an "
+                "unresolvable ambiguity for a .bandgroup manifest lookup."
+            )
+        if stem_matches:
+            img_record = stem_matches[0]
     if img_record is None:
         return [], 0, 0
     img_id = img_record["id"]
