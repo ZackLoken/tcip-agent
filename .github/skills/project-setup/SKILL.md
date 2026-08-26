@@ -123,11 +123,12 @@ the format cannot be determined, `read_annotations` returns an error rather than
 
 ## 5. Split: `make_splits`
 
-Create leakage-free train/val/test splits with `make_splits` (group-aware, keeps sibling
-tiles of one source image in the same split). Non-destructive by default (writes stem
-manifests + stats); pass `materialize=True` to also lay out a
-`{train,val,test}/{images,labels}/` tree, with the platform's own per-image JSON labels
-(not YOLO's `.txt` format; `tcip-annotation` supports `{json, coco}` only).
+Create leakage-free train/val splits with `make_splits` (group-aware, keeps sibling
+tiles of one source image in the same split; a held-out test list is refused, since no launch
+path honours one). Non-destructive by default (writes stem manifests + stats); pass
+`materialize=True` to also lay out a `{train,val}/{images,labels}/` tree, with the platform's
+own per-image JSON labels (not YOLO's `.txt` format; `tcip-annotation` supports `{json, coco}`
+only).
 
 ## 6. Build a model, train, infer
 

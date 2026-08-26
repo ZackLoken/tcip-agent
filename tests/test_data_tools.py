@@ -91,6 +91,15 @@ def test_make_splits_bad_ratios(data_dir: Path):
     assert "error" in result
 
 
+def test_make_splits_train_and_val_not_summing_to_one_names_both_constraints(data_dir: Path):
+    """A caller carrying over the old three-way train_ratio with test_ratio at its new default
+    of 0 gets a message naming both standing constraints, not just the raw sum."""
+    result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, test_ratio=0.0)
+    assert "error" in result
+    assert "test_ratio" in result["error"]
+    assert "train_ratio" in result["error"] and "val_ratio" in result["error"]
+
+
 def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=3) -> Path:
     from PIL import Image
 
@@ -212,6 +221,7 @@ def test_make_splits_spatial_writes_strip_identity_manifest(tmp_path: Path):
     assert manifest["spatial"]["train_identities"] == train_ids
     assert manifest["labels_root"] is not None
     assert manifest["dataset_fingerprint"] is not None
+    assert set(manifest["spatial"]["requested_fractions"]) == {"train", "val"}
 
 
 def test_make_splits_spatial_refuses_a_nonzero_test_ratio(tmp_path: Path):
