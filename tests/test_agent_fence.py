@@ -283,8 +283,8 @@ def test_both_guards_agree_on_the_expected_verdict_per_shape_and_path(shape, pat
     """Both guards feed one classifier (the same-object assertion above), so equal verdicts
     follow once each shell's extractor finds a token; asserting the expected verdict rather than
     equality alone means a pair that both fail to extract a target cannot pass. The extractors
-    barely intersect (bash's sed -i/patch/dd of=/ln/install/rsync/find -fprint and the line
-    editors; PowerShell's .NET/stream-writer forms and the item-property cmdlets); those are
+    barely intersect (bash's patch/dd of=/ln/install/rsync/find -fprint and the line editors;
+    PowerShell's .NET/stream-writer forms and the item-property cmdlets); those are
     outside parity by construction, each covered by its own shell's tests. Iterating the fence
     declaration's paths is not claimed as coverage here: the classifier is one object, checked
     elsewhere, and these three path kinds exercise the extractors, not the declaration.
@@ -355,8 +355,7 @@ def test_guard_denies_moving_breeder_data(cmd):
     "cmd",
     [
         # a bare "mv" as a substring of a path or grep pattern (not statement position) must not
-        # trip the guard: the false-positive the _STMT anchoring on _MOVE_OP exists to prevent,
-        # mirroring _DELETE_OP's own anchoring.
+        # trip the guard, the same guarantee the delete-verb check gives its own leading token.
         "cat /c/proj/annotations/mv-notes.txt",
         "grep -rn mv /c/proj/annotations",
         "ls /c/proj/annotations/mv-backup",
@@ -422,7 +421,7 @@ def test_guard_fails_open_on_garbage_stdin():
         # find, the sharpest hole: Bash(find:*) is allow-listed, so only the guard stops this
         "find /c/proj/annotations -name '*.json' -delete",
         "find /c/proj/annotations -name '*.json' -exec rm {} \\;",
-        # every other verb _DELETE_OP treats as unconditionally destructive, reached the same way
+        # every other verb the delete check treats as unconditionally destructive, reached the same way
         "find /c/proj/annotations -exec rmdir {} \\;",
         "find /c/proj/annotations -exec unlink {} \\;",
         "find /c/proj/annotations -exec shred {} \\;",
@@ -900,5 +899,101 @@ def test_guard_reads_a_subshells_verb_as_a_verb():
     # A subshell's parentheses are segment boundaries, so the verb inside one is read as a verb
     # rather than swallowed into an unrecognized leading token.
     r = _run_guard("(cp evil.py packages/tcip-mcp/x.py)")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_reads_a_brace_groups_verb_as_a_verb():
+    # A brace group's braces are segment boundaries too, the same as a subshell's parentheses.
+    r = _run_guard("{ cp evil.py packages/tcip-mcp/x.py; }")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_admits_a_brace_groups_writer_to_a_free_destination():
+    r = _run_guard("{ cp evil.py /tmp/scratch.txt; }")
+    assert r.returncode == 0, r.stdout
+
+
+def test_guard_reads_a_destination_past_a_command_substitution():
+    # $( ... ) stays inside the segment that encloses it rather than opening a fresh statement,
+    # so the real destination that follows it is still read and classified.
+    r = _run_guard("cp a $(echo ignored) packages/tcip-mcp/server.py")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_admits_a_command_substitution_ahead_of_a_free_destination():
+    r = _run_guard("cp a $(echo ignored) /tmp/scratch.txt")
+    assert r.returncode == 0, r.stdout
+
+
+def test_guard_denies_an_unbalanced_command_substitution():
+    # No closing paren leaves no reliable parse to judge, so the guard denies by name rather
+    # than guessing where the substitution would have ended.
+    r = _run_guard("cp a $(echo unterminated packages/tcip-mcp/server.py")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+def test_guard_treats_an_escaped_newline_as_a_continuation_not_a_break():
+    # A backslash immediately before a newline joins the two lines into one statement, so a
+    # write on the continued line is still read as part of the same segment as its verb.
+    r = _run_guard("touch \\\npackages/tcip-mcp/x.py")
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "nice -n 5 cp a packages/tcip-mcp/server.py",
+        "nice -5 cp a packages/tcip-mcp/server.py",
+        "env -i cp a packages/tcip-mcp/server.py",
+        "env -u PATH cp a packages/tcip-mcp/server.py",
+        "command -p cp a packages/tcip-mcp/server.py",
+        "command -v cp a packages/tcip-mcp/server.py",
+        "time -p cp a packages/tcip-mcp/server.py",
+    ],
+)
+def test_guard_denies_a_writer_run_through_a_wrappers_own_option(cmd):
+    # Each wrapper's own option is consumed before the verb underneath is read, so a writer
+    # cannot hide behind the wrapper's flag.
+    r = _run_guard(cmd)
+    assert r.returncode == 2, r.stdout
+    assert "deny" in r.stdout
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "nice -n 5 cp a /tmp/scratch.txt",
+        "env -i cp a /tmp/scratch.txt",
+        "command -p cp a /tmp/scratch.txt",
+        "time -p cp a /tmp/scratch.txt",
+    ],
+)
+def test_guard_admits_a_writer_run_through_a_wrappers_own_option_to_a_free_destination(cmd):
+    r = _run_guard(cmd)
+    assert r.returncode == 0, r.stdout
+
+
+def test_guard_denies_a_writer_wrapped_through_env_or_busybox_or_command_to_an_editor():
+    # A wrapper hides the editor the same way it hides a writer, so both are read through the
+    # same stripped token list rather than a raw-string regex.
+    for cmd in ("env ed packages/tcip-mcp/server.py",
+                "busybox ed packages/tcip-mcp/server.py",
+                "command ed packages/tcip-mcp/server.py",
+                "env rm -rf packages/tcip-mcp/server.py"):
+        r = _run_guard(cmd)
+        assert r.returncode == 2, (cmd, r.stdout)
+        assert "deny" in r.stdout
+
+
+def test_bash_guard_windows_separator_parity():
+    # An unquoted backslash is not a path separator to Git Bash, which drops it, so the argument
+    # names a flat file, not a path into packages/; a quoted one is preserved and does name it.
+    assert _run_guard("cp a packages\\x.py").returncode == 0
+    r = _run_guard("cp a 'packages\\x.py'")
     assert r.returncode == 2, r.stdout
     assert "deny" in r.stdout
