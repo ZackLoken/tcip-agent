@@ -178,6 +178,27 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     assert "tiling=" in r["error"]
 
 
+def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
+    """A present, unreadable label document raised out of run_full_frame_evaluation is this
+    tool's own {"error": ...} shape too, not a raise through the MCP boundary."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    def _refuse(*a, **kw):
+        raise UnreadableLabelDocument("labels/2026-03-02/IMG_0001.json does not decode as JSON")
+
+    monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _refuse)
+    images_dir, labels_dir = _det_dataset(tmp_path)
+    ckpt = tmp_path / "model.pt"
+    ckpt.write_bytes(b"x")
+
+    r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                       subject="catkin", use_tiled_inference=True)
+    assert "error" in r
+    assert "IMG_0001.json" in r["error"]
+
+
 def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
     """Honoring an explicit low max_dets verbatim reopens a truncation hole unless it's at least
     detectable. A caller-explicit cap that actually binds on real detections must be visible in

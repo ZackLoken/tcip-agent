@@ -52,7 +52,11 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
     """``(width, height)`` the labels record, or ``None`` when they record none.
 
     The frame the boxes were drawn in, straight from the annotation a human produced, the only
-    reference that can catch a reader disagreeing with the authoring tool.
+    reference that can catch a reader disagreeing with the authoring tool. The json branch reads
+    through :func:`~tcip_mcp.pipelines.data.splits.image_extent_from_labels`, the same function a
+    split derives its own frame from, so the two agree by construction rather than each parsing
+    the label file on its own; a present, unreadable label raises
+    :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than reading as no frame.
     """
     if coco is not None:
         images = coco.get("images", []) if isinstance(coco, dict) else []
@@ -64,17 +68,9 @@ def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
         return None
     if fmt not in ("", "json"):
         return None  # only the canonical per-image JSON carries its own frame
-    path = Path(labels_dir) / f"{stem}.json"
-    if not path.exists():
-        return None
-    try:
-        import json
+    from tcip_mcp.pipelines.data.splits import image_extent_from_labels
 
-        data = json.loads(path.read_text(encoding="utf-8")) or {}
-    except Exception:  # noqa: BLE001, an unreadable label file is the reader's problem, not ours
-        return None
-    w, h = int(data.get("width", 0) or 0), int(data.get("height", 0) or 0)
-    return (w, h) if w > 0 and h > 0 else None
+    return image_extent_from_labels(labels_dir, stem)
 
 
 def resolved_classes_path(dataset_dir) -> Path | None:

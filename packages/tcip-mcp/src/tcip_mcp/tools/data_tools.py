@@ -384,13 +384,17 @@ def make_splits(
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.splits import (
         group_balanced_split,
         count_label_lines,
         resolve_group_key_fn,
     )
 
-    scan = _scan_dataset(folder_path)
+    try:
+        scan = _scan_dataset(folder_path)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     image_map = {Path(p).stem: p for p in scan["images"]}
     label_map = {Path(p).stem: p for p in scan["labels"]}
 
@@ -406,9 +410,12 @@ def make_splits(
     if stratified:
         # count_label_lines is JSON-aware; raw count_lines would count pretty-printed JSON
         # lines as annotations (a {objects: []} negative reads as ~5 foreground objects).
-        annotation_counts = {
-            s: count_label_lines(Path(label_map[s]).parent, s) for s in stems
-        }
+        try:
+            annotation_counts = {
+                s: count_label_lines(Path(label_map[s]).parent, s) for s in stems
+            }
+        except UnreadableLabelDocument as exc:
+            return {"error": str(exc)}
 
     try:
         group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
@@ -524,10 +531,14 @@ def _make_spatial_split(
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
+    from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.splits import image_extent_from_labels, spatial_strip_split
     from tcip_mcp.pipelines.data.tiling import tile_positions, tile_within_extent
 
-    scan = _scan_dataset(folder_path)
+    try:
+        scan = _scan_dataset(folder_path)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     image_map = {Path(p).stem: p for p in scan["images"]}
     label_map = {Path(p).stem: p for p in scan["labels"]}
     stems = sorted(set(image_map) & set(label_map))
@@ -537,7 +548,10 @@ def _make_spatial_split(
                          "run's own automatic route."}
     stem = stems[0]
     labels_root = Path(label_map[stem]).parent
-    extent = image_extent_from_labels(labels_root, stem)
+    try:
+        extent = image_extent_from_labels(labels_root, stem)
+    except UnreadableLabelDocument as exc:
+        return {"error": str(exc)}
     if extent is None:
         return {"error": f"{stem}'s label file carries no width/height; cannot derive a spatial "
                          "split without the image extent."}
