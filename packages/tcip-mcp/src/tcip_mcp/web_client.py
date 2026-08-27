@@ -52,7 +52,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
 _PORT_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".txt")
-"""The backend's port handoff, one document under the platform state root."""
+"""The backend's port handoff, one document under the workspace root."""
 
 BACKEND_PORT_STORE = "backend_port"
 _PORT_PARTS = ("web_port",)

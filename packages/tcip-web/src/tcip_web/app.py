@@ -46,6 +46,7 @@ async def _lifespan(_app: FastAPI):
     'interrupted' (a record, not a resumable job; see ``jobstore``).
     """
     log_exposure_opt_in()
+    bind_startup_root()
     # Size GDAL's block cache once per process, at the entry point, never at source construction.
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
@@ -84,17 +85,51 @@ async def _lifespan(_app: FastAPI):
 # At import, not in the lifespan: a route may be exercised against this app without one running,
 # and a route that reaches a store with no backend bound would refuse rather than write.
 bind_default()
-# At import too, ahead of the lifespan's rehydrate: every way this app is served (python -m
-# tcip_web, bare uvicorn, --lifespan off, the reloader's child) binds the same root this way.
-from tcip_mcp.project_paths import pin_project_root  # noqa: E402
 
-pin_project_root(from_marker=True)
+_startup_root_bound = False
+
+
+def bind_startup_root() -> None:
+    """Pin this process's platform-state root once, a served app's own responsibility rather
+    than an importer's.
+
+    Reached from :class:`_BindStartupRootMiddleware` (ahead of every route, for a request
+    served before the lifespan has run) and from the lifespan's own startup (ahead of its
+    rehydrate), so every way this app is served (``python -m tcip_web``, bare uvicorn,
+    ``--lifespan off``, the reloader's child) pins the same root before anything resolves one,
+    while a process that only imports this module (the test suite at collection, a repo
+    script) never calls this and pins nothing.
+    """
+    global _startup_root_bound
+    if _startup_root_bound:
+        return
+    from tcip_mcp.project_paths import pin_project_root
+
+    pin_project_root(from_marker=True)
+    _startup_root_bound = True
+
+
+class _BindStartupRootMiddleware:
+    """ASGI middleware that calls :func:`bind_startup_root` ahead of every request.
+
+    Covers a request served with the lifespan disabled or never started (``--lifespan off``,
+    a ``TestClient`` used outside its context manager), where the lifespan's own call never
+    runs. Idempotent past the first call, so this costs nothing on every later request.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] in ("http", "websocket"):
+            bind_startup_root()
+        await self.app(scope, receive, send)
+
 
 app = FastAPI(title="TCIP Pipeline", version="0.1.0", lifespan=_lifespan)
 
-# CORS is not enabled by default: browser is expected to hit the same origin
-# via the Vite dev proxy. If we ever serve the frontend elsewhere, add
-# fastapi.middleware.cors.CORSMiddleware here.
+# CORS is not enabled by default: the browser hits the same origin via the Vite dev proxy.
+# Serving the frontend elsewhere would add fastapi.middleware.cors.CORSMiddleware here.
 
 # Exposure is decided per connection from its arrival address and the Host must name this
 # backend (tcip_web.trust_boundary); the WebSocket routes apply the Origin policy before accept.
@@ -103,6 +138,10 @@ app.add_middleware(TrustBoundaryMiddleware)
 # Compress JSON/text responses above ~1KB. The /api/review/matches payload scales with
 # polygon count (dense images ship high-hundreds-of-KB to multi-MB uncompressed JSON).
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Added last: Starlette's add_middleware makes the most recently added the outermost, so this
+# pin resolves ahead of every other middleware and route.
+app.add_middleware(_BindStartupRootMiddleware)
 
 # ── Tab routes ──
 from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
@@ -292,6 +331,9 @@ def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
     could not be used (a store refusal, a lock timeout, or a marker naming a project that is
     not adoptable), never both. A repin's ``platform_root_disagreement`` says when the event's
     own name differed from what the marker actually named.
+
+    Runs on the calling thread; the route awaits this in a worker thread so the marker read
+    and the rehydrates below never block the event loop.
     """
     from tcip_mcp import workspace
     from tcip_mcp.project_paths import repin_platform_root
@@ -299,10 +341,8 @@ def _repin_from_active_project_event(sent_name: Any) -> dict[str, Any]:
     try:
         found = workspace.active_project_if_present(create=False)
         if found is None:
-            name = workspace.read_active_project(create=False)
-            if name:
-                workspace.adoptable_project_root(name)  # raises, naming why it is not adoptable
-            return {}
+            problem = workspace.marker_problem(create=False)
+            return {"platform_root_problem": problem} if problem else {}
         marker_name, marker_root = found
     except Exception as exc:  # noqa: BLE001 - reported in the response, never raised
         return {"platform_root_problem": str(exc)}
@@ -365,7 +405,11 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
         await _gui_store.mutate(mutation)
     root_fields: dict[str, Any] = {}
     if event.event_type == PANEL_EVENT_ACTIVE_PROJECT_CHANGED:
-        root_fields = _repin_from_active_project_event(event.data.get("name"))
+        import asyncio
+
+        root_fields = await asyncio.to_thread(
+            _repin_from_active_project_event, event.data.get("name")
+        )
     await _broadcast_to_panel(panel, payload)
     return {"status": "ok", "panel": panel, "event_type": event.event_type, **root_fields}
 

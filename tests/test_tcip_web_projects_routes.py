@@ -276,6 +276,19 @@ def test_list_route_reports_the_recorded_site(client, workspace_dir):
     assert by_name["hazelnut_catkin_recorded"]["site"] == "north orchard"
 
 
+def test_list_reports_the_current_platform_root_after_a_repin(client, workspace_dir):
+    """platform_root/platform_root_source answer the root this backend just repinned to, not
+    whatever pin_project_root last decided at process startup."""
+    from tcip_mcp import workspace
+
+    proj = _make_project(workspace_dir, "hazelnut_catkin_valley", dates=["2026-02-11"])
+
+    workspace.set_active_project("hazelnut_catkin_valley")
+    after = client.get("/api/projects").json()
+    assert after["platform_root"] == str(proj.resolve())
+    assert after["platform_root_source"] == "adopted"
+
+
 def test_active_returns_null_when_marker_points_at_missing_project(client, workspace_dir):
     from tcip_mcp import workspace
 

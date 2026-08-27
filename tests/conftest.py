@@ -93,15 +93,24 @@ def _restore_platform_root_env():
 
     ``set_active_project`` repins ``TCIP_PROJECT_ROOT`` in-process (so a project's audit /
     experiments / registry co-locate under it). Since pytest runs in one process, a test
-    that adopts a tmp project would otherwise leak that now-deleted root into later tests.
-    Snapshot and restore the var around every test.
+    that adopts a tmp project would otherwise leak that now-deleted root, and the
+    :class:`~tcip_mcp.project_paths.RootBinding` naming it, into later tests. Snapshot and
+    restore both the var and the binding around every test.
     """
+    from tcip_mcp import project_paths
+
     saved = os.environ.get("TCIP_PROJECT_ROOT")
+    saved_binding = project_paths.root_binding()
     yield
     if saved is None:
         os.environ.pop("TCIP_PROJECT_ROOT", None)
     else:
         os.environ["TCIP_PROJECT_ROOT"] = saved
+    # getattr, not a plain import: a fail-before run against a tree that predates
+    # restore_binding must still collect every other test in this file.
+    restore = getattr(project_paths, "restore_binding", None)
+    if restore is not None:
+        restore(saved_binding)
 
 
 @pytest.fixture

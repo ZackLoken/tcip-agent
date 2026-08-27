@@ -237,9 +237,10 @@ def set_active_project(name: str) -> dict:
     creating anything, so any safely-named project is adoptable, conforming or not.
 
     The notification also carries whether the web backend repinned its own platform-state
-    root on it (``backend_repinned``) or could not (``backend_root_problem``): when the
-    backend is down or the delivery fails, both are ``None``, since it will bind from the
-    marker at its own next start regardless.
+    root on it (``backend_repinned``, a bool), the root it repinned to (``backend_platform_root``),
+    or why it could not (``backend_root_problem``): when the backend is down or the delivery
+    fails, ``backend_repinned`` is ``False`` and the other two are ``None``, since it will bind
+    from the marker at its own next start regardless.
 
     Args:
         name: The workspace project to make active.
@@ -257,12 +258,14 @@ def set_active_project(name: str) -> dict:
         "app", PANEL_EVENT_ACTIVE_PROJECT_CHANGED, {"name": name, "project_path": str(proj)}
     )
     response = delivery.get("response") or {}
+    backend_platform_root = response.get("platform_root")
     return {
         "name": name,
         "project_path": str(proj),
         "marker": str(marker),
         "gui_notified": bool(delivery.get("delivered")),
-        "backend_repinned": response.get("platform_root"),
+        "backend_repinned": backend_platform_root is not None,
+        "backend_platform_root": backend_platform_root,
         "backend_root_problem": response.get("platform_root_problem"),
         "recent_activity": _recent_activity(str(proj)),
     }
