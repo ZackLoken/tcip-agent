@@ -231,7 +231,10 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     directory's hash, so a manifest draw never addresses the lock a whole-directory draw locked,
     and the evidence records the swept universe under ``label_stems.calibration`` (with
     ``stated_values.split_manifest_dir``) instead of the whole directory under
-    ``label_dirs.calibration``.
+    ``label_dirs.calibration``. ``evidence`` also carries ``calibration_stems`` (the swept stem
+    list, every calibration) and, under a manifest, ``excluded``
+    (``calibration_universe_from_manifest``'s own ``excluded_training_stems``/
+    ``excluded_unassigned_stems``).
     """
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
@@ -488,8 +491,8 @@ def force_redraw_cal_holdout_split(
     ``redraw_history`` with its policy, seed, and the old and new split's content hashes, so a
     redraw-until-it-passes pattern is visible on review even though nothing here enforces that a
     reason differ from a prior one; the old and new split membership itself is recorded in the
-    audit log alongside the reason, not in ``redraw_history``; the defense is a reviewable audit
-    trail, not an automatic block.
+    audit log alongside the reason (and, when given, ``split_manifest_dir``), not in
+    ``redraw_history``; the defense is a reviewable audit trail, not an automatic block.
 
     Provide either ``labels_dir`` (the identity is derived as ``dataset_hash(labels_dir)``, and
     its stems are re-scanned) or ``identity_hash`` directly (e.g. a review-reference hash, in
@@ -509,8 +512,10 @@ def force_redraw_cal_holdout_split(
         images_dir: Images for ``labels_dir``. When given, stems are the same labels-intersect-
             images-on-disk universe ``run_inference``'s calibration uses, a stem
             whose image was deleted/renamed never enters the redraw's stem universe. Omitted ->
-            every labeled stem is used regardless of whether an image still exists for it,
-            for a caller that has no images directory to check against.
+            every labeled stem is used regardless of whether an image still exists for it, for a
+            caller that has no images directory to check against; required alongside
+            ``split_manifest_dir``, whose universe must be the same one a manifest-restricted
+            calibration draws.
         identity_hash: The locked split's identity hash directly.
         group_by: New grouping policy, ``"tile_prefix"`` / ``"stem"`` (ignored if
             ``group_key_map`` is given). ``None`` (default) resolves to ``"tile_prefix"`` when
@@ -546,6 +551,10 @@ def force_redraw_cal_holdout_split(
         if not subject:
             return {"error": "split_manifest_dir requires subject: the manifest's own subject "
                              "must be checked against the door's."}
+        if not images_dir:
+            return {"error": "split_manifest_dir requires images_dir: a labels-only universe "
+                             "can include a stem whose image is gone, a lock the redraw would "
+                             "address that no manifest-restricted calibration ever draws."}
         if group_by is not None or group_key_map is not None:
             return {"error": f"split_manifest_dir={split_manifest_dir!r} conflicts with "
                              "group_by/group_key_map: the manifest's own grouping policy governs "
@@ -942,7 +951,16 @@ def run_inference(
         )
         same_images = calibration_images_dir is None or (
             images_dir is not None and Path(calibration_images_dir) == Path(images_dir))
-        if same_images and inf_stems and set(inf_stems) == cal_label_stems:
+        # A manifest's own calibration universe is a held-out subset of the labelled directory,
+        # so inferring the whole directory is still the same labelled set the calibration drew.
+        if split_manifest_dir is not None:
+            comparable = bool(
+                same_images and inf_stems and cal_label_stems
+                and cal_label_stems <= set(inf_stems)
+            )
+        else:
+            comparable = bool(same_images and inf_stems and set(inf_stems) == cal_label_stems)
+        if comparable:
             target_hash, cross_dataset_check = dataset_hash(calibration_labels_dir, stems=inf_stems), "same-labeled-set"
         else:
             target_hash, cross_dataset_check = None, "not-comparable-unlabeled-target"
@@ -1642,6 +1660,7 @@ def export_predictions(
     trait: str | None = None,
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    split_manifest_dir: str | None = None,
     experiment_id: str | None = None,
     overwrite: bool = False,
     acknowledge_unvalidated: bool = False,
@@ -1740,6 +1759,9 @@ def export_predictions(
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating
             point (``images_dir`` regime only; not accepted with ``raster_path``, see ``trait``).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        split_manifest_dir: Restrict calibration to one capture date's held-out side of a split
+            manifest (forwarded to ``run_inference``; see its own doc), so a manifest-restricted
+            calibration's evidence can earn a validation record through this door.
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
         overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
@@ -1850,7 +1872,7 @@ def export_predictions(
         tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
         calibration_labels_dir=calibration_labels_dir, calibration_images_dir=calibration_images_dir,
-        experiment_id=experiment_id,
+        split_manifest_dir=split_manifest_dir, experiment_id=experiment_id,
     )
     if "error" in result:
         return result
@@ -1934,6 +1956,7 @@ def tabulate_counts(
     postprocess: str = "nms",
     calibration_labels_dir: str | None = None,
     calibration_images_dir: str | None = None,
+    split_manifest_dir: str | None = None,
     experiment_id: str | None = None,
     acknowledge_unvalidated: bool = False,
     predictions_dir: str | None = None,
@@ -1995,6 +2018,9 @@ def tabulate_counts(
         postprocess: Cross-tile merge, "nms" or "nmm".
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
+        split_manifest_dir: Restrict calibration to one capture date's held-out side of a split
+            manifest (forwarded to ``run_inference``; see its own doc), so a manifest-restricted
+            calibration's evidence can earn a validation record through this door.
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
         acknowledge_unvalidated: Write the count CSV even when the operating point is unvalidated,
@@ -2048,6 +2074,7 @@ def tabulate_counts(
         trait=trait,
         calibration_labels_dir=calibration_labels_dir,
         calibration_images_dir=calibration_images_dir,
+        split_manifest_dir=split_manifest_dir,
         experiment_id=experiment_id,
     )
     if "error" in result:

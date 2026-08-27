@@ -91,6 +91,7 @@ def test_calibration_universe_from_manifest_excludes_a_stem_not_present(tmp_path
 
 
 def test_calibration_universe_from_manifest_refuses_fewer_than_two_groups(tmp_path: Path):
+    """The refusal names a remedy: a different draw, or the whole-directory calibration."""
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
 
     root = _two_date_dataset(tmp_path / "ds")
@@ -98,7 +99,7 @@ def test_calibration_universe_from_manifest_refuses_fewer_than_two_groups(tmp_pa
     val_this_date = [i.split("/", 1)[1] for i in manifest["splits"]["val"]
                      if i.startswith(f"{DATES[0]}/")]
 
-    with pytest.raises(ValueError, match="group"):
+    with pytest.raises(ValueError, match="split_manifest_dir"):
         calibration_universe_from_manifest(manifest, DATES[0], present=val_this_date[:1])
 
 
@@ -326,6 +327,23 @@ def test_force_redraw_manifest_requires_subject(tmp_path: Path):
     assert "error" in result and "subject" in result["error"]
 
 
+def test_force_redraw_manifest_requires_images_dir(tmp_path: Path):
+    """A labels-only universe can include a stem whose image is gone, a lock the redraw would
+    address that no manifest-restricted calibration ever draws; refuse rather than address it."""
+    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+
+    result = force_redraw_cal_holdout_split(
+        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
+        split_manifest_dir=str(out), subject=SUBJECT, reason="test redraw",
+    )
+
+    assert "error" in result and "images_dir" in result["error"]
+
+
 def test_force_redraw_refuses_a_moved_images_root_by_name(tmp_path: Path):
     from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
 
@@ -342,3 +360,35 @@ def test_force_redraw_refuses_a_moved_images_root_by_name(tmp_path: Path):
     )
 
     assert "error" in result and "images_root" in result["error"]
+
+
+def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(tmp_path: Path):
+    """With images_dir given, a manifest redraw's universe excludes a held-out member whose
+    image is gone, the same universe a manifest-restricted calibration would draw, so the redraw
+    addresses that same lock rather than a second, unreachable one."""
+    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
+    from tcip_mcp.pipelines.resolution import dataset_hash
+    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+
+    root = _two_date_dataset(tmp_path / "ds", stems=("a", "b", "c", "d", "e", "f", "g", "h"))
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    val_this_date = [i.split("/", 1)[1] for i in manifest["splits"]["val"]
+                    if i.startswith(f"{DATES[0]}/")]
+    missing = val_this_date[0]
+    (root / "images" / DATES[0] / f"{missing}.jpg").unlink()
+
+    present, _ = label_image_stems(
+        str(root / "annotations" / DATES[0]), str(root / "images" / DATES[0]))
+    expected_universe, _gb, _gkm, _excl = calibration_universe_from_manifest(
+        manifest, DATES[0], present)
+    expected_hash = dataset_hash(str(root / "annotations" / DATES[0]), stems=expected_universe)
+
+    result = force_redraw_cal_holdout_split(
+        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
+        images_dir=str(root / "images" / DATES[0]), split_manifest_dir=str(out),
+        subject=SUBJECT, reason="test redraw",
+    )
+
+    assert "error" not in result
+    assert result["identity_hash"] == expected_hash
