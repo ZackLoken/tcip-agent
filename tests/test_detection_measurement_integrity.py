@@ -1198,7 +1198,7 @@ def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_ca
             "results": [{"image": img, "width": 100, "height": 100,
                          "boxes": [], "scores": [], "labels": [], "count": 0}],
             "checkpoint_sha256": sha,
-            **calibrated_run_fields(labels_dir=tmp_path, tiled=False),
+            **calibrated_run_fields(labels_dir=tmp_path, tiled=False, checkpoint_sha256=sha),
         }
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)

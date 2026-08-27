@@ -394,3 +394,72 @@ def test_registration_digest_and_load_digest_agree(tmp_path, monkeypatch):
 
     checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
     assert checkpoint.sha256 == reg["sha256"]
+
+
+# Rail 3: a sweep record edited after the run is refused by _calibration_evidence through
+# export_predictions, naming both digests.
+
+def _stand_in_calibration(monkeypatch, itools, labels_dir):
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tests._dense_op_fixtures import dense_records
+
+    n_images, objects = 20, 80
+    inputs = {
+        "dataset_hash": "H",
+        "calibration_records": dense_records(n_images=n_images, objects_per_image=objects,
+                                             id_prefix="c", fp_pattern=[1] * n_images, score=0.9,
+                                             fp_score=0.05),
+        "holdout_records": dense_records(n_images=n_images, objects_per_image=objects,
+                                         id_prefix="h", shift=5.0, fp_pattern=[1] * n_images,
+                                         score=0.9, fp_score=0.05),
+        "tiled": False, "tile_size": None, "tile_size_source": "default",
+        "staged_conf_floor": 0.01,
+    }
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
+                "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
+
+
+def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path, monkeypatch):
+    import tcip_mcp.tools.inference_tools as itools
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt))
+    images_dir, _ = _images(tmp_path)
+    _stand_in_calibration(monkeypatch, itools, tmp_path)
+
+    real_verified = itools._run_inference_verified
+    captured: dict = {}
+
+    def _spy(*a, **kw):
+        result = real_verified(*a, **kw)
+        captured.clear()
+        captured.update(result)
+        return result
+
+    monkeypatch.setattr(itools, "_run_inference_verified", _spy)
+
+    out = tmp_path / "preds"
+    r = itools.export_predictions(str(ckpt), str(images_dir), str(out), trait="catkin",
+                                  calibration_labels_dir=str(tmp_path))
+    assert "error" not in r, r
+
+    from tcip_store import store
+
+    identity = captured["calibration_evidence_key"]
+    key = itools.confidence_sweep_key(identity)
+    body = store.read(key)
+    body["calibration_evidence"]["inputs"]["dataset_hash"] = "tampered"
+    store.replace(key, body)
+
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: dict(captured))
+    out2 = tmp_path / "preds2"
+    refused = itools.export_predictions(str(ckpt), str(images_dir), str(out2), trait="catkin",
+                                        calibration_labels_dir=str(tmp_path))
+    assert "error" in refused
+    assert identity in refused["error"]
+    assert not out2.exists()

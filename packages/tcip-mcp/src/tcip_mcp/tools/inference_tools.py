@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path, PurePosixPath
 
@@ -86,6 +87,24 @@ def confidence_sweep_path(inputs_hash: str) -> Path:
     return project_root().joinpath(
         *_SweepArtifactLocator().relative_path(key.root, key.parts).parts
     )
+
+
+def confidence_sweep_identity(body: dict) -> str:
+    """The sha256 identity of a confidence-sweep record's whole body, over the exact bytes the
+    store writes for it (``RECORD_JSON.encode``, the codec's own check of what the body carries).
+
+    The writer takes the key a record is written under from this function, and the reader
+    recomputes it over what was read back and compares: two calibrations differing in any byte
+    the count gate would run over now differ in identity, and a record edited after the run no
+    longer matches the digest the run's own response carried. The full sixty-four hex characters,
+    never truncated: a truncated key under ``last_writer_wins`` would let two legitimate bodies
+    sharing a prefix overwrite each other.
+    """
+    return _sha256_of_bytes(RECORD_JSON.encode(body))
+
+
+def _sha256_of_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def _recorded_training_id_map(predictor) -> dict | None:
@@ -1079,34 +1098,34 @@ def _run_inference_verified(
                 manifest_excluded["excluded_validation_stems"])
             extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
         # The full sweep can be large, persist it and return the path (provenance emits has_sweep).
-        # Content-addressed by every dimension the sweep depends on, never under-keyed.
+        # The record's own body is its identity, so a curve differing from a prior one is never lost.
+        sweep_body = {
+            "trait": trait,
+            "dataset_hash": cal_hash,
+            "checkpoint_sha256": identity["sha256"],
+            "predictor_path": {
+                "tile": resolved_tile_bool, "tile_size": resolved_tile,
+                "overlap": resolved_overlap, "postprocess": postprocess,
+                "global_nms_iou": applied_nms_iou, "max_dets": applied_max_dets,
+            },
+            "sweep": conf_param.sweep,
+            "calibration_evidence": evidence,
+        }
         try:
-            import hashlib
-            import json as _json
+            sweep_identity = confidence_sweep_identity(sweep_body)
+        except (TypeError, ValueError) as exc:
+            return {"error": f"the operating-point sweep for trait {trait!r} could not be kept "
+                             f"(its body cannot be recorded): {exc}"}
+        # The evidence rides in the sweep artifact, read back by identity, never on this response.
+        from tcip_store import store
 
-            from tcip_store import store
-
-            sweep_key = {
-                "trait": trait,
-                "dataset_hash": cal_hash,
-                "checkpoint_sha256": identity["sha256"],
-                "predictor_path": {
-                    "tile": resolved_tile_bool, "tile_size": resolved_tile,
-                    "overlap": resolved_overlap, "postprocess": postprocess,
-                    "global_nms_iou": applied_nms_iou, "max_dets": applied_max_dets,
-                },
-            }
-            body_hash = hashlib.sha256(
-                _json.dumps(sweep_key, sort_keys=True, default=str).encode()
-            ).hexdigest()[:16]
-            # The evidence rides in the sweep artifact, read back by identity, never on this response.
-            store.replace(confidence_sweep_key(body_hash),
-                          {**sweep_key, "sweep": conf_param.sweep,
-                           "calibration_evidence": evidence})
-            extra["sweep_path"] = str(confidence_sweep_path(body_hash))
-            extra["calibration_evidence_key"] = body_hash
+        try:
+            store.replace(confidence_sweep_key(sweep_identity), sweep_body)
         except Exception:
             logger.warning("could not persist operating-point sweep", exc_info=True)
+        else:
+            extra["sweep_path"] = str(confidence_sweep_path(sweep_identity))
+            extra["calibration_evidence_key"] = sweep_identity
     else:
         # Raw inference has no per-dataset calibration: the model already carries score_threshold as
         # its in-model conf; the bundle stamps it validated_against=false so the un-trustworthiness of
@@ -1265,14 +1284,28 @@ def _calibration_evidence(result: dict) -> dict | None:
 
     Read rather than carried on the run's own response: the records are the largest thing a
     calibration produces, and only a door earning a validation record has any use for them.
+
+    The record read back is re-encoded and its digest compared against ``identity`` (the run's
+    own carried key, which is also its identity, see :func:`confidence_sweep_identity`); a
+    difference raises ``ValueError`` naming both, since the evidence the count gate would run
+    over is then not what this run wrote. An absent record still returns ``None``.
     """
     identity = result.get("calibration_evidence_key")
     if not identity:
         return None
     from tcip_store import store
 
-    return (store.read(confidence_sweep_key(identity), default=None) or {}).get(
-        "calibration_evidence")
+    body = store.read(confidence_sweep_key(identity), default=None)
+    if body is None:
+        return None
+    recomputed = confidence_sweep_identity(body)
+    if recomputed != identity:
+        raise ValueError(
+            f"the confidence-sweep record under {identity!r} does not match the digest this "
+            f"run's own response carried (recomputed {recomputed!r}): the evidence the count "
+            "gate would run over is not what this run wrote."
+        )
+    return body.get("calibration_evidence")
 
 
 def _open_count_claim(evidence: dict, *, trait: str, checkpoint_sha256: str | None,
@@ -1309,7 +1342,10 @@ def _draft_count_claim(result: dict, *, trait: str | None, bucket: Path,
 
     if not result.get("validated") or tile_size_validated == VALIDATED_FALSE:
         return None, None
-    evidence = _calibration_evidence(result)
+    try:
+        evidence = _calibration_evidence(result)
+    except ValueError as exc:
+        return None, {"error": str(exc)}
     if evidence is None:
         return None, {"error": (
             f"the run reports a validated operating point for trait {trait!r} but kept no "

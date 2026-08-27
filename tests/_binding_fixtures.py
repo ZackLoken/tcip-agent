@@ -172,8 +172,8 @@ def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
 def calibrated_run_fields(
     trait: str = "catkin",
     *,
+    checkpoint_sha256: str,
     labels_dir: str | Path,
-    identity: str = "evidence-for-a-standin-run",
     tiled: bool = False,
     tile_size: int | None = None,
     tile_size_source: str = "default",
@@ -182,15 +182,16 @@ def calibrated_run_fields(
 
     A test standing in for the inference pass still has to leave behind what the door reopens the
     gate over, or the door has nothing to earn with and says so. This resolves a real held-out
-    operating point over a dense synthetic reference, files the evidence beside its sweep exactly
-    where a calibrated run files it, and hands back the result fields that carry it. The producing
-    experiment is ``None``, the ordinary bespoke-checkpoint case, so the door earns through a
-    created calibration experiment.
+    operating point over a dense synthetic reference, files the record under its own identity
+    (``confidence_sweep_identity``, the same key a real run's write and a delivery door's read
+    agree on) exactly where a calibrated run files it, and hands back the result fields that carry
+    it. The producing experiment is ``None``, the ordinary bespoke-checkpoint case, so the door
+    earns through a created calibration experiment.
     """
     from tcip_store import store
 
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
-    from tcip_mcp.tools.inference_tools import confidence_sweep_key
+    from tcip_mcp.tools.inference_tools import confidence_sweep_identity, confidence_sweep_key
     from tests._dense_op_fixtures import dense_records
 
     n_images, objects = 20, 80
@@ -210,7 +211,19 @@ def calibrated_run_fields(
     bundle = resolve_operating_point(trait, experiment_id=None, **inputs)
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(labels_dir)}}}
-    store.replace(confidence_sweep_key(identity), {"calibration_evidence": evidence})
+    body = {
+        "trait": trait,
+        "dataset_hash": "H",
+        "checkpoint_sha256": checkpoint_sha256,
+        "predictor_path": {
+            "tile": tiled, "tile_size": tile_size, "overlap": None,
+            "postprocess": "nms", "global_nms_iou": None, "max_dets": None,
+        },
+        "sweep": bundle.get("conf").sweep,
+        "calibration_evidence": evidence,
+    }
+    identity = confidence_sweep_identity(body)
+    store.replace(confidence_sweep_key(identity), body)
     return {
         "operating_point": bundle.to_provenance()["operating_point"],
         "validated": True,
@@ -218,5 +231,6 @@ def calibrated_run_fields(
         "dataset_hash": "H",
         "shippable_issues": [],
         "experiment_id": None,
+        "checkpoint_sha256": checkpoint_sha256,
         "calibration_evidence_key": identity,
     }

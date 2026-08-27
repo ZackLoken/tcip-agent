@@ -677,8 +677,9 @@ def _earned_run_inference_result(tmp_path, *, trait="catkin", **calibration):
                      "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
                      "count": 1}],
         "image_count": 1, "total_detections": 1, "id_map": None,
-        "checkpoint_sha256": "deadbeef", "produced_at": "2026-01-01T00:00:00Z",
-        **calibrated_run_fields(trait, labels_dir=tmp_path, **calibration),
+        "produced_at": "2026-01-01T00:00:00Z",
+        **calibrated_run_fields(trait, labels_dir=tmp_path, checkpoint_sha256="deadbeef",
+                                **calibration),
     }
 
 
