@@ -179,13 +179,13 @@ def test_the_label_memo_serves_the_tree_the_registry_and_the_review_scan_alike(
         _write_gt(ann / f"IMG_{i:04d}.json", [(1, 1, 3, 3)])
 
     calls = []
-    real_read = json_io.read_annotations
+    real_build = json_io._annotations_of
 
-    def _counting_read(path):
-        calls.append(str(path))
-        return real_read(path)
+    def _counting_build(data):
+        calls.append(data)
+        return real_build(data)
 
-    monkeypatch.setattr(json_io, "read_annotations", _counting_read)
+    monkeypatch.setattr(json_io, "_annotations_of", _counting_build)
 
     client.get("/api/dataset/tree", params={"dataset_root": str(dataset_root)})
     client.get(
