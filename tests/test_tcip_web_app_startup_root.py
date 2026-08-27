@@ -10,22 +10,11 @@ import sys
 import time
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 
-from tcip_mcp import workspace
+from tcip_mcp import project_paths, workspace
 from tcip_mcp.web_client import PANEL_EVENT_ACTIVE_PROJECT_CHANGED
 from tcip_web.app import app
-
-
-@pytest.fixture(autouse=True)
-def _reset_startup_bound(monkeypatch):
-    """Every test here exercises the once-per-process startup pin from a clean slate,
-    regardless of whether an earlier test in the same worker already bound it."""
-    import tcip_web.app as app_module
-
-    monkeypatch.setattr(app_module, "_startup_root_bound", False)
-
 
 _IMPORT_ONLY = """\
 import os
@@ -68,12 +57,34 @@ def test_first_request_pins_from_the_marker(tmp_path, monkeypatch):
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    project_paths.restore_binding(None)
     tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
 
     resp = TestClient(app, base_url="http://127.0.0.1").get("/health")
 
     assert resp.status_code == 200
     assert project_root().resolve() == proj.resolve()
+
+
+def test_a_binding_set_before_the_first_request_is_not_replaced(tmp_path, monkeypatch):
+    """``set_active_project`` (source ``adopted``) can run before this process has served
+    its first request; the middleware's own bind must leave that binding alone rather than
+    resolving the marker itself and overwriting it with source ``marker``."""
+    ws = tmp_path / "ws"
+    proj = ws / "elderberry_cyme_bloom"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    project_paths.restore_binding(None)
+
+    workspace.set_active_project("elderberry_cyme_bloom")
+    assert project_paths.root_binding().source == "adopted"
+
+    resp = TestClient(app, base_url="http://127.0.0.1").get("/health")
+
+    assert resp.status_code == 200
+    assert project_paths.root_binding().source == "adopted"
+    assert project_paths.root_binding().root.resolve() == proj.resolve()
 
 
 def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch):
@@ -87,6 +98,7 @@ def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch)
     (proj / ".tcip").mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
     monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    project_paths.restore_binding(None)
     tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
 
     seen_roots = []
@@ -104,9 +116,42 @@ def test_lifespan_binds_before_rehydrate_reads_a_registry(tmp_path, monkeypatch)
     assert seen_roots == [str(proj.resolve())]
 
 
+async def _largest_loop_gap(coro):
+    """Run ``coro`` alongside a ticker that measures the largest gap, in seconds, between
+    consecutive event-loop turns while it is in flight.
+
+    Blind to which thread does the work inside ``coro``; sensitive only to whether the loop
+    itself stayed free to run other coroutines meanwhile. A gap near the duration of a slow
+    synchronous read inside ``coro`` means the loop was blocked for that read; a gap near zero
+    means the read ran off the loop.
+    """
+    gaps: list[float] = []
+    last = time.monotonic()
+
+    async def _tick() -> None:
+        nonlocal last
+        while True:
+            await asyncio.sleep(0)
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    ticker = asyncio.create_task(_tick())
+    # A task, unlike a bare coroutine, always goes through the loop's ready queue.
+    work = asyncio.create_task(coro)
+    try:
+        result = await work
+    finally:
+        ticker.cancel()
+    return result, max(gaps, default=0.0)
+
+
 def test_active_project_changed_event_does_not_stall_a_concurrent_request(monkeypatch):
-    """The marker read and its rehydrates run off the event loop, so a slow one stalls no
-    other request served by the same process."""
+    """The event branch's marker read runs off the event loop, so a slow one lengthens this
+    request's own wall time but never blocks the loop from running its other turns."""
+    from tcip_mcp.project_paths import pin_project_root
+
+    pin_project_root(from_marker=False)
 
     def slow_read(*, create=False):
         time.sleep(1.0)
@@ -114,25 +159,38 @@ def test_active_project_changed_event_does_not_stall_a_concurrent_request(monkey
 
     monkeypatch.setattr(workspace, "active_project_if_present", slow_read)
 
-    async def _drive() -> tuple[httpx.Response, float]:
+    async def _post() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
-            event_task = asyncio.create_task(
-                client.post(
-                    "/api/events/app",
-                    json={"event_type": PANEL_EVENT_ACTIVE_PROJECT_CHANGED, "data": {}},
-                )
+            return await client.post(
+                "/api/events/app",
+                json={"event_type": PANEL_EVENT_ACTIVE_PROJECT_CHANGED, "data": {}},
             )
-            await asyncio.sleep(0.1)
-            t0 = time.monotonic()
-            health = await client.get("/health")
-            elapsed = time.monotonic() - t0
-            await event_task
-            return health, elapsed
 
-    health, elapsed = asyncio.run(_drive())
-    assert health.status_code == 200
-    assert elapsed < 0.5
+    resp, gap = asyncio.run(_largest_loop_gap(_post()))
+    assert resp.status_code == 200
+    assert gap < 0.5
+
+
+def test_first_requests_bind_does_not_stall_the_loop(monkeypatch):
+    """bind_startup_root's own marker read is the same store-bound read the event branch
+    makes; a slow one must not stall the loop on the process's very first request either."""
+    project_paths.restore_binding(None)
+
+    def slow_read(*, create=False):
+        time.sleep(1.0)
+        return None
+
+    monkeypatch.setattr(workspace, "active_project_if_present", slow_read)
+
+    async def _get() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
+            return await client.get("/health")
+
+    resp, gap = asyncio.run(_largest_loop_gap(_get()))
+    assert resp.status_code == 200
+    assert gap < 0.5
 
 
 def test_event_branch_reports_the_shared_marker_problem_text(monkeypatch):
