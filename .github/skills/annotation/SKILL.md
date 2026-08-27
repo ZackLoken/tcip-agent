@@ -28,12 +28,18 @@ Both are read by `format_io.load_annotations` / written by `save_annotations`; t
 MCP tool wrapping the read side is `read_annotations` (see Tools below). A missing label file
 reads as no annotations; a present one either reader cannot make sense of raises
 `json_io.UnreadableLabelDocument` naming the file or the malformed record's index, rather than
-reading short: undecodable text, a non-dict document, or a record with no string subject for
-json; a record whose `category_id` will not coerce to `int`, or has no name in the document's own
-`categories`, for coco. An unreadable file is not the same fact as no file. `format_io.detect_format`
-raises its own `ValueError` for a missing path, a directory holding no label documents, or a
-present document that decodes but matches neither format's shape, so a misdetected format never
-reads real annotations as empty either.
+reading short. For json, the per-image reader (`json_io._annotations_of`) refuses: undecodable
+text, a non-dict document, an `annotations` value that is not a list, a record that is not a
+dict, a record with no string subject, and a record whose stored box has no positive extent. For
+coco, `format_io.parse_coco_annotations` refuses on the same terms: a record whose `category_id`
+will not coerce to `int`, or has no name in the document's own `categories`. An unreadable file
+is not the same fact as no file.
+
+`format_io.detect_format` raises its own `ValueError`, apart from the reader's refusals above,
+for a missing path, a directory holding no label documents, or a present document that decodes
+but matches neither format's shape, so a misdetected format never reads real annotations as
+empty either; it also refuses the old `objects` label schema outright rather than sniffing it,
+since that schema is converted once and never read in place.
 
 A collaborator's delivery in some other schema is yours to convert: read a sample, write a
 converter in `scripts/`, and emit the canonical per-image JSON. The platform carries no built-in
