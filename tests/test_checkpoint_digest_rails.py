@@ -159,6 +159,9 @@ def test_prioritize_review_queue_refuses_by_the_stated_project_path(tmp_path):
 
 
 def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp_path):
+    """Coverage, not a guard: --project-root and this refusal landed in the same change, so no
+    baseline exists that parses the flag but lacks the check; prove_test_fails_before against
+    f4413a14 reports SystemExit(2) from argparse, never this test's own assertion."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -179,6 +182,47 @@ def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp
         "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
     ])
     assert rc == 2
+
+
+def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_checkpoint(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path, n=4)
+    csv_path = tmp_path / "ranks.csv"
+    csv_path.write_text(
+        "stem,rank\n" + "".join(f"img{i},{i % 3}\n" for i in range(4)), encoding="utf-8")
+    out = tmp_path / "calib"
+
+    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+
+    r = calibrate_ordinal_regression_operating_point(
+        trait_name="catkin", task="ordinal", checkpoint_path=ckpt,
+        images_dir=str(images_dir), csv_path=str(csv_path),
+        criterion="quadratic_weighted_kappa", output_dir=str(out),
+        dataset_root=str(tmp_path),
+    )
+    assert "error" in r
+    assert "register_model" in r["error"]
+    assert not (out / "ordinal_operating_point.json").exists()
+
+
+def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoint(tmp_path):
+    """Drives the review-priority route's own worker directly, the way
+    tests/test_inference_route_write_order.py:69 drives the inference worker."""
+    pytest.importorskip("fastapi")
+    from tcip_web.routes.review import PriorityQueueJob, _pq_worker
+
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+
+    job = PriorityQueueJob(job_id="rail1-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
+                          dataset_root=str(tmp_path), method="combined", budget=10)
+    _pq_worker(job)
+    assert job.status == "failed"
+    assert "register_model" in job.error
+    assert job.queue == []
 
 
 # Rail 2: a registered checkpoint whose bytes are replaced (in place, or by rename) after
@@ -272,34 +316,36 @@ def test_one_entry_naming_none_beside_one_that_does_admits_the_named_producer(tm
 
 # Rail 5: an unregistered checkpoint is refused without being unpickled.
 
+def _touch_marker(marker_path: str) -> "_SideEffectOnUnpickle":
+    Path(marker_path).write_text("unpickled", encoding="utf-8")
+    return _SideEffectOnUnpickle.__new__(_SideEffectOnUnpickle)
+
+
 class _SideEffectOnUnpickle:
-    """Its unpickling has a side effect; the design read's own probe shape."""
+    """Its unpickling writes a marker file; the design read's own probe shape."""
+
+    def __init__(self, marker_path: str) -> None:
+        self._marker_path = marker_path
 
     def __reduce__(self):
-        return (_record_side_effect, ())
-
-
-_SIDE_EFFECTS: list[str] = []
-
-
-def _record_side_effect() -> "_SideEffectOnUnpickle":
-    _SIDE_EFFECTS.append("unpickled")
-    return _SideEffectOnUnpickle.__new__(_SideEffectOnUnpickle)
+        return (_touch_marker, (self._marker_path,))
 
 
 def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
-    _SIDE_EFFECTS.clear()
+    marker = tmp_path / "unpickled.marker"
     ckpt = tmp_path / "m.pt"
-    torch.save({"model_state_dict": {}, "carries_side_effect": _SideEffectOnUnpickle()}, str(ckpt))
+    torch.save({"model_state_dict": {},
+               "carries_side_effect": _SideEffectOnUnpickle(str(marker))}, str(ckpt))
     images_dir, _ = _images(tmp_path)
 
     from tcip_mcp.tools.inference_tools import run_inference
 
-    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
-    assert "error" in r
-    assert "register_model" in r["error"]
-    assert _SIDE_EFFECTS == []  # the payload was never unpickled
+    try:
+        run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    except Exception:
+        pass
+    assert not marker.exists()  # the payload was never unpickled
 
 
 # Rail 6: valid work the rail admits, through the doors that gate on measurement.
