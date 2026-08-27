@@ -557,11 +557,12 @@ class TestInferenceToolOutputSchema:
         ]
         ckpt = tmp_path / "m.pt"
         ckpt.write_bytes(b"x")
+        sha = "0f1e2d3c4b5a"
         monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: {
             "results": results, "image_count": len(results),
             "total_detections": sum(counts.values()), "id_map": None,
-            "checkpoint_sha256": "0f1e2d3c4b5a", "produced_at": "2026-01-01T00:00:00Z",
-            **calibrated_run_fields(labels_dir=tmp_path, tiled=False)})
+            "checkpoint_sha256": sha, "produced_at": "2026-01-01T00:00:00Z",
+            **calibrated_run_fields(labels_dir=tmp_path, tiled=False, checkpoint_sha256=sha)})
         monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
                             lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 

@@ -96,6 +96,7 @@ def test_set_detector_operating_point_reports_no_path_when_nothing_matches():
 
 def _checkpoint(tmp_path, builder: str) -> str:
     from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": f"tests.bespoke_models:{builder}",
                     "builder_kwargs": {"in_chans": 3}, "task": "detection"}
@@ -103,6 +104,9 @@ def _checkpoint(tmp_path, builder: str) -> str:
     torch.save({"model_source": model_source,
                 "model_state_dict": build_model({"model_source": model_source}).state_dict(),
                 "config": {"data": {"tiling": {"enabled": False}}}}, str(ckpt))
+    reg = register_model(name=builder, checkpoint_path=str(ckpt), config={},
+                         project_path=str(tmp_path))
+    assert "error" not in reg, reg
     return str(ckpt)
 
 
@@ -160,6 +164,18 @@ def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_pa
     assert sweep["staged_conf_floor_attribute_path"] == "self"
     assert sweep["conf_censored"] is False
     assert "conf_floor_unstated" not in sweep["failures"]
+
+    # The sweep round trip: the response's own digest agrees with the record read back under it.
+    from tcip_store import store
+
+    from tcip_mcp.tools.inference_tools import (
+        _calibration_evidence, confidence_sweep_identity, confidence_sweep_key,
+    )
+
+    key = r["calibration_evidence_key"]
+    body = store.read(confidence_sweep_key(key))
+    assert confidence_sweep_identity(body) == key
+    assert _calibration_evidence(r) == body["calibration_evidence"]
 
 
 def test_a_module_exposing_no_knob_refuses_unstated_not_censored(tmp_path, monkeypatch):
