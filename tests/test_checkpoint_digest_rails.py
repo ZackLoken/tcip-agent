@@ -133,7 +133,20 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
     assert job.done == 0
 
 
-def test_prioritize_review_queue_refuses_an_unregistered_checkpoint(tmp_path):
+def test_prioritize_review_queue_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+
+    r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage")
+    assert "error" in r
+    assert "register_model" in r["error"]
+
+
+def test_prioritize_review_queue_refuses_by_the_stated_project_path(tmp_path):
+    """Coverage: project_path, not just the process root, is where the load looks."""
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path)
 
