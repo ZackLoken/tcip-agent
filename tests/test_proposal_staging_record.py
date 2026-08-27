@@ -340,3 +340,23 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
         image_path=str(img_path), assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" in accepted
     assert str(img_path) in accepted["error"]
+
+
+def test_accept_proposals_refuses_a_reserved_stem_with_an_error_dict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepting proposals for an image whose stem is a bucket stamp name answers the staging
+    writer's refusal as an error dict, never a raise through the audited door."""
+    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+
+    image = tmp_path / "images" / "2026-01-01" / "operating_point.jpg"
+    _make_image(image)
+    _install_stub(monkeypatch, [_candidate(0, 5.0)])
+    proposed = propose_annotations(image_path=str(image), engine="sam")
+    assert "error" not in proposed, proposed
+
+    accepted = accept_proposals(
+        image_path=str(image), assignments=[{"candidate_id": 0, "subject": "catkin"}])
+    assert "error" in accepted
+    assert "operating_point" in accepted["error"]
+    assert not (tmp_path / "predictions" / "sam" / "2026-01-01" / "operating_point.json").exists()

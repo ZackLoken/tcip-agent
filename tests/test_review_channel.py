@@ -556,3 +556,16 @@ def test_stage_proposals_overwrite_in_place_when_no_verdicts(tmp_path: Path) -> 
     res = stage_proposals(str(root), "claude", date, "IMG_0001", _BOX, overwrite=True)
     assert "error" not in res
     assert res["bucket"] == "claude" and res["bucket_redirected"] is False
+
+
+def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(tmp_path: Path) -> None:
+    """An image whose stem is one of a bucket's own stamp names can never become a per-image
+    prediction document, and the audited door says so in its answer rather than raising."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "operating_point", size=(640, 480))
+    boxes = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    res = stage_proposals(str(root), "claude", date, "operating_point", boxes)
+    assert "error" in res
+    assert "operating_point" in res["error"]
+    assert not (Path(prediction_dir(root, "claude", date)) / "operating_point.json").exists()
