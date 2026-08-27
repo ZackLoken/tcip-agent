@@ -65,7 +65,8 @@ def split_manifest_key(split_dir: str | Path) -> Key:
 
 _SPLIT_MANIFEST_REQUIRED_KEYS = (
     "seed", "group_by", "dataset_fingerprint", "subject", "attribute", "id_map",
-    "members", "splits", "admission_counts",
+    "members", "splits", "admission_counts", "calibration_foreground_groups_by_date",
+    "realized_ratios",
 )
 """Every key ``make_splits``' manifest dict literal writes, kept as one tuple so
 :func:`read_split_manifest_dir`'s required set can never drift from what the writer actually
