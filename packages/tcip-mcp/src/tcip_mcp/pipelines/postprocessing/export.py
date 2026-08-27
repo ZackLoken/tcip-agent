@@ -91,7 +91,7 @@ def write_predictions_json(
     from datetime import datetime, timezone
 
     from tcip_annotation import json_io
-    from tcip_annotation.state import Annotation, BBox, bbox_of
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.class_registry import decode_class_ids
 
     w = result.get("width") or 0
@@ -112,7 +112,7 @@ def write_predictions_json(
         geometry: BBox | Polygon = BBox(x1, y1, x2, y2)
         if masks is not None and i < len(masks):
             geometry = _mask_geometry_for_export(masks[i], (x1, y1, x2, y2), name, image_size=(w, h))
-        if not json_io.stored_box_extent_ok(bbox_of(geometry)):
+        if not json_io.geometry_extent_ok(geometry):
             dropped += 1
             continue
         preds.append(Annotation(subject=name, geometry=geometry, score=float(score),

@@ -45,3 +45,42 @@ def test_build_dataset_coco(tmp_path):
     _, target = ds[0]
     assert target["boxes"].shape == (1, 4)
     assert ds.class_distribution == {0: 1}
+
+
+def _bom_coco_path(tmp_path):
+    coco = {"images": [{"id": 1, "file_name": "img0.jpg", "width": 100, "height": 100}],
+            "annotations": [{"id": 1, "image_id": 1, "category_id": 0, "bbox": [10, 10, 40, 40]}],
+            "categories": []}
+    coco_path = tmp_path / "ann.json"
+    coco_path.write_bytes(b"\xef\xbb\xbf" + json.dumps(coco).encode("utf-8"))
+    return coco_path
+
+
+@pytest.mark.parametrize("task", ["detection", "instance_seg"])
+def test_build_dataset_coco_admits_a_byte_order_marked_document(tmp_path, task):
+    """A UTF-8 byte-order mark encodes the same document as one without it: both training
+    loaders admit it through the reader's one decode, the same as ``load_annotations`` does."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    images_dir = tmp_path / "images"
+    _make_images(images_dir)
+    coco_path = _bom_coco_path(tmp_path)
+
+    ds = build_dataset(task, images_dir=str(images_dir), labels_dir=str(images_dir),
+                       num_classes=1, label_format="coco", coco_json=str(coco_path))
+    assert list(ds.stems)
+
+
+@pytest.mark.parametrize("task", ["detection", "instance_seg"])
+def test_build_dataset_coco_refuses_an_undecodable_document(tmp_path, task):
+    """A present COCO document that will not decode is a named refusal, not a raw parse error
+    surfacing from whichever loader happens to touch it first."""
+    from tcip_annotation.json_io import UnreadableLabelDocument
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    images_dir = tmp_path / "images"
+    _make_images(images_dir)
+    coco_path = tmp_path / "ann.json"
+    coco_path.write_bytes(b"{not json")
+
+    with pytest.raises(UnreadableLabelDocument):
+        build_dataset(task, images_dir=str(images_dir), labels_dir=str(images_dir),
+                      num_classes=1, label_format="coco", coco_json=str(coco_path))

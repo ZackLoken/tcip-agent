@@ -744,7 +744,9 @@ class DetectionDataset(BaseImageDataset):
         elif self.label_format == "coco":
             if not coco_json:
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
-            self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
+            from tcip_annotation import json_io
+
+            self._coco = json_io.load_label_document(coco_json)
         # The single name→id map: resolved here for a direct-json build, else supplied by
         # build_dataset (which resolved it once for the COCO assembly). One derivation either way.
         if id_map is None and self.label_format == "json":
@@ -1147,7 +1149,9 @@ class InstanceSegDataset(BaseImageDataset):
         elif self.label_format == "coco":
             if not coco_json:
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
-            self._coco = json.loads(Path(coco_json).read_text(encoding="utf-8"))
+            from tcip_annotation import json_io
+
+            self._coco = json_io.load_label_document(coco_json)
         if id_map is None and self.label_format == "json":
             _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)

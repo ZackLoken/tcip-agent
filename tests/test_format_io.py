@@ -350,3 +350,37 @@ def test_load_annotations_a_missing_path_stays_absent_under_a_stated_fmt(tmp_pat
     not exist has no shape to check and reads exactly as an omitted fmt would."""
     missing = tmp_path / "nothing_here.json"
     assert load_annotations(str(missing), fmt="json") == []
+
+
+# ── the reader's one decode: a byte-order mark, or nothing to decode at all ──
+
+
+def test_detect_format_and_load_annotations_admit_a_byte_order_marked_coco(tmp_path):
+    """A UTF-8 byte-order mark encodes the same document as one without it: detection and the
+    COCO parser must agree on that, not disagree at the second decode."""
+    coco = _sample_coco_detect()
+    path = tmp_path / "annotations.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(coco).encode("utf-8"))
+
+    assert detect_format(str(path)) == "coco"
+    anns = load_annotations(str(path), file_name="IMG_0001.jpg")
+    assert len(anns) == 2
+
+
+def test_parse_coco_json_admits_a_byte_order_marked_document(tmp_path):
+    from tcip_annotation.format_io import _parse_coco_json
+
+    coco = _sample_coco_detect()
+    path = tmp_path / "annotations.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(coco).encode("utf-8"))
+    assert _parse_coco_json(str(path))["categories"] == coco["categories"]
+
+
+def test_parse_coco_json_refuses_an_undecodable_document(tmp_path):
+    from tcip_annotation.format_io import _parse_coco_json
+    from tcip_annotation.json_io import UnreadableLabelDocument
+
+    path = tmp_path / "annotations.json"
+    path.write_bytes(b"{not json")
+    with pytest.raises(UnreadableLabelDocument):
+        _parse_coco_json(str(path))

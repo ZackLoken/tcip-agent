@@ -133,9 +133,15 @@ def _detect_json_format(path: Path) -> AnnotFormat | None:
 
 
 def _parse_coco_json(path: str) -> dict:
-    """Load and return a COCO-format JSON file."""
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """A COCO-format JSON file's parsed dict, through the one decode every label reader shares.
+
+    Raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` for a document that will not
+    decode or does not parse as a dict, rather than a raw exception :func:`detect_format` (which
+    already admitted the same bytes through the same decode) would not have raised.
+    """
+    from tcip_annotation.json_io import load_label_document
+
+    return load_label_document(path)
 
 
 def _coco_categories(coco: dict) -> dict[int, str]:

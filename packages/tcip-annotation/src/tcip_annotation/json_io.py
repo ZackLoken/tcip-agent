@@ -576,6 +576,27 @@ def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
     return xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
 
 
+def _rounded_rings(rings: list[list[tuple[float, float]]]) -> list[list[tuple[float, float]]]:
+    """A polygon's rings with each vertex rounded to the document's stored 2-decimal grid."""
+    return [[(round(float(x), 2), round(float(y), 2)) for x, y in ring] for ring in rings]
+
+
+def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
+    """Whether ``geometry`` still has positive extent once written to its stored grid.
+
+    A :class:`Polygon`'s vertices round to two decimals before its box is derived, the same
+    order :func:`write_annotations` stores them in, so a caller pre-filtering a candidate
+    detection before it ever reaches the writer reaches the identical verdict the writer would.
+    An empty ring list (every ring shorter than three points) has no shape and is not ok.
+    """
+    if isinstance(geometry, Polygon):
+        rings = [r for r in geometry.rings if len(r) >= 3]
+        if not rings:
+            return False
+        return stored_box_extent_ok(bbox_of(Polygon(_rounded_rings(rings))))
+    return stored_box_extent_ok(geometry)
+
+
 def _annotation_record(a: Annotation) -> dict | None:
     """One annotation → its JSON object, or None if a degenerate polygon should be skipped."""
     rec: dict = {"subject": a.subject}
@@ -584,10 +605,11 @@ def _annotation_record(a: Annotation) -> dict | None:
         valid_rings = [r for r in geom.rings if len(r) >= 3]
         if not valid_rings:
             return None  # no ring is a real shape; skip so write<->read stays symmetric
-        rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy] for ring in valid_rings]
-        # The polygon's box travels with it (COCO-style), derived from the rings rather than
-        # authored: every reader re-derives via bbox_of, so the two can't diverge.
-        poly_box = bbox_of(Polygon(valid_rings))
+        rounded_rings = _rounded_rings(valid_rings)
+        rec["segmentation"] = [[c for xy in ring for c in xy] for ring in rounded_rings]
+        # Boxed from the rounded rings the document stores, not the raw ones, so a ring that
+        # only collapses at the stored grid can't write a box claiming extent it lost.
+        poly_box = bbox_of(Polygon(rounded_rings))
         rec["bbox"] = _stored_bbox_or_raise(poly_box, where=f"{a.subject!r} annotation's polygon")
     elif isinstance(geom, BBox):
         rec["bbox"] = _stored_bbox_or_raise(geom, where=f"{a.subject!r} annotation")
