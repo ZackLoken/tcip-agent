@@ -635,11 +635,13 @@ def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monk
 
 def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     from tcip_mcp.experiments import create_experiment, read_split_manifest
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
+    from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(root, out)
+    manifest = _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
     train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
 
@@ -651,9 +653,17 @@ def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     binding = persisted["manifest_binding"]
     assert binding["manifest_dir"] == str(out)
     assert binding["date"] == DATES[0]
-    assert binding["calibration_bound"] >= 0
+
+    # An independent bind over this run's own admitted train/val stems, checked against the
+    # persisted counts and hash rather than a tautology a two-sided binder would also pass.
+    expected = bind_manifest_stems(
+        manifest, DATES[0], SUBJECT, None, sorted(train_ds.stems) + sorted(val_ds.stems))
+    assert binding["calibration_bound"] == expected.calibration_bound == len(expected.calibration)
     assert binding["calibration_unadmitted"] == 0
     assert binding["other_dates"] > 0  # the manifest's other date's members, across all three sides
+    expected_hash = dataset_hash(
+        data_cfg["labels_dir"], stems=sorted(expected.train + expected.val + expected.calibration))
+    assert binding["labels_hash_now"] == expected_hash
 
 
 def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_bind(
@@ -905,6 +915,200 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
     assert sorted(captured["ds"].stems) == sorted(expected_universe)
     assert captured["kw"]["split_manifest_dir"] == str(out)
     assert captured["kw"]["evaluated_stem_count"] == len(expected_universe)
+
+
+def test_evaluate_model_under_manifest_writes_and_reads_back_test_results(
+    tmp_path: Path, monkeypatch,
+):
+    """The real run_test_evaluation path under a manifest, not a stub: writes test_results.json
+    for real, and the record read back through evaluation_results_key carries split_manifest_dir
+    and the loader's own evaluated_stem_count."""
+    import tcip_store as ts
+
+    import tcip_mcp.pipelines.model_build as model_build
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
+    from tcip_mcp.pipelines.training.evaluation import evaluation_results_key
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    class _DummyModel:
+        def load_state_dict(self, state_dict):
+            pass
+
+        def to(self, device):
+            pass
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    present, _ = label_image_stems(labels_dir, images_dir)
+    expected_universe, *_rest = calibration_universe_from_manifest(manifest, DATES[0], present)
+    assert expected_universe
+
+    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+    ckpt_path = Path(run.output_dir) / "model_best.pt"
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
+    monkeypatch.setattr(evaluation, "evaluate",
+                        lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.5})
+
+    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+                         split_manifest_dir=str(out))
+
+    assert "error" not in res, res
+    persisted = ts.read(evaluation_results_key(run.output_dir))
+    assert persisted["split_manifest_dir"] == str(out)
+    assert persisted["evaluated_stem_count"] == len(expected_universe)
+
+
+def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
+    tmp_path: Path, monkeypatch,
+):
+    """With date omitted, evaluate_model derives the calibration universe's own date rather than
+    reading confirmed negatives under an undated bucket (which finds none), so a confirmed
+    negative on the calibration side is admitted, not dropped as an unconfirmed empty label."""
+    import tcip_store as ts
+
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+    from tcip_mcp.pipelines.data.splits import member_identity
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.tools.data_tools import split_manifest_key
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    root = tmp_path / "ds"
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    for i in range(4):
+        _write_stem(images_dir, labels_dir, f"p{i}",
+                   [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
+    _write_stem(images_dir, labels_dir, "n0", [])
+    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"n0.jpg": "negative"},
+                          recorded_by="user:tester")
+
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
+    manifest = ts.read(split_manifest_key(out))
+    negative_identity = member_identity(DATES[0], "n0")
+    for side in ("train", "val", "calibration"):
+        manifest["splits"][side] = [i for i in manifest["splits"][side] if i != negative_identity]
+    manifest["splits"]["calibration"].append(negative_identity)
+    ts.replace(split_manifest_key(out), manifest)
+
+    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+
+    captured: dict = {}
+
+    def _fake(ckpt, loader, device, task, output_dir, **kw):
+        captured["ds"] = loader.dataset
+        captured["kw"] = kw
+        return {"tiled": False, "eval_regime": "tile-level"}
+
+    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+
+    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+                         split_manifest_dir=str(out))
+
+    assert "error" not in res, res
+    assert "n0" in captured["ds"].stems
+    assert captured["kw"]["evaluated_stem_count"] == len(captured["ds"].stems)
+
+
+def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monkeypatch):
+    """A real (if minimal) checkpoint and a stubbed run_test_evaluation, so the refusal's own
+    assertion is what fails, not an unrelated checkpoint-loading crash reached by continuing past
+    a refusal the tree under test does not raise."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}},
+              str(Path(run.output_dir) / "model_best.pt"))
+    monkeypatch.setattr(
+        evaluation, "run_test_evaluation",
+        lambda ckpt, loader, device, task, output_dir, **kw:
+            {"tiled": False, "eval_regime": "tile-level"})
+
+    result = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+                            split_manifest_dir=str(out), date=DATES[1])
+
+    assert "error" in result and "disagrees" in result["error"]
+
+
+def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_still_refuses(
+    tmp_path: Path, monkeypatch,
+):
+    """evaluate_model asks the shared universe resolver for one foreground group (it halves
+    nothing), so a calibration side reduced to exactly one foreground group still scores under
+    it, while the same universe still refuses through the shared resolver's own two-group floor
+    (the locked cal/holdout draw's halving)."""
+    import tcip_store as ts
+
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.data.splits import (
+        calibration_universe_from_manifest, count_label_lines, label_image_stems,
+        member_identity_parts,
+    )
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.tools.data_tools import split_manifest_key
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    present, _ = label_image_stems(labels_dir, images_dir)
+    cal_ids = [i for i in manifest["splits"]["calibration"]
+              if member_identity_parts(i)[0] == DATES[0]]
+    fg_cal_ids = [i for i in cal_ids if count_label_lines(
+        labels_dir, member_identity_parts(i)[1], subject=SUBJECT) > 0]
+    assert len(fg_cal_ids) >= 2
+    # Move every foreground calibration member but one onto train for this date, leaving the
+    # calibration side with exactly one foreground group.
+    keep, move = fg_cal_ids[0], fg_cal_ids[1:]
+    manifest["splits"]["calibration"] = [
+        i for i in manifest["splits"]["calibration"] if i not in move]
+    manifest["splits"]["train"] = sorted(manifest["splits"]["train"] + move)
+    ts.replace(split_manifest_key(out), manifest)
+
+    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+
+    monkeypatch.setattr(
+        evaluation, "run_test_evaluation",
+        lambda ckpt, loader, device, task, output_dir, **kw:
+            {"tiled": False, "eval_regime": "tile-level"})
+
+    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+                         split_manifest_dir=str(out))
+    assert "error" not in res, res
+
+    manifest_reread = ts.read(split_manifest_key(out))
+    with pytest.raises(ValueError, match="foreground group"):
+        calibration_universe_from_manifest(
+            manifest_reread, DATES[0], present,
+            foreground_stems={member_identity_parts(keep)[1]})
 
 
 def test_evaluate_model_manifest_refuses_a_subject_mismatch(tmp_path: Path):

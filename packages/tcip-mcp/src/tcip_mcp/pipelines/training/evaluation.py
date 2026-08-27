@@ -1290,9 +1290,11 @@ def run_test_evaluation(
     matches the training-run val mAP), not the delivery regime, the stamp keeps the two from being
     silently conflated. See ``run_full_frame_evaluation`` for a delivery-grade metric.
 
-    ``split_manifest_dir``/``evaluated_stem_count`` are the caller's own record of a manifest
-    the loader was narrowed to (``evaluate_model``'s own binding, resolved before the loader was
-    built): recorded verbatim when given, absent otherwise, never re-derived here.
+    ``split_manifest_dir``/``evaluated_stem_count`` are the caller's own record of a manifest the
+    loader was narrowed to (``evaluate_model``'s own binding, resolved before the loader was
+    built, refusing rather than calling here when the loader admitted fewer stems than the
+    universe the manifest drew): recorded verbatim when given, absent otherwise, never
+    re-derived here.
     """
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
 

@@ -1002,12 +1002,13 @@ def label_image_stems(
 def calibration_universe_from_manifest(
     manifest: dict, date: str | None, present: Iterable[str],
     *, foreground_stems: Iterable[str] | None = None,
+    min_foreground_groups: dict[str, int] | None = None,
 ) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]]]:
-    """The calibration universe a split manifest gives a locked cal/holdout draw for one capture
-    date: the manifest's ``calibration`` members under ``date`` that are present in the door's own
-    stem listing, so a calibration measures the operating point on exactly the side the manifest
-    held out for it, never the side the shipped checkpoint was chosen on (a disjointness check
-    catches a leak onto that side separately, against the checkpoint's own ``split.json``).
+    """The calibration universe a split manifest gives one caller restricting a read to it, for
+    one capture date: the manifest's ``calibration`` members under ``date`` that are present in
+    the door's own stem listing, so a read measures on exactly the side the manifest held out for
+    it, never the side the shipped checkpoint was chosen on (a disjointness check catches a leak
+    onto that side separately, against the checkpoint's own ``split.json``).
 
     ``present`` is the door's own stem listing (e.g. :func:`label_image_stems`' stems), checked
     against rather than assumed: a manifest member with no image left on disk is not a real
@@ -1020,6 +1021,13 @@ def calibration_universe_from_manifest(
     gets; the doors this family ships all wire it, through
     :func:`resolve_manifest_calibration_universe`.
 
+    ``min_foreground_groups`` is the caller's own floor, forwarded to
+    :func:`refuse_insufficient_foreground_groups` verbatim; omitted, it defaults to
+    ``{"calibration": 2}``, the shape a locked cal/holdout draw needs since it halves the universe
+    into two non-empty parts. A caller that draws no lock and halves nothing (``evaluate_model``)
+    states its own floor of one instead, so a legitimate single-foreground-group universe is not
+    refused for a halving this caller never performs.
+
     Returns ``(stems, group_by, group_key_map, excluded)``: ``stems`` is the calibration-side
     identities narrowed to bare stems; ``group_by``/``group_key_map`` are the manifest's own
     grouping policy (``group_key_map`` narrowed to this date's bare stems, so a lookup by stem
@@ -1029,10 +1037,10 @@ def calibration_universe_from_manifest(
     present members none of the three sides claimed (``excluded_unassigned_stems``), the
     universe itself in none of them.
 
-    Refuses, naming the count and the date, when the resulting universe would hold fewer than two
-    (foreground, when known) groups: the held-out half would be empty and an operating point
-    would stamp unvalidated silently. The remedy names a redraw on this date specifically, since
-    the floor at a manifest's own draw is over the whole tree and one date can still land short.
+    Refuses, naming the count, the date and the caller's own floor, when the resulting universe
+    would hold fewer foreground (when known) groups than that floor states. The remedy names a
+    redraw on this date specifically, since the floor at a manifest's own draw is over the whole
+    tree and one date can still land short.
     """
     present_set = set(present)
     splits = manifest.get("splits") or {}
@@ -1070,8 +1078,9 @@ def calibration_universe_from_manifest(
     else:
         fg = set(foreground_stems)
         n_groups = len({group_key_fn(s) for s in stems if s in fg})
+    floor = min_foreground_groups if min_foreground_groups is not None else {"calibration": 2}
     try:
-        refuse_insufficient_foreground_groups(n_groups, {"calibration": 2})
+        refuse_insufficient_foreground_groups(n_groups, floor)
     except ValueError as exc:
         raise ValueError(
             f"the split manifest's calibration side for date {date!r} gives a calibration "
@@ -1085,15 +1094,20 @@ def calibration_universe_from_manifest(
 def resolve_manifest_calibration_universe(
     manifest: dict, split_manifest_dir: str | Path, labels_dir: str | Path,
     images_dir: str | Path | None, subject: str | None, attribute: str | None,
-    present: Iterable[str],
+    present: Iterable[str], *, min_foreground_groups: dict[str, int] | None = None,
 ) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]], str | None]:
-    """The checks every door restricting a calibration to a split manifest shares, ahead of
+    """The checks every door restricting a read to a split manifest shares, ahead of
     :func:`calibration_universe_from_manifest`'s own draw: the manifest's ``subject``/
     ``attribute`` must equal the door's, the labels directory's date
     (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
     under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
-    each refusing by name. Called from both the calibration door and ``evaluate_model`` so the
-    two never drift into disagreeing about what a manifest-restricted evaluation reads.
+    each refusing by name. Called from ``_calibrate_operating_point``, ``evaluate_model``,
+    ``force_redraw_cal_holdout_split`` and ``scripts/calibrate_operating_point.py`` so none of
+    the four drift into disagreeing about what a manifest-restricted read reads.
+
+    ``min_foreground_groups`` is forwarded to :func:`calibration_universe_from_manifest`
+    unchanged: the caller's own floor, ``{"calibration": 2}`` when omitted (a locked draw's
+    halving), the shape a caller that halves nothing states for itself.
 
     Returns ``(stems, group_by, group_key_map, excluded, date)``, the universe plus the date it
     was drawn for.
@@ -1120,7 +1134,8 @@ def resolve_manifest_calibration_universe(
         if count_label_lines(labels_dir, s, subject=subject, attribute=attribute) > 0
     }
     stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
-        manifest, date, present_stems, foreground_stems=foreground_stems)
+        manifest, date, present_stems, foreground_stems=foreground_stems,
+        min_foreground_groups=min_foreground_groups)
     return stems, group_by, group_key_map, excluded, date
 
 
