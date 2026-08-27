@@ -928,6 +928,67 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     assert r["cross_dataset_check"] == "same-labeled-set"
 
 
+@pytest.mark.parametrize("give_calibration_images_dir", [False, True])
+@pytest.mark.parametrize("case,inf_stems,expected_check", [
+    ("superset", ("a", "b", "c"), "same-labeled-set"),
+    ("equal", ("a", "b"), "same-labeled-set"),
+    ("subset", ("a",), "not-comparable-unlabeled-target"),
+    ("disjoint", ("c", "d"), "not-comparable-unlabeled-target"),
+])
+def test_manifest_calibration_firewall_hashes_the_universe(
+        tmp_path, monkeypatch, case, inf_stems, expected_check, give_calibration_images_dir):
+    """The firewall's target hash under a manifest is computed over the calibration universe (the
+    same stems the bundle's own hash covers), not the inference stem list: a superset or equal
+    inference target compares real, matching hashes and validates; a genuine subset or disjoint
+    target stays the honest not-comparable case, in both cases regardless of whether
+    calibration_images_dir is given."""
+    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import dataset_hash
+
+    from PIL import Image
+
+    cal, hold = _good_dense_cal_holdout()
+    universe = ["a", "b"]
+    dh = dataset_hash(tmp_path, stems=universe)
+    inputs = {"tiled": False, "dataset_hash": dh, "calibration_records": cal,
+             "holdout_records": hold, "staged_conf_floor": 0.01}
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    evidence = {
+        "resolver": "resolve_operating_point", "inputs": inputs,
+        "reference_inputs": {
+            "label_stems": {"calibration": {"path": str(tmp_path), "stems": universe}},
+            "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
+        },
+        "calibration_stems": universe,
+    }
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, dh, 0, evidence))
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    monkeypatch.chdir(tmp_path)
+
+    image_paths = []
+    for stem in inf_stems:
+        p = tmp_path / f"{stem}.png"
+        Image.new("RGB", (100, 100)).save(p)
+        image_paths.append(str(p))
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+
+    kwargs = dict(calibration_labels_dir=str(tmp_path), split_manifest_dir=str(tmp_path / "m"))
+    if give_calibration_images_dir:
+        kwargs["calibration_images_dir"] = str(tmp_path)
+
+    r = itools.run_inference(
+        str(ckpt), image_paths=image_paths, images_dir=str(tmp_path), device="cpu",
+        tile=False, trait="catkin", **kwargs)
+
+    assert r["cross_dataset_check"] == expected_check
+    assert r["validated"] is True
+    assert not any("inherited across a different dataset" in i for i in r["shippable_issues"])
+
+
 def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_path, monkeypatch):
     """A manifest-restricted calibration answers how many present stems it left out of its
     universe, the training side's and the unassigned ones, as counts beside the incomplete
