@@ -1174,7 +1174,7 @@ Writers: `set_image_status`,
 manifest or file tree are written, by `negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)`
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:634`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:712`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:713`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:439`; `_status_bucket_for`,
