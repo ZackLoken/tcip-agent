@@ -230,6 +230,13 @@ def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
     assert load.status_code == 200
     assert set(load.json()["subjects"]) == {"catkin"}
 
+    select = client.post("/api/dataset/select", json={
+        "project_root": str(project), "dataset_root": str(project),
+        "subject": "catkin", "date": date})
+    assert select.status_code == 200
+    assert select.json()["annotations_present"] is True
+    assert select.json()["label_problem"] is None
+
 
 def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_routes(
     client: TestClient, tmp_path: Path, outside: Path, closed_project,
@@ -258,6 +265,15 @@ def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_route
         "project_root": str(project), "dataset_root": str(project),
         "annotations_dir": str(ann_dir / date)})
     assert resp.status_code == 403
+
+    # The selection door is advisory and never rejects, so it reports the same refusal as the
+    # date's label problem rather than scanning what the other two routes refuse.
+    select = client.post("/api/dataset/select", json={
+        "project_root": str(project), "dataset_root": str(project),
+        "subject": "catkin", "date": date})
+    assert select.status_code == 200
+    assert select.json()["annotations_present"] is False
+    assert "outside the allowed roots" in (select.json()["label_problem"] or "")
 
 
 def test_the_state_store_persists_under_the_guarded_root_not_the_snapshot_it_loaded(
