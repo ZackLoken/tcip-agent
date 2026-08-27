@@ -10,7 +10,6 @@ the agent supplies (mirrors ``model_source``; see `build_from_dataset_source`).
 from __future__ import annotations
 
 import csv
-import json
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
