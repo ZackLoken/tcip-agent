@@ -1170,6 +1170,40 @@ def test_geometry_extent_ok_agrees_with_the_writer_on_a_collapsing_polygon() -> 
     assert geometry_extent_ok(real) is True
 
 
+def test_a_prediction_document_the_writer_lands_in_a_bucket_reads_back_through_the_bucket_readers(
+    tmp_path: Path,
+) -> None:
+    """The writer is write_annotations, called the shape pipelines/postprocessing/export.py's
+    write_predictions_json calls it: keep_empty=True, each Annotation carrying a score and a
+    created_by stamped through tcip_mcp.pipelines.resolution.prediction_producer, landing at
+    dataset_layout.prediction_dir(root, model, date) / label_filename(stem). The readers are
+    read_annotations (the document's own records), prediction_documents (the bucket listing) and
+    dataset_layout.models_with_predictions (the per-date model listing): a document only its
+    writer's test has seen is one any of these three readers could silently disagree with.
+    """
+    from tcip_mcp.dataset_layout import label_filename, models_with_predictions, prediction_dir
+    from tcip_mcp.pipelines.resolution import prediction_producer
+
+    root, model, date, stem = tmp_path, "baseline", "2026-02-11", "IMG_1"
+    created_by = prediction_producer("checkpoints/baseline.pt", "a" * 64)
+    preds = [Annotation(subject="catkin", geometry=BBox(10.0, 20.0, 110.0, 220.0), score=0.875,
+                        created_by=created_by, created_at="2026-02-11T10:00:00Z")]
+    target = prediction_dir(root, model, date) / label_filename(stem)
+    write_annotations(str(target), preds, 640, 480, keep_empty=True)
+
+    got = read_annotations(target)
+    assert len(got) == 1
+    assert got[0].subject == "catkin" and got[0].score == 0.875
+    assert got[0].created_by == created_by
+
+    from tcip_annotation.json_io import prediction_documents
+
+    assert prediction_documents(prediction_dir(root, model, date)) == [target]
+
+    assert models_with_predictions(root, date) == [model]
+    assert models_with_predictions(root, "2026-03-24") == []  # no bucket on this date
+
+
 def test_prediction_documents_skips_a_directory_named_like_a_json_file(tmp_path: Path) -> None:
     from tcip_annotation.json_io import prediction_documents
 

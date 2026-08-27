@@ -142,6 +142,27 @@ def test_ingest_exif_buckets_and_undated(tmp_path):
     assert (proj / ".tcip" / "models").is_dir()
 
 
+def test_ingested_bytes_read_back_through_the_image_key(tmp_path):
+    """The writer is the real ingest_images tool, driven the same way
+    test_ingest_exif_buckets_and_undated drives it. The reader is tcip_store's blob read through
+    dataset_layout.image_key(root, date, stem, ext), which refuses a falsy date, so this uses a
+    dated capture. The existing test only asserts the copied file is_file(); this asserts the
+    bytes the store hands back through the key are byte-identical to the source file ingest
+    copied from, not merely present."""
+    import tcip_store as ts
+
+    src = tmp_path / "raw"
+    _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
+
+    manifest = ingest_images(source=str(src), name="hazelnut_catkin_valley-farm", site="north orchard")
+    assert "error" not in manifest
+
+    proj = Path(manifest["project_path"])
+    key = dataset_layout.image_key(proj, "2026-02-11", "a", ".jpg")
+    stored = ts.read_blob_versioned(key).value
+    assert stored == (src / "a.jpg").read_bytes()
+
+
 def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(tmp_path):
     """A raster states its capture date in raster metadata, not in EXIF: an orthomosaic lands in a
     real date bucket the same as a photo does."""

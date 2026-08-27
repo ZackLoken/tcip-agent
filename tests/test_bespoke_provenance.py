@@ -24,6 +24,7 @@ from tcip_mcp.pipelines.inference.predictor import (  # noqa: E402
 )
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     build_model,
+    snapshot_file_key,
     snapshot_manifest_key,
     snapshot_model_source,
     stamp_model_ref,
@@ -137,6 +138,34 @@ def test_snapshot_model_source_basename_collision_does_not_clobber(tmp_path):
         dst = exp_dir / "model_src" / e["file"]
         assert dst.is_file()
         assert hashlib.sha256(dst.read_bytes()).hexdigest() == e["sha256"]  # not clobbered
+
+
+def test_every_snapshotted_file_reads_back_through_the_store_with_the_manifests_digest(tmp_path):
+    """The writer is snapshot_model_source, which put_blobs each source file under
+    snapshot_file_key(exp_dir, sha256[:8], filename). The reader is tcip_store.read_blob_versioned
+    on that same key: this store exposes no bare read_blob, and open_blob is for a blob too large
+    to hold in memory, which a test fixture is not. For every entry the manifest records, the
+    bytes read back through the key must equal the source file's own bytes, and hashlib.sha256 of
+    those bytes must equal the entry's own sha256: a manifest whose digest nobody re-derived from
+    the stored blob is a document only its writer's test has seen."""
+    exp_dir = tmp_path / "exp"
+    exp_dir.mkdir()
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    (a_dir / "model.py").write_text("# builder A")
+    (b_dir / "model.py").write_text("# builder B, different content")
+
+    src = {"builder": "tests.bespoke_models:build_bespoke_detector",
+          "source_files": [str(a_dir / "model.py"), str(b_dir / "model.py")]}
+    manifest = snapshot_model_source({"model_source": src}, exp_dir)
+
+    assert manifest["files"]
+    for entry in manifest["files"]:
+        content, filename = entry["file"].split("/", 1)
+        stored = ts.read_blob_versioned(snapshot_file_key(exp_dir, content, filename)).value
+        assert stored == Path(entry["src"]).read_bytes()
+        assert hashlib.sha256(stored).hexdigest() == entry["sha256"]
 
 
 # --------------------------------------------------------------------------
