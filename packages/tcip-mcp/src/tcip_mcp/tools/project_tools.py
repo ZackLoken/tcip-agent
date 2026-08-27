@@ -371,8 +371,10 @@ def inspect_project(project_path: str = "") -> dict:
     marker: adoption repins only the adopting process, so the GUI and this process can end
     up naming different projects until both explicitly adopt. Carries
     ``platform_root_binding``, this process's own :class:`tcip_mcp.project_paths.RootBinding`
-    as a dict, when :func:`tcip_mcp.project_paths.pin_project_root` has run: absent under
-    pytest and any standalone use, since neither calls it.
+    as a dict, when either :func:`tcip_mcp.project_paths.pin_project_root` or
+    :func:`tcip_mcp.project_paths.repin_platform_root` has run: absent under pytest until a
+    ``set_active_project`` call repins, and absent for any other standalone use, since none of
+    those call either.
 
     For a project with ``.tcip``, carries ``site`` and ``site_problem`` from
     ``tcip_mcp.project_record.site_fields``: exactly one is set, and ``site_problem`` names why

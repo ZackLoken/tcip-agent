@@ -101,9 +101,10 @@ def list_projects() -> dict:
     """List workspace projects (directories containing ``.tcip/``), newest first.
 
     Carries ``platform_root``/``platform_root_source`` when this backend has bound one
-    (:func:`tcip_mcp.project_paths.root_binding`, always populated once the app has been
-    imported): the backend's own platform-state root, so the GUI can show it disagreeing
-    with ``active``/``active_path`` in the window before a repin lands.
+    (:func:`tcip_mcp.project_paths.root_binding`, populated once the app has served its first
+    request or repinned via ``set_active_project``, never merely imported): the backend's own
+    platform-state root, so the GUI can show it disagreeing with ``active``/``active_path`` in
+    the window before a repin lands.
     """
     from tcip_mcp.project_paths import root_binding
 
