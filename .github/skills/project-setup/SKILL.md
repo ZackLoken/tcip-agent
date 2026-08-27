@@ -124,16 +124,16 @@ the format cannot be determined, `read_annotations` returns an error rather than
 ## 5. Split: `make_splits`
 
 Create leakage-free train/val/calibration splits with `make_splits` (group-aware, keeps sibling
-tiles of one source image in the same split; a held-out test list is refused, since no launch
-path honours one). Non-destructive by default (writes stem manifests + stats); pass
-`materialize=True` to also lay out a `{train,val,calibration}/{images,labels}/` tree (a
-`calibration/` directory only when `calibration_ratio > 0`), with the platform's own per-image
-JSON labels (not YOLO's `.txt` format; `tcip-annotation` supports `{json, coco}` only). Writing a
-manifest requires `subject`: its members are drawn through the same admission a training run
-uses, and a run names it with `data.split.manifest_dir` to train against that exact partition
-instead of drawing its own; the manifest's `calibration` side is never bound to a loader, so a
-run's own selection (`val`) side is never what the checkpoint is later validated against (see the
-`evaluation` skill's Calibration/Holdout Split section).
+tiles of one source image in the same split; there is no held-out test list, and no launch path
+honours one). Non-destructive by default (writes stem manifests + stats); pass
+`materialize=True` to also lay out a `{train,val,calibration}/{images,labels}/` tree, with the
+platform's own per-image JSON labels (not YOLO's `.txt` format; `tcip-annotation` supports
+`{json, coco}` only). Writing a manifest requires `subject` and all three ratios stated non-zero:
+its members are drawn through the same admission a training run uses, and a run names it with
+`data.split.manifest_dir` to train against that exact partition instead of drawing its own; the
+manifest's `calibration` side is never bound to a loader, so a run's own selection (`val`) side is
+never what the checkpoint is later validated against (see the `evaluation` skill's
+Calibration/Holdout Split section).
 
 ## 6. Build a model, train, infer
 
