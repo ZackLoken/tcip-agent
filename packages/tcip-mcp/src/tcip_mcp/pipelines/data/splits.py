@@ -1041,6 +1041,43 @@ def calibration_universe_from_manifest(
     return stems, group_by, group_key_map, excluded
 
 
+def resolve_manifest_calibration_universe(
+    manifest: dict, split_manifest_dir: str | Path, labels_dir: str | Path,
+    images_dir: str | Path | None, subject: str | None, attribute: str | None,
+    present: Iterable[str],
+) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]], str | None]:
+    """The checks every door restricting a calibration to a split manifest shares, ahead of
+    :func:`calibration_universe_from_manifest`'s own draw: the manifest's ``subject``/
+    ``attribute`` must equal the door's, the labels directory's date
+    (:func:`~tcip_mcp.dataset_layout.annotation_date`) must be one the manifest holds members
+    under, and the manifest's ``images_root`` for that date must be the door's ``images_dir``,
+    each refusing by name. Called from both the calibration door and ``evaluate_model`` so the
+    two never drift into disagreeing about what a manifest-restricted evaluation reads.
+
+    Returns ``(stems, group_by, group_key_map, excluded, date)``, the universe plus the date it
+    was drawn for.
+    """
+    from tcip_mcp.dataset_layout import annotation_date
+
+    if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
+        raise ValueError(
+            f"split manifest at {split_manifest_dir!r} was drawn for subject="
+            f"{manifest.get('subject')!r}, attribute={manifest.get('attribute')!r}, but this "
+            f"door's recorded scope is subject={subject!r}, attribute={attribute!r}."
+        )
+    date = annotation_date(labels_dir)
+    date_block = (manifest.get("members") or {}).get(manifest_date_key(date))
+    if date_block is None:
+        raise ValueError(
+            f"split manifest at {split_manifest_dir!r} holds no members under date {date!r}; "
+            f"it holds members under {sorted(manifest.get('members') or {})}."
+        )
+    refuse_if_images_root_moved("images_dir", images_dir, date_block.get("images_root"), date)
+    stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
+        manifest, date, present)
+    return stems, group_by, group_key_map, excluded, date
+
+
 def _split_content_hash(parts: dict[str, list[str]] | None) -> str | None:
     """Content hash over a split's calibration+holdout membership (order-independent per side)."""
     if not parts:

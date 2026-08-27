@@ -6,7 +6,8 @@ Stores experiment state in .tcip/experiments/<experiment_id>/:
   artifacts.json, pointers to model weights, predictions
   lineage.json, data → model → predictions chain
   status.json, current state and timestamps
-  split.json, the train/val membership, seed and dataset identity a metric is reproducible with
+  split.json, the train/val membership, seed, capture date and dataset identity a metric is
+    reproducible with (plus a bound run's calibration-side counts, held out from both)
   env.json, the library versions, seed and model kind behind a reproducible run
   validations.jsonl, the claims earned against this run's evidence (append-only)
 
