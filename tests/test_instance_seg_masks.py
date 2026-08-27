@@ -508,6 +508,31 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(tmp_path, monkeypatch):
     assert json_io.read_annotations(str(out)) == []
 
 
+def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(tmp_path, monkeypatch):
+    """A polygon with real raw extent that collapses to one point at the document's stored
+    2-decimal grid must be dropped here, the same as an already-collinear contour: the writer
+    would otherwise refuse it and abort the whole batch."""
+    from tcip_mcp.pipelines.postprocessing import export
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Polygon
+
+    monkeypatch.setattr(
+        export, "_mask_geometry_for_export",
+        lambda mask, bbox_xyxy, subject, *, image_size=None: Polygon(
+            rings=[[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]]),
+    )
+    result = {
+        "image": "img.jpg", "width": 64, "height": 64,
+        "boxes": [[1.0, 1.0, 2.0, 2.0]], "scores": [0.9], "labels": [1],
+        "masks": [[[0]]],
+    }
+    out = tmp_path / "img.json"
+    dropped = export.write_predictions_json(str(out), result)
+
+    assert dropped == 1
+    assert json_io.read_annotations(str(out)) == []
+
+
 def test_export_no_masks_key_writes_bbox_as_before():
     """Regression guard: a plain detection result (no masks key at all) must still export BBox
     as before; masks are additive, not a behavior change for non-instance_seg."""

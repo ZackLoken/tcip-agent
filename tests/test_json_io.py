@@ -1138,12 +1138,36 @@ def test_a_polygon_that_would_round_to_a_zero_extent_box_is_refused_at_write(tmp
         write_annotations(path, [sliver], 10, 10)
 
 
+def test_a_polygon_whose_vertices_all_round_to_one_point_is_refused_at_write(tmp_path: Path) -> None:
+    """A polygon's box is checked against the same rounded rings the document stores, not the raw
+    ones: vertices that only collapse to one point at the stored 2-decimal grid must never write a
+    bbox claiming extent the stored geometry does not have."""
+    path = tmp_path / "a.json"
+    sliver = Annotation(subject="catkin", geometry=Polygon(
+        [[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]]
+    ))
+    with pytest.raises(ValueError):
+        write_annotations(path, [sliver], 10, 10)
+
+
 def test_a_box_that_rounds_to_positive_extent_still_writes_and_reads_back(tmp_path: Path) -> None:
     path = tmp_path / "a.json"
     real = Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 1.02, 1.02))
     write_annotations(path, [real], 10, 10)
     [back] = read_annotations(path)
     assert back.subject == "catkin"
+
+
+def test_geometry_extent_ok_agrees_with_the_writer_on_a_collapsing_polygon() -> None:
+    """The pre-write check a caller uses to drop a degenerate detection before it ever reaches
+    the writer must reach the writer's own verdict, not a looser one: one implementation."""
+    from tcip_annotation.json_io import geometry_extent_ok
+
+    collapsing = Polygon([[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]])
+    assert geometry_extent_ok(collapsing) is False
+
+    real = Polygon([[(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0)]])
+    assert geometry_extent_ok(real) is True
 
 
 def test_prediction_documents_skips_a_directory_named_like_a_json_file(tmp_path: Path) -> None:

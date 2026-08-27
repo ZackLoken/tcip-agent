@@ -137,7 +137,7 @@ def _write_positive_label(path: Path, positives: list[tuple], img_w: int, img_h:
     failure rather than letting it propagate.
 
     A verdict's normalized box can denormalize to zero extent (the persistence boundary's own
-    refusal, ``check_box_extent`` inside ``write_annotations``); caught here so one degenerate
+    refusal, ``stored_box_extent_ok`` inside ``write_annotations``); caught here so one degenerate
     record does not abort a harvest of many images with an uncaught ``ValueError``.
     """
     # Denormalize the verdict log's [cx,cy,w,h] to pixel xyxy for the name-based per-image JSON.
