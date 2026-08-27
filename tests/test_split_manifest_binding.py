@@ -223,6 +223,24 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     return root
 
 
+def _single_source_mosaic_dataset(root: Path) -> tuple[Path, Path]:
+    """One tileable single-source image with GT spread across its extent, enough for the spatial
+    single-source split to derive disjoint regions from one image alone (the same extent and
+    tile geometry ``test_spatial_region_containment.py``'s own mosaic fixture uses)."""
+    from PIL import Image
+
+    images_dir, labels_dir = root / "images", root / "labels"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    w, h = 4000, 3000
+    Image.new("RGB", (w, h), color=(90, 90, 90)).save(images_dir / "mosaic.png")
+    boxes = [Annotation(subject=SUBJECT, geometry=BBox(x, y, x + 20, y + 20))
+            for x in range(20, w - 20, 200) for y in range(20, h - 20, 200)]
+    json_io.write_annotations(str(labels_dir / "mosaic.json"), boxes, w, h, keep_empty=True)
+    return images_dir, labels_dir
+
+
 def test_auto_train_val_admits_a_confirmed_negative_with_data_date_unset(tmp_path: Path):
     """A run whose ``data.date`` is left unset still reads confirmed negatives under the tree's
     own date, the date the split manifest was drawn under, so a manifest member confirmed
@@ -284,6 +302,37 @@ def test_auto_train_val_second_bind_on_the_same_config_binds_again(tmp_path: Pat
     train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
+
+
+def test_auto_train_val_binds_an_explicit_map_manifest_twice_and_persists_its_narrowed_map(
+        tmp_path: Path):
+    """A manifest drawn with an agent-derived ``group_key_map`` binds from a fresh config, binds
+    again on the same config dict, and its per-date narrowed map survives into ``split.json``."""
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    group_key_map = {
+        f"{date}/{stem}": group
+        for date in DATES for stem, group in (("a", "p1"), ("b", "p1"), ("c", "p2"))
+    }
+    result = make_splits(str(root), output_path=str(out), subject=SUBJECT,
+                         group_key_map=group_key_map, seed=1,
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0)
+    assert "error" not in result, result
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+
+    _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+
+    assert train_ds.stems and val_ds.stems
+    assert data_cfg["split"]["resolved_group_key_map"] == {"a": "p1", "b": "p1", "c": "p2"}
+
+    create_experiment("exp_explicit_map_bind", {})
+    _persist_split_manifest("exp_explicit_map_bind", train_ds, val_ds, data_cfg)
+    persisted = read_split_manifest("exp_explicit_map_bind")
+    assert persisted["group_key_map"] == {"a": "p1", "b": "p1", "c": "p2"}
 
 
 def test_preflight_config_on_a_bound_config_admits_it_again(tmp_path: Path):
@@ -469,6 +518,61 @@ def test_auto_train_val_manifest_binding_failure_raises_rather_than_degrading(tm
         _auto_train_val("detection", data_cfg, None)
 
 
+def test_auto_train_val_manifest_refuses_a_dataset_level_coco_misrouted_as_labels_dir(
+        tmp_path: Path):
+    """The manifest branch reaches the same dataset-level-COCO refusal the auto path does,
+    raised ahead of admission and never folded into a binding failure."""
+    import json
+
+    from tcip_mcp.tools.training_tools import _auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+
+    labels_dir = root / "annotations" / DATES[0]
+    for f in labels_dir.glob("*.json"):
+        f.unlink()
+    (labels_dir / "dataset.json").write_text(json.dumps(
+        {"images": [], "annotations": [], "categories": []}))
+
+    with pytest.raises(ValueError, match="data.labels_dir="):
+        _auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_reads_the_label_format_once_per_run(tmp_path: Path, monkeypatch):
+    """Neither the manifest branch nor the auto path reads ``data.labels_dir``'s format more than
+    once: the caller reads it ahead of its own handler, and the admission build it feeds into
+    never re-reads it."""
+    import tcip_mcp.tools.training_tools as ttools
+
+    calls: list[None] = []
+    real = ttools._checked_label_format
+
+    def counting(task, data_cfg, src):
+        calls.append(None)
+        return real(task, data_cfg, src)
+
+    monkeypatch.setattr(ttools, "_checked_label_format", counting)
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    manifest_cfg = _run_data_cfg(root, out, DATES[0])
+    ttools._auto_train_val("detection", manifest_cfg, None)
+    assert len(calls) == 1
+
+    calls.clear()
+    auto_cfg = {
+        "images_dir": str(root / "images" / DATES[0]),
+        "labels_dir": str(root / "annotations" / DATES[0]),
+        "subject": SUBJECT, "attribute": None,
+    }
+    ttools._auto_train_val("detection", auto_cfg, None)
+    assert len(calls) == 1
+
+
 # -- _persist_split_manifest / the worker's config patch --------------------------
 
 
@@ -490,6 +594,40 @@ def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     assert persisted["manifest_binding"]["date"] == DATES[0]
 
 
+def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_bind(
+        tmp_path: Path):
+    """A config inherited from an earlier bound launch (its ``data.split`` still carrying that
+    run's ``manifest_binding``) relaunched with no ``manifest_dir`` draws its own split and
+    records none of the earlier binding beside the drawn membership."""
+    from tcip_mcp.experiments import create_experiment, read_split_manifest
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    data_cfg = {
+        "images_dir": str(root / "images" / DATES[0]),
+        "labels_dir": str(root / "annotations" / DATES[0]),
+        "subject": SUBJECT, "attribute": None,
+        "split": {
+            "manifest_binding": {"manifest_dir": "stale", "date": DATES[0]},
+            "resolved_group_key_map": {"stale": "p"},
+            "resolved_seed": 7,
+        },
+    }
+
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+
+    assert val_ds is not None
+    assert "manifest_binding" not in data_cfg["split"]
+    assert "resolved_group_key_map" not in data_cfg["split"]
+    assert "resolved_seed" not in data_cfg["split"]
+
+    create_experiment("exp_relaunch_no_manifest", {})
+    _persist_split_manifest("exp_relaunch_no_manifest", train_ds, val_ds, data_cfg)
+
+    persisted = read_split_manifest("exp_relaunch_no_manifest")
+    assert "manifest_binding" not in persisted
+
+
 def test_patch_experiment_config_split_merges_into_the_durable_record(tmp_path: Path):
     import tcip_store as ts
     from tcip_mcp.experiments import config_key, create_experiment
@@ -502,6 +640,49 @@ def test_patch_experiment_config_split_merges_into_the_durable_record(tmp_path: 
     cfg = ts.read(config_key("exp_split_patch"))
     assert cfg["data"]["labels_dir"] == "orig"
     assert cfg["data"]["split"]["manifest_binding"]["date"] == DATES[0]
+
+
+def test_worker_leaves_a_relaunched_spatial_runs_stale_binding_out_of_the_durable_config(
+        tmp_path: Path, monkeypatch):
+    """A launch config inherited from an earlier bound run (its ``data.split`` still carrying
+    that run's ``manifest_binding``) relaunched with no ``manifest_dir`` over a single-source,
+    spatially splittable tree must not mirror any binding into the durable record: the real
+    ``_auto_train_val`` clears the stale block before it resolves its own spatial split, so the
+    worker's patch-back gate never fires."""
+    import tcip_store as ts
+    from tcip_mcp.experiments import config_key, create_experiment
+    from tcip_mcp.pipelines.training import subprocess_worker as worker
+    from tcip_mcp.tools import training_tools as ttools
+
+    images_dir, labels_dir = _single_source_mosaic_dataset(tmp_path / "ds")
+    out = tmp_path / "run"
+    out.mkdir()
+    data = {
+        "images_dir": str(images_dir), "labels_dir": str(labels_dir), "subject": SUBJECT,
+        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+    }
+    create_experiment("exp_stale_spatial_relaunch",
+                      {"model_source": {"builder": "x:y", "task": "detection"}, "data": data})
+    launch_config = {
+        "model_source": {"builder": "x:y", "task": "detection"},
+        "data": {**data,
+                 "split": {"manifest_binding": {"manifest_dir": "stale", "date": DATES[0]}}},
+    }
+    ts.replace(ttools.launch_config_key(out), launch_config)
+
+    class StopAfterSplit(Exception):
+        pass
+
+    def stop(*args, **kwargs):
+        raise StopAfterSplit
+
+    monkeypatch.setattr(worker, "_resolve_run_id_map", stop)
+    with pytest.raises(StopAfterSplit):
+        worker.run("run1", "exp_stale_spatial_relaunch", str(out), "")
+
+    durable_split = ts.read(config_key("exp_stale_spatial_relaunch"))["data"].get("split", {})
+    assert "manifest_binding" not in durable_split
+    assert "spatial_manifest" not in durable_split
 
 
 # -- preflight_config's manifest-level checks --------------------------------------

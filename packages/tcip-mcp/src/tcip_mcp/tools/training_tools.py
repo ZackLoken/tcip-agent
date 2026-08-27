@@ -2106,9 +2106,10 @@ def _checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
     Refuses a dataset-level assembled COCO document sitting in ``data.labels_dir`` rather than
     per-image label files: a caller-fixable config error, since the per-image files in that
     directory would be shadowed by the assembled export, silently training on the wrong source
-    being worse than refusing. Called by every caller of :func:`_build_full_admitted_dataset`
-    before any admission draw runs, so neither the auto path's degrade handler nor a manifest
-    bind can catch this refusal and fold it into "training without validation".
+    being worse than refusing. Called once per run, by each caller of
+    :func:`_build_full_admitted_dataset` ahead of its own handler and never from inside the
+    helper, so neither the auto path's degrade handler nor a manifest bind can catch this
+    refusal and fold it into "training without validation".
     """
     if task not in ("detection", "instance_seg") or data_cfg.get("label_format") or data_cfg.get("coco_json"):
         return None
@@ -2130,15 +2131,18 @@ def _checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
     return fmt
 
 
-def _build_full_admitted_dataset(task: str, data_cfg: dict, src: dict, transforms):
+def _build_full_admitted_dataset(
+    task: str, data_cfg: dict, src: dict, transforms, detected_label_format: str | None,
+):
     """The full, admitted-set dataset for one run's data config, plus the ``build_dataset`` kwargs
     that produced it: one implementation, called both by the auto-split path (inside its own
     degrading handler) and by a split-manifest bind (unwrapped, so a real build failure raises
     rather than degrading to no validation over a recorded partition), so the two can never
     disagree about what this run admits.
 
-    A dataset-level COCO sitting in ``data.labels_dir`` is refused by :func:`_checked_label_format`
-    before either caller's own admission draw runs, never folded into a build failure here.
+    ``detected_label_format`` is the caller's own :func:`_checked_label_format` result: a
+    dataset-level COCO document sitting in ``data.labels_dir`` is refused there, ahead of the
+    caller's own handler, never re-read (and so never re-refused) here.
 
     Returns ``(full_ds, stems, build_src)``: ``stems`` is the task path's own admitted set
     (``full_ds.stems``/``full_ds._stems``), and ``build_src`` is ``src`` plus any assembled
@@ -2149,7 +2153,6 @@ def _build_full_admitted_dataset(task: str, data_cfg: dict, src: dict, transform
 
     build_src = dict(src)
     labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
-    detected_label_format = _checked_label_format(task, data_cfg, src)
 
     if detected_label_format == "json":
         from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, assemble_coco
@@ -2214,6 +2217,13 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
     split_cfg_raw = data_cfg.get("split")
     split_cfg_raw = split_cfg_raw if isinstance(split_cfg_raw, dict) else {}
     manifest_dir = split_cfg_raw.get("manifest_dir")
+
+    # A binding block an earlier bound launch left behind is cleared here; only the manifest
+    # branch below writes it back, and only when this run itself binds.
+    for _stale_key in (
+        "manifest_binding", "resolved_group_by", "resolved_group_key_map", "resolved_seed",
+    ):
+        split_cfg_raw.pop(_stale_key, None)
 
     # 1. Explicit validation source.
     val_images = data_cfg.get("val_images_dir")
@@ -2311,7 +2321,9 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 "data.split.manifest_dir requires data.subject: a manifest binds by subject, "
                 "and this run's own admission has none to compare against it."
             )
-        full_ds, admitted, build_src = _build_full_admitted_dataset(task, data_cfg, src, transforms)
+        detected_label_format = _checked_label_format(task, data_cfg, src)
+        full_ds, admitted, build_src = _build_full_admitted_dataset(
+            task, data_cfg, src, transforms, detected_label_format)
         binding = bind_manifest_stems(
             manifest, date, subject, attribute, admitted,
             admission_counts=getattr(full_ds, "sample_counts", None))
@@ -2347,9 +2359,10 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     # 2. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
     # error, raised outside the handler below rather than degraded.
-    _checked_label_format(task, data_cfg, src)
+    detected_label_format = _checked_label_format(task, data_cfg, src)
     try:
-        full_ds, stems, build_src = _build_full_admitted_dataset(task, data_cfg, src, transforms)
+        full_ds, stems, build_src = _build_full_admitted_dataset(
+            task, data_cfg, src, transforms, detected_label_format)
     except Exception as exc:
         logger.warning("Auto train/val split failed (%s); training without validation.", exc)
         return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
