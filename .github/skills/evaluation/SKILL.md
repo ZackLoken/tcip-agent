@@ -78,14 +78,18 @@ seed and the old/new split's content hashes (not the stems themselves); the old 
 membership is recorded in the audit log alongside the reason, so a redraw-until-it-passes pattern
 stays visible on review.
 
-`run_inference`/`force_redraw_cal_holdout_split` also take `split_manifest_dir`: draw the
+`run_inference`, `export_predictions` and `tabulate_counts` (the latter two forward it to
+`run_inference`) and `force_redraw_cal_holdout_split` all take `split_manifest_dir`: draw the
 calibration universe from one capture date's held-out side of a named `split_manifest` record
-instead of every labelled stem with an image, so the operating point measures on exactly the set
-the shipped checkpoint was chosen against. The manifest's own subject/attribute must match this
-call's (`force_redraw_cal_holdout_split` takes `subject`/`attribute` directly; `run_inference`
-resolves them from the run's own training scope), and `split_manifest_dir` conflicts with an
-explicit `group_by`/`group_key_map`, whose default becomes `None` for this reason (resolved to
-`tile_prefix` when neither was given).
+instead of every labelled stem with an image, the labelled stems that date's manifest admitted
+but held out of training. The manifest's own subject/attribute must match this call's
+(`force_redraw_cal_holdout_split` takes `subject`/`attribute` directly; `run_inference` resolves
+them from the run's own training scope), and `split_manifest_dir` conflicts with an explicit
+`group_by`/`group_key_map`, whose default becomes `None` for this reason (resolved to
+`tile_prefix` when neither was given). `force_redraw_cal_holdout_split` additionally requires
+`labels_dir`, `subject` and `images_dir` alongside `split_manifest_dir`: a labels-only universe
+can include a stem whose image is gone, a lock the redraw exists to fix, so it refuses by name
+without one.
 
 ## Failure Triage
 
