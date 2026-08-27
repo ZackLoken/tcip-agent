@@ -1161,12 +1161,18 @@ def test_read_split_manifest_dir_admits_the_writers_own_record(tmp_path: Path):
 
 def test_read_split_manifest_dir_refuses_each_missing_required_key_by_name(tmp_path: Path):
     """A manifest missing any key make_splits writes is refused before a bind ever reads it,
-    naming the missing key, rather than reaching a downstream cast with nothing to fall back to."""
-    keys_a_written_manifest_carries = (
-        "seed", "group_by", "dataset_fingerprint", "subject", "attribute", "id_map",
-        "members", "splits", "admission_counts",
-    )
+    naming the missing key, rather than reaching a downstream cast with nothing to fall back to.
+    The key list is read off a record the writer produced, never restated by hand, and the
+    reader's required tuple must equal it, so neither side can drift from the other."""
+    from tcip_mcp.tools.data_tools import _SPLIT_MANIFEST_REQUIRED_KEYS
+
     root = _multi_source_dataset(tmp_path / "ds")
+    written = make_splits(str(root), output_path=str(tmp_path / "m_all"), seed=1,
+                          subject="catkin", train_ratio=0.5, val_ratio=0.25,
+                          calibration_ratio=0.25)
+    assert "error" not in written, written
+    keys_a_written_manifest_carries = tuple(ts.read(split_manifest_key(tmp_path / "m_all")))
+    assert set(keys_a_written_manifest_carries) == set(_SPLIT_MANIFEST_REQUIRED_KEYS)
     for missing_key in keys_a_written_manifest_carries:
         out = tmp_path / f"m_{missing_key}"
         result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
