@@ -928,6 +928,48 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     assert r["cross_dataset_check"] == "same-labeled-set"
 
 
+def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_path, monkeypatch):
+    """A manifest-restricted calibration answers how many present stems it left out of its
+    universe, the training side's and the unassigned ones, as counts beside the incomplete
+    attribute count, so the caller learns the exclusions without opening the persisted evidence."""
+    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    from PIL import Image
+
+    cal, hold = _good_dense_cal_holdout()
+    inputs = {"tiled": False, "dataset_hash": "H", "calibration_records": cal,
+              "holdout_records": hold, "staged_conf_floor": 0.01}
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    evidence = {
+        "resolver": "resolve_operating_point", "inputs": inputs,
+        "reference_inputs": {
+            "label_stems": {"calibration": {"path": str(tmp_path), "stems": ["a"]}},
+            "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
+        },
+        "calibration_stems": ["a"],
+        "excluded": {"excluded_training_stems": ["b", "c"], "excluded_unassigned_stems": ["d"]},
+    }
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    monkeypatch.chdir(tmp_path)
+
+    img = tmp_path / "a.png"
+    Image.new("RGB", (100, 100)).save(img)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    r = itools.run_inference(
+        str(ckpt), image_paths=[str(img)], images_dir=str(tmp_path), device="cpu",
+        tile=False, trait="catkin", calibration_labels_dir=str(tmp_path),
+        split_manifest_dir=str(tmp_path / "m"))
+
+    assert r["n_excluded_training_stems"] == 2
+    assert r["n_excluded_unassigned_stems"] == 1
+    assert r["n_excluded_incomplete_attribute"] == 0
+
+
 def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
     """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
