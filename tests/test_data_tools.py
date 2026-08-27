@@ -110,34 +110,57 @@ def test_scan_and_validate_report_a_reserved_stem_image_with_no_label(tmp_path: 
     assert scan_result["unlabelled_images"] == 2
 
 
+def _add_extra_catkin_groups(data_dir: Path, count: int) -> None:
+    """Adds ``count`` more single-tile foreground groups under ``data_dir``'s own date, for its
+    own subject, without touching the shared ``data_dir`` fixture other tests depend on: a
+    manifest write needs at least four foreground groups to clear ``make_splits``' floor, one
+    more than the fixture's own three."""
+    from PIL import Image
+
+    images_dir = data_dir / "images" / "2-11-26"
+    labels_dir = data_dir / "annotations" / "2-11-26"
+    for i in range(count):
+        stem = f"extra_{i:03d}"
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480,
+        )
+
+
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
+    _add_extra_catkin_groups(data_dir, 1)
     out = tmp_path / "splits"
-    result = make_splits(str(data_dir), output_path=str(out), materialize=True, subject="catkin")
-    assert result["total_stems"] == 3
-    assert sum(result["splits"].values()) == 3
+    result = make_splits(str(data_dir), output_path=str(out), materialize=True, subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
+    assert result["total_stems"] == 4
+    assert sum(result["splits"].values()) == 4
     assert result["output_dir"] == str(out)
-    for split in ("train", "val"):
+    for split in ("train", "val", "calibration"):
         assert ts.exists(split_stem_list_key(out, split))
         assert (out / split / "images").is_dir()
         assert (out / split / "labels").is_dir()
-    assert "test" not in result["splits"]
     assert not (out / "test").exists()
     # Every image landed under exactly one split's images/ dir.
     placed = sorted(p.stem for p in out.rglob("images/*") if p.is_file())
-    assert placed == ["img_001", "img_002", "img_003"]
+    assert placed == ["extra_000", "img_001", "img_002", "img_003"]
 
 
 def test_make_splits_basic(data_dir: Path, tmp_path: Path):
+    _add_extra_catkin_groups(data_dir, 1)
     out = tmp_path / "manifests"
-    # The 3 fixture stems (img_001..003) are 3 distinct foreground groups.
-    result = make_splits(str(data_dir), output_path=str(out), subject="catkin")
-    assert result["total_stems"] == 3
-    assert result["groups"] == 3
-    assert sum(result["splits"].values()) == 3
+    # The fixture's 4 stems (img_001..003 plus one grown group) are 4 distinct foreground
+    # groups, exactly the manifest floor (one each for train/val, two for calibration).
+    result = make_splits(str(data_dir), output_path=str(out), subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
+    assert result["total_stems"] == 4
+    assert result["groups"] == 4
+    assert sum(result["splits"].values()) == 4
     assert result["stratified"] is True
-    for split in ("train", "val"):
+    for split in ("train", "val", "calibration"):
         assert ts.exists(split_stem_list_key(out, split))
-    assert "test" not in result["splits"]
 
     manifest = ts.read(split_manifest_key(out))
     assert manifest["subject"] == "catkin"
@@ -146,15 +169,15 @@ def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     assert Path(date_block["labels_root"]).is_dir()
     assert date_block["dataset_hash"]
     assert manifest["dataset_fingerprint"] is not None
-    assert "test" not in manifest["splits"]
+    assert set(manifest["splits"]) == {"train", "val", "calibration"}
 
 
-def test_make_splits_refuses_a_nonzero_test_ratio(data_dir: Path):
-    """No launch path honours a held-out test list: make_splits refuses one rather than writing
-    a partition nothing downstream reads."""
-    result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, test_ratio=0.1)
-    assert "error" in result
-    assert "test_ratio" in result["error"]
+def test_make_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
+    """A stats-only call (no output_path, no materialize) may pass any calibration_ratio; only a
+    manifest write requires a non-zero one."""
+    result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.1)
+    assert "error" not in result, result
+    assert result["splits"]["calibration"] >= 0
 
 
 def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_path: Path):
@@ -163,7 +186,8 @@ def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     bad = next((data_dir / "annotations" / "2-11-26").glob("*.json"))
     bad.write_bytes(b"{not json")
 
-    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin")
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -178,7 +202,8 @@ def test_make_splits_reports_an_unreadable_label_sorted_last(
     bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
     bad.write_bytes(b"{not json")
 
-    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin")
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert str(bad) in result["error"]
@@ -228,10 +253,26 @@ def test_make_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
-    result = make_splits(str(root), output_path=str(tmp_path / "manifests"), subject="leaf")
+    result = make_splits(str(root), output_path=str(tmp_path / "manifests"), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert "plotA" in result["error"]
+
+
+def _add_extra_leaf_groups(images_dir: Path, labels_dir: Path, count: int) -> None:
+    """Adds ``count`` more plain single-tile foreground groups (subject ``leaf``) beside a
+    band-group fixture, so a manifest write over it clears the four-foreground-group floor."""
+    from PIL import Image
+
+    letters = "BCDEFGH"
+    for i in range(count):
+        stem = f"plot{letters[i]}"
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
 
 
 def test_make_splits_materialize_refuses_an_incomplete_band_group_before_writing(tmp_path: Path):
@@ -244,18 +285,21 @@ def test_make_splits_materialize_refuses_an_incomplete_band_group_before_writing
     root = tmp_path / "ds"
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
-    (root / "annotations" / "2-11-26").mkdir(parents=True)
+    labels_dir = root / "annotations" / "2-11-26"
+    labels_dir.mkdir(parents=True)
 
     band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
     np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(images_dir, "plotA", {"G": band_g, "R": band_r})  # R never created
     json_io.write_annotations(
-        root / "annotations" / "2-11-26" / "plotA.json",
+        labels_dir / "plotA.json",
         [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
     )
+    _add_extra_leaf_groups(images_dir, labels_dir, 3)
     out = tmp_path / "m"
 
-    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf")
+    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert "plotA" in result["error"] and "R" in result["error"]
@@ -273,22 +317,26 @@ def test_make_splits_materialize_places_a_complete_band_group(tmp_path: Path):
         root = tmp_path / f"ds_{copy_files}"
         images_dir = root / "images" / "2-11-26"
         images_dir.mkdir(parents=True)
-        (root / "annotations" / "2-11-26").mkdir(parents=True)
+        labels_dir = root / "annotations" / "2-11-26"
+        labels_dir.mkdir(parents=True)
         band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
         np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
         np.save(band_r, np.zeros((4, 4), dtype=np.uint8))
         write_band_group_manifest(images_dir, "plotA", {"G": band_g, "R": band_r})
         json_io.write_annotations(
-            root / "annotations" / "2-11-26" / "plotA.json",
+            labels_dir / "plotA.json",
             [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
         )
+        _add_extra_leaf_groups(images_dir, labels_dir, 3)
         out = tmp_path / f"m_{copy_files}"
 
         result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
-                             copy_files=copy_files, train_ratio=1.0, val_ratio=0.0, test_ratio=0.0)
+                             copy_files=copy_files, train_ratio=0.5, val_ratio=0.25,
+                             calibration_ratio=0.25)
 
         assert "error" not in result, result
-        placed = {p.name for p in (out / "train" / "images").iterdir()}
+        placed = {p.name for split in ("train", "val", "calibration")
+                 for p in (out / split / "images").glob("plotA*")}
         assert placed == {"plotA.bandgroup", "plotA_G.npy", "plotA_R.npy"}
 
 
@@ -334,9 +382,11 @@ def test_make_splits_manifest_answer_carries_each_dates_hash(data_dir: Path, tmp
     """A manifest call's answer identifies the labels it partitioned per capture date, the same
     hashes the written manifest's ``members`` blocks record, so the caller need not open the
     record to cite what the draw covered."""
+    _add_extra_catkin_groups(data_dir, 1)
     out = tmp_path / "manifests"
-    result = make_splits(str(data_dir), output_path=str(out), subject="catkin")
-    assert "error" not in result
+    result = make_splits(str(data_dir), output_path=str(out), subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
 
     members = ts.read(split_manifest_key(out))["members"]
     assert result["dataset_hashes_by_date"] == {
@@ -345,17 +395,103 @@ def test_make_splits_manifest_answer_carries_each_dates_hash(data_dir: Path, tmp
 
 
 def test_make_splits_bad_ratios(data_dir: Path):
-    result = make_splits(str(data_dir), train_ratio=0.5, val_ratio=0.5, test_ratio=0.5)
+    result = make_splits(str(data_dir), train_ratio=0.5, val_ratio=0.5, calibration_ratio=0.5)
     assert "error" in result
 
 
-def test_make_splits_train_and_val_not_summing_to_one_names_both_constraints(data_dir: Path):
-    """A caller carrying over the old three-way train_ratio with test_ratio at its new default
-    of 0 gets a message naming both standing constraints, not just the raw sum."""
-    result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, test_ratio=0.0)
+def test_make_splits_train_val_calibration_not_summing_to_one_names_all_three(data_dir: Path):
+    """The sum-check message names all three standing constraints, not just the raw sum."""
+    result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.2)
     assert "error" in result
-    assert "test_ratio" in result["error"]
+    assert "calibration_ratio" in result["error"]
     assert "train_ratio" in result["error"] and "val_ratio" in result["error"]
+
+
+def test_make_splits_manifest_write_refuses_a_zero_calibration_ratio(tmp_path: Path):
+    """A manifest's calibration side is the universe every calibration under it draws from, so a
+    manifest write states a non-zero calibration_ratio; the keyword names the missing input."""
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), subject="catkin")
+
+    assert "error" in result
+    assert "calibration_ratio" in result["error"]
+    assert not out.exists()
+
+
+def test_make_splits_writes_three_stem_lists(tmp_path: Path):
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+
+    assert "error" not in result, result
+    for split in ("train", "val", "calibration"):
+        assert ts.exists(split_stem_list_key(out, split))
+    manifest = ts.read(split_manifest_key(out))
+    assert set(manifest["splits"]) == {"train", "val", "calibration"}
+    assert manifest["splits"]["calibration"]
+
+
+def test_make_splits_floor_refuses_before_any_write_regardless_of_stratify_foreground(
+    tmp_path: Path,
+):
+    """The foreground floor is over the draw's own subject-scoped counter on every manifest
+    draw, whether or not stratify_foreground toggles the balancing pass: a tree with only three
+    foreground groups refuses before anything is written, with stratify_foreground off."""
+    root = _multi_source_dataset(tmp_path / "ds", prefixes=("srcA", "srcB", "srcC"))
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), subject="catkin", seed=1,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
+                         stratify_foreground=False)
+
+    assert "error" in result
+    assert "foreground group" in result["error"]
+    assert not out.exists()
+
+
+def test_make_splits_floor_ignores_a_groups_only_annotations_of_another_subject(tmp_path: Path):
+    """A confirmed-negative-for-the-draws-subject group whose label file happens to carry
+    another subject's annotation is not this draw's foreground: the subject-scoped counter
+    reads it as zero, so three real ``leaf`` groups plus one such group still refuse (below the
+    floor of four), the same tree an unscoped counter would have read as four and written."""
+    from PIL import Image
+
+    from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+
+    root = tmp_path / "ds"
+    date = "2-11-26"
+    images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(
+        Subject(name="leaf"), Subject(name="bud"),
+    )))
+    for stem in ("p1", "p2", "p3"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "p4.jpg")
+    json_io.write_annotations(
+        labels_dir / "p4.json",
+        [Annotation(subject="bud", geometry=BBox(4, 4, 12, 12))], 100, 80, keep_empty=True,
+    )
+    record_image_statuses(root, status_bucket("leaf", date), {"p4.jpg": "negative"},
+                          recorded_by="user:tester")
+
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject="leaf", seed=1,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+
+    assert "error" in result
+    assert "foreground group" in result["error"]
+    assert not out.exists()
 
 
 def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=3) -> Path:
@@ -381,12 +517,13 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
     # No source prefix may appear in more than one split.
     seen: dict[str, str] = {}
-    for split in ("train", "val"):
+    for split in ("train", "val", "calibration"):
         for stem in ts.read(split_stem_list_key(out, split)):
             g = default_group_key(stem)
             assert seen.get(g, split) == split, f"group {g} spans splits"
@@ -394,19 +531,22 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
 
 
 def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
-    """An agent-derived group_key_map (3 members, 2 groups) is honored: the two same-group
+    """An agent-derived group_key_map (5 members, 4 groups) is honored: the two same-group
     members never land in different splits."""
-    root = _multi_source_dataset(tmp_path / "ds", prefixes=("x", "y", "z"), tiles=1)
+    root = _multi_source_dataset(tmp_path / "ds", prefixes=("x", "y", "z", "w", "v"), tiles=1)
     out = tmp_path / "m"
-    group_key_map = {"2-11-26/x_0_0": "gA", "2-11-26/y_0_0": "gA", "2-11-26/z_0_0": "gB"}
+    group_key_map = {
+        "2-11-26/x_0_0": "gA", "2-11-26/y_0_0": "gA", "2-11-26/z_0_0": "gB",
+        "2-11-26/w_0_0": "gC", "2-11-26/v_0_0": "gD",
+    }
     result = make_splits(str(root), output_path=str(out), seed=1,
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0,
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
                          group_by="tile_prefix", group_key_map=group_key_map, subject="catkin")
-    assert "error" not in result
+    assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
 
     membership: dict[str, str] = {}
-    for split in ("train", "val"):
+    for split in ("train", "val", "calibration"):
         for identity in ts.read(split_stem_list_key(out, split)):
             membership[identity] = split
     assert membership["2-11-26/x_0_0"] == membership["2-11-26/y_0_0"]  # gA never straddles
@@ -420,7 +560,8 @@ def test_make_splits_unrecognized_group_by_refuses_without_writing(tmp_path: Pat
     dataset without anyone noticing; it must refuse loudly and write nothing instead."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="catkin")
+    result = make_splits(str(root), output_path=str(out), group_by="not_a_real_key", subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result
     assert not out.exists() or not (out / "split_manifest.json").is_file()
 
@@ -430,14 +571,16 @@ def test_make_splits_refuses_to_write_a_manifest_with_no_subject(tmp_path: Path)
     samples; make_splits refuses to write one rather than guessing what a run would admit."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out))
+    result = make_splits(str(root), output_path=str(out),
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" in result and "subject" in result["error"]
     assert not out.exists()
 
 
 def _two_date_collision_dataset(root: Path, subject: str) -> Path:
-    """One stem name, ``shared``, present under two capture dates with different content: a
-    manifest keyed by bare stem could only ever hold one of the two."""
+    """One stem name, ``shared``, present under two capture dates with different content, plus
+    one more distinct stem per date so a manifest write over this tree clears the foreground
+    floor: a manifest keyed by bare stem could only ever hold one of the two ``shared`` images."""
     from PIL import Image
 
     for date, box_x in (("2-11-26", 4), ("2-12-01", 40)):
@@ -450,6 +593,12 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
             labels_dir / "shared.json",
             [Annotation(subject=subject, geometry=BBox(box_x, 4, box_x + 8, 12))], 100, 80,
         )
+        extra_stem = f"extra_{date}"
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{extra_stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{extra_stem}.json",
+            [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
     return root
 
 
@@ -457,18 +606,18 @@ def test_two_dates_sharing_a_filename_produce_two_members(tmp_path: Path):
     root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
-    assert "error" not in result
-    assert result["total_stems"] == 2
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
+    assert "error" not in result, result
+    assert result["total_stems"] == 4
     manifest = ts.read(split_manifest_key(out))
     members = {identity for identities in manifest["splits"].values() for identity in identities}
-    assert members == {"2-11-26/shared", "2-12-01/shared"}
+    assert {"2-11-26/shared", "2-12-01/shared"} <= members
     assert set(manifest["members"]) == {"2-11-26", "2-12-01"}
 
 
 def _two_subject_dataset(root: Path) -> Path:
-    """Four stems on one date: two carry ``leaf``, two carry the unrelated subject ``bud``, no
-    stem carries both."""
+    """Six stems on one date: four carry ``leaf``, two carry the unrelated subject ``bud``, no
+    stem carries both; four ``leaf`` stems clear a leaf-scoped manifest write's foreground floor."""
     from PIL import Image
 
     from tcip_mcp.class_registry import ClassRegistry, Subject, write_registry
@@ -481,8 +630,10 @@ def _two_subject_dataset(root: Path) -> Path:
     write_registry(root / "classes.json", ClassRegistry(subjects=(
         Subject(name="leaf"), Subject(name="bud"),
     )))
-    for stem, subject in (("leaf_a", "leaf"), ("leaf_b", "leaf"),
-                         ("bud_a", "bud"), ("bud_b", "bud")):
+    for stem, subject in (
+        ("leaf_a", "leaf"), ("leaf_b", "leaf"), ("leaf_c", "leaf"), ("leaf_d", "leaf"),
+        ("bud_a", "bud"), ("bud_b", "bud"),
+    ):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
@@ -495,17 +646,18 @@ def test_make_splits_holds_only_the_named_subjects_admitted_samples(tmp_path: Pa
     root = _two_subject_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), subject="leaf",
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
-    assert "error" not in result
-    assert result["total_stems"] == 2
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
+    assert "error" not in result, result
+    assert result["total_stems"] == 4
     manifest = ts.read(split_manifest_key(out))
     members = {identity for identities in manifest["splits"].values() for identity in identities}
-    assert members == {"2-11-26/leaf_a", "2-11-26/leaf_b"}
+    assert members == {"2-11-26/leaf_a", "2-11-26/leaf_b", "2-11-26/leaf_c", "2-11-26/leaf_d"}
 
 
 def _attribute_scoped_dataset(root: Path) -> Path:
-    """Three stems on one date, one subject: two have their instance assessed for ``condition``,
-    one carries an instance never assessed for it."""
+    """Five stems on one date, one subject: four have their instance assessed for ``condition``
+    (clearing an attribute-scoped manifest write's foreground floor), one carries an instance
+    never assessed for it."""
     from PIL import Image
 
     from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
@@ -520,7 +672,10 @@ def _attribute_scoped_dataset(root: Path) -> Path:
             Attribute(name="condition", type="categorical", values=("healthy", "damaged")),
         )),
     )))
-    for stem, condition in (("assessed_a", "healthy"), ("assessed_b", "damaged")):
+    for stem, condition in (
+        ("assessed_a", "healthy"), ("assessed_b", "damaged"),
+        ("assessed_c", "healthy"), ("assessed_d", "damaged"),
+    ):
         Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
         json_io.write_annotations(
             labels_dir / f"{stem}.json",
@@ -539,20 +694,22 @@ def test_make_splits_attribute_scoped_manifest_holds_only_assessed_samples(tmp_p
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), subject="leaf", attribute="condition",
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
-    assert "error" not in result
-    assert result["total_stems"] == 2
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
+    assert "error" not in result, result
+    assert result["total_stems"] == 4
     manifest = ts.read(split_manifest_key(out))
     assert manifest["attribute"] == "condition"
     members = {identity for identities in manifest["splits"].values() for identity in identities}
-    assert members == {"2-11-26/assessed_a", "2-11-26/assessed_b"}
+    assert members == {
+        "2-11-26/assessed_a", "2-11-26/assessed_b", "2-11-26/assessed_c", "2-11-26/assessed_d",
+    }
 
 
 def test_make_splits_refuses_to_materialize_a_multi_date_manifest(tmp_path: Path):
     root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
     assert "error" in result
     assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
     assert not out.exists()
@@ -568,20 +725,22 @@ def test_make_splits_multi_date_refusal_names_the_loose_label_bucket(tmp_path: P
     dated_labels = root / "annotations" / "2-11-26"
     dated_images.mkdir(parents=True)
     dated_labels.mkdir(parents=True)
-    Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / "a.jpg")
-    json_io.write_annotations(
-        dated_labels / "a.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
-    Image.new("RGB", (100, 80), (128, 128, 128)).save(root / "images" / "loose.jpg")
-    json_io.write_annotations(
-        root / "annotations" / "loose.json",
-        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
-    )
+    for stem in ("a", "b"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / f"{stem}.jpg")
+        json_io.write_annotations(
+            dated_labels / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    for stem in ("loose", "loose2"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(root / "images" / f"{stem}.jpg")
+        json_io.write_annotations(
+            root / "annotations" / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
 
     out = tmp_path / "m"
     result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=1)
 
     assert "error" in result
     assert "2-11-26" in result["error"]
@@ -617,7 +776,8 @@ def test_make_splits_refuses_two_dated_label_dirs_sharing_a_flat_images_root(tmp
     root = _two_date_flat_images_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
 
-    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
@@ -649,7 +809,8 @@ def test_make_splits_refuses_a_dated_dir_and_loose_labels_sharing_a_flat_images_
     )
     out = tmp_path / "m"
 
-    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert "2-11-26" in result["error"]
@@ -675,7 +836,8 @@ def test_make_splits_nothing_admitted_names_the_searched_directories_and_the_unp
     )
     out = tmp_path / "m"
 
-    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" in result
     assert "annotations/ (loose labels)" in result["error"]
@@ -705,7 +867,8 @@ def _dated_labels_flat_images_dataset(root: Path, stems: tuple[str, ...]) -> Pat
 def test_make_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Path):
     root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0", "p1", "p2", "p3", "p4"))
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result
     assert result["total_stems"] == 5
     assert result["admission_counts"]["annotated"] == 5
@@ -735,7 +898,8 @@ def test_make_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
         )
 
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" not in result
     assert result["total_stems"] == 5
@@ -807,7 +971,8 @@ def test_make_splits_writes_no_member_block_for_a_date_that_admits_nothing(tmp_p
     )
 
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    result = make_splits(str(root), output_path=str(out), subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in result
     manifest = ts.read(split_manifest_key(out))
 
@@ -835,6 +1000,14 @@ def test_make_splits_materialize_negative_carry_reads_only_the_materializing_dat
     labels_dir.mkdir(parents=True)
     Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "neg.jpg")
     json_io.write_annotations(labels_dir / "neg.json", [], 100, 80, keep_empty=True)
+    # A pure-negative draw has zero foreground groups; four more real annotations clear the
+    # manifest floor without changing what this test is about (the negative carry's own bucket).
+    for stem in ("pos_a", "pos_b", "pos_c", "pos_d"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
 
     record_image_statuses(
         root, status_bucket("leaf", "2-11-26"), {"neg.jpg": "negative"}, recorded_by="user:right",
@@ -844,11 +1017,13 @@ def test_make_splits_materialize_negative_carry_reads_only_the_materializing_dat
     )
 
     out = tmp_path / "splits"
-    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf")
-    assert "error" not in result
+    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
 
     split_dir = next(
-        out / s for s in ("train", "val") if (out / s / "images" / "neg.jpg").is_file()
+        out / s for s in ("train", "val", "calibration")
+        if (out / s / "images" / "neg.jpg").is_file()
     )
     store = read_image_status_store(split_dir)
     record = store[status_bucket("leaf", None)]["neg.jpg"]
@@ -882,7 +1057,8 @@ def test_read_split_manifest_dir_admits_the_writers_own_record(tmp_path: Path):
     required set never rejects the writer's own output."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    write_result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
+    write_result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+                               train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert "error" not in write_result
 
     manifest = read_split_manifest_dir(out)
@@ -901,7 +1077,8 @@ def test_read_split_manifest_dir_refuses_each_missing_required_key_by_name(tmp_p
     root = _multi_source_dataset(tmp_path / "ds")
     for missing_key in keys_a_written_manifest_carries:
         out = tmp_path / f"m_{missing_key}"
-        result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
+        result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+                             train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
         assert "error" not in result
 
         full = ts.read(split_manifest_key(out))
@@ -912,15 +1089,39 @@ def test_read_split_manifest_dir_refuses_each_missing_required_key_by_name(tmp_p
             read_split_manifest_dir(out)
 
 
-def test_read_split_manifest_dir_refuses_a_splits_block_missing_train_or_val(tmp_path: Path):
+def test_read_split_manifest_dir_refuses_a_two_sided_record(tmp_path: Path):
+    """A manifest drawn before the platform held out a calibration side (here simulated by
+    dropping the third side from a record the writer actually produced) binds nothing: the
+    reader refuses it by name rather than silently reading it as a two-sided manifest."""
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
-    assert "error" not in result
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
 
     full = ts.read(split_manifest_key(out))
-    full["splits"] = {"train": full["splits"]["train"]}
+    full["splits"] = {"train": full["splits"]["train"], "val": full["splits"]["val"]}
     ts.replace(split_manifest_key(out), full)
 
-    with pytest.raises(ValueError, match="val"):
+    with pytest.raises(ValueError, match="calibration"):
+        read_split_manifest_dir(out)
+
+
+def test_read_split_manifest_dir_refuses_overlapping_sides(tmp_path: Path):
+    """A record whose sides are not pairwise disjoint is refused, naming the identities two
+    sides claim: the reader's contract, checked once here for every consumer that reads through
+    it, since a member on train and calibration would be trained on and one it was held out to
+    calibrate against."""
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in result, result
+
+    full = ts.read(split_manifest_key(out))
+    straddler = full["splits"]["calibration"][0]
+    full["splits"]["train"] = [*full["splits"]["train"], straddler]
+    ts.replace(split_manifest_key(out), full)
+
+    with pytest.raises(ValueError, match="train/calibration"):
         read_split_manifest_dir(out)

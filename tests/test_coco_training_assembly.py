@@ -716,10 +716,11 @@ def test_split_tree_carries_its_confirmed_negatives(tmp_path):
                           recorded_by="user:breeder")
 
     out = tmp_path / "splits"
-    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin")
+    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
+               train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     carried = set()
-    for split in ("train", "val", "test"):
+    for split in ("train", "val", "calibration"):
         d = out / split / "labels"
         if d.is_dir():
             carried |= confirmed_negative_names(d, subject="catkin", date=None)
@@ -757,10 +758,11 @@ def test_split_tree_carries_a_quarantine_capable_stamp(tmp_path):
     stamp_image_status_digests(tmp_path, status_bucket("catkin", None), neg_names, expected_digest)
 
     out = tmp_path / "splits"
-    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin")
+    make_splits(str(tmp_path), output_path=str(out), materialize=True, subject="catkin",
+               train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     found = False
-    for split in ("train", "val", "test"):
+    for split in ("train", "val", "calibration"):
         split_root = out / split
         digest_key = image_status_digest_key(split_root)
         if not ts.exists(digest_key):

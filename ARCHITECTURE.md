@@ -598,9 +598,9 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `scan_dataset` | `data_tools.py:211` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
-| `validate_data_quality` | `data_tools.py:281` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:431` | yes | Compute a leakage-free, annotation-stratified train/val split. |
+| `scan_dataset` | `data_tools.py:234` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
+| `validate_data_quality` | `data_tools.py:304` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:454` | yes | Compute a leakage-free, annotation-stratified train/val split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -754,14 +754,14 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:193` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:202` |
-| WS | `/ws/state` | `state_ws` | `app.py:210` |
-| GET | `/health` | `health` | `app.py:295` |
-| GET | `/` | `index` | `app.py:312` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:376` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:427` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:436` |
+| GET | `/api/state` | `get_state` | `app.py:204` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:213` |
+| WS | `/ws/state` | `state_ws` | `app.py:221` |
+| GET | `/health` | `health` | `app.py:315` |
+| GET | `/` | `index` | `app.py:323` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:387` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:438` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:447` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -1024,7 +1024,7 @@ from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:6
 (line 72). The port write resolves under the workspace root, not the platform-state root, so
 it needs no pin first; the app pins the platform-state root at the lifespan's startup or,
 when a request is served before the lifespan has run, at that first request, never at import:
-`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:90`) reads the workspace's
+`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:91`) reads the workspace's
 active-project marker (`tcip_mcp.project_paths.pin_project_root(from_marker=True)`) the first
 time either the lifespan (`app.py:50`) or the startup middleware (`app.py:131`) calls it, so
 every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
@@ -1089,7 +1089,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:334`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:981`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:979`.
 
 A prediction record's `created_by` is one spelling, `resolution.prediction_producer`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:994`, so every checkpoint-backed writer
@@ -1177,9 +1177,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's stem lists, manifest or file tree are written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:641`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:680`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:794`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:855`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
@@ -1190,7 +1190,7 @@ subject whose attribute schema is about to change so the confirmations under it 
 before the outgoing digest is gone.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:674`, imported by the web route module.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:672`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
 `packages/tcip-web/src/tcip_web/routes/review.py:720`, derives it from the GT file through
@@ -1222,7 +1222,7 @@ legitimately exist; the outgoing registry is the last moment their digest is rec
 sweep records it there and they read as predating the change instead of as made under the new
 vocabulary. Both writers reach the store through the one transactional writer
 `dataset_layout.stamp_image_status_digests`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:813`, whose `only_unstamped` argument keeps
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:811`, whose `only_unstamped` argument keeps
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`'s quarantine logic,
@@ -1244,7 +1244,7 @@ sidecar, `confirmed_negative_names` reads it) and in
 
 Path: `<dataset_root>/.tcip/state/view_coverage.json`.
 
-Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:403`,
+Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:401`,
 naming the stored record's own shape as `tcip_web.routes._coverage_models.CoverageRecord`.
 Writer and reader: `routes/coverage.py`'s `post_coverage` (`:187`) and `get_coverage` (`:143`),
 each validating the stored record against `CoverageRecord` before merging into or serving it.
@@ -1269,9 +1269,9 @@ Path: `<dataset_root>/.tcip/state/region_completeness.json` and
 `region_completeness_digest.json`, siblings of `image_status.json`.
 
 Path/shape definition: `tcip_mcp.dataset_layout.region_completeness_path`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:484`;
-`region_completeness_digest_path`, `dataset_layout.py:522`; shape guard
-`normalize_region_completeness_store`, `dataset_layout.py:562`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:482`;
+`region_completeness_digest_path`, `dataset_layout.py:520`; shape guard
+`normalize_region_completeness_store`, `dataset_layout.py:560`.
 
 Writer/reader named by phase0 but not independently opened this session:
 `pipelines/region_completeness.py` as the digest sidecar's writer.
@@ -1279,9 +1279,9 @@ Writer/reader named by phase0 but not independently opened this session:
 Seam S25 ("region_completeness.json attestation store"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_coverage_routes.py:449`,
 `tests/test_block_calibration.py:126,164,203`. The shared functions across the HTTP-route side and
-the calibration-gate side are `region_completeness_path` (`dataset_layout.py:484`),
-`normalize_region_completeness_store` (`dataset_layout.py:562`) and `status_bucket`
-(`dataset_layout.py:586`). Gap: `test_block_calibration.py`'s
+the calibration-gate side are `region_completeness_path` (`dataset_layout.py:482`),
+`normalize_region_completeness_store` (`dataset_layout.py:560`) and `status_bucket`
+(`dataset_layout.py:584`). Gap: `test_block_calibration.py`'s
 `_attest_regions_complete` helper bypasses the HTTP route, writing the store via the same shared
 functions the route calls internally rather than via a POST to `/api/coverage/completeness`, so a
 bug confined to the route's own HTTP layer would not be caught by the calibration-gate tests.
@@ -1532,7 +1532,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:259`.
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:165`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:176`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1659,7 +1659,7 @@ Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val}.json`, 
 `split_stem_list_key`, `data_tools.py:35`, under whatever directory the caller asked the
 partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:431`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:454`, when `output_path` is given or `materialize=True`.
 The manifest records `seed`, `group_by` (the resolved policy), `group_key_map` when one was
 supplied, `dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
 `assign_class_ids` map the draw resolved), `members` (one block per capture date that admitted at
@@ -1691,10 +1691,10 @@ No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
 Path: named for the identity hash it locks rather than a directory of its own, addressed by
-`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:832`, under the
+`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:897`, under the
 scope root the split was drawn over (`cal_holdout_scope_root`).
 
-Writer: `resolve_locked_cal_holdout_split`, `splits.py:991`, locking on first draw for a given
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:1057`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
 `group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
@@ -1777,14 +1777,14 @@ Phase 3 verdict: single.
 
 Must agree: sender and receiver accept the same set of panel names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:165` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:35` (`VALID_PANELS,`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:36` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:760` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:399` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:410` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:914`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
@@ -1846,21 +1846,21 @@ and nothing ever read it back out: the dataset's real confirmed-negative store i
 `image_status.json`, addressed by `image_status_key`, the seam this entry once asked to agree
 with. The key stopped being written; a project's existing record still carrying it is conformed by
 `scripts/drop_annotation_stats_image_status.py`, a one-off operator script.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:706` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:704` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:321` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
 
 ## S14. dataset_layout.py as the on-disk path resolver
 
 Must agree: agent writes and GUI reads resolve to the same files.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:123` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date` at line 475 as the published inverse of `status_bucket`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:121` (`def image_root(`, with `annotation_root`/`prediction_root` and the dated dir calls built on them, plus `bucket_subject_date` at line 475 as the published inverse of `status_bucket`).
 Side B: `packages/tcip-web/src/tcip_web/routes/dataset.py` (`select_dataset` resolves every directory through the resolver; `scripts/doctor.py`, `data_tools`, `project_tools` and `annotation_tools` no longer re-spell the tree).
 Phase 3 verdict: single.
 
 ## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:859` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:857` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
 Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
@@ -1909,14 +1909,14 @@ Phase 3 verdict: single.
 ## S22. image_status.json confirmed-negative store
 
 Must agree: a negative is empty labels plus an explicit human Complete, every consumer applies the same bucket keying and status vocabulary, and each stored status carries the actor who set it and when, so a person's Complete and a status a harvest wrote stay distinguishable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:683` (`def derive_status(`, with `IMAGE_STATUSES` at line 610 as the one vocabulary, `status_of` at line 542 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:681` (`def derive_status(`, with `IMAGE_STATUSES` at line 610 as the one vocabulary, `status_of` at line 542 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` and `routes/review.py` call `derive_status`; the browser imports one `ImageStatus` type from `api/classes.ts`, pinned against the Python vocabulary by a gate test.
 Phase 3 verdict: single.
 
 ## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:813` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:811` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
 Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:162` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
@@ -1930,7 +1930,7 @@ Phase 3 verdict: single.
 ## S25. region_completeness.json attestation store
 
 Must agree: an attestation written by the GUI is readable, and staleness-checkable, by the calibration path that relies on it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:484` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:482` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:123` (`def stale_cells(`).
 Phase 3 verdict: restated-in-test.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:123` (`def stale_cells(`).
@@ -1938,7 +1938,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S26. dataset.json identity and fingerprint
 
 Must agree: the stored fingerprint and the recomputed one cover the same inputs.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:310` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:308` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:731` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
@@ -2093,7 +2093,7 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:209` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:220` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:175` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2136,14 +2136,14 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:268` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:279` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:209` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:220` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
@@ -2178,7 +2178,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:212` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:223` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets

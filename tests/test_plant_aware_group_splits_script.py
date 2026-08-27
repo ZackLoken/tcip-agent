@@ -61,10 +61,12 @@ def _center_latlon(native_x: float, native_y: float) -> tuple[float, float]:
     return lat, lon
 
 
-# Two plants ~100 m apart in UTM easting: far outside any NN tolerance a 2-plant, ~100 m grid
-# pitch would derive (pitch/6 ~= 16.7 m), so a stem can only match its own true plant.
+# Plants ~100 m apart in UTM easting: far outside any NN tolerance a grid this dense would
+# derive (pitch/6 ~= 16.7 m), so a stem can only match its own true plant.
 P1_TIEPOINT = (500_000.0, 4_800_000.0)
 P2_TIEPOINT = (500_100.0, 4_800_000.0)
+P3_TIEPOINT = (500_200.0, 4_800_000.0)
+P4_TIEPOINT = (500_300.0, 4_800_000.0)
 FAR_TIEPOINT = (600_000.0, 4_800_000.0)  # ~100 km away: outside tolerance for both plants
 
 
@@ -82,6 +84,21 @@ def two_plant_csv(tmp_path: Path) -> Path:
     p2_lat, p2_lon = _center_latlon(*P2_TIEPOINT)
     csv_path = tmp_path / "plants.csv"
     _write_plant_csv(csv_path, [("P1", "acc-A", p1_lat, p1_lon), ("P2", "acc-B", p2_lat, p2_lon)])
+    return csv_path
+
+
+@pytest.fixture
+def four_plant_csv(tmp_path: Path) -> Path:
+    """Four plants, so a manifest write over their capture dates clears the foreground floor
+    (one each for train/val, two for calibration) while still exercising group cohesion."""
+    plants = [
+        ("P1", "acc-A", *_center_latlon(*P1_TIEPOINT)),
+        ("P2", "acc-B", *_center_latlon(*P2_TIEPOINT)),
+        ("P3", "acc-C", *_center_latlon(*P3_TIEPOINT)),
+        ("P4", "acc-D", *_center_latlon(*P4_TIEPOINT)),
+    ]
+    csv_path = tmp_path / "plants4.csv"
+    _write_plant_csv(csv_path, plants)
     return csv_path
 
 
@@ -196,42 +213,42 @@ def _write_dataset_stem(dataset_root: Path, date: str, stem: str, tiepoint: tupl
 
 
 def test_make_splits_keeps_every_plants_stems_on_one_split_side(
-    tmp_path: Path, two_plant_csv: Path,
+    tmp_path: Path, four_plant_csv: Path,
 ) -> None:
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.tools.data_tools import _scan_dataset, make_splits, split_manifest_key
 
     dataset_root = tmp_path / "dataset"
-    # Two plants, two capture dates each: four stems total, two groups of two.
-    for date, tiepoint in (("2026-02-01", P1_TIEPOINT), ("2026-03-01", P1_TIEPOINT)):
-        _write_dataset_stem(dataset_root, date, f"p1_{date}", tiepoint)
-    for date, tiepoint in (("2026-02-01", P2_TIEPOINT), ("2026-03-01", P2_TIEPOINT)):
-        _write_dataset_stem(dataset_root, date, f"p2_{date}", tiepoint)
+    # Four plants, two capture dates each: eight stems total, four groups of two, exactly the
+    # manifest floor (one each for train/val, two for calibration).
+    for plot, tiepoint in (
+        ("p1", P1_TIEPOINT), ("p2", P2_TIEPOINT), ("p3", P3_TIEPOINT), ("p4", P4_TIEPOINT),
+    ):
+        for date in ("2026-02-01", "2026-03-01"):
+            _write_dataset_stem(dataset_root, date, f"{plot}_{date}", tiepoint)
 
     scan = _scan_dataset(str(dataset_root))
     stem_to_raster = {}
     for p in scan["images"]:
         _root, date, stem = parse_image_path(p)
         stem_to_raster[member_identity(date, stem)] = Path(p)
-    group_key_map = derive_plant_group_key_map(stem_to_raster, _plants(two_plant_csv))
+    group_key_map = derive_plant_group_key_map(stem_to_raster, _plants(four_plant_csv))
 
     out_dir = tmp_path / "splits_out"
     result = make_splits(
-        folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.5, test_ratio=0.0,
+        folder_path=str(dataset_root), train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25,
         seed=0, group_key_map=group_key_map, output_path=str(out_dir), subject=SUBJECT,
     )
 
-    assert "error" not in result
+    assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
 
     manifest = ts.read(split_manifest_key(out_dir))
     identity_side = {s: side for side, identities in manifest["splits"].items() for s in identities}
     # Every group's members (same plot_name) land on the identical side.
-    for group_identities in (
-        [f"{d}/p1_{d}" for d in ("2026-02-01", "2026-03-01")],
-        [f"{d}/p2_{d}" for d in ("2026-02-01", "2026-03-01")],
-    ):
+    for plot in ("p1", "p2", "p3", "p4"):
+        group_identities = [f"{d}/{plot}_{d}" for d in ("2026-02-01", "2026-03-01")]
         sides = {identity_side[s] for s in group_identities}
         assert len(sides) == 1, f"{group_identities} split across sides: {identity_side}"
 
@@ -239,19 +256,25 @@ def test_make_splits_keeps_every_plants_stems_on_one_split_side(
 # ── CLI end to end ───────────────────────────────────────────────────────
 
 
-def test_main_cli_end_to_end(tmp_path: Path, two_plant_csv: Path) -> None:
+def _four_plant_dataset(tmp_path: Path) -> Path:
+    dataset_root = tmp_path / "dataset"
+    for plot, tiepoint in (
+        ("p1", P1_TIEPOINT), ("p2", P2_TIEPOINT), ("p3", P3_TIEPOINT), ("p4", P4_TIEPOINT),
+    ):
+        for date in ("2026-02-01", "2026-03-01"):
+            _write_dataset_stem(dataset_root, date, f"{plot}_{date}", tiepoint)
+    return dataset_root
+
+
+def test_main_cli_end_to_end(tmp_path: Path, four_plant_csv: Path) -> None:
     from tcip_mcp.tools.data_tools import split_manifest_key
 
-    dataset_root = tmp_path / "dataset"
-    for date, tiepoint in (("2026-02-01", P1_TIEPOINT), ("2026-03-01", P1_TIEPOINT)):
-        _write_dataset_stem(dataset_root, date, f"p1_{date}", tiepoint)
-    for date, tiepoint in (("2026-02-01", P2_TIEPOINT), ("2026-03-01", P2_TIEPOINT)):
-        _write_dataset_stem(dataset_root, date, f"p2_{date}", tiepoint)
+    dataset_root = _four_plant_dataset(tmp_path)
 
     out_dir = tmp_path / "cli_splits_out"
     rc = main([
-        str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
-        "--train-ratio", "0.5", "--val-ratio", "0.5", "--test-ratio", "0.0",
+        str(dataset_root), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
+        "--train-ratio", "0.5", "--val-ratio", "0.25", "--calibration-ratio", "0.25",
         "--seed", "0", "--output-path", str(out_dir),
     ])
 
@@ -259,28 +282,40 @@ def test_main_cli_end_to_end(tmp_path: Path, two_plant_csv: Path) -> None:
     assert ts.exists(split_manifest_key(out_dir))
 
 
-def test_main_cli_default_invocation_writes_its_two_partitions(
-    tmp_path: Path, two_plant_csv: Path,
+def test_main_cli_default_invocation_states_all_three_ratios(
+    tmp_path: Path, four_plant_csv: Path,
 ) -> None:
-    """No ratio flags named: the script's own defaults (0.8/0.2/0.0) still write a real train/val
-    split, and no test partition."""
+    """No train/val ratio flags named: the script's own defaults (0.8/0.2) still write a real
+    train/val split beside the stated calibration side."""
     from tcip_mcp.tools.data_tools import split_manifest_key, split_stem_list_key
 
-    dataset_root = tmp_path / "dataset"
-    for date, tiepoint in (("2026-02-01", P1_TIEPOINT), ("2026-03-01", P1_TIEPOINT)):
-        _write_dataset_stem(dataset_root, date, f"p1_{date}", tiepoint)
-    for date, tiepoint in (("2026-02-01", P2_TIEPOINT), ("2026-03-01", P2_TIEPOINT)):
-        _write_dataset_stem(dataset_root, date, f"p2_{date}", tiepoint)
+    dataset_root = _four_plant_dataset(tmp_path)
 
     out_dir = tmp_path / "cli_defaults_out"
-    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
+    rc = main([str(dataset_root), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
+              "--calibration-ratio", "0.2", "--train-ratio", "0.6", "--val-ratio", "0.2",
               "--output-path", str(out_dir)])
 
     assert rc == 0
     assert ts.exists(split_stem_list_key(out_dir, "train"))
     assert ts.exists(split_stem_list_key(out_dir, "val"))
+    assert ts.exists(split_stem_list_key(out_dir, "calibration"))
     manifest = ts.read(split_manifest_key(out_dir))
-    assert set(manifest["splits"]) == {"train", "val"}
+    assert set(manifest["splits"]) == {"train", "val", "calibration"}
+
+
+def test_main_cli_without_calibration_ratio_refuses(tmp_path: Path, four_plant_csv: Path) -> None:
+    """``--calibration-ratio`` has no default and is required beside ``--output-path`` or
+    ``--materialize``: the script's plain default invocation (train/val ratios only) now
+    refuses rather than silently writing a two-sided manifest."""
+    dataset_root = _four_plant_dataset(tmp_path)
+    out_dir = tmp_path / "cli_defaults_out"
+
+    with pytest.raises(SystemExit):
+        main([str(dataset_root), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
+             "--output-path", str(out_dir)])
+
+    assert not out_dir.exists()
 
 
 def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, two_plant_csv: Path) -> None:

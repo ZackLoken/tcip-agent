@@ -58,7 +58,7 @@ def test_group_split_deterministic_and_partition():
     a = group_balanced_split(stems, seed=7)
     b = group_balanced_split(stems, seed=7)
     assert a == b
-    union = a["train"] + a["val"] + a["test"]
+    union = a["train"] + a["val"] + a["calibration"]
     assert sorted(union) == sorted(stems)
     assert len(union) == len(set(union)) == len(stems)
 
@@ -71,12 +71,49 @@ def test_group_split_foreground_stratification():
     parts = group_balanced_split(
         stems, annotation_counts=counts, splits=(0.6, 0.4, 0.0), seed=3
     )
-    assert parts["test"] == []  # 0.0 fraction -> empty
+    assert parts["calibration"] == []  # 0.0 fraction -> empty
 
     def has_fg(ss):
         return any(counts[s] > 0 for s in ss)
 
     assert has_fg(parts["train"]) and has_fg(parts["val"])
+
+
+def test_group_split_calibration_side_gets_its_stated_minimum():
+    """Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, the default one-per-side
+    minimum lands 4/1/1 (train's floor absorbs every group the balancing pass would otherwise
+    give the smaller sides); stating a per-side minimum of two for the third side raises its own
+    floor to two groups, taking from train's share instead."""
+    stems = _grouped(6)
+    counts = {s: 1 for s in stems}
+
+    default_parts = group_balanced_split(
+        stems, annotation_counts=counts, splits=(0.6, 0.2, 0.2), seed=1)
+    assert len({default_group_key(s) for s in default_parts["train"]}) == 4
+    assert len({default_group_key(s) for s in default_parts["val"]}) == 1
+    assert len({default_group_key(s) for s in default_parts["calibration"]}) == 1
+
+    stated_parts = group_balanced_split(
+        stems, annotation_counts=counts, splits=(0.6, 0.2, 0.2), seed=1,
+        min_foreground_groups={"train": 1, "val": 1, "calibration": 2},
+    )
+    assert len({default_group_key(s) for s in stated_parts["calibration"]}) == 2
+
+
+def test_refuse_insufficient_foreground_groups_admits_a_sufficient_tree():
+    from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
+
+    refuse_insufficient_foreground_groups(4, {"train": 1, "val": 1, "calibration": 2})
+
+
+def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall():
+    from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
+
+    with pytest.raises(ValueError) as exc_info:
+        refuse_insufficient_foreground_groups(2, {"train": 1, "val": 1, "calibration": 2})
+    message = str(exc_info.value)
+    assert "train=1" in message and "val=1" in message and "calibration=2" in message
+    assert "2 foreground group" in message
 
 
 def test_group_split_no_foreground_fallback():

@@ -166,7 +166,8 @@ class TestE2EPipeline:
 
         split_dir = tmp_path / "splits"
         split_result = make_splits(root, output_path=str(split_dir), materialize=True,
-                                   subject="catkin")
+                                   subject="catkin", train_ratio=0.5, val_ratio=0.25,
+                                   calibration_ratio=0.25)
         assert split_result["total_stems"] == 5
         assert ts.exists(split_stem_list_key(split_dir, "train"))
         assert ts.exists(split_stem_list_key(split_dir, "val"))
