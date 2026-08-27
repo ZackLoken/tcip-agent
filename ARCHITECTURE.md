@@ -622,10 +622,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:475` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:670` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1656` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1957` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `force_redraw_cal_holdout_split` | `inference_tools.py:480` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `run_inference` | `inference_tools.py:681` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1667` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1968` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -675,8 +675,8 @@ Docstring is the function's docstring first line, verbatim.
 | `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
 | `update_trait_spec_fields` | `phenology_tools.py:109` | yes | Update one or more fields on an already-registered trait's spec. |
 | `calibrate_classifier_operating_point` | `phenology_tools.py:392` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:558` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:749` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:561` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
+| `compute_phenology` | `phenology_tools.py:752` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (7 tools)
 
@@ -707,7 +707,7 @@ Docstring is the function's docstring first line, verbatim.
 | `cancel_training` | `training_tools.py:898` | yes | Request graceful cancellation of a running training run. |
 | `inspect_compute_resources` | `training_tools.py:927` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
 | `run_hpo` | `training_tools.py:1305` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2536` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `evaluate_model` | `training_tools.py:2539` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -1177,9 +1177,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's stem lists, manifest or file tree are written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:680`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:694`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:855`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:878`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
@@ -1365,12 +1365,14 @@ are listed here with the rest rather than taking numbers of their own.
   (`def _persist_split_manifest(`). Read by `read_split_manifest`,
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
-  directory's own capture date (`null` for a flat tree), so a later selection-disjointness check
-  can scope itself to one date without re-deriving it from the config. When the run named a split
-  manifest (`data.split.manifest_dir`), this record's `manifest_binding` carries the binding's
-  counts (`assigned`, `train_bound`, `val_bound`, `calibration_bound`, `calibration_unadmitted`,
-  `other_dates`, `splits.ManifestBinding`) and its two content hashes (never the manifest's own
-  member lists, which live in the `split_manifest` record itself, see §26); `calibration_bound`
+  directory's own capture date, `manifest_date_key`'s empty string for a flat tree (never `null`:
+  a selection-disjointness check comparing dates must tell a flat run's own date apart from a
+  caller that derived no date to compare at all), so it can scope itself to one date without
+  re-deriving it from the config. When the run named a split manifest (`data.split.manifest_dir`),
+  this record's `manifest_binding` carries the binding's counts (`assigned`, `train_bound`,
+  `val_bound`, `calibration_bound`, `calibration_unadmitted`, `other_dates`) and its two content
+  hashes (never the manifest's own member lists, which live in the `split_manifest` record itself,
+  see §26); `calibration_bound`
   counts stems the manifest's `calibration` side names for this date, placed on neither loader
   whether or not the run currently admits them, and `calibration_unadmitted` counts the subset the
   run no longer admits at all, so a review of this one record shows the manifest's held-out side
@@ -1387,8 +1389,9 @@ are listed here with the rest rather than taking numbers of their own.
   "group_check": str | None}` for the four documents `resolver_selection_disjointness` covers,
   `null` for `resolve_scale`; `applicable` is `False` when no split manifest is in play (no
   `split_manifest_dir` named and no `manifest_binding` on the checkpoint's own run, a within-image
-  `spatial_strip` split, an empty `val`, an `external` group_by, or a calibration dated differently
-  than the run's own `split.json`), each such case carrying its own `reason`; `unresolvable` marks
+  `spatial_strip` split, an empty `val`, an `external` group_by, no `calibration_date` derived at
+  all, or a `calibration_date` other than the run's own `split.json` `date`), each such case
+  carrying its own `reason`; `unresolvable` marks
   the one case the ruling refuses rather than skips, a named manifest with no experiment record to
   read a selection side from. Read by `read_validations`, `experiments.py:991`,
   `find_validation`, `experiments.py:1006` (matching rows by recomputed `validation_digest`,
@@ -1677,29 +1680,36 @@ partition to be written to; no dataset resolver owns this layout.
 
 Writer: `make_splits`, `data_tools.py:454`, when `output_path` is given or `materialize=True`.
 The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
-all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`), refusing a zero
-`calibration_ratio` by name, since the calibration side is the universe every calibration drawn
-under this manifest later draws from. The draw refuses, before any write, when the tree holds
-fewer foreground groups of `subject` (and `attribute`, when scoped) than the requested sides need
-at minimum (one each for `train`/`val`, two for `calibration`), counted through a subject-scoped
-`count_label_lines`, independent of `stratify_foreground`. The manifest records `seed`, `group_by`
-(the resolved policy), `group_key_map` when one was supplied, `dataset_fingerprint`, `subject`,
-`attribute` (`null` when none), `id_map` (the `assign_class_ids` map the draw resolved), `members`
-(one block per capture date that admitted at least one stem, keyed through
-`splits.manifest_date_key` (the date, or `""` for a flat tree), holding `labels_root`,
-`images_root`, and that date's own `dataset_hash`; a date the draw searched but admitted nothing
-writes no block, so a reader that finds none under a date treats it as one the manifest never
-held, not one it holds empty), `splits` (`train`/`val`/`calibration` identities, `<date>/<stem>`,
-the bare `<stem>` under a flat tree), and `admission_counts` (the summed `trainable_stems` counts
-across every date). Each `split_stem_list.json` document holds one side's identities, the same
-list `splits` already carries. The answer also carries `calibration_foreground_groups_by_date`,
-since the floor above is over the whole draw and one date's own calibration slice can still land
-short of two foreground groups; the calibration door's own floor is where that absence bites. A
-stats-only call (no `output_path`, no `materialize`) writes no manifest, admits a zero or non-zero
-`calibration_ratio` either way, but answers `dataset_hashes_by_date` the same way, over whatever
-labels directories its plain image/label scan found, plus a single `dataset_hash` only when that
-scan found exactly one such directory; over more than one, `dataset_hash` is `null` rather than
-one directory's hash blind to the rest.
+all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`) non-zero, refusing whichever is
+zero by name, since a manifest always draws all three sides. The draw refuses, before any write,
+when the tree holds fewer foreground groups of `subject` (and `attribute`, when scoped) than the
+three sides need at minimum (one each for `train`/`val`, two for `calibration`), counted through a
+subject-scoped `count_label_lines` for the minimum pass on every manifest draw, independent of
+`stratify_foreground` (which only gates the balancing pass's own foreground signal). The manifest
+records `seed`, `group_by` (the resolved policy), `group_key_map` when one was supplied,
+`dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
+`assign_class_ids` map the draw resolved), `members` (one block per capture date that admitted at
+least one stem, keyed through `splits.manifest_date_key` (the date, or `""` for a flat tree),
+holding `labels_root`, `images_root`, and that date's own `dataset_hash`; a date the draw searched
+but admitted nothing writes no block, so a reader that finds none under a date treats it as one
+the manifest never held, not one it holds empty), `splits` (`train`/`val`/`calibration`
+identities, `<date>/<stem>`, the bare `<stem>` under a flat tree), `admission_counts` (the summed
+`trainable_stems` counts across every date), `calibration_foreground_groups_by_date` and
+`realized_ratios` (both described below). Each `split_stem_list.json` document holds one side's
+identities, the same list `splits` already carries. The answer (and the persisted manifest
+record) also carry `calibration_foreground_groups_by_date`, a count for every date `members`
+holds, `0` included, since the floor above is over the whole draw and one date's own calibration
+slice can still land short of two foreground groups; the calibration door's own floor is where
+that absence bites. Both also carry `realized_ratios`, each side's member share of the draw
+actually delivered: at a floor-sized tree the minimum pass can consume every foreground group
+before the balancing pass ever sees the caller's fractions, so the delivered shares can diverge
+from the ratios asked for. A stats-only call (no `output_path`, no `materialize`) writes no
+manifest, admits a zero or non-zero `calibration_ratio` either way, carries neither
+`calibration_foreground_groups_by_date` nor `realized_ratios` (both manifest-write-only fields),
+but answers `dataset_hashes_by_date` the same way, over whatever labels directories its plain
+image/label scan found, plus a single
+`dataset_hash` only when that scan found exactly one such directory; over more than one,
+`dataset_hash` is `null` rather than one directory's hash blind to the rest.
 
 Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:75`, the one reader a training or
 tuning run's `data.split.manifest_dir` resolves through (`training_tools._auto_train_val`) and a
@@ -1709,7 +1719,7 @@ which refuses by name when the record is absent, undecodable, not a mapping, lac
 `admission_counts` (the tuple `data_tools._SPLIT_MANIFEST_REQUIRED_KEYS`, kept beside the writer's
 dict so the two cannot drift), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
 sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
-only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:384`) reads all three
+only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:403`) reads all three
 sides for one capture date: a `calibration` member is placed on neither loader, whether or not the
 run currently admits it, recorded as `calibration_bound`/`calibration_unadmitted` rather than
 refused on; the `train`/`val` refusals (an admitted stem assigned to no side, a member the run no
@@ -1722,10 +1732,10 @@ No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
 Path: named for the identity hash it locks rather than a directory of its own, addressed by
-`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:897`, under the
+`cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:933`, under the
 scope root the split was drawn over (`cal_holdout_scope_root`).
 
-Writer: `resolve_locked_cal_holdout_split`, `splits.py:1122`, locking on first draw for a given
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:1172`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
 `group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
@@ -2015,7 +2025,7 @@ Phase 3 verdict: single.
 ## S32. Single operating-point resolution for all consumers
 
 Must agree: the same model and images yield the same conf/NMS/max_dets/tile whichever entry door asks for them.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:709` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:716` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:372` and `:414` (`raw_operating_point` and `block_calibrated_export_operating_point`, the two uncalibrated regimes). Every door takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
 Phase 3 verdict: single.
 
@@ -2029,8 +2039,8 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2567` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:2164` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2565` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:2175` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
