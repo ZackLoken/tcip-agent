@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from tcip_mcp.model_registry import VerifiedCheckpoint
+
 from tcip_mcp.pipelines.derivations import probe_channels
 from tcip_mcp.pipelines.model_build import (
     MODEL_SOURCE_KEY,
@@ -88,22 +90,20 @@ class GenericPredictor:
 
     def __init__(
         self,
-        checkpoint_path: str,
+        checkpoint: "VerifiedCheckpoint",
         device: str | None = None,
         score_threshold: float = 0.5,
         nms_iou: float | None = None,
         max_dets: int | None = None,
-        *,
-        checkpoint: dict | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.score_threshold = score_threshold
         self.max_dets = max_dets
 
-        # ``build_predictor`` may hand us the already-loaded checkpoint (it read it to sniff the
-        # kind) so the weights aren't read from disk twice; fall back to loading it ourselves.
-        ckpt = checkpoint if checkpoint is not None else torch.load(
-            checkpoint_path, map_location=self.device, weights_only=False)
+        # Already read and unpickled by load_registered_checkpoint; no re-read here.
+        self.checkpoint_path = checkpoint.path
+        self.checkpoint_sha256 = checkpoint.sha256
+        ckpt = checkpoint.payload
         # A bespoke checkpoint carries the importable-builder ref; build_model re-imports it.
         self.model_source = ckpt.get(MODEL_SOURCE_KEY)
         self.kind = KIND_TCIP_MODULE

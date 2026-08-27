@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import math
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -60,128 +62,194 @@ def read_registry_index(project_path: str | Path) -> list[dict]:
     return tcip_store.read(registry_index_key(project_path), default=[])
 
 
+def _sha256_of_bytes(data: bytes) -> str:
+    """The one digest function every bytes-to-hash caller in this module shares."""
+    return hashlib.sha256(data).hexdigest()
+
+
 def _compute_sha256(filepath: str | Path) -> str:
-    """Compute SHA-256 checksum of a file."""
-    h = hashlib.sha256()
+    """Compute SHA-256 checksum of a file, reading it once."""
     with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-# Process-level cache so a multi-GB checkpoint is hashed once per run, not once per delivery
-# call. Keyed by (resolved path, size, mtime) so an edited/replaced file re-hashes.
-_SHA_CACHE: dict[tuple[str, int, int], str] = {}
+        return _sha256_of_bytes(f.read())
 
 
 def checkpoint_sha256(filepath: str | Path) -> str | None:
-    """Cached SHA-256 of a checkpoint file (``None`` if missing).
+    """SHA-256 of a checkpoint file (``None`` if missing), read fresh on every call.
 
-    Readers of a delivered phenotype resolve the producing checkpoint's identity through here so
-    they carry its content hash without re-hashing the file on every call.
+    Uncached: a caller needing the digest of bytes it is about to unpickle uses
+    :func:`load_registered_checkpoint`, which reads and hashes one byte string and never a
+    second, possibly-replaced, read of the same path. This function's one remaining production
+    caller reads a recorded lineage path that may no longer exist and wants ``None`` for that,
+    never an exception, on a fact outside the verified-load rail.
     """
     p = Path(filepath)
     if not p.is_file():
         return None
-    st = p.stat()
-    key = (str(p.resolve()), st.st_size, int(st.st_mtime))
-    sha = _SHA_CACHE.get(key)
-    if sha is None:
-        sha = _compute_sha256(p)
-        _SHA_CACHE[key] = sha
-    return sha
+    return _compute_sha256(p)
 
 
-def resolve_model_identity(
-    checkpoint_path: str | Path,
-    *,
-    experiment_id: str | None = None,
-    project_path: str | None = None,
-) -> dict:
-    """Best-effort producing-model identity for a checkpoint: ``{checkpoint, sha256, experiment_id}``.
+_PERIODIC_RESUME_PREFIX = "checkpoint_epoch_"
+"""The trainer's own periodic-checkpoint naming convention (``generic_trainer.py``): a resume
+artifact the trainer's own resume path reads, never a deliverable to register."""
 
-    ``sha256`` is the cached content hash (never re-hashed per call). ``experiment_id`` resolves,
-    in order: the caller's explicit value; the checkpoint payload's own stamped ``experiment_id``
-    (every checkpoint saved through the audited envelope carries one via ``stamp_model_ref``,
-    without this, the ordinary train-then-calibrate workflow silently resolved to ``None`` and
-    bypassed the train-disjointness gate entirely, not just genuinely-foreign checkpoints); then a
-    best-effort registry lookup (a checkpoint registered but never carrying the stamp, e.g. from
-    before the stamp existed). A raw/foreign checkpoint legitimately has no experiment, the
-    identity records the sha and leaves ``experiment_id`` ``None`` rather than failing.
 
-    Reads the checkpoint with ``weights_only=True``, sufficient to read the stamped ``str`` (a
-    payload of tensors/dicts/basic Python types, which is what ``stamp_model_ref`` produces and
-    what this reads back) without executing arbitrary pickle content or loading the full weights
-    just to read one field. A checkpoint that fails even this safe load is logged and treated as
-    "no stamp", the same ``experiment_id=None`` outcome as a genuinely foreign checkpoint, but a
-    distinct, visible log line rather than an indistinguishable silent ``pass``, since "the stamp
-    couldn't be read" and "there was never a stamp" are materially different situations.
+def _unregistered_checkpoint_error(checkpoint_path: Path, digest: str, root: str) -> "UnregisteredCheckpoint":
+    if checkpoint_path.stem.startswith(_PERIODIC_RESUME_PREFIX):
+        return UnregisteredCheckpoint(
+            f"{checkpoint_path} (sha256 {digest}) is not named by any entry in the registry at "
+            f"{root!r}: its name marks it a periodic resume checkpoint "
+            f"({_PERIODIC_RESUME_PREFIX}*), read only by the trainer's own resume path, not a "
+            "deliverable to register."
+        )
+    return UnregisteredCheckpoint(
+        f"{checkpoint_path} (sha256 {digest}) is not named by any entry in the registry at "
+        f"{root!r}: register it with register_model under a name of its own (explicit mode; a "
+        "completed run registers its own final weights on completion under the run's id, and a "
+        "second checkpoint of the same run -- model_final beside a model_best, or a bespoke tag "
+        "-- is registered in explicit mode under a distinct name, since experiment mode names "
+        "the entry after the run and replaces by name)."
+    )
+
+
+def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, digest: str) -> str | None:
+    """The one producer ``entries`` (already matched by ``sha256``) agree on.
+
+    Today's producer is the ``experiment:`` tag; ``tags`` is caller-asserted until the model
+    registry's own tag-binding family lands, so this is bounded to what the entries assert, not a
+    verified fact. An entry naming none is ignored (not a vote for ``None``); every entry that
+    does name one must name the same value, or the load refuses rather than guess a first match.
     """
+    producers = {
+        tag.split(":", 1)[1]
+        for e in entries
+        for tag in (e.get("tags") or [])
+        if isinstance(tag, str) and tag.startswith("experiment:")
+    }
+    if len(producers) > 1:
+        raise UnregisteredCheckpoint(
+            f"{checkpoint_path} (sha256 {digest}) is named by registry entries naming different "
+            f"producers ({sorted(producers)!r}): the producer a stamp will carry is a required "
+            "fact, not a first-match guess. Name the conflicting entries distinctly or supersede "
+            "the stale one before this checkpoint can be loaded."
+        )
+    return next(iter(producers), None)
+
+
+@dataclass(frozen=True)
+class VerifiedCheckpoint:
+    """A checkpoint :func:`load_registered_checkpoint` read, hashed and matched against the
+    registry before anything in it was unpickled.
+
+    Holding an instance is evidence of verification only because no other constructor exists in
+    production: every predictor build and every measurement-path checkpoint load in this platform
+    takes this object from :func:`load_registered_checkpoint`, and a test that stubs a load stubs
+    that function.
+    """
+
+    path: str
+    """The path the caller named, as given."""
+    sha256: str
+    """The digest of the exact bytes ``payload`` was unpickled from."""
+    payload: dict
+    """The loaded checkpoint, read with ``weights_only=True``."""
+    entries: tuple[dict, ...]
+    """Every registry entry whose ``sha256`` equals this checkpoint's digest."""
+    producer: str | None
+    """The one producer ``entries`` agree names, ``None`` when none of them names one."""
+
+    @property
+    def data_config(self) -> dict:
+        """The checkpoint's own stamped ``config["data"]``, ``{}`` for a checkpoint carrying
+        none (a foreign checkpoint's documented answer)."""
+        data_cfg = (self.payload.get("config") or {}).get("data")
+        return data_cfg if isinstance(data_cfg, dict) else {}
+
+
+class UnregisteredCheckpoint(ValueError):
+    """A checkpoint the registry names no entry for, or whose registered entries disagree on
+    producer, or whose payload cannot be trusted to unpickle under ``weights_only=True``."""
+
+
+def load_registered_checkpoint(
+    checkpoint_path: str | Path, *, project_path: str | None = None,
+) -> VerifiedCheckpoint:
+    """Read a checkpoint's bytes once, hash them, and refuse unless the registry names that hash.
+
+    Closes the family of forgeries option B rules out: a checkpoint dropped at any path with no
+    registry entry, and a checkpoint whose file is replaced (in place or by rename) between a
+    caller checking its identity and a caller loading its weights. In order: the file is read
+    into one ``bytes`` object; the digest is taken over that exact object through
+    :func:`_sha256_of_bytes` (the same function :meth:`ModelRegistry.register_model` hashes with,
+    so registration and this load are literally the same bytes-to-digest code); the registry
+    index of ``project_path`` (or, unset, :func:`~tcip_mcp.project_paths.project_root`) is read
+    and every entry whose ``sha256`` equals the digest is collected; none of them raises
+    :class:`UnregisteredCheckpoint`, naming the path, the digest, the root searched, and the
+    remedy. Several entries naming one digest must agree on producer or the load refuses (see
+    :func:`_resolve_producer`). Only once the registry has answered is the payload unpickled,
+    with ``weights_only=True``, a narrower sink than the ``weights_only=False`` sniff a predictor
+    build used to run: every deliverable checkpoint this platform's own trainer writes (a state
+    dict, JSON config, numeric metrics and the three stamps) loads under it; a payload that will
+    not (a periodic resume checkpoint's RNG/optimizer state, or a bespoke loop's own arbitrary
+    object) refuses naming the reason, since registration verifies identity, never payload shape.
+    A payload that does not unpickle to a dict raises the same ``ValueError`` a kind sniff raises
+    for the same fact. A missing file raises ``FileNotFoundError`` before any read.
+
+    The digest and the load are over one immutable byte string, so no replacement of the file, in
+    place or by rename, on either platform, can separate them.
+    """
+    from tcip_mcp.pipelines.inference.predictor import _require_dict_payload
     from tcip_mcp.project_paths import project_root
 
     ckpt = Path(checkpoint_path)
-    sha = checkpoint_sha256(ckpt)
-    exp = experiment_id
-    if exp is None and ckpt.is_file():
-        try:
-            import torch  # local checkpoint the caller is deliberately identifying
+    root = project_path or str(project_root())
+    with open(ckpt, "rb") as f:
+        data = f.read()
+    digest = _sha256_of_bytes(data)
+    index = read_registry_index(root)
+    entries = tuple(e for e in index if e.get("sha256") == digest)
+    if not entries:
+        raise _unregistered_checkpoint_error(ckpt, digest, root)
+    producer = _resolve_producer(entries, checkpoint_path=ckpt, digest=digest)
 
-            payload = torch.load(ckpt, map_location="cpu", weights_only=True)
-            if isinstance(payload, dict):
-                stamped = payload.get("experiment_id")
-                if isinstance(stamped, str) and stamped:
-                    exp = stamped
-        except Exception as exc:
-            logger.warning(
-                "could not read a stamped experiment_id from checkpoint %s (%s); treating it as "
-                "unstamped for this identity resolution (falls through to the registry lookup, "
-                "then a foreign/no-provenance identity), which is distinct from a checkpoint that "
-                "genuinely never carried a stamp.", ckpt, exc,
-            )
-    if exp is None and sha is not None:
-        try:
-            registry = ModelRegistry(project_path or str(project_root()))
-            for m in registry.list_models():
-                if m.get("sha256") == sha or (
-                    m.get("checkpoint_path") and Path(m["checkpoint_path"]) == ckpt
-                ):
-                    for tag in m.get("tags", []):
-                        if isinstance(tag, str) and tag.startswith("experiment:"):
-                            exp = tag.split(":", 1)[1]
-                            break
-                    if exp:
-                        break
-        except Exception:
-            exp = None
-    return {"checkpoint": ckpt.stem, "sha256": sha, "experiment_id": exp}
+    import torch  # local checkpoint the registry already named; unpickling it is the point
 
-
-def read_checkpoint_data_config(checkpoint_path: str | Path) -> dict:
-    """The checkpoint's own stamped ``config["data"]`` (tiling/subject/attribute/id_map/...).
-
-    Read via ``weights_only=True`` (the same safe partial read :func:`resolve_model_identity` uses
-    for ``experiment_id``), without a full model rebuild: a light config sniff for a caller that
-    only needs the training-run facts already stamped on the checkpoint, not its weights. ``{}`` for
-    a checkpoint with no ``config`` key, or one that fails even this safe read (logged, not raised):
-    a foreign/raw checkpoint legitimately carries neither.
-    """
-    ckpt = Path(checkpoint_path)
-    if not ckpt.is_file():
-        return {}
     try:
-        import torch  # local checkpoint the caller is deliberately reading
-
-        payload = torch.load(ckpt, map_location="cpu", weights_only=True)
-        if isinstance(payload, dict):
-            data_cfg = (payload.get("config") or {}).get("data")
-            if isinstance(data_cfg, dict):
-                return data_cfg
+        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
     except Exception as exc:
-        logger.warning(
-            "could not read config[\"data\"] from checkpoint %s (%s); treating it as carrying "
-            "none, the same honest fallback a genuinely-foreign checkpoint gets.", ckpt, exc,
-        )
-    return {}
+        raise UnregisteredCheckpoint(
+            f"{ckpt} (sha256 {digest}) is registered but could not be loaded with "
+            f"weights_only=True ({exc}): registration verifies identity, not payload shape, and "
+            "this payload carries something outside a platform-written deliverable checkpoint's "
+            "contract (a resume checkpoint's RNG/optimizer state is the trainer's own resume "
+            "path to read; a bespoke loop's own arbitrary state is outside the contract)."
+        ) from exc
+    payload = _require_dict_payload(payload, str(ckpt))
+    return VerifiedCheckpoint(
+        path=str(checkpoint_path), sha256=digest, payload=payload, entries=entries,
+        producer=producer,
+    )
+
+
+def resolve_model_identity(checkpoint: VerifiedCheckpoint, *, experiment_id: str | None = None) -> dict:
+    """Producing-model identity for a verified checkpoint: ``{checkpoint, sha256, experiment_id}``.
+
+    ``sha256`` and the ``experiment_id`` this returns both come off ``checkpoint``, already loaded
+    and matched against the registry by :func:`load_registered_checkpoint`; this function reads no
+    file and hashes nothing itself. ``experiment_id`` resolves, in order: the caller's explicit
+    value; the checkpoint payload's own stamped ``experiment_id`` (every checkpoint saved through
+    the audited envelope carries one via ``stamp_model_ref``); then the checkpoint's own resolved
+    ``producer`` (the registry's ``experiment:`` tag on the entries that matched its digest). A
+    raw/foreign but registered checkpoint legitimately has none of the three, and the identity
+    records the sha with ``experiment_id`` left ``None`` rather than failing.
+    """
+    exp = experiment_id
+    if exp is None:
+        stamped = checkpoint.payload.get("experiment_id")
+        if isinstance(stamped, str) and stamped:
+            exp = stamped
+    if exp is None:
+        exp = checkpoint.producer
+    return {"checkpoint": Path(checkpoint.path).stem, "sha256": checkpoint.sha256, "experiment_id": exp}
 
 
 class ModelRegistry:

@@ -15,9 +15,12 @@ Usage:
     python scripts/calibrate_operating_point.py \
         --checkpoint <ckpt.pt> --trait <trait_name> \
         --labels-dir <labeled_dir> --images-dir <images_dir> \
-        --dataset-root <dataset_root> \
+        --dataset-root <dataset_root> --project-root <project_root> \
         [--experiment-id <id>] [--val-ratio 0.5] [--device cpu] [--subject <subject>] \
         [--attribute <attribute>] [--split-manifest-dir <dir>]
+
+The checkpoint must be named by a registry entry under --project-root (register it with
+register_model first); this script refuses one it is not, naming the digest and the root.
 """
 
 from __future__ import annotations
@@ -38,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
                              "run_inference's own calibration read one lock for these labels. The "
                              "labels' dataset root, or the labels dir itself when the dataset "
                              "layout places it under none.")
+    parser.add_argument("--project-root", required=True,
+                        help="The registry root the checkpoint must be named under: this script "
+                             "binds only the backend, and project_root() falls back to the "
+                             "working directory, which would search an empty index.")
     parser.add_argument("--experiment-id", default=None,
                         help="Producing experiment id recorded in the printed provenance.")
     parser.add_argument("--val-ratio", type=float, default=0.5,
@@ -88,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     from torch.utils.data import DataLoader
 
     from tcip_annotation.json_io import require_reference_ground_truth
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.splits import (
         count_label_lines, manifest_date_key, resolve_locked_cal_holdout_split,
@@ -100,15 +108,18 @@ def main(argv: list[str] | None = None) -> int:
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
     from tcip_mcp.pipelines.training.generic_trainer import task_collate
 
-    # Match the MCP path's own initial predictor construction exactly (DEFAULT_MAX_DETS) rather
-    # than leaving the framework default (torchvision 100/300) in place: this value is superseded
-    # below, once this split's density is known, by the set_detector_operating_point call that
-    # actually governs the collection pass ("detector-cap censoring").
     # --labels-dir is this script's measurement reference, so it clears the one admissibility rail.
     require_reference_ground_truth(args.labels_dir)
 
-    predictor = build_predictor(checkpoint_path=args.checkpoint, device=args.device,
-                                max_dets=DEFAULT_MAX_DETS)
+    try:
+        checkpoint = load_registered_checkpoint(args.checkpoint, project_path=args.project_root)
+    except UnregisteredCheckpoint as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    # Match the MCP path's initial predictor construction (DEFAULT_MAX_DETS); superseded below,
+    # once this split's density is known, by set_detector_operating_point.
+    predictor = build_predictor(checkpoint, device=args.device, max_dets=DEFAULT_MAX_DETS)
     tile_size = getattr(predictor, "train_tile_size", None)
 
     probe = build_dataset("detection", images_dir=args.images_dir, labels_dir=args.labels_dir,

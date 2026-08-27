@@ -1264,26 +1264,26 @@ def evaluate(
     return result
 
 
-def _producer_identity(ckpt_path: str) -> dict:
-    """Producing-model identity for a test-results stamp (checkpoint sha + experiment id).
-
-    Best-effort, a foreign checkpoint records the sha and leaves the experiment id null rather
-    than failing the evaluation.
-    """
+def _producer_identity(checkpoint) -> dict:
+    """Producing-model identity for a test-results stamp (checkpoint sha + experiment id), off
+    a ``VerifiedCheckpoint`` already loaded and matched against the registry."""
     from tcip_mcp.model_registry import resolve_model_identity
 
-    identity = resolve_model_identity(ckpt_path)
+    identity = resolve_model_identity(checkpoint)
     return {"model_sha256": identity["sha256"], "experiment_id": identity["experiment_id"]}
 
 
 def run_test_evaluation(
-    ckpt_path: str, loader, device, task: str, output_dir: str, *,
+    checkpoint, loader, device, task: str, output_dir: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     tiling: dict | None = None, trait: str | None = None,
     split_manifest_dir: str | None = None, evaluated_stem_count: int | None = None,
 ) -> dict:
-    """Load ``model_best.pt``, evaluate ``loader``, write ``test_results.json``.
+    """Evaluate ``loader`` against ``checkpoint``, write ``test_results.json``.
+
+    ``checkpoint`` is a ``VerifiedCheckpoint`` (``model_registry.load_registered_checkpoint``);
+    this function reads no file itself.
 
     ``tiling`` describes the eval dataset regime for provenance only (the loader is built by the
     caller): a tile-level run scores per-tile predictions against per-tile GT (a diagnostic that
@@ -1298,7 +1298,7 @@ def run_test_evaluation(
     """
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
 
-    ckpt = torch.load(ckpt_path, map_location=device)
+    ckpt = checkpoint.payload
     model = build_model(ckpt)
     model.load_state_dict(ckpt[STATE_DICT_KEY])
     model.to(device)
@@ -1309,8 +1309,8 @@ def run_test_evaluation(
     tiled = bool(tiling and tiling.get("enabled", True) and task == "detection")
     result = {
         **metrics,
-        "model_path": str(ckpt_path), "task": task,
-        **_producer_identity(ckpt_path),
+        "model_path": checkpoint.path, "task": task,
+        **_producer_identity(checkpoint),
         "iou_type": effective_iou_type(task, iou_type),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "tiled": tiled,
@@ -1325,7 +1325,7 @@ def run_test_evaluation(
 
 
 def run_full_frame_evaluation(
-    ckpt_path: str, images_dir: str, labels_dir: str, output_dir: str, *,
+    checkpoint, images_dir: str, labels_dir: str, output_dir: str, *,
     subject: str | None = None, attribute: str | None = None,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,
     tile_size: int | None = None, overlap: float | None = None,
@@ -1379,7 +1379,7 @@ def run_full_frame_evaluation(
     from tcip_mcp.pipelines.resolution import resolve_tile_size_param
 
     predictor = build_predictor(
-        checkpoint_path=str(ckpt_path), device=device,
+        checkpoint, device=device,
         score_threshold=conf_threshold, nms_iou=global_nms_iou, max_dets=max_dets)
 
     # A stated edge contradicting the checkpoint's own recorded geometry raises here and propagates
@@ -1396,7 +1396,7 @@ def run_full_frame_evaluation(
         tile_size_derived_from=tile_size_derived_from)
     if not tile_param.is_shippable:
         raise ValueError(
-            f"Cannot resolve a trustworthy tile_size for {ckpt_path}: no explicit tile_size was "
+            f"Cannot resolve a trustworthy tile_size for {checkpoint.path}: no explicit tile_size was "
             "passed and the checkpoint carries no persisted or native-frame training tile geometry. "
             "This is the delivery-grade gating path (report this to gate a delivery); it refuses to "
             "silently score at a fabricated scale rather than the model's real training scale. If "
@@ -1482,9 +1482,9 @@ def run_full_frame_evaluation(
         # instance_seg checkpoint's delivery artifact.
         # iou_type stays the literal "bbox": this gate always computes a box-only metric by design
         # (require_masks=False above), true regardless of task, see the docstring.
-        "model_path": str(ckpt_path), "task": getattr(predictor, "task", "detection"),
+        "model_path": checkpoint.path, "task": getattr(predictor, "task", "detection"),
         "iou_type": "bbox",
-        **_producer_identity(ckpt_path),
+        **_producer_identity(checkpoint),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "max_dets_cap_saturated_frac": _cap_saturated_frac(per_image),
         "tile_size": tile_size, "tile_size_source": tile_size_source,

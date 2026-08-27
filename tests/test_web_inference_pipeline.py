@@ -4,6 +4,24 @@ code path; there is no separate ultralytics+SAHI-specific one."""
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _stub_checkpoint_verification(monkeypatch):
+    """Every test in this module drives a stubbed predictor, not a real registered checkpoint;
+    load_registered_checkpoint is stubbed to admit whatever path it is given, carrying the real
+    file's own digest when one exists (some assertions here check that hash) and a fixed stand-in
+    otherwise.
+    """
+    import tcip_mcp.model_registry as model_registry_mod
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    def _stub(path, *a, **kw):
+        sha = model_registry_mod.checkpoint_sha256(path) or "stub-sha256"
+        return stub_verified_checkpoint(str(path), sha256=sha)
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
+
+
 def test_write_predictions_json_roundtrip_and_negative(tmp_path):
     import json
 
@@ -55,7 +73,7 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
         train_tile_size = 640
 
         def __init__(self, checkpoint_path=None, **kwargs):
-            captured["checkpoint"] = checkpoint_path
+            captured["checkpoint"] = getattr(checkpoint_path, "path", checkpoint_path)
             captured["kwargs"] = kwargs
 
         def predict_batch(self, paths, tile=False, tile_size=224, overlap=0.2, **kw):

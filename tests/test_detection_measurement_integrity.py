@@ -25,6 +25,25 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
 
 
+def _stub_checkpoint(path: str = "ckpt.pt"):
+    """A VerifiedCheckpoint stand-in for a test that stubs build_predictor: no registry lookup
+    or file read behind it, since the predictor it would build is stubbed too."""
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    return stub_verified_checkpoint(path)
+
+
+def _patch_build_predictor(monkeypatch, predictor_mod, stub_factory):
+    """Stub build_predictor (its checkpoint argument is now positional) and the
+    load_registered_checkpoint a calling tool resolves it through, so a stubbed-predictor test
+    never needs a real registered checkpoint on disk."""
+    import tcip_mcp.model_registry as model_registry_mod
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: stub_factory())
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda *a, **kw: _stub_checkpoint())
+
+
 # ======================================================================
 # Detection val-loss must include all-negative images
 # ======================================================================
@@ -174,12 +193,14 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     run = create_run({"data": {"tiling": {"enabled": True, "tile_size": 64}}}, str(tmp_path / "out"))
     out = Path(run.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(out, project_root=str(tmp_path), filename="model_best.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection", subject="catkin")
@@ -191,13 +212,14 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
 def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import DetectionDataset, TiledDetectionDataset
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin")
+    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="catkin")
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -206,13 +228,14 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
 def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = registered_checkpoint(tmp_path, project_root=str(tmp_path), filename="model.pt")
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
+    evaluate_model(ckpt, str(images_dir), str(labels_dir), task="detection", subject="catkin",
                    tiling={"enabled": True, "tile_size": 64})
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -240,11 +263,11 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
             return {"image": path, "width": 128, "height": 128,
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     # This stub carries no persisted training tile geometry, so the delivery-grade
     # gate now refuses unless the caller states the geometry explicitly (the affordance a rail must
     # admit; see test_gate_refuses_unresolvable_tile_geometry for the refusal itself).
-    r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
+    r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
                                   subject="catkin", tile_size=64, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"
     # counted once against un-fragmented full-frame GT (tile-level would split/duplicate it)
@@ -285,8 +308,8 @@ def test_evaluate_scores_a_contradicted_negative_on_its_actual_content_and_names
             return {"image": path, "width": 128, "height": 128,
                     "boxes": [[54, 54, 74, 74]], "scores": [0.9], "labels": [1], "count": 1}
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
-    r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
+    r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
                                   subject="catkin", tile_size=64, overlap=0.2)
     assert r["contradicted_negatives"] == ["a.png"]
     # scored against the real content, not held out as a still-trusted negative
@@ -319,9 +342,9 @@ def test_attribute_registry_refusal_reaches_the_caller(tmp_path, monkeypatch):
             return {"image": path, "width": 128, "height": 128,
                     "boxes": [], "scores": [], "labels": [], "count": 0}
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _Stub())
     with pytest.raises(ValueError, match="classes.json"):
-        run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out"),
+        run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir), str(tmp_path / "out"),
                                   subject="catkin", attribute="elongation", tile_size=64, overlap=0.2)
 
 
@@ -348,7 +371,7 @@ def _stub_inference(monkeypatch, *, train_tile_size=None, train_overlap=None):
             return [{"image": p, "width": 100, "height": 100,
                      "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _Stub)
     return captured
 
 
@@ -420,9 +443,9 @@ def test_gate_refuses_unresolvable_tile_geometry(tmp_path):
 
     predictor_mod_build = predictor_mod.build_predictor
     try:
-        predictor_mod.build_predictor = lambda **kw: _NoGeometryStub()
+        predictor_mod.build_predictor = lambda *a, **kw: _NoGeometryStub()
         with pytest.raises(ValueError, match="tiling="):
-            run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+            run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
                                       str(tmp_path / "out"))
     finally:
         predictor_mod.build_predictor = predictor_mod_build
@@ -460,8 +483,8 @@ def test_gate_derives_tile_geometry_from_checkpoint(tmp_path):
 
     predictor_mod_build = predictor_mod.build_predictor
     try:
-        predictor_mod.build_predictor = lambda **kw: _DerivedGeometryStub()
-        r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+        predictor_mod.build_predictor = lambda *a, **kw: _DerivedGeometryStub()
+        r = run_full_frame_evaluation(_stub_checkpoint(), str(images_dir), str(labels_dir),
                                       str(tmp_path / "out"), subject="catkin")
     finally:
         predictor_mod.build_predictor = predictor_mod_build
@@ -492,7 +515,7 @@ def test_run_inference_no_registry_degrades_honestly_not_a_crash(tmp_path, monke
                      "boxes": [[10, 10, 20, 20]], "scores": [0.9], "labels": [1], "count": 1}
                     for p in paths]
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _Stub)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
 
@@ -523,7 +546,7 @@ def test_run_inference_corrupted_registry_still_propagates(tmp_path, monkeypatch
             return [{"image": p, "width": 100, "height": 100,
                      "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _Stub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _Stub)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
 
@@ -731,7 +754,7 @@ def test_default_path_unchanged(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF
 
     stub = _CalStub()
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
+    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
     r = run_inference(str(ckpt), image_paths=[_one_image(tmp_path)], device="cpu", tile=False)
@@ -767,7 +790,7 @@ def test_calibration_wires_resolved_conf(tmp_path, monkeypatch):
     # gates a bundle when tiled, so the mocked bundle must match the real regime it stands in for).
     _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
     stub = _CalStub()
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
+    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)  # sweep artifact under .tcip/artifacts
 
     ckpt = tmp_path / "m.pt"
@@ -794,7 +817,7 @@ def test_sweep_artifact_is_content_addressed_not_label_hash_only(tmp_path, monke
 
     _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=True)
     stub = _CalStub()
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
+    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)
 
     ckpt = tmp_path / "m.pt"
@@ -834,7 +857,7 @@ def test_export_predictions_sidecar_carries_sweep_pointer(tmp_path, monkeypatch)
     # at, and the delivery gate now refuses on exactly that kind of mismatch.
     _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
     stub = _CalStub()
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: stub)
+    _patch_build_predictor(monkeypatch, predictor_mod, lambda: stub)
     monkeypatch.chdir(tmp_path)
 
     ckpt = tmp_path / "m.pt"
@@ -875,7 +898,7 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
     monkeypatch.setattr(itools, "_calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
     ckpt = tmp_path / "m.pt"
@@ -912,7 +935,7 @@ def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp
     }
     monkeypatch.setattr(itools, "_calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
     img_a, img_b = tmp_path / "a.png", tmp_path / "b.png"
@@ -965,7 +988,7 @@ def test_manifest_calibration_firewall_hashes_the_universe(
     }
     monkeypatch.setattr(itools, "_calibrate_operating_point",
                         lambda *a, **k: (bundle, dh, 0, evidence))
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
     image_paths = []
@@ -1016,7 +1039,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
     }
     monkeypatch.setattr(itools, "_calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
     img = tmp_path / "a.png"
@@ -1042,7 +1065,7 @@ def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch)
 
     # tiled=False: matches the real run_inference call below (tile=False).
     _stand_in_calibration(monkeypatch, itools, tmp_path, tiled=False)
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _CalStub)
     monkeypatch.chdir(tmp_path)
 
     ckpt = tmp_path / "m.pt"
@@ -1097,7 +1120,7 @@ def test_calibration_follows_delivery_tile_regime(tmp_path, monkeypatch):
             return [{"image": p, "width": 128, "height": 128, "boxes": boxes,
                      "scores": scores, "labels": labels, "count": len(boxes)} for p in paths]
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _RegimeStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _RegimeStub)
     monkeypatch.chdir(tmp_path)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
@@ -1147,7 +1170,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
         def predict_batch(self, paths, **kw):
             raise AssertionError("must refuse before any predictor pass, calibration included")
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _NoGeometryStub())
+    _patch_build_predictor(monkeypatch, predictor_mod, _NoGeometryStub)
     monkeypatch.chdir(tmp_path)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
@@ -1159,6 +1182,7 @@ def test_calibrated_run_refuses_when_tile_size_has_no_real_basis(tmp_path, monke
 
 
 def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_catkin_trait_spec):
+    import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
@@ -1167,18 +1191,19 @@ def test_export_predictions_validated_from_bundle(tmp_path, monkeypatch, seed_ca
     img = _one_image(tmp_path)
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"x")
+    sha = "the-checkpoint-behind-this-bucket"
 
-    def _fake_run_inference(**kw):
-        from tcip_mcp.model_registry import checkpoint_sha256
-
+    def _fake_run_inference_verified(*a, **kw):
         return {
             "results": [{"image": img, "width": 100, "height": 100,
                          "boxes": [], "scores": [], "labels": [], "count": 0}],
-            "checkpoint_sha256": checkpoint_sha256(ckpt),
+            "checkpoint_sha256": sha,
             **calibrated_run_fields(labels_dir=tmp_path, tiled=False),
         }
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     out_dir = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
     r = itools.export_predictions(str(ckpt), str(tmp_path), str(out_dir), trait="catkin",
                                   calibration_labels_dir=str(tmp_path))
@@ -1196,9 +1221,10 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
     ``predictions_dir`` these counts rest on no bucket anyone can re-read, so a caller wanting the
     CSV to be delivered at all acknowledges it as provisional.
     """
+    import tcip_mcp.model_registry as model_registry_mod
     import tcip_mcp.tools.inference_tools as itools
 
-    def _fake_run_inference(**kw):
+    def _fake_run_inference_verified(*a, **kw):
         if captured is not None:
             captured.update(kw)
         return {
@@ -1210,12 +1236,16 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
     from tests import _operationalization_fixtures as fx
 
     fx.seed_confirmed_count(tmp_path)
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda *a, **kw: _stub_checkpoint(str(ckpt)))
     monkeypatch.setattr(
         itools, "export_detection_csv",
         lambda results, path, provenance=None, *, trait, measurement_validated=None,
         pred_dirs=None, acknowledge_unvalidated=False: str(path))
-    return itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    return itools.tabulate_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                   trait=fx.COUNT_TRAIT,
                                   calibration_labels_dir=str(tmp_path),
                                   acknowledge_unvalidated=acknowledge)

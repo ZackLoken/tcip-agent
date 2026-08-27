@@ -24,6 +24,7 @@ from tcip_mcp.pipelines.model_build import MODEL_SOURCE_KEY, STATE_DICT_KEY
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from tcip_mcp.model_registry import VerifiedCheckpoint
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,9 @@ class Predictor(Protocol):
     def predict_tiled(self, source: str | Path | BandGroupRef, **kwargs: Any) -> dict: ...
 
 
-def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
-    """Resolve the kind from an already-loaded checkpoint object (no second disk read)."""
+def _require_dict_payload(ckpt: Any, checkpoint_path: str) -> dict:
+    """The isinstance check every checkpoint reader needs before trusting ``ckpt`` as a payload
+    dict, shared so a verified load and the kind sniff raise the identical fact one way."""
     if not isinstance(ckpt, dict):
         raise ValueError(
             f"Cannot determine model kind for {checkpoint_path}: checkpoint did not unpickle to a "
@@ -81,6 +83,12 @@ def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
             f"('kind' / {MODEL_SOURCE_KEY!r}+{STATE_DICT_KEY!r}) this platform's own "
             "checkpoints do."
         )
+    return ckpt
+
+
+def _kind_from_ckpt(ckpt: Any, checkpoint_path: str) -> str:
+    """Resolve the kind from an already-loaded checkpoint object (no second disk read)."""
+    ckpt = _require_dict_payload(ckpt, checkpoint_path)
     stamped = ckpt.get("kind")
     if stamped:
         return str(stamped)
@@ -302,33 +310,24 @@ def resolve_tile_regime(
     return resolved_tile, tile_size_source, resolved_overlap, overlap_source, tile_resize
 
 
-def build_predictor(checkpoint_path: str, *, kind: str | None = None, **kwargs: Any) -> "Predictor":
+def build_predictor(
+    checkpoint: "VerifiedCheckpoint", *, kind: str | None = None, **kwargs: Any,
+) -> "Predictor":
     """Construct the right predictor for a checkpoint's kind (the one inference entry point).
 
-    Pass ``kind`` to skip detection (e.g. the registry already recorded it). Predictor
-    kwargs (``device``, ``score_threshold``, ``nms_iou``, ``max_dets``, …) pass through.
+    ``checkpoint`` is a :class:`~tcip_mcp.model_registry.VerifiedCheckpoint`, the object
+    :func:`~tcip_mcp.model_registry.load_registered_checkpoint` returns: this function reads no
+    file itself, so a predictor built here always carries a checkpoint the registry named. Pass
+    ``kind`` to skip detection (e.g. the registry already recorded it); the payload it sniffs from
+    is ``checkpoint.payload``, already unpickled by the verified load, never a second read.
+    Predictor kwargs (``device``, ``score_threshold``, ``nms_iou``, ``max_dets``, …) pass through.
     """
-    ckpt = None
     if kind is None:
-        # Sniff by loading once; hand the loaded checkpoint to the predictor so the weights aren't
-        # read from disk twice. If the file can't be read (missing / corrupt / a test stub), fall
-        # back to the default tcip kind, GenericPredictor then surfaces the real load error rather
-        # than us masking it here.
-        import torch
-
-        try:
-            ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        except Exception:
-            logger.debug("build_predictor: could not read %s to sniff kind; assuming %s",
-                         checkpoint_path, DEFAULT_KIND, exc_info=True)
-            kind = DEFAULT_KIND
-        else:
-            kind = _kind_from_ckpt(ckpt, checkpoint_path)
+        kind = _kind_from_ckpt(checkpoint.payload, checkpoint.path)
 
     if kind == KIND_TCIP_MODULE:
         # A tcip checkpoint GenericPredictor rebuilds by re-importing the bespoke model_source
         # builder through build_model, never exec.
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-        extra = {"checkpoint": ckpt} if ckpt is not None else {}
-        return GenericPredictor(checkpoint_path=checkpoint_path, **extra, **kwargs)
-    raise ValueError(f"Unsupported model kind {kind!r} for {checkpoint_path}")
+        return GenericPredictor(checkpoint, **kwargs)
+    raise ValueError(f"Unsupported model kind {kind!r} for {checkpoint.path}")

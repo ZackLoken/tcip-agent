@@ -10,6 +10,32 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _stub_checkpoint_verification(monkeypatch):
+    """Every test in this module drives a stubbed predictor, not a real registered checkpoint;
+    load_registered_checkpoint is stubbed to admit whatever path it is given, carrying the real
+    file's own digest when one exists (some assertions here check that hash) and a fixed stand-in
+    otherwise.
+    """
+    import tcip_mcp.model_registry as model_registry_mod
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    def _stub(path, *a, **kw):
+        sha = model_registry_mod.checkpoint_sha256(path) or "stub-sha256"
+        return stub_verified_checkpoint(str(path), sha256=sha)
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
+
+
+def _ckpt(tmp_path, name: str = "ckpt.pt") -> str:
+    """A checkpoint path that exists on disk, for the not-found check every door now runs first."""
+    p = tmp_path / name
+    if not p.exists():
+        p.write_bytes(b"stub")
+    return str(p)
+
+
 def test_export_predictions_writes_json(tmp_path, monkeypatch):
     ckpt = tmp_path / "m.pt"
     ckpt.write_bytes(b"stub")  # only existence is checked
@@ -54,14 +80,14 @@ def test_export_predictions_forwards_split_manifest_dir_to_run_inference(tmp_pat
 
     captured = {}
 
-    def _fake_run_inference(**kwargs):
+    def _fake_run_inference_verified(*a, **kwargs):
         captured.update(kwargs)
         return {"error": "stop: plumbing check only"}
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
 
     itools.export_predictions(
-        "ckpt.pt", images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        _ckpt(tmp_path), images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
         split_manifest_dir=str(tmp_path / "m"))
 
     assert captured.get("split_manifest_dir") == str(tmp_path / "m")
@@ -74,7 +100,7 @@ def test_export_predictions_refuses_split_manifest_dir_with_raster_path(tmp_path
     from tcip_mcp.tools.inference_tools import export_predictions
 
     result = export_predictions(
-        "ckpt.pt", output_dir=str(tmp_path / "out"),
+        _ckpt(tmp_path), output_dir=str(tmp_path / "out"),
         raster_path=str(tmp_path / "mosaic.tif"), split_manifest_dir=str(tmp_path / "m"))
 
     assert "error" in result and "split_manifest_dir" in result["error"]
@@ -87,11 +113,11 @@ def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, 
 
     captured = {}
 
-    def _fake_run_inference(**kwargs):
+    def _fake_run_inference_verified(*a, **kwargs):
         captured.update(kwargs)
         return {"error": "stop: plumbing check only"}
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_verified)
     stated = type("Stated", (), {"ok": True, "message": ""})()
     monkeypatch.setattr(
         "tcip_mcp.operationalization.resolve_trait_and_record",
@@ -101,7 +127,7 @@ def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, 
         lambda spec, record, kind, registry=None: stated)
 
     itools.tabulate_counts(
-        "ckpt.pt", str(tmp_path), str(tmp_path / "out.csv"), "some_trait",
+        _ckpt(tmp_path), str(tmp_path), str(tmp_path / "out.csv"), "some_trait",
         split_manifest_dir=str(tmp_path / "m"))
 
     assert captured.get("split_manifest_dir") == str(tmp_path / "m")

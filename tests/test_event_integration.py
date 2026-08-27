@@ -541,8 +541,10 @@ class TestInferenceToolOutputSchema:
         that pairs a file to the wrong image, or drops the image that found nothing, does not read
         as correct.
         """
+        import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
         from tests._binding_fixtures import calibrated_run_fields
+        from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
         def _boxes(n: int) -> list[list[float]]:
             return [[10.0 * i, 12.0 * i, 10.0 * i + 24.0, 12.0 * i + 18.0] for i in range(1, n + 1)]
@@ -553,14 +555,18 @@ class TestInferenceToolOutputSchema:
              "scores": [0.9] * n, "labels": [1] * n, "count": n}
             for stem, n in counts.items()
         ]
-        monkeypatch.setattr(itools, "run_inference", lambda **kw: {
+        ckpt = tmp_path / "m.pt"
+        ckpt.write_bytes(b"x")
+        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: {
             "results": results, "image_count": len(results),
             "total_detections": sum(counts.values()), "id_map": None,
             "checkpoint_sha256": "0f1e2d3c4b5a", "produced_at": "2026-01-01T00:00:00Z",
             **calibrated_run_fields(labels_dir=tmp_path, tiled=False)})
+        monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                            lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
         out = tmp_path / "dataset" / "predictions" / "baseline" / "2026-01-01"
-        res = itools.export_predictions("m.pt", images_dir=str(tmp_path), output_dir=str(out),
+        res = itools.export_predictions(str(ckpt), images_dir=str(tmp_path), output_dir=str(out),
                                         trait="catkin")
 
         assert "error" not in res, res
@@ -582,23 +588,29 @@ class TestInferenceToolOutputSchema:
         """
         import csv
 
+        import tcip_mcp.model_registry as model_registry_mod
         import tcip_mcp.tools.inference_tools as itools
         from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+        from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
         counts = {"row3_plant07.jpg": 2, "row3_plant11.jpg": 0, "row9_plant02.jpg": 17}
-        monkeypatch.setattr(itools, "run_inference", lambda **kw: {
+        ckpt = tmp_path / "m.pt"
+        ckpt.write_bytes(b"x")
+        monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: {
             "results": [{"image": name, "count": n, "scores": [0.9] * n}
                         for name, n in counts.items()],
             "image_count": len(counts), "total_detections": sum(counts.values()),
             "operating_point": {"conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT}},
             "validated": True, "conf_source": "calibration"})
+        monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                            lambda *a, **kw: stub_verified_checkpoint(str(ckpt)))
 
         from tests import _operationalization_fixtures as fx
 
         fx.seed_confirmed_count(tmp_path)
         out_csv = tmp_path / "block_counts.csv"
         # No predictions_dir: the CSV is the provisional one but still carries each measured count.
-        res = itools.tabulate_counts("m.pt", str(tmp_path), str(out_csv),
+        res = itools.tabulate_counts(str(ckpt), str(tmp_path), str(out_csv),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path),
                                      acknowledge_unvalidated=True)

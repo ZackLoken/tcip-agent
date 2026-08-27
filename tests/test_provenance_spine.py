@@ -42,79 +42,77 @@ def test_stamp_model_ref_stamps_experiment_id():
     assert "experiment_id" not in payload3
 
 
-# ── R2: sha256 computed once (cached) + identity resolved from the registry ─
-
-def test_checkpoint_sha256_is_cached(tmp_path, monkeypatch):
-    import tcip_mcp.model_registry as reg
-
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"weights")
-
-    calls = {"n": 0}
-    real = reg._compute_sha256
-
-    def _counting(p):
-        calls["n"] += 1
-        return real(p)
-
-    monkeypatch.setattr(reg, "_compute_sha256", _counting)
-    reg._SHA_CACHE.clear()
-    a = reg.checkpoint_sha256(ckpt)
-    b = reg.checkpoint_sha256(ckpt)
-    assert a == b and len(a) == 64
-    assert calls["n"] == 1  # second call served from cache, no re-hash
-
+# ── R2: identity resolved off a verified, registry-matched checkpoint ───────
 
 def test_resolve_model_identity_from_registry(tmp_path):
-    from tcip_mcp.model_registry import ModelRegistry, resolve_model_identity
+    torch = pytest.importorskip("torch")
+    from tcip_mcp.model_registry import (
+        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
+    )
 
     ckpt = tmp_path / "best.pt"
-    ckpt.write_bytes(b"weights")
+    torch.save({"model_state_dict": {}}, ckpt)
     ModelRegistry(str(tmp_path)).register_model(
         "m1", str(ckpt), {"model_source": {"builder": "x:y"}}, tags=["experiment:expR"],
         metrics_source=None)
 
-    ident = resolve_model_identity(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    ident = resolve_model_identity(checkpoint)
     assert ident["sha256"] and len(ident["sha256"]) == 64
     assert ident["experiment_id"] == "expR"
     assert ident["checkpoint"] == "best"
 
 
 def test_resolve_model_identity_foreign_checkpoint(tmp_path):
-    from tcip_mcp.model_registry import resolve_model_identity
+    """A registered checkpoint with no producing experiment (no ``experiment:`` tag, no stamp)
+    resolves the sha and leaves ``experiment_id`` null rather than failing."""
+    torch = pytest.importorskip("torch")
+    from tcip_mcp.model_registry import (
+        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
+    )
 
     ckpt = tmp_path / "foreign.pt"
-    ckpt.write_bytes(b"weights")
-    ident = resolve_model_identity(ckpt, project_path=str(tmp_path))
+    torch.save({"model_state_dict": {}}, ckpt)
+    ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt), {}, metrics_source=None)
+
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    ident = resolve_model_identity(checkpoint)
     assert ident["sha256"]                 # sha still recorded
     assert ident["experiment_id"] is None  # no run -> honest null, not a failure
 
 
 def test_resolve_model_identity_reads_checkpoint_own_experiment_id(tmp_path):
     """The ordinary train-then-calibrate workflow saves a checkpoint stamped with its own
-    ``experiment_id`` (via ``stamp_model_ref``) but never registers it before calibration runs;
-    ``resolve_model_identity`` must read that stamp directly rather than resolving None just
-    because no registry entry exists yet, which would otherwise silently bypass the
-    train-disjointness gate for every checkpoint that hadn't been explicitly registered."""
+    ``experiment_id`` (via ``stamp_model_ref``); ``resolve_model_identity`` must read that stamp
+    directly rather than resolving it only from the registry's own ``experiment:`` tag, which
+    would otherwise silently bypass the train-disjointness gate whenever the two disagree."""
     torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import resolve_model_identity
+    from tcip_mcp.model_registry import (
+        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
+    )
 
     ckpt = tmp_path / "stamped.pt"
     torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
+    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {}, metrics_source=None)
 
-    ident = resolve_model_identity(ckpt, project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    ident = resolve_model_identity(checkpoint)
     assert ident["experiment_id"] == "expStamped"
     assert ident["sha256"]
 
 
 def test_resolve_model_identity_caller_experiment_id_wins_over_stamp(tmp_path):
     torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import resolve_model_identity
+    from tcip_mcp.model_registry import (
+        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
+    )
 
     ckpt = tmp_path / "stamped.pt"
     torch.save({"model_state_dict": {}, "experiment_id": "expStamped"}, ckpt)
+    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt), {}, metrics_source=None)
 
-    ident = resolve_model_identity(ckpt, experiment_id="expCaller", project_path=str(tmp_path))
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    ident = resolve_model_identity(checkpoint, experiment_id="expCaller")
     assert ident["experiment_id"] == "expCaller"
 
 

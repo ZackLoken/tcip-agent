@@ -2646,14 +2646,19 @@ def evaluate_model(
     if not Path(ckpt).is_file():
         return {"error": f"Checkpoint not found: {ckpt}"}
 
-    # A bare checkpoint path (run is None) carries its own stamped config["data"] too, read the
-    # same light way a run id's in-memory config already is, so both paths agree.
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+
+    try:
+        checkpoint = load_registered_checkpoint(ckpt)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
+
+    # A bare checkpoint path (run is None) carries its own stamped config["data"] too, read off
+    # the object already loaded, so both paths agree without a second read.
     if run is not None:
         run_data_cfg = run.config.get("data", {}) or {}
     else:
-        from tcip_mcp.model_registry import read_checkpoint_data_config
-
-        run_data_cfg = read_checkpoint_data_config(ckpt)
+        run_data_cfg = checkpoint.data_config
     run_tiling = run_data_cfg.get("tiling")
     # The eval scope's subject/attribute: caller-supplied wins, else the producing run's config, so
     # the name-based GT reads through the same id map the run trained with.
@@ -2705,7 +2710,7 @@ def evaluate_model(
 
         try:
             return run_full_frame_evaluation(
-                ckpt, images_dir, labels_dir, str(Path(ckpt).parent),
+                checkpoint, images_dir, labels_dir, str(Path(ckpt).parent),
                 subject=subject, attribute=attribute,
                 conf_threshold=conf_threshold, iou_threshold=iou_threshold,
                 tile_size=tcfg.get("tile_size"), overlap=tcfg.get("overlap"),
@@ -2758,7 +2763,7 @@ def evaluate_model(
     # from the delivery-grade path's 1000 above; an explicit caller max_dets is honored verbatim.
     resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
-        ckpt, loader, device, task, str(Path(ckpt).parent),
+        checkpoint, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
         split_manifest_dir=split_manifest_dir,

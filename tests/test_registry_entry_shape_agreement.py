@@ -16,7 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.model_registry import ModelRegistry, resolve_model_identity
+from tcip_mcp.model_registry import (
+    ModelRegistry, load_registered_checkpoint, resolve_model_identity,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCTOR_PATH = REPO_ROOT / "scripts" / "doctor.py"
@@ -99,27 +101,29 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(tmp_path
     """A checkpoint copied to a path the registry never saw still resolves to the run that
     produced it, matched on the content hash the registry stored. Resolution scans the whole
     index, so the entry whose hash matches wins over an earlier entry that does not."""
+    torch = pytest.importorskip("torch")
     root = tmp_path / "proj"
     root.mkdir()
     reg = ModelRegistry(str(root))
 
     other = tmp_path / "other_run.pt"
-    other.write_bytes(b"a different run entirely")
+    torch.save({"model_state_dict": {}, "note": "a different run entirely"}, other)
     reg.register_model("chestnut_leaf_area_seg_v2", str(other), {},
                        tags=["segmenter", "experiment:leaf_run"], metrics_source=None)
 
-    content = b"the checkpoint that produced the phenotype"
     trained = tmp_path / "model_best.pt"
-    trained.write_bytes(content)
+    torch.save({"model_state_dict": {}, "note": "the checkpoint that produced the phenotype"},
+              trained)
     reg.register_model("hazelnut_catkin_detector_v1", str(trained), {},
                        tags=["detector", "experiment:catkin_run3"], metrics_source=None)
 
     delivered = tmp_path / "delivery" / "model_copy.pt"
     delivered.parent.mkdir()
-    delivered.write_bytes(content)
+    delivered.write_bytes(trained.read_bytes())
 
-    identity = resolve_model_identity(delivered, project_path=str(root))
-    assert identity["sha256"] == hashlib.sha256(content).hexdigest()
+    checkpoint = load_registered_checkpoint(delivered, project_path=str(root))
+    identity = resolve_model_identity(checkpoint)
+    assert identity["sha256"] == hashlib.sha256(trained.read_bytes()).hexdigest()
     assert identity["experiment_id"] == "catkin_run3"
     assert identity["checkpoint"] == "model_copy"
 
