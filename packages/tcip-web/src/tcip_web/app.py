@@ -11,6 +11,7 @@ static-file serving, and health/index.
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import logging
 from collections import defaultdict, deque
@@ -86,27 +87,31 @@ async def _lifespan(_app: FastAPI):
 # and a route that reaches a store with no backend bound would refuse rather than write.
 bind_default()
 
-_startup_root_bound = False
-
-
 def bind_startup_root() -> None:
     """Pin this process's platform-state root once, a served app's own responsibility rather
-    than an importer's.
+    than an importer's, and only when nothing has bound one yet.
 
     Reached from :class:`_BindStartupRootMiddleware` (ahead of every route, for a request
     served before the lifespan has run) and from the lifespan's own startup (ahead of its
     rehydrate), so every way this app is served (``python -m tcip_web``, bare uvicorn,
-    ``--lifespan off``, the reloader's child) pins the same root before anything resolves one,
+    ``--lifespan off``, the reloader's child) pins a root before anything resolves one,
     while a process that only imports this module (the test suite at collection, a repo
     script) never calls this and pins nothing.
-    """
-    global _startup_root_bound
-    if _startup_root_bound:
-        return
-    from tcip_mcp.project_paths import pin_project_root
 
+    Checks :func:`tcip_mcp.project_paths.root_binding` rather than a flag of its own: a
+    ``set_active_project`` repin that lands before the first request already leaves a
+    binding in place, and this must not replace it with a fresh marker read.
+    """
+    from tcip_mcp.project_paths import pin_project_root, root_binding
+
+    if root_binding() is not None:
+        return
     pin_project_root(from_marker=True)
-    _startup_root_bound = True
+
+
+# Serializes concurrent first requests onto one marker read: the second waits here, then
+# finds the root already bound and returns immediately.
+_bind_startup_root_lock = asyncio.Lock()
 
 
 class _BindStartupRootMiddleware:
@@ -114,7 +119,10 @@ class _BindStartupRootMiddleware:
 
     Covers a request served with the lifespan disabled or never started (``--lifespan off``,
     a ``TestClient`` used outside its context manager), where the lifespan's own call never
-    runs. Idempotent past the first call, so this costs nothing on every later request.
+    runs. The marker read :func:`bind_startup_root` may perform is a store read bounded by a
+    file-lock timeout, so it runs off the event loop in a worker thread, under the module
+    lock above; once a root is bound the check inside :func:`bind_startup_root` is cheap, so
+    later requests still pay the thread hop but no further store read.
     """
 
     def __init__(self, app: Any) -> None:
@@ -122,7 +130,8 @@ class _BindStartupRootMiddleware:
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope["type"] in ("http", "websocket"):
-            bind_startup_root()
+            async with _bind_startup_root_lock:
+                await asyncio.to_thread(bind_startup_root)
         await self.app(scope, receive, send)
 
 
