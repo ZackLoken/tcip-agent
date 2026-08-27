@@ -598,9 +598,9 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `scan_dataset` | `data_tools.py:234` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
-| `validate_data_quality` | `data_tools.py:304` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:454` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `scan_dataset` | `data_tools.py:235` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
+| `validate_data_quality` | `data_tools.py:305` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:455` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -1177,9 +1177,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's stem lists, manifest or file tree are written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:694`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:695`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:878`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:879`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
@@ -1678,7 +1678,7 @@ addressed by `split_manifest_key`, `packages/tcip-mcp/src/tcip_mcp/tools/data_to
 `split_stem_list_key`, `data_tools.py:35`, under whatever directory the caller asked the
 partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:454`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:455`, when `output_path` is given or `materialize=True`.
 The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
 all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`) non-zero, refusing whichever is
 zero by name, since a manifest always draws all three sides. The draw refuses, before any write,
@@ -1711,7 +1711,7 @@ image/label scan found, plus a single
 `dataset_hash` only when that scan found exactly one such directory; over more than one,
 `dataset_hash` is `null` rather than one directory's hash blind to the rest.
 
-Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:75`, the one reader a training or
+Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:76`, the one reader a training or
 tuning run's `data.split.manifest_dir` resolves through (`training_tools._auto_train_val`) and a
 manifest-restricted calibration resolves through (`splits.resolve_manifest_calibration_universe`),
 which refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
