@@ -26,11 +26,10 @@ def cached_label_annotations(path: Path) -> tuple:
     count, a subject renamed to an equal-length name); this memo reads the file's current bytes
     on every call and keys the hit on their digest instead, so it never answers a same-size
     in-place edit from a parse made before it. Reading the bytes costs a stat's worth more than a
-    stat alone would; only the decode and the record construction are skipped on a hit. Decoding
-    and parsing a miss go through :func:`tcip_annotation.json_io.parse_label_document` and the
-    module's own byte-decode policy, the same ones every other reader of a label document's raw
-    bytes shares, so this memo and the reader it stands in for cannot disagree about whether a
-    document reads.
+    stat alone would; only the decode and the record construction are skipped on a hit. A miss
+    goes through :func:`tcip_annotation.json_io.annotations_from_bytes`, the one path from a
+    document's bytes to its records that every reader shares, so this memo and the reader it
+    stands in for cannot disagree about whether a document reads.
 
     A missing file reads as no annotations. A present, unreadable one raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument`, uncached: a broken document is
@@ -41,12 +40,7 @@ def cached_label_annotations(path: Path) -> tuple:
     this path under one digest: a caller must never mutate a record in place, and takes a copy
     before changing anything.
     """
-    from tcip_annotation.json_io import (
-        UnreadableLabelDocument,
-        _annotations_of,
-        _decode_label_bytes,
-        parse_label_document,
-    )
+    from tcip_annotation.json_io import UnreadableLabelDocument, annotations_from_bytes
 
     try:
         data = path.read_bytes()
@@ -60,8 +54,7 @@ def cached_label_annotations(path: Path) -> tuple:
     if cached is not None and cached[0] == digest:
         _cache.move_to_end(key)
         return cached[1]
-    text = _decode_label_bytes(data, source=key)
-    annotations = tuple(_annotations_of(parse_label_document(text, source=key)))
+    annotations = tuple(annotations_from_bytes(data, source=key))
     _cache[key] = (digest, annotations)
     _cache.move_to_end(key)
     if len(_cache) > _CACHE_MAX:
