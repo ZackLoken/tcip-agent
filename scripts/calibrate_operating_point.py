@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.split_manifest_dir:
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
-            calibration_universe_from_manifest, manifest_date_key,
+            calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
         )
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
@@ -142,14 +142,11 @@ def main(argv: list[str] | None = None) -> int:
                   f"{cal_date!r}; it holds members under {sorted(manifest.get('members') or {})}.",
                   file=sys.stderr)
             return 2
-        manifest_images_root = date_block.get("images_root")
-        import os
-        from pathlib import Path
-
-        if manifest_images_root and not os.path.samefile(
-                Path(args.images_dir).resolve(), Path(manifest_images_root).resolve()):
-            print(f"images_dir={args.images_dir!r} is not the split manifest's images_root for "
-                  f"date {cal_date!r} ({manifest_images_root!r}).", file=sys.stderr)
+        try:
+            refuse_if_images_root_moved(
+                "images_dir", args.images_dir, date_block.get("images_root"), cal_date)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
             return 2
         try:
             stems, group_by, group_key_map, _excluded = calibration_universe_from_manifest(

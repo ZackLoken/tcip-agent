@@ -68,8 +68,8 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     run names its ``data.split.manifest_dir`` through.
 
     Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
-    a mapping, or lacks ``subject`` or ``members``: the two keys every binding needs and a record
-    predating this family's ``make_splits`` (or not written by it at all) would not carry.
+    a mapping, or lacks ``subject`` or ``members``: the two keys every binding needs, and the two
+    a ``split_manifest`` record always carries.
     """
     from tcip_store import DecodeError
 
@@ -87,8 +87,8 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     missing = [k for k in ("subject", "members") if k not in manifest]
     if missing:
         raise ValueError(
-            f"the split manifest at {split_dir} carries no {missing}: not written by this "
-            "family's make_splits, or written before it."
+            f"the split manifest at {split_dir} carries no {missing}: a split_manifest record "
+            "always carries both."
         )
     return manifest
 

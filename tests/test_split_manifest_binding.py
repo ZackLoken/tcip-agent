@@ -212,6 +212,42 @@ def _run_data_cfg(root: Path, manifest_dir: Path, date: str, *, subject: str = S
     }
 
 
+def _dataset_with_a_confirmed_negative(root: Path) -> Path:
+    """One date, three annotated stems plus a fourth confirmed negative for ``SUBJECT``."""
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    for stem in ("a", "b", "c"):
+        _write_stem(images_dir, labels_dir, stem,
+                   [Annotation(subject=SUBJECT, geometry=BBox(4, 4, 20, 20))])
+    _write_stem(images_dir, labels_dir, "n", [])
+    return root
+
+
+def test_auto_train_val_admits_a_confirmed_negative_with_data_date_unset(tmp_path: Path):
+    """A run whose ``data.date`` is left unset still reads confirmed negatives under the tree's
+    own date, the date the split manifest was drawn under, so a manifest member confirmed
+    negative under that date still admits."""
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+    from tcip_mcp.tools.training_tools import _auto_train_val
+
+    root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
+    record_image_statuses(root, status_bucket(SUBJECT, DATES[0]), {"n.jpg": "negative"},
+                          recorded_by="user:tester")
+    out = tmp_path / "m"
+    manifest = _draw(root, out, seed=1)
+    assert "n" in {i.split("/", 1)[1] for ids in manifest["splits"].values() for i in ids}
+    data_cfg = {
+        "images_dir": str(root / "images" / DATES[0]),
+        "labels_dir": str(root / "annotations" / DATES[0]),
+        "subject": SUBJECT, "attribute": None,
+        "split": {"manifest_dir": str(out)},
+    }
+
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+
+    assert "n" in train_ds.stems + val_ds.stems
+
+
 def test_auto_train_val_binds_to_the_manifests_own_partition_for_its_date(tmp_path: Path):
     from tcip_mcp.tools.training_tools import _auto_train_val
 
@@ -231,6 +267,63 @@ def test_auto_train_val_binds_to_the_manifests_own_partition_for_its_date(tmp_pa
     assert binding["date"] == DATES[0]
     assert binding["labels_hash_now"]
     assert "train" not in binding and "val" not in binding
+
+
+def test_auto_train_val_second_bind_on_the_same_config_binds_again(tmp_path: Path):
+    """The write-back lands under keys the conflict check never reads, so a second bind on the
+    same config dict (a bespoke ``ctx.auto_train_val`` loop reusing ``run.config``) binds again
+    rather than refusing against its own first bind."""
+    from tcip_mcp.tools.training_tools import _auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+
+    _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+
+    assert train_ds.stems and val_ds.stems
+
+
+def test_preflight_config_on_a_bound_config_admits_it_again(tmp_path: Path):
+    """Preflighting a config already bound once (the same conflict-key rail this file's other
+    preflight tests exercise) must not itself read as a conflict."""
+    from tcip_mcp.tools.training_tools import _auto_train_val, preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    _auto_train_val("detection", data_cfg, None)
+
+    result = preflight_config(_preflight_config(root, out, DATES[0], split=data_cfg["split"]))
+
+    manifest_issues = [i for i in result["issues"] if "manifest" in i]
+    assert manifest_issues == []
+
+
+def test_relaunch_from_the_durable_record_binds_again(tmp_path: Path):
+    """A run relaunched from the durable ``config.json`` record a bound run's own worker patched
+    binds again, rather than refusing against the very block that records it bound once."""
+    import tcip_store as ts
+    from tcip_mcp.experiments import config_key, create_experiment
+    from tcip_mcp.pipelines.training.subprocess_worker import _patch_experiment_config_split
+    from tcip_mcp.tools.training_tools import _auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    data_cfg = _run_data_cfg(root, out, DATES[0])
+    _auto_train_val("detection", data_cfg, None)
+
+    create_experiment("exp_relaunch_split_bind", {"data": dict(data_cfg)})
+    _patch_experiment_config_split("exp_relaunch_split_bind", data_cfg["split"])
+    durable_data_cfg = ts.read(config_key("exp_relaunch_split_bind"))["data"]
+
+    train_ds, val_ds = _auto_train_val("detection", durable_data_cfg, None)
+
+    assert train_ds.stems and val_ds.stems
 
 
 def test_auto_train_val_binds_the_same_tree_for_the_other_subject(tmp_path: Path):
@@ -326,6 +419,37 @@ def test_auto_train_val_manifest_refuses_an_images_root_mismatch(tmp_path: Path)
 
     with pytest.raises(ValueError, match="images_root"):
         _auto_train_val("detection", data_cfg, None)
+
+
+def test_auto_train_val_manifest_refuses_a_moved_images_root_by_name(tmp_path: Path):
+    """A manifest's recorded images_root that no longer exists on disk (a moved or renamed
+    dataset) answers the named refusal, never a bare crash from comparing against a gone path."""
+    from tcip_mcp.tools.training_tools import _auto_train_val
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    moved = tmp_path / "moved_images"
+    (root / "images" / DATES[0]).rename(moved)
+    data_cfg = _run_data_cfg(root, out, DATES[0], images_dir=moved)
+
+    with pytest.raises(ValueError, match="images_root"):
+        _auto_train_val("detection", data_cfg, None)
+
+
+def test_preflight_config_flags_a_moved_images_root_by_name(tmp_path: Path):
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    moved = tmp_path / "moved_images"
+    (root / "images" / DATES[0]).rename(moved)
+    config = _preflight_config(root, out, DATES[0], images_dir=str(moved))
+
+    result = preflight_config(config)
+
+    assert any("images_root" in i for i in result["issues"])
 
 
 def test_auto_train_val_manifest_binding_failure_raises_rather_than_degrading(tmp_path: Path):
@@ -432,3 +556,20 @@ def test_preflight_config_flags_a_subject_mismatch(tmp_path: Path):
     result = preflight_config(config)
 
     assert any("subject" in i for i in result["issues"])
+
+
+def test_preflight_config_accepts_an_empty_string_attribute_the_child_normalizes(tmp_path: Path):
+    """An explicit empty-string attribute normalizes to ``None`` the same way the child's own
+    ``_dataset_source_kwargs`` call normalizes it, so preflight does not flag a launch the child
+    binds without complaint."""
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    config = _preflight_config(root, out, DATES[0], attribute="")
+
+    result = preflight_config(config)
+
+    manifest_issues = [i for i in result["issues"] if "manifest" in i]
+    assert manifest_issues == []

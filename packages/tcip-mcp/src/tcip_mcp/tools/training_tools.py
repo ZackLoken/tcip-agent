@@ -229,9 +229,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
     # check probes a sample image, and never false-fails on an empty/absent/unreadable dir. Catches
     # an unrecognized ``group_by`` or an incomplete ``group_key_map`` here, at preflight, rather
     # than deep in ``_auto_train_val`` where it would otherwise raise.
-    split_cfg = data_cfg.get("split") if isinstance(data_cfg, dict) else None
-    if isinstance(split_cfg, dict) and (split_cfg.get("group_by") or split_cfg.get("group_key_map")):
-        images_dir = data_cfg.get("images_dir")
+    data_cfg_dict: dict = data_cfg if isinstance(data_cfg, dict) else {}
+    split_cfg = data_cfg_dict.get("split")
+    split_cfg_dict: dict = split_cfg if isinstance(split_cfg, dict) else {}
+    if split_cfg_dict.get("group_by") or split_cfg_dict.get("group_key_map"):
+        images_dir = data_cfg_dict.get("images_dir")
         if images_dir and Path(images_dir).is_dir():
             from tcip_mcp.pipelines.data.datasets import IMAGE_EXTS
             stems = sorted(f.stem for f in Path(images_dir).iterdir()
@@ -239,23 +241,23 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             if stems:
                 from tcip_mcp.pipelines.data.splits import resolve_group_key_fn
                 try:
-                    resolve_group_key_fn(split_cfg.get("group_by", "tile_prefix"), stems,
-                                         group_key_map=split_cfg.get("group_key_map"))
+                    resolve_group_key_fn(split_cfg_dict.get("group_by", "tile_prefix"), stems,
+                                         group_key_map=split_cfg_dict.get("group_key_map"))
                 except ValueError as exc:
                     issues.append(f"data.split: {exc}")
 
     # Split-manifest binding: only what preflight can answer without the run's real admission
     # (bind_manifest_stems itself never runs here; the checks below mirror _auto_train_val's).
-    manifest_dir = split_cfg.get("manifest_dir") if isinstance(split_cfg, dict) else None
+    manifest_dir = split_cfg_dict.get("manifest_dir")
     if manifest_dir:
         task_for_manifest = (model_source.get("task") if isinstance(model_source, dict) else None) \
-            or (data_cfg.get("task", "detection") if isinstance(data_cfg, dict) else "detection")
-        if data_cfg.get("val_images_dir"):
+            or data_cfg_dict.get("task", "detection")
+        if data_cfg_dict.get("val_images_dir"):
             issues.append(
                 "data.split.manifest_dir conflicts with data.val_images_dir: two membership "
                 "sources for one run's validation split."
             )
-        conflicts = _split_manifest_drawn_conflicts(data_cfg, split_cfg)
+        conflicts = _split_manifest_drawn_conflicts(data_cfg_dict, split_cfg_dict)
         if conflicts:
             issues.append(
                 f"data.split.manifest_dir conflicts with {conflicts}: a recorded partition and "
@@ -278,7 +280,8 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                 issues.append(str(exc))
                 manifest = None
             if manifest is not None:
-                subject, attribute = data_cfg.get("subject"), data_cfg.get("attribute")
+                norm_src = _dataset_source_kwargs(task_for_manifest, data_cfg_dict)
+                subject, attribute = norm_src.get("subject"), norm_src.get("attribute")
                 if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
                     issues.append(
                         f"split manifest was drawn for subject={manifest.get('subject')!r}, "
@@ -286,9 +289,9 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                         f"subject={subject!r}, attribute={attribute!r}: a run only binds to its "
                         "own subject's (and attribute's) manifest."
                     )
-                labels_dir = data_cfg.get("labels_dir", "")
+                labels_dir = data_cfg_dict.get("labels_dir", "")
                 run_date = annotation_date(labels_dir)
-                declared_date = data_cfg.get("date")
+                declared_date = data_cfg_dict.get("date")
                 if declared_date is not None and declared_date != run_date:
                     issues.append(
                         f"data.date={declared_date!r} disagrees with the date "
@@ -305,16 +308,15 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                             f"{sorted(manifest.get('members') or {})}."
                         )
                     else:
-                        run_images_dir = data_cfg.get("images_dir")
-                        manifest_images_root = date_block.get("images_root")
-                        if (run_images_dir and manifest_images_root
-                                and not os.path.samefile(Path(run_images_dir).resolve(),
-                                                         Path(manifest_images_root).resolve())):
-                            issues.append(
-                                f"data.images_dir={run_images_dir!r} is not the split manifest's "
-                                f"images_root for date {run_date!r} ({manifest_images_root!r}): "
-                                "a member's identity names pixels only under its own root."
+                        from tcip_mcp.pipelines.data.splits import refuse_if_images_root_moved
+
+                        try:
+                            refuse_if_images_root_moved(
+                                "data.images_dir", data_cfg_dict.get("images_dir"),
+                                date_block.get("images_root"), run_date,
                             )
+                        except ValueError as exc:
+                            issues.append(str(exc))
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
@@ -1744,7 +1746,7 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         manifest = {
             "train": train_members,
             "val": val_members,
-            "seed": int(split.get("seed", 42)),
+            "seed": int(split.get("resolved_seed", split.get("seed", 42))),
             "dataset_hash": dh,
             "dataset_id": dataset_id,
             "dataset_fingerprint": dataset_fingerprint,
@@ -1752,10 +1754,11 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             # "spatial_strip"/None); _train_disjointness recomputes group keys from this.
             "group_by": resolved_group_by,
         }
-        if resolved_group_by == "explicit_map" and split.get("group_key_map"):
+        resolved_group_key_map = split.get("resolved_group_key_map") or split.get("group_key_map")
+        if resolved_group_by == "explicit_map" and resolved_group_key_map:
             # The map itself: without it _train_disjointness has a policy name but no way to
             # compute group keys for stems outside this run.
-            manifest["group_key_map"] = split["group_key_map"]
+            manifest["group_key_map"] = resolved_group_key_map
         if spatial:
             manifest["spatial"] = spatial
         if split.get("manifest_binding"):
@@ -2089,6 +2092,37 @@ def _spatial_split_raster_identity(data_cfg: dict, stem: str) -> dict | None:
         return None
 
 
+def _checked_label_format(task: str, data_cfg: dict, src: dict) -> str | None:
+    """The per-image label format this run's ``data.labels_dir`` holds (``"json"``, ``"coco"``
+    never returned, see below), or ``None`` for a task/config the check does not apply to.
+
+    Refuses a dataset-level assembled COCO document sitting in ``data.labels_dir`` rather than
+    per-image label files: a caller-fixable config error, since the per-image files in that
+    directory would be shadowed by the assembled export, silently training on the wrong source
+    being worse than refusing. Called by every caller of :func:`_build_full_admitted_dataset`
+    before any admission draw runs, so neither the auto path's degrade handler nor a manifest
+    bind can catch this refusal and fold it into "training without validation".
+    """
+    if task not in ("detection", "instance_seg") or data_cfg.get("label_format") or data_cfg.get("coco_json"):
+        return None
+    labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
+    if not (labels_dir and images_dir):
+        return None
+    from tcip_mcp.pipelines.data.datasets import dir_label_format, first_labels_json
+
+    fmt = dir_label_format(labels_dir)
+    if fmt == "coco":
+        offending = first_labels_json(labels_dir)
+        raise ValueError(
+            f"data.labels_dir={labels_dir!r} holds a dataset-level COCO file "
+            f"({offending}): if the per-image label files in this directory are the ones "
+            "that should train, move it out of data.labels_dir; if this COCO export is "
+            "the intended label source, set data.coco_json (or data.label_format='coco') "
+            "to train on it directly."
+        )
+    return fmt
+
+
 def _build_full_admitted_dataset(task: str, data_cfg: dict, src: dict, transforms):
     """The full, admitted-set dataset for one run's data config, plus the ``build_dataset`` kwargs
     that produced it: one implementation, called both by the auto-split path (inside its own
@@ -2096,9 +2130,8 @@ def _build_full_admitted_dataset(task: str, data_cfg: dict, src: dict, transform
     rather than degrading to no validation over a recorded partition), so the two can never
     disagree about what this run admits.
 
-    A dataset-level COCO sitting in ``data.labels_dir`` is a caller-fixable config error and
-    raises here rather than degrading: the per-image label files in that directory are shadowed
-    by the assembled export, silently training on the wrong source is worse than refusing.
+    A dataset-level COCO sitting in ``data.labels_dir`` is refused by :func:`_checked_label_format`
+    before either caller's own admission draw runs, never folded into a build failure here.
 
     Returns ``(full_ds, stems, build_src)``: ``stems`` is the task path's own admitted set
     (``full_ds.stems``/``full_ds._stems``), and ``build_src`` is ``src`` plus any assembled
@@ -2108,23 +2141,8 @@ def _build_full_admitted_dataset(task: str, data_cfg: dict, src: dict, transform
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     build_src = dict(src)
-    detected_label_format = None
     labels_dir, images_dir = src.get("labels_dir", ""), src.get("images_dir", "")
-    if task in ("detection", "instance_seg") and not (
-        data_cfg.get("label_format") or data_cfg.get("coco_json")
-    ):
-        from tcip_mcp.pipelines.data.datasets import dir_label_format, first_labels_json
-        if labels_dir and images_dir:
-            detected_label_format = dir_label_format(labels_dir)
-            if detected_label_format == "coco":
-                offending = first_labels_json(labels_dir)
-                raise ValueError(
-                    f"data.labels_dir={labels_dir!r} holds a dataset-level COCO file "
-                    f"({offending}): if the per-image label files in this directory are the ones "
-                    "that should train, move it out of data.labels_dir; if this COCO export is "
-                    "the intended label source, set data.coco_json (or data.label_format='coco') "
-                    "to train on it directly."
-                )
+    detected_label_format = _checked_label_format(task, data_cfg, src)
 
     if detected_label_format == "json":
         from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, assemble_coco
@@ -2252,6 +2270,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
             bind_manifest_stems, manifest_date_key, member_identity_parts,
+            refuse_if_images_root_moved,
         )
         from tcip_mcp.pipelines.resolution import dataset_hash
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
@@ -2267,22 +2286,23 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 "confirmations and the manifest must be read under the same one."
             )
         date = run_date
+        # The admission draw below reads confirmed negatives under src["date"]; it must agree.
+        src["date"] = date
         date_block = (manifest.get("members") or {}).get(manifest_date_key(date))
         if date_block is None:
             raise ValueError(
                 f"split manifest at {manifest_dir!r} holds no members under date {date!r}; it "
                 f"holds members under {sorted(manifest.get('members') or {})}."
             )
-        manifest_images_root = date_block.get("images_root")
-        if images_dir and manifest_images_root and not os.path.samefile(
-                Path(images_dir).resolve(), Path(manifest_images_root).resolve()):
-            raise ValueError(
-                f"data.images_dir={images_dir!r} is not the split manifest's images_root for "
-                f"date {date!r} ({manifest_images_root!r}): a member's identity names pixels "
-                "only under its own root."
-            )
+        refuse_if_images_root_moved(
+            "data.images_dir", images_dir, date_block.get("images_root"), date)
 
         subject, attribute = src.get("subject"), src.get("attribute")
+        if not subject:
+            raise ValueError(
+                "data.split.manifest_dir requires data.subject: a manifest binds by subject, "
+                "and this run's own admission has none to compare against it."
+            )
         full_ds, admitted, build_src = _build_full_admitted_dataset(task, data_cfg, src, transforms)
         binding = bind_manifest_stems(
             manifest, date, subject, attribute, admitted,
@@ -2292,12 +2312,12 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         split_cfg["resolved_group_by"] = manifest.get("group_by")
         manifest_group_key_map = manifest.get("group_key_map")
         if manifest_group_key_map:
-            split_cfg["group_key_map"] = {
+            split_cfg["resolved_group_key_map"] = {
                 member_identity_parts(identity)[1]: group_key
                 for identity, group_key in manifest_group_key_map.items()
                 if member_identity_parts(identity)[0] == date
             }
-        split_cfg["seed"] = manifest.get("seed")
+        split_cfg["resolved_seed"] = manifest.get("seed")
         split_cfg["manifest_binding"] = {
             "manifest_dir": manifest_dir, "subject": subject, "attribute": attribute,
             "date": date, "labels_hash_at_split": date_block.get("dataset_hash"),
@@ -2319,6 +2339,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
 
     # 2. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
     # error, raised outside the handler below rather than degraded.
+    _checked_label_format(task, data_cfg, src)
     try:
         full_ds, stems, build_src = _build_full_admitted_dataset(task, data_cfg, src, transforms)
     except Exception as exc:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path, PurePosixPath
 
 from tcip_store import RECORD_JSON, BadKey, Key, StoreDescriptor, register_store
@@ -279,7 +278,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     if split_manifest_dir is not None:
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
-            calibration_universe_from_manifest, manifest_date_key,
+            calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
         )
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
@@ -297,13 +296,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                 f"split manifest at {split_manifest_dir!r} holds no members under date "
                 f"{cal_date!r}; it holds members under {sorted(manifest.get('members') or {})}."
             )
-        manifest_images_root = date_block.get("images_root")
-        if images_dir and manifest_images_root and not os.path.samefile(
-                Path(images_dir).resolve(), Path(manifest_images_root).resolve()):
-            raise ValueError(
-                f"images_dir={images_dir!r} is not the split manifest's images_root for date "
-                f"{cal_date!r} ({manifest_images_root!r})."
-            )
+        refuse_if_images_root_moved(
+            "images_dir", images_dir, date_block.get("images_root"), cal_date)
         stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
             manifest, cal_date, stems)
         stem_to_image = {s: stem_to_image[s] for s in stems}
@@ -573,7 +567,7 @@ def force_redraw_cal_holdout_split(
     if split_manifest_dir is not None:
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
-            calibration_universe_from_manifest, manifest_date_key,
+            calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
         )
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
@@ -589,11 +583,11 @@ def force_redraw_cal_holdout_split(
             return {"error": f"split manifest at {split_manifest_dir!r} holds no members under "
                              f"date {cal_date!r}; it holds members under "
                              f"{sorted(manifest.get('members') or {})}."}
-        manifest_images_root = date_block.get("images_root")
-        if images_dir and manifest_images_root and not os.path.samefile(
-                Path(images_dir).resolve(), Path(manifest_images_root).resolve()):
-            return {"error": f"images_dir={images_dir!r} is not the split manifest's "
-                             f"images_root for date {cal_date!r} ({manifest_images_root!r})."}
+        try:
+            refuse_if_images_root_moved(
+                "images_dir", images_dir, date_block.get("images_root"), cal_date)
+        except ValueError as exc:
+            return {"error": str(exc)}
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
             manifest_stems, group_by, group_key_map, _excluded = calibration_universe_from_manifest(

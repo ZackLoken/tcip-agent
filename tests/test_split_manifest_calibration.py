@@ -266,6 +266,23 @@ def test_calibrate_operating_point_manifest_refuses_an_images_root_mismatch(tmp_
             split_manifest_dir=str(out), **_CAL_KWARGS)
 
 
+def test_calibrate_operating_point_manifest_refuses_a_moved_images_root_by_name(tmp_path: Path):
+    """A manifest's recorded images_root that no longer exists on disk answers the named
+    refusal, never a bare crash from comparing against a gone path."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    moved = tmp_path / "elsewhere"
+    (root / "images" / DATES[0]).rename(moved)
+
+    with pytest.raises(ValueError, match="images_root"):
+        itools._calibrate_operating_point(
+            _CalStub(), "catkin", str(root / "annotations" / DATES[0]), str(moved),
+            split_manifest_dir=str(out), **_CAL_KWARGS)
+
+
 # -- force_redraw_cal_holdout_split with a manifest --------------------------------
 
 
@@ -307,3 +324,21 @@ def test_force_redraw_manifest_requires_subject(tmp_path: Path):
     )
 
     assert "error" in result and "subject" in result["error"]
+
+
+def test_force_redraw_refuses_a_moved_images_root_by_name(tmp_path: Path):
+    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    moved = tmp_path / "elsewhere"
+    (root / "images" / DATES[0]).rename(moved)
+
+    result = force_redraw_cal_holdout_split(
+        dataset_root=str(root), labels_dir=str(root / "annotations" / DATES[0]),
+        images_dir=str(moved), split_manifest_dir=str(out),
+        subject=SUBJECT, reason="test redraw",
+    )
+
+    assert "error" in result and "images_root" in result["error"]

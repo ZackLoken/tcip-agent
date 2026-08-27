@@ -124,6 +124,19 @@ def test_patch_experiment_config_id_map_never_sinks_a_run_with_no_experiment_dir
     _patch_experiment_config_id_map("no_such_exp", "catkin", None, {"catkin": 0})
 
 
+def test_is_manifest_bound_split_only_true_for_a_manifest_binding():
+    """A spatial or auto-split run's own resolved ``data.split`` block (member identities that
+    stay out of the durable config) must not qualify, only a manifest-bound run's block does."""
+    from tcip_mcp.pipelines.training.subprocess_worker import _is_manifest_bound_split
+
+    assert _is_manifest_bound_split({"manifest_binding": {"date": "2-11-26"}}) is True
+    assert _is_manifest_bound_split(
+        {"resolved_group_by": "spatial_strip", "spatial_manifest": {}}) is False
+    assert _is_manifest_bound_split({"resolved_group_by": "tile_prefix"}) is False
+    assert _is_manifest_bound_split({}) is False
+    assert _is_manifest_bound_split(None) is False
+
+
 # ── attach_run ──────────────────────────────────────────────────────────
 
 

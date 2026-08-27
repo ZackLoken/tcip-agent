@@ -26,6 +26,7 @@ from __future__ import annotations
 import bisect
 import hashlib
 import logging
+import os
 import random
 import re
 from collections import defaultdict
@@ -410,6 +411,33 @@ def bind_manifest_stems(
     return ManifestBinding(
         train=train_bound, val=val_bound, assigned=len(this_date_ids),
         train_bound=len(train_bound), val_bound=len(val_bound), other_dates=other_dates,
+    )
+
+
+def refuse_if_images_root_moved(
+    label: str, images_dir: str | Path | None, manifest_images_root: str | Path | None,
+    date: str | None,
+) -> None:
+    """Raises when ``images_dir`` is not the exact filesystem object ``manifest_images_root``
+    names for ``date``, refusing by name rather than letting a plain existence-blind comparison
+    crash when either side no longer exists (a moved dataset root, a renamed images bucket).
+
+    A no-op when either side is empty: nothing recorded to compare against, or no images_dir the
+    caller stated. ``label`` is how the caller names its own side in the message
+    (``"images_dir"`` for a bare tool argument, ``"data.images_dir"`` for a run config field);
+    every door this backs (preflight, the training child, both inference doors) reads it
+    identically, one implementation rather than each re-deriving the comparison.
+    """
+    if not images_dir or not manifest_images_root:
+        return
+    images_path, manifest_path = Path(images_dir), Path(manifest_images_root)
+    if (images_path.is_dir() and manifest_path.is_dir()
+            and os.path.samefile(images_path.resolve(), manifest_path.resolve())):
+        return
+    raise ValueError(
+        f"{label}={str(images_dir)!r} is not the split manifest's images_root for date "
+        f"{date!r} ({str(manifest_images_root)!r}): a member's identity names pixels only "
+        "under its own root."
     )
 
 

@@ -108,6 +108,14 @@ def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute:
         logger.warning("class-id-map patch-back failed for %s", experiment_id, exc_info=True)
 
 
+def _is_manifest_bound_split(split_cfg: object) -> bool:
+    """Whether a run's ``data.split`` block is a manifest-bound run's resolved block, the one
+    shape :func:`_patch_experiment_config_split` exists for: a spatial or auto-split run's own
+    resolved block carries per-region/per-stem member identities that stay out of the durable
+    config, so only ``manifest_binding``'s presence qualifies."""
+    return isinstance(split_cfg, dict) and "manifest_binding" in split_cfg
+
+
 def _patch_experiment_config_split(experiment_id: str, split_cfg: dict) -> None:
     """Best-effort: merge this run's resolved split policy into the durable experiment record's
     own ``config.json``, the same merge-not-rewrite shape :func:`_patch_experiment_config_tiling`
@@ -229,10 +237,9 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
 
     train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
 
-    # data_cfg["split"] is a manifest binding's own patch target (_auto_train_val writes it in
-    # place); mirrored onto the durable record the same way the tiling and id-map patches are.
-    if isinstance(data_cfg.get("split"), dict):
-        _patch_experiment_config_split(experiment_id, data_cfg["split"])
+    split_cfg = data_cfg.get("split")
+    if _is_manifest_bound_split(split_cfg):
+        _patch_experiment_config_split(experiment_id, split_cfg)
 
     # Stamp this run's resolved name->id map onto config["data"] in place, data_cfg
     # is the same dict object, so this lands on the checkpoint (generic_trainer persists run.config
