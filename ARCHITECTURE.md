@@ -591,8 +591,8 @@ Docstring is the function's docstring first line, verbatim.
 | `segment_prompt` | `annotation_tools.py:479` | yes | Turn an interactive prompt (points, a box, or grid cells) into mask polygon rings, via an engine. |
 | `push_panel_data` | `annotation_tools.py:575` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
 | `focus` | `annotation_tools.py:609` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
-| `stage_proposals` | `annotation_tools.py:854` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
-| `write_class_map` | `annotation_tools.py:1041` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
+| `stage_proposals` | `annotation_tools.py:851` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
+| `write_class_map` | `annotation_tools.py:1040` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
 ### data_tools.py (3 tools)
 
@@ -717,8 +717,8 @@ Docstring is the function's docstring first line, verbatim.
 | `render_failure_cases` | `vision_tools.py:516` | yes | Find and render the worst predictions for failure analysis. |  <!-- queued: P5-45 demote-to-script -->
 | `propose_annotations` | `vision_tools.py:749` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
 | `accept_proposals` | `vision_tools.py:950` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1078` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1208` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `capture_live_canvas` | `vision_tools.py:1080` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:1210` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 8 + 3 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 8 + 1 + 6 = 59 tools across 16 modules.
 
@@ -1074,7 +1074,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:629`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:641`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1083,9 +1083,9 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:442`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:455`;
 `tcip_annotation.format_io.load_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:329`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:334`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:976`.
 
@@ -1107,14 +1107,14 @@ different consumer path in the same test.
 Path: caller-supplied, single dataset-level `.json` file, not per-image.
 
 Writers: `tcip_annotation.format_io.write_coco`,
-`packages/tcip-annotation/src/tcip_annotation/format_io.py:259`;
+`packages/tcip-annotation/src/tcip_annotation/format_io.py:260`;
 `tcip_annotation.format_io.save_annotations` (`fmt="coco"`), `format_io.py:283`;
 `tcip_annotation.json_io.to_coco_dataset` (returns dict, performs no file I/O),
 `packages/tcip-annotation/src/tcip_annotation/json_io.py:413`.
 
-Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:210`;
+Readers: `tcip_annotation.format_io.parse_coco_annotations`, `format_io.py:211`;
 `tcip_annotation.format_io.load_annotations` (`fmt="coco"` or auto-detected via `detect_format`,
-`format_io.py:66`), `format_io.py:263`.
+`format_io.py:67`), `format_io.py:263`.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names the COCO write/read agreement
 directly. S19 ("Annotation format detection scope (json, coco)") is the nearest seam but covers
@@ -1129,7 +1129,7 @@ Path: `<dataset_root>/classes.json`.
 Writer: `tcip_mcp.class_registry.replace_registry`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`, the one write both registry doors call
 (the GUI's `save_classes` and the tool's `write_class_map`,
-`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1041`).
+`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1040`).
 
 Readers: `tcip_mcp.class_registry.read_registry`, `class_registry.py:190`;
 `tcip_mcp.dataset_layout.list_subjects` (delegates to `class_registry`),
@@ -1214,7 +1214,7 @@ Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:265`
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
 `save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:161`) and `write_class_map`
-(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1041`), before the new registry lands.
+(`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1040`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
 sweep records it there and they read as predating the change instead of as made under the new
@@ -1438,7 +1438,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:629` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:641` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:223`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:191`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -1464,7 +1464,7 @@ bucket.
 
 Path: `<prediction_bucket_dir>/operating_point.json`, sibling of the bucket's per-image files,
 one of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
-(`packages/tcip-annotation/src/tcip_annotation/json_io.py:167`) names and every bucket
+(`packages/tcip-annotation/src/tcip_annotation/json_io.py:180`) names and every bucket
 enumeration excludes (format 17).
 
 Writer: `write_sidecar`, `resolution.py:897`, the one write, under the stamp's own lock;
@@ -1807,7 +1807,7 @@ Phase 3 verdict: single.
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:139` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1104` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1106` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
@@ -1854,7 +1854,7 @@ Phase 3 verdict: single.
 ## S17. Canonical per-image annotation JSON schema
 
 Must agree: every writer produces, and every reader accepts, the same name-based record shape.
-Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:334` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
+Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:347` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:191`, `packages/tcip-web/src/tcip_web/routes/review.py:667` and `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:179` (every save door converts through it rather than assembling records of its own).
 Phase 3 verdict: single.
 
@@ -1862,13 +1862,13 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:41` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:548` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:560` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
 
 Must agree: every reader refuses rather than guesses when a file's format is undetermined.
-Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:66` (`def detect_format(path: str) -> AnnotFormat:`).
+Side A: `packages/tcip-annotation/src/tcip_annotation/format_io.py:67` (`def detect_format(path: str) -> AnnotFormat:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:114` (`file_fmt = fmt or detect_format(str(gt_path))`).
 Phase 3 verdict: single.
 
