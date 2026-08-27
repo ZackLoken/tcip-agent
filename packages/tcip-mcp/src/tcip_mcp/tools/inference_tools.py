@@ -1001,6 +1001,10 @@ def run_inference(
             "sweep_summary": _sweep_summary(conf_param),
             "n_excluded_incomplete_attribute": n_excluded_incomplete_attribute,
         }
+        manifest_excluded = evidence.get("excluded")
+        if manifest_excluded is not None:
+            extra["n_excluded_training_stems"] = len(manifest_excluded["excluded_training_stems"])
+            extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
         # The full sweep can be large, persist it and return the path (provenance emits has_sweep).
         # Keyed on cal_hash alone, a second checkpoint (or the same checkpoint under
         # different tile/postprocess settings) calibrated on the same labels would silently overwrite the
