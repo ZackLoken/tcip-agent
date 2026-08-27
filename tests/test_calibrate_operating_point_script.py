@@ -19,6 +19,17 @@ import pytest
 pytest.importorskip("torch")
 
 
+def _stub_checkpoint_load(monkeypatch) -> None:
+    """These tests drive a stubbed predictor over a checkpoint path ("x.pt") that never exists
+    on disk; load_registered_checkpoint is stubbed so the verified-load rail never reads it."""
+    import tcip_mcp.model_registry as model_registry_mod
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+
+
 def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     """Behavioral parity, not source-text matching: substring-matching the script's source
     (``'max_dets=DEFAULT_MAX_DETS' in script_src``) would stay green on a cosmetic rename of an
@@ -48,7 +59,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
             return [{"image": p, "width": 100, "height": 100,
                     "boxes": [], "scores": [], "labels": [], "count": 0} for p in paths]
 
-    def _build_predictor(*, max_dets=None, **kw):
+    def _build_predictor(checkpoint=None, *, max_dets=None, **kw):
         max_dets_calls.append(max_dets)
         return _Predictor()
 
@@ -56,6 +67,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
     # ``from tcip_mcp.pipelines.inference.predictor import build_predictor`` (a lazy import inside
     # the function body), so patching the defining module's attribute intercepts both calls.
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _build_predictor)
+    _stub_checkpoint_load(monkeypatch)
 
     # ---- script path ----
     class _Probe:
@@ -84,7 +96,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
 
     # ---- MCP path ----
@@ -115,11 +127,12 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
             self.device = "cpu"
             self.train_tile_size = None
 
-    def _build_predictor(*, checkpoint_path, device, max_dets=None, **kw):
+    def _build_predictor(checkpoint=None, *, device, max_dets=None, **kw):
         calls["build_predictor_max_dets"] = max_dets
         return _Predictor()
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor", _build_predictor)
+    _stub_checkpoint_load(monkeypatch)
 
     class _Probe:
         stems = ["a", "b"]
@@ -151,7 +164,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
     # The script's build_predictor call carries the shared cap constant, not the framework
     # default (100/300) that would otherwise truncate the 0.01-floored calibration pass.
@@ -185,7 +198,8 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
             self.train_tile_size = None
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
-                        lambda *, checkpoint_path, device, max_dets=None, **kw: _Predictor())
+                        lambda checkpoint=None, *, device, max_dets=None, **kw: _Predictor())
+    _stub_checkpoint_load(monkeypatch)
 
     class _Probe:
         stems = ["a", "b"]
@@ -215,7 +229,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
     applied_cap = _Model.detector.roi_heads.detections_per_img
     assert applied_cap == 100  # derive_max_dets_from_counts([2, 2]) floor
@@ -235,7 +249,8 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
             self.score_threshold = 0.5
 
     monkeypatch.setattr("tcip_mcp.pipelines.inference.predictor.build_predictor",
-                        lambda **kw: _Predictor())
+                        lambda *a, **kw: _Predictor())
+    _stub_checkpoint_load(monkeypatch)
 
     class _Probe:
         stems = ["a", "b"]
@@ -264,7 +279,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert rc == 0
     assert not (tmp_path / ".tcip" / "experiments").exists()
     out = capsys.readouterr().out
@@ -292,7 +307,7 @@ def test_script_refuses_an_agent_authored_reference_before_touching_a_model(monk
     with pytest.raises(ValueError) as refused:
         main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(labels), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path)])
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path)])
     assert "created_by" in str(refused.value) or "claude" in str(refused.value)
 
 
@@ -303,7 +318,8 @@ def test_script_split_manifest_dir_requires_subject(tmp_path):
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--split-manifest-dir", str(tmp_path / "m")])
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
+              "--split-manifest-dir", str(tmp_path / "m")])
 
     assert rc == 2
 
@@ -315,7 +331,8 @@ def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
 
     rc = main(["--checkpoint", "x.pt", "--trait", "catkin",
               "--labels-dir", str(tmp_path / "labels"), "--images-dir", str(tmp_path / "images"),
-              "--dataset-root", str(tmp_path), "--split-manifest-dir", str(tmp_path / "m"),
+              "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
+              "--split-manifest-dir", str(tmp_path / "m"),
               "--subject", "catkin", "--group-by", "stem"])
 
     assert rc == 2

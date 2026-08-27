@@ -1,0 +1,396 @@
+"""The checkpoint digest rail: every delivery door recomputes the sha256 of the checkpoint bytes
+it loaded and refuses one no registry entry names, before anything in it is unpickled.
+
+See docs/audit/remediation/milestone-s/checkpoint-digest-design.md, sections 3-5.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+torch = pytest.importorskip("torch")
+pytest.importorskip("torchvision")
+
+from tcip_mcp.pipelines.model_build import build_model  # noqa: E402
+
+pytestmark = pytest.mark.usefixtures("seed_catkin_trait_spec")
+
+
+def _bespoke_checkpoint(path: Path, *, stamp: dict | None = None, tile_size: int = 64) -> str:
+    """A real, unpicklable tcip checkpoint at path, the platform's own producer's shape."""
+    model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
+                    "builder_kwargs": {"num_classes": 1, "min_size": tile_size,
+                                       "max_size": tile_size * 2},
+                    "task": "detection"}
+    payload = {"model_source": model_source,
+              "model_state_dict": build_model({"model_source": model_source}).state_dict()}
+    if stamp:
+        payload.update(stamp)
+    torch.save(payload, str(path))
+    return str(path)
+
+
+def _images(tmp_path: Path, n: int = 1, size: int = 100):
+    from PIL import Image
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir(exist_ok=True)
+    paths = []
+    for i in range(n):
+        p = images_dir / f"img{i}.png"
+        Image.new("RGB", (size, size), (100, 100, 100)).save(p)
+        paths.append(str(p))
+    return images_dir, paths
+
+
+def _register(tmp_path: Path, ckpt_path: str, *, name: str = "rail-model",
+             tags: list[str] | None = None) -> dict:
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(name=name, checkpoint_path=ckpt_path, config={},
+                            project_path=str(tmp_path), tags=tags)
+    assert "error" not in result, result
+    return result
+
+
+# Rail 1: an unregistered checkpoint the platform's own producer wrote is refused by name, at
+# every door, writing nothing.
+
+def test_run_inference_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(ckpt, images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" in r
+    assert "register_model" in r["error"]
+    assert str(tmp_path) in r["error"]
+
+
+def test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+    out = tmp_path / "preds"
+
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    r = export_predictions(ckpt, str(images_dir), str(out), tile=False)
+    assert "error" in r
+    assert "register_model" in r["error"]
+    assert not out.exists()
+
+
+def test_tabulate_counts_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path, monkeypatch):
+    from tests import _operationalization_fixtures as fx
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    fx.seed_confirmed_count(tmp_path)
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+    out_csv = tmp_path / "o.csv"
+
+    from tcip_mcp.tools.inference_tools import tabulate_counts
+
+    r = tabulate_counts(ckpt, str(images_dir), str(out_csv), trait=fx.COUNT_TRAIT)
+    assert "error" in r
+    assert "register_model" in r["error"]
+    assert not out_csv.exists()
+
+
+def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    r = evaluate_model(ckpt, str(images_dir), str(images_dir), task="detection")
+    assert "error" in r
+    assert "register_model" in r["error"]
+
+
+def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from tcip_web.routes.inference import InferenceJob, _worker
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+    out_dir = tmp_path / "out"
+
+    job = InferenceJob(job_id="rail1", checkpoint_path=ckpt, images_dir=str(images_dir),
+                       output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
+                       slice_hw=(224, 224), overlap=0.2)
+    _worker(job)
+    assert job.status == "failed"
+    assert "register_model" in job.error
+    assert not (out_dir / "img0.json").exists()
+    assert job.done == 0
+
+
+def test_prioritize_review_queue_refuses_an_unregistered_checkpoint(tmp_path):
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+
+    r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage",
+                                project_path=str(tmp_path))
+    assert "error" in r
+    assert "register_model" in r["error"]
+
+
+def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp_path):
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    images_dir, _ = _images(tmp_path, n=3)
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    for i in range(3):
+        json_io.write_annotations(
+            str(labels_dir / f"img{i}.json"),
+            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 100, 100)
+
+    from scripts.calibrate_operating_point import main
+
+    rc = main([
+        "--checkpoint", ckpt, "--trait", "catkin",
+        "--labels-dir", str(labels_dir), "--images-dir", str(images_dir),
+        "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
+    ])
+    assert rc == 2
+
+
+# Rail 2: a registered checkpoint whose bytes are replaced (in place, or by rename) after
+# registration is refused: the digest of the bytes actually loaded names no entry.
+
+def test_run_inference_refuses_a_checkpoint_overwritten_in_place_after_registration(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt))
+
+    # Replace the bytes in place, as a second torch.save over the same path.
+    _bespoke_checkpoint(ckpt, tile_size=96)
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" in r
+    assert "register_model" in r["error"]
+
+
+def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt))
+
+    # A different checkpoint's bytes moved into the registered name by rename.
+    other = _bespoke_checkpoint(tmp_path / "other.pt", tile_size=96)
+    ckpt.unlink()
+    Path(other).rename(ckpt)
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" in r
+    assert "register_model" in r["error"]
+
+
+# Rail 4: registry entries naming one digest with disagreeing producers refuse the load by
+# name; entries that agree, or one naming none beside one that does, admit it.
+
+def test_two_entries_naming_one_digest_with_disagreeing_producers_refuse(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt), name="entry-a", tags=["experiment:expA"])
+    _register(tmp_path, str(ckpt), name="entry-b", tags=["experiment:expB"])
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" in r
+    assert "expA" in r["error"] and "expB" in r["error"]
+
+
+def test_two_entries_naming_one_digest_with_agreeing_producers_admit_it(tmp_path, monkeypatch):
+    """Coverage: the admitting half of rail 4."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt), name="entry-a", tags=["experiment:expA"])
+    _register(tmp_path, str(ckpt), name="entry-b", tags=["experiment:expA"])
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+    assert r["experiment_id"] == "expA"
+
+
+def test_one_entry_naming_none_beside_one_that_does_admits_the_named_producer(tmp_path, monkeypatch):
+    """Coverage: an untagged entry is not a vote for producer=None; it is simply ignored."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt), name="entry-untagged")
+    _register(tmp_path, str(ckpt), name="entry-tagged", tags=["experiment:expA"])
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+    assert r["experiment_id"] == "expA"
+
+
+# Rail 5: an unregistered checkpoint is refused without being unpickled.
+
+class _SideEffectOnUnpickle:
+    """Its unpickling has a side effect; the design read's own probe shape."""
+
+    def __reduce__(self):
+        return (_record_side_effect, ())
+
+
+_SIDE_EFFECTS: list[str] = []
+
+
+def _record_side_effect() -> "_SideEffectOnUnpickle":
+    _SIDE_EFFECTS.append("unpickled")
+    return _SideEffectOnUnpickle.__new__(_SideEffectOnUnpickle)
+
+
+def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    _SIDE_EFFECTS.clear()
+    ckpt = tmp_path / "m.pt"
+    torch.save({"model_state_dict": {}, "carries_side_effect": _SideEffectOnUnpickle()}, str(ckpt))
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" in r
+    assert "register_model" in r["error"]
+    assert _SIDE_EFFECTS == []  # the payload was never unpickled
+
+
+# Rail 6: valid work the rail admits, through the doors that gate on measurement.
+
+def test_run_inference_admits_a_registered_checkpoint_and_carries_its_digest(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    reg = _register(tmp_path, str(ckpt))
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+    assert r["checkpoint_sha256"] == reg["sha256"]
+
+
+def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    reg = _register(tmp_path, str(ckpt))
+    copy = tmp_path / "copy.pt"
+    copy.write_bytes(ckpt.read_bytes())
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(copy), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+    assert r["checkpoint_sha256"] == reg["sha256"]
+
+
+def test_run_inference_admits_a_raw_run_with_no_trait_and_stamps_unvalidated(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt))
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+    assert r["validated"] is False
+
+
+def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_distinct_name(
+    tmp_path, monkeypatch,
+):
+    """model_final beside model_best, registered explicit mode under a distinct name, is admitted:
+    experiment mode would have replaced the run's own registered entry by name instead."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    best = tmp_path / "model_best.pt"
+    _bespoke_checkpoint(best)
+    _register(tmp_path, str(best), name="run-best")
+    final = tmp_path / "model_final.pt"
+    _bespoke_checkpoint(final, tile_size=96)
+    _register(tmp_path, str(final), name="run-final")
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(final), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+
+
+# Rail 7: a checkpoint a completed envelope run registered on completion (the platform's own
+# producer, register_model_from_experiment) runs with no further step.
+
+def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_further_step(
+    tmp_path, monkeypatch,
+):
+    from tcip_mcp.experiments import create_experiment, register_model_from_experiment, update_status
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_id = "exp-rail7"
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    update_status(exp_id, "completed")
+    ckpt = tmp_path / "model_best.pt"
+    _bespoke_checkpoint(ckpt)
+    reg = register_model_from_experiment(exp_id, str(ckpt))
+    assert "error" not in reg, reg
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.model_registry import checkpoint_sha256
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" not in r, r
+    assert r["checkpoint_sha256"] == checkpoint_sha256(ckpt)
+
+
+# Rail 10: register_model and load_registered_checkpoint agree on one file's digest.
+
+def test_registration_digest_and_load_digest_agree(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    reg = _register(tmp_path, str(ckpt))
+
+    from tcip_mcp.model_registry import load_registered_checkpoint
+
+    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+    assert checkpoint.sha256 == reg["sha256"]

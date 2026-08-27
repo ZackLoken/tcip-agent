@@ -678,7 +678,13 @@ def calibrate_ordinal_regression_operating_point(
         return {"error": str(exc)}
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
-    predictor = build_predictor(checkpoint_path)
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+
+    try:
+        checkpoint = load_registered_checkpoint(checkpoint_path)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
+    predictor = build_predictor(checkpoint)
     cal_pred = _scalar_predictions(predictor, logical, cal_stems, shape["suffix"])
     hold_pred = _scalar_predictions(predictor, logical, hold_stems, shape["suffix"])
 
@@ -704,7 +710,7 @@ def calibrate_ordinal_regression_operating_point(
     out = resolve_output_path(output_dir)
     document = f"{task}_operating_point"
     checkpoint_sha256 = resolve_model_identity(
-        checkpoint_path, experiment_id=experiment_id)["sha256"]
+        checkpoint, experiment_id=experiment_id)["sha256"]
     stamp = {
         "operating_point": {task: {"validated_against": result["validated_against"],
                                    "criterion": criterion}},

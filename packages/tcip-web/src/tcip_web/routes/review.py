@@ -1425,6 +1425,7 @@ def _pq_worker(job: PriorityQueueJob) -> None:
             strategy="informativeness",
             method=job.method,
             budget=job.budget,
+            project_path=job.platform_root,
         )
         if "error" in result:
             job.status = "failed"

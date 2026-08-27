@@ -178,7 +178,7 @@ def _density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0)
 
 
 def resolve_block_calibration_records(
-    predictor: Any, *, checkpoint_path: str, trait_name: str, experiment_id: str | None,
+    predictor: Any, *, trait_name: str, experiment_id: str | None,
     global_nms_iou: float, export_tile_size: int, tile_batch_size: int = 96, postprocess: str = "nms",
     k_cal: int = DEFAULT_K_CAL, k_test: int = DEFAULT_K_TEST, seed: int = 0,
 ) -> tuple[Any, dict, dict]:
@@ -215,10 +215,6 @@ def resolve_block_calibration_records(
 
     from tcip_mcp.experiments import config_key, read_split_manifest
 
-    if experiment_id is None:
-        from tcip_mcp.model_registry import resolve_model_identity
-
-        experiment_id = resolve_model_identity(checkpoint_path)["experiment_id"]
     if experiment_id is None:
         raise BlockCalibrationRefused(
             "block calibration refused: this checkpoint's training experiment_id could not be "

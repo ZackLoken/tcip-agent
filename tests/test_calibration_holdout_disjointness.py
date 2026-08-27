@@ -12,7 +12,6 @@ covers model_registry.resolve_model_identity's checkpoint deserialization.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -856,39 +855,23 @@ def test_recorded_training_id_map_helper_is_none_when_config_carries_no_map():
     assert itools._recorded_training_id_map(stub) == {"elongated": 0, "dormant": 1}
 
 
-# ===========================================================================
-# Minor: resolve_model_identity's checkpoint deserialization.
-# ===========================================================================
-
-class _UnsafeGlobal:
-    """A plain object with no torch.load(weights_only=True) allowlist entry: module-level so
-    torch.save/pickle can reference it, unlike a function-local class."""
-
+# --- Minor: resolve_model_identity's checkpoint deserialization. --------------------------
 
 def test_minor_resolve_model_identity_reads_the_codebase_own_stamped_checkpoints(tmp_path):
     """weights_only=True must still read a checkpoint saved the way stamp_model_ref produces it:
     the rail must admit valid work, not only reject foreign payloads."""
-    from tcip_mcp.model_registry import resolve_model_identity
+    from tcip_mcp.model_registry import (
+        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
+    )
 
     ckpt = tmp_path / "m.pt"
     torch.save({"model_state_dict": {"w": torch.zeros(2, 2)},
                "optimizer_state_dict": {"state": {}, "param_groups": [{"lr": 1e-3}]},
                "experiment_id": "exp_abc", "kind": "tcip_module"}, ckpt)
-    identity = resolve_model_identity(ckpt)
+    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    identity = resolve_model_identity(checkpoint)
     assert identity["experiment_id"] == "exp_abc"
-
-
-def test_minor_resolve_model_identity_logs_unreadable_stamp_distinctly(tmp_path, caplog):
-    """An unreadable (not merely absent) stamp is logged distinctly rather than falling through to
-    the same silent 'pass' a genuinely foreign checkpoint gets."""
-    from tcip_mcp.model_registry import resolve_model_identity
-
-    ckpt = tmp_path / "m.pt"
-    torch.save({"model_state_dict": {}, "weird": _UnsafeGlobal()}, ckpt)
-    with caplog.at_level(logging.WARNING, logger="tcip_mcp.model_registry"):
-        identity = resolve_model_identity(ckpt)
-    assert identity["experiment_id"] is None
-    assert any("could not read a stamped experiment_id" in r.message for r in caplog.records)
 
 
 # --- shared record fixture (mirrors test_operating_point.py's _records) -----------------------

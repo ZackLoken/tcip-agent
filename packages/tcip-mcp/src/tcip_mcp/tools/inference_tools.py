@@ -797,17 +797,11 @@ def run_inference(
                          "calibration this call has no trait/calibration_labels_dir to run, so "
                          "the manifest would be silently dropped rather than bounding one."}
 
-    # An unstated cap falls to the shared platform default for the pass while staying unstated for
-    # the resolver, the only thing that can derive one from the data.
-    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
-    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
-    max_dets_stated = max_dets is not None
-    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
-    conf_stated = conf_threshold is not None
-
     if dry_run:
         # No model load here: an unset ``tile`` is a pending derivation (the checkpoint decides
         # it), not a fabricated default, like tile_size/overlap already report.
+        applied_conf, applied_nms_iou, applied_max_dets = _applied_operating_point(
+            conf_threshold, global_nms_iou, max_dets)
         if tile is None:
             tiled_dry: bool | str = "pending-checkpoint-derivation"
             tiled_source_dry = "pending-checkpoint-derivation"
@@ -833,7 +827,70 @@ def run_inference(
                      "(resolve_operating_point) so the count is calibrated, not a default."),
         }
 
-    # Lazy import to avoid torch import at module level
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+
+    try:
+        checkpoint = load_registered_checkpoint(checkpoint_path)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
+    return _run_inference_verified(
+        checkpoint, image_paths=image_paths, images_dir=images_dir,
+        conf_threshold=conf_threshold, device=device, tile=tile, tile_size=tile_size,
+        overlap=overlap, tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou,
+        max_dets=max_dets, postprocess=postprocess, trait=trait,
+        calibration_labels_dir=calibration_labels_dir,
+        calibration_images_dir=calibration_images_dir, experiment_id=experiment_id,
+        group_by=group_by, group_key_map=group_key_map, split_seed=split_seed,
+        split_holdout_ratio=split_holdout_ratio, split_manifest_dir=split_manifest_dir,
+    )
+
+
+def _applied_operating_point(
+    conf_threshold: float | None, global_nms_iou: float | None, max_dets: int | None,
+) -> tuple[float, float, int]:
+    """The stated-vs-platform-default resolution for conf/NMS/max_dets, shared by
+    ``run_inference``'s ``dry_run`` preview and its verified body so the two can't diverge."""
+    applied_nms_iou = DEFAULT_NMS_IOU if global_nms_iou is None else float(global_nms_iou)
+    applied_max_dets = DEFAULT_MAX_DETS if max_dets is None else int(max_dets)
+    applied_conf = DEFAULT_CONF if conf_threshold is None else float(conf_threshold)
+    return applied_conf, applied_nms_iou, applied_max_dets
+
+
+def _run_inference_verified(
+    checkpoint,
+    *,
+    image_paths: list[str] | None = None,
+    images_dir: str | None,
+    conf_threshold: float | None,
+    device: str | None,
+    tile: bool | None,
+    tile_size: int | None,
+    overlap: float | None,
+    tile_batch_size: int,
+    global_nms_iou: float | None,
+    max_dets: int | None,
+    postprocess: str,
+    trait: str | None,
+    calibration_labels_dir: str | None,
+    calibration_images_dir: str | None,
+    experiment_id: str | None,
+    group_by: str | None = None,
+    group_key_map: dict[str, str] | None = None,
+    split_seed: int = 0,
+    split_holdout_ratio: float = 0.5,
+    split_manifest_dir: str | None = None,
+) -> dict:
+    """The verified body of ``run_inference``: everything after its checkpoint is loaded once.
+
+    Carries no ``@audited`` of its own: the calling tool's audit line is the record of this call.
+    ``export_predictions`` calls this directly (never the ``@mcp.tool()`` wrapper) with the
+    checkpoint it already loaded, so a door composing this pass never loads the file twice.
+    """
+    max_dets_stated = max_dets is not None
+    conf_stated = conf_threshold is not None
+    applied_conf, applied_nms_iou, applied_max_dets = _applied_operating_point(
+        conf_threshold, global_nms_iou, max_dets)
+
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.pipelines.resolution import dataset_hash, raw_operating_point
@@ -841,7 +898,7 @@ def run_inference(
     # NMS IoU + the full-frame detection cap govern which boxes exist (in-model thresholds), not
     # just cross-tile merge, else nms_iou would have no effect on an untiled run.
     predictor = build_predictor(
-        checkpoint_path=checkpoint_path,
+        checkpoint,
         device=device,
         score_threshold=applied_conf,
         nms_iou=applied_nms_iou,
@@ -855,10 +912,10 @@ def run_inference(
         getattr(predictor, "train_tile_size", None) is not None) if tile is None else tile
 
     # Identity resolved before calibration: its train-disjointness gate needs the checkpoint's
-    # experiment_id. sha is cached (never re-hashed per call).
+    # experiment_id, off the object already loaded (no re-hash, no re-read).
     from tcip_mcp.model_registry import resolve_model_identity
 
-    identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+    identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
 
     # Derive tile geometry from training geometry unless the caller pinned it; refuses only when a
     # stated edge contradicts the checkpoint's own recorded geometry.
@@ -880,7 +937,7 @@ def run_inference(
     if resolved_tile_bool and resolved_tile is None:
         # Tiling was requested but nothing justifies a scale: refuse rather than fabricate one.
         return {"error": (
-            f"tile_size could not be resolved for {checkpoint_path}: this checkpoint carries no "
+            f"tile_size could not be resolved for {checkpoint.path}: this checkpoint carries no "
             "persisted training tile geometry, no tile_size was given explicitly, and its untiled "
             "training frame yields no tile edge either (none recorded, or a rectangular one, which "
             "no single square edge reproduces the scale of on both axes), so tiled inference has no "
@@ -1022,12 +1079,7 @@ def run_inference(
                 manifest_excluded["excluded_validation_stems"])
             extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
         # The full sweep can be large, persist it and return the path (provenance emits has_sweep).
-        # Keyed on cal_hash alone, a second checkpoint (or the same checkpoint under
-        # different tile/postprocess settings) calibrated on the same labels would silently overwrite the
-        # prior curve. Content-address the filename by every dimension the sweep actually depends
-        # on, checkpoint identity + the full predictor path, not just the labels, so it can't be
-        # under-keyed again the next time a dimension is added; identical inputs harmlessly reuse
-        # the same file, different inputs never collide.
+        # Content-addressed by every dimension the sweep depends on, never under-keyed.
         try:
             import hashlib
             import json as _json
@@ -1104,7 +1156,7 @@ def run_inference(
     # and the web GUI's own inference worker, routes/inference.py), never a second implementation.
     id_map = resolve_decode_id_map(predictor, images_dir)
     out = {
-        "checkpoint": checkpoint_path,
+        "checkpoint": checkpoint.path,
         "checkpoint_sha256": identity["sha256"],
         "experiment_id": identity["experiment_id"],
         "images_dir": images_dir,
@@ -1354,7 +1406,7 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
 
 
 def _export_predictions_raster(
-    *, checkpoint_path: str, raster_path: str, out: Path, resolution, device: str | None,
+    *, checkpoint, raster_path: str, out: Path, resolution, device: str | None,
     conf_threshold: float | None, tile_size: int | None, overlap: float | None, tile_batch_size: int,
     global_nms_iou: float | None, max_dets: int | None, postprocess: str, require_masks: bool,
     experiment_id: str | None, acknowledge_unvalidated: bool, trait: str | None = None,
@@ -1411,10 +1463,10 @@ def _export_predictions_raster(
     raw_conf_stated = conf_threshold is not None
 
     predictor = build_predictor(
-        checkpoint_path=checkpoint_path, device=device, score_threshold=applied_conf,
+        checkpoint, device=device, score_threshold=applied_conf,
         nms_iou=applied_nms_iou, max_dets=applied_max_dets,
     )
-    identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+    identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
     if identity["experiment_id"]:
         # Checked before the raster pass, not after: a blob write cannot join the record's own
         # transaction, so this is the one chance to refuse before the export writes anything.
@@ -1436,7 +1488,7 @@ def _export_predictions_raster(
         if tile_size_source == "explicit" and resolved_tile is not None else None)
     if resolved_tile is None:
         return {"error": (
-            f"tile_size could not be resolved for {checkpoint_path}: this checkpoint carries no "
+            f"tile_size could not be resolved for {checkpoint.path}: this checkpoint carries no "
             "persisted training tile geometry and no tile_size was given explicitly, so this "
             "always-tiled regime has no real basis to run at. Pass tile_size explicitly, or "
             "retrain with tile geometry persisted."
@@ -1468,7 +1520,7 @@ def _export_predictions_raster(
 
         try:
             block_bundle, block_prov, block_evidence = resolve_block_calibration_records(
-                predictor, checkpoint_path=checkpoint_path, trait_name=trait,
+                predictor, trait_name=trait,
                 experiment_id=identity["experiment_id"], global_nms_iou=applied_nms_iou,
                 export_tile_size=resolved_tile,
                 tile_batch_size=tile_batch_size, postprocess=postprocess,
@@ -1585,7 +1637,7 @@ def _export_predictions_raster(
 
     out.mkdir(parents=True, exist_ok=True)
     sha = identity["sha256"]
-    producer = prediction_producer(checkpoint_path, sha)
+    producer = prediction_producer(checkpoint.path, sha)
     pred_path = out / f"{Path(raster_path).stem}.json"
     # Read before the write: a drop can empty a mask list that was genuinely there, and has_masks
     # must reflect what this run used, not what happened to survive the drop.
@@ -1602,7 +1654,7 @@ def _export_predictions_raster(
         id_map=id_map,
         trait=op_bundle.trait or None,
         dataset_hash=op_bundle.dataset_hash,
-        checkpoint=Path(checkpoint_path).stem,
+        checkpoint=Path(checkpoint.path).stem,
         checkpoint_sha256=sha,
         experiment_id=identity["experiment_id"],
         images_dir=None,
@@ -1795,6 +1847,8 @@ def export_predictions(
         require_masks: Collect masks for an ``instance_seg`` checkpoint (``raster_path`` regime
             only; ignored for ``images_dir``, which always carries masks via ``run_inference``).
     """
+    if not Path(checkpoint_path).is_file():
+        return {"error": f"Checkpoint not found: {checkpoint_path}"}
     if not output_dir:
         return {"error": "output_dir is required"}
     if images_dir is None and raster_path is None:
@@ -1809,20 +1863,29 @@ def export_predictions(
         return {"error": "split_manifest_dir is not supported for a raster_path export: block "
                          "calibration draws no split-manifest universe, so it would be silently "
                          "dropped rather than scoping anything."}
-    if raster_path is not None:
-        # The images_dir regime gets this for free from run_inference's own check; this regime
-        # builds its predictor directly, so a missing file would otherwise raise uncaught.
-        if not Path(checkpoint_path).is_file():
-            return {"error": f"Checkpoint not found: {checkpoint_path}"}
-        if not Path(raster_path).is_file():
-            return {"error": f"raster_path not found: {raster_path}"}
+    if raster_path is not None and not Path(raster_path).is_file():
+        return {"error": f"raster_path not found: {raster_path}"}
+
+    # Resolve the writable bucket before the checkpoint is read: a verdict-blocked overwrite must
+    # still refuse before the file is touched at all.
+    out, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
+        output_dir, overwrite=overwrite)
+    if refusal is not None:
+        return refusal
+
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+
+    try:
+        checkpoint = load_registered_checkpoint(checkpoint_path)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
 
     block_calibration_experiment_id = None
     if raster_path is not None and trait:
         from tcip_mcp.model_registry import resolve_model_identity
         from tcip_mcp.pipelines.block_calibration import reserved_calibration_region_available
 
-        block_identity = resolve_model_identity(checkpoint_path, experiment_id=experiment_id)
+        block_identity = resolve_model_identity(checkpoint, experiment_id=experiment_id)
         block_calibration_experiment_id = block_identity["experiment_id"]
         if block_calibration_experiment_id is None or not reserved_calibration_region_available(
             block_calibration_experiment_id
@@ -1836,16 +1899,9 @@ def export_predictions(
                 "instead, or retrain with reserve_calibration_fraction set."
             )}
 
-    # Resolve the writable bucket before the (expensive) inference so a verdict-blocked overwrite
-    # fails fast.
-    out, resolution, bucket_root, refusal = _resolve_writable_bucket_for(
-        output_dir, overwrite=overwrite)
-    if refusal is not None:
-        return refusal
-
     if raster_path is not None:
         return _export_predictions_raster(
-            checkpoint_path=checkpoint_path, raster_path=raster_path, out=out,
+            checkpoint=checkpoint, raster_path=raster_path, out=out,
             resolution=resolution, device=device, conf_threshold=conf_threshold,
             tile_size=tile_size, overlap=overlap, tile_batch_size=tile_batch_size,
             global_nms_iou=global_nms_iou, max_dets=max_dets, postprocess=postprocess,
@@ -1858,16 +1914,15 @@ def export_predictions(
         check_delivery_gate, resolve_tile_size_param, tile_size_gate_flag,
     )
 
-    # Gate before the (expensive) pass where possible, matching the raster_path regime: a light,
-    # weights-free config sniff resolves the same tile geometry run_inference itself will.
+    # Gate before the (expensive) pass: the checkpoint's own stamped config, already loaded,
+    # resolves the same tile geometry run_inference itself will.
     from types import SimpleNamespace
 
-    from tcip_mcp.model_registry import read_checkpoint_data_config
     from tcip_mcp.pipelines.inference.predictor import (
         TileEdgeContradiction, explicit_edge_provenance, resolve_tile_regime,
     )
 
-    data_cfg = read_checkpoint_data_config(checkpoint_path)
+    data_cfg = checkpoint.data_config
     tiling_cfg = data_cfg.get("tiling") or {}
     stub = SimpleNamespace(
         train_tile_size=tiling_cfg.get("tile_size"), train_overlap=tiling_cfg.get("overlap"),
@@ -1891,8 +1946,8 @@ def export_predictions(
     if not pre_gate.ok:
         return {"error": pre_gate.reason, "tile_size_validated": pre_tile_ref}
 
-    result = run_inference(
-        checkpoint_path=checkpoint_path, images_dir=images_dir, conf_threshold=conf_threshold,
+    result = _run_inference_verified(
+        checkpoint, images_dir=images_dir, conf_threshold=conf_threshold,
         device=device, tile=tile, tile_size=tile_size, overlap=overlap,
         tile_batch_size=tile_batch_size, global_nms_iou=global_nms_iou, max_dets=max_dets,
         postprocess=postprocess, trait=trait,
@@ -2065,6 +2120,8 @@ def tabulate_counts(
     from tcip_mcp.project_paths import resolve_output_path
     from tcip_mcp.traits import TraitUnknownError
 
+    if not Path(checkpoint_path).is_file():
+        return {"error": f"Checkpoint not found: {checkpoint_path}"}
     output_path = str(resolve_output_path(output_path))
     # Ahead of the pass, so a refused delivery has no counts of its own to hand back.
     try:
@@ -2085,8 +2142,15 @@ def tabulate_counts(
         if refusal is not None:
             return refusal
 
-    result = run_inference(
-        checkpoint_path=checkpoint_path,
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+
+    try:
+        checkpoint = load_registered_checkpoint(checkpoint_path)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
+
+    result = _run_inference_verified(
+        checkpoint,
         images_dir=images_dir,
         conf_threshold=conf_threshold,
         device=device,

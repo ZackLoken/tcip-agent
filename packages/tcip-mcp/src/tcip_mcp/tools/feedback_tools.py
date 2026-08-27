@@ -51,6 +51,17 @@ def _verdict_store_of(dataset_root: str, review_state_dir: str) -> Path:
     return review_state_dir_of(dataset_root)
 
 
+def _load_or_refuse(checkpoint_path: str, project_path: str):
+    """The verified checkpoint a review-queue strategy builds its predictor from, or the door's
+    own refusal dict when the registry names no entry for it. Returns ``(checkpoint, refusal)``."""
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
+
+    try:
+        return load_registered_checkpoint(checkpoint_path, project_path=project_path or None), None
+    except UnregisteredCheckpoint as exc:
+        return None, {"error": str(exc)}
+
+
 def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str | None]:
     """The prediction bucket to read verdicts from, and the refusal when that is not one answer.
 
@@ -205,6 +216,7 @@ def prioritize_review_queue(
     auto_threshold: float | None = None,
     bucket: str | None = None,
     review_state_dir: str = "",
+    project_path: str = "",
 ) -> dict:
     """Order un-reviewed images for the next review batch.
 
@@ -242,6 +254,8 @@ def prioritize_review_queue(
         review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
             default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
             are never merged and neither stands in for the other.
+        project_path: Project root the checkpoint's registry entry is looked up under. Empty
+            (default) resolves to the process's own root.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -291,7 +305,10 @@ def prioritize_review_queue(
             return {"strategy": strategy, "total_images": 0, "reviewed_skipped": reviewed_skipped,
                     "auto_accepted": 0, "needs_review": 0, "review_images": [],
                     "unscoreable_images": [], "auto_accepted_images": []}
-        predictor = build_predictor(checkpoint_path)
+        checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
+        if refusal is not None:
+            return refusal
+        predictor = build_predictor(checkpoint)
         predictions = predictor.predict_batch(sources)
         needs_review = review_queue(predictions, low=low, high=high)
         # A prediction with no confidence-bearing signal at all (e.g. a regression head's point
@@ -343,7 +360,10 @@ def prioritize_review_queue(
     except (ImportError, OSError) as e:
         return {"error": f"torch/torchvision unavailable: {e}"}
 
-    predictor = build_predictor(checkpoint_path)
+    checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
+    if refusal is not None:
+        return refusal
+    predictor = build_predictor(checkpoint)
     guard = require_composed_detector(predictor, purpose="review-queue scoring")
     if guard:
         return {"error": guard}

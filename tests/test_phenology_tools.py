@@ -1425,7 +1425,9 @@ def test_classification_items_scopes_gt_to_the_run_subject(tmp_path: Path) -> No
 # unlike calibrate_classifier_operating_point's paired GT/prediction dirs).
 # --------------------------------------------------------------------------
 
-def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path) -> None:
+def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
@@ -1435,6 +1437,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
     from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(10):
@@ -1450,6 +1453,13 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
     run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="ordinal")
     assert run.status == "completed", getattr(run, "error", run.status)
+
+    from tcip_mcp.tools.model_tools import register_model
+
+    ckpt_path = str(tmp_path / "out" / "model_best.pt")
+    reg = register_model(name="ordinal-e2e", checkpoint_path=ckpt_path, config={},
+                         project_path=str(tmp_path))
+    assert "error" not in reg, reg
 
     result = calibrate_ordinal_regression_operating_point(
         trait_name="catkin", task="ordinal",
@@ -1476,7 +1486,9 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(tmp_path: Path
     assert sidecar["checkpoint_sha256"] == checkpoint_sha256(tmp_path / "out" / "model_best.pt")
 
 
-def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: Path) -> None:
+def test_calibrate_ordinal_regression_operating_point_regression_e2e(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
@@ -1486,6 +1498,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: P
     from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(10):
@@ -1501,6 +1514,12 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(tmp_path: P
     run = create_run({**_train_config(model_source), "seed": 0}, str(tmp_path / "out"))
     run = train(run, loader, val_loader=None, task="regression")
     assert run.status == "completed", getattr(run, "error", run.status)
+
+    from tcip_mcp.tools.model_tools import register_model
+
+    reg = register_model(name="regression-e2e", checkpoint_path=str(tmp_path / "out" / "model_best.pt"),
+                         config={}, project_path=str(tmp_path))
+    assert "error" not in reg, reg
 
     result = calibrate_ordinal_regression_operating_point(
         trait_name="catkin", task="regression",
@@ -1570,8 +1589,16 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     csv_path = tmp_path / "ranks.csv"
     _rank_csv(csv_path, ranks)
     assert dataset_root_of(frames) is None
+    torch = pytest.importorskip("torch")
     checkpoint = tmp_path / "model_best.pt"
-    checkpoint.write_bytes(b"the weights this calibration ran over")
+    torch.save({"model_state_dict": {}, "kind": "tcip_module"}, checkpoint)
+
+    from tcip_mcp.tools.model_tools import register_model
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    reg = register_model(name="loose-dir", checkpoint_path=str(checkpoint), config={},
+                         project_path=str(tmp_path))
+    assert "error" not in reg, reg
 
     class _RecordedRanks:
         def predict_batch(self, sources):

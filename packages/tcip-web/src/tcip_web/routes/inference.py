@@ -230,12 +230,21 @@ def _worker(job: InferenceJob) -> None:
 
         # One inference entry point (same as MCP run_inference): build_predictor dispatches on
         # the checkpoint's model kind, sniffed from the checkpoint itself.
+        from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
         from tcip_mcp.pipelines.inference.predictor import build_predictor
         from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
         from tcip_mcp.pipelines.resolution import raw_operating_point
 
+        try:
+            checkpoint = load_registered_checkpoint(
+                job.checkpoint_path, project_path=job.platform_root)
+        except UnregisteredCheckpoint as exc:
+            job.status = "failed"
+            job.error = str(exc)
+            logger.warning("inference job %s refused: %s", job.job_id, job.error)
+            return
         predictor = build_predictor(
-            checkpoint_path=job.checkpoint_path,
+            checkpoint,
             device=None,  # auto: cuda if available, else cpu
             score_threshold=job.conf,  # conf is an unvalidated documented default either way,
             nms_iou=job.iou,           # raw_operating_point below wraps the same raw value, never
@@ -307,7 +316,7 @@ def _worker(job: InferenceJob) -> None:
         # matching failed closed on every review session no matter how thoroughly it was reviewed.
         from tcip_mcp.model_registry import resolve_model_identity
 
-        identity = resolve_model_identity(job.checkpoint_path)
+        identity = resolve_model_identity(checkpoint)
 
         # This run's name->id map: the same resolver the MCP door's run_inference calls
         # (tcip_mcp.tools.inference_tools.resolve_decode_id_map): prefers the training run's own

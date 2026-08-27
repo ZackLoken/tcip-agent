@@ -28,6 +28,28 @@ from tests._binding_fixtures import write_bound_sidecar, write_prediction
 
 
 @pytest.fixture(autouse=True)
+def _stub_checkpoint_verification(monkeypatch):
+    """Every test in this module exercises the gate logic downstream of a checkpoint load, not
+    the load itself, so load_registered_checkpoint is stubbed to admit whatever path it is given.
+    """
+    import tcip_mcp.model_registry as model_registry_mod
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint",
+                        lambda path, *a, **kw: stub_verified_checkpoint(str(path)))
+
+
+def _dummy_checkpoint(tmp_path) -> str:
+    """A checkpoint path that exists on disk, for the not-found check every door now runs first;
+    its bytes are never read (load_registered_checkpoint is stubbed for this whole module)."""
+    p = tmp_path / "m.pt"
+    if not p.exists():
+        p.write_bytes(b"x")
+    return str(p)
+
+
+@pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path):
     """Every delivery below ships under a trait whose delivered number has a confirmed meaning.
 
@@ -459,13 +481,13 @@ def test_export_aggregated_csv_rejects_an_unrecognized_measurement_document(tmp_
 def test_tabulate_counts_refuses_unvalidated_run(tmp_path, monkeypatch):
     import tcip_mcp.tools.inference_tools as itools
 
-    def _fake_run_inference(**kw):
+    def _fake_run_inference(*a, **kw):
         return {"results": [{"image": "a.png", "count": 3}], "image_count": 1,
                 "total_detections": 3, "operating_point": {"conf": {"value": 0.5}},
                 "validated": False, "conf_source": "default"}
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT)
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
@@ -477,7 +499,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
 
     captured = {}
 
-    def _fake_run_inference(**kw):
+    def _fake_run_inference(*a, **kw):
         return {"results": [{"image": "a.png", "count": 3, "scores": [0.9]}], "image_count": 1,
                 "total_detections": 3, "operating_point": {"conf": {"value": 0.5}},
                 "validated": False, "conf_source": "default"}
@@ -488,9 +510,9 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
         captured["acknowledge_unvalidated"] = acknowledge_unvalidated
         return str(path)
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
     monkeypatch.setattr(itools, "export_detection_csv", _fake_export)
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
     assert "error" not in r
     assert r["operating_point_validated"] == VALIDATED_FALSE
@@ -500,7 +522,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
 # ── tile_size gates the same way, closing the asymmetry with conf ─────
 
 def _fake_run_inference_with(*, conf_ref, tile_size_prov=None):
-    def _fake(**kw):
+    def _fake(*a, **kw):
         op = {"conf": {"value": 0.6, "validated_against": conf_ref}}
         if tile_size_prov is not None:
             op["tile_size"] = tile_size_prov
@@ -517,11 +539,11 @@ def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(t
     ungrounded tile scale."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference_with(
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_with(
         conf_ref=VALIDATED_HELD_OUT,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path))
     assert "error" in r
     assert r["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself is fine...
@@ -546,11 +568,11 @@ def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeyp
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
     captured = {}
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _earned_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, trait=fx.COUNT_TRAIT, tiled=True, tile_size=224, tile_size_source="derived"))
     _capture_csv_stamp(monkeypatch, itools, captured)
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
     assert "error" not in r, r
@@ -565,12 +587,12 @@ def test_tabulate_counts_never_gates_tile_size_when_untiled(tmp_path, monkeypatc
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
-    monkeypatch.setattr(itools, "run_inference",
-                        lambda **kw: _earned_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
     _capture_csv_stamp(monkeypatch, itools, captured)
     r = itools.tabulate_counts(
-        "m.pt", str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
+        _dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"), trait=fx.COUNT_TRAIT,
         calibration_labels_dir=str(tmp_path),
         predictions_dir=str(tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"))
     assert "error" not in r, r
@@ -586,17 +608,17 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
-    monkeypatch.setattr(itools, "run_inference",
-                        lambda **kw: _earned_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_inference_result(
                             tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
     _capture_csv_stamp(monkeypatch, itools, captured)
-    refused = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    refused = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                      trait=fx.COUNT_TRAIT,
                                      calibration_labels_dir=str(tmp_path))
     assert "predictions_dir" in refused["error"]
     assert refused["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself was fine
 
-    provisional = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    provisional = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                          trait=fx.COUNT_TRAIT,
                                          calibration_labels_dir=str(tmp_path),
                                          acknowledge_unvalidated=True)
@@ -615,12 +637,12 @@ def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_desp
     import tcip_mcp.tools.inference_tools as itools
 
     captured = {}
-    monkeypatch.setattr(itools, "run_inference", _fake_run_inference_with(
+    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_with(
         conf_ref=VALIDATED_HELD_OUT,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     _capture_csv_stamp(monkeypatch, itools, captured)
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                acknowledge_unvalidated=True)
     assert "error" not in r
@@ -667,12 +689,12 @@ def test_export_predictions_refuses_fabricated_tile_size_even_with_validated_con
     door builds on, same contract as an uncalibrated conf), so the refusal belongs here."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _fake_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _fake_run_inference_result(
         conf_ref=VALIDATED_HELD_OUT,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.export_predictions("m.pt", str(tmp_path), str(out))
+    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out))
     assert "error" in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert not out.exists()
@@ -686,10 +708,10 @@ def test_export_predictions_ships_when_tile_size_has_a_real_basis(
 
     from tcip_mcp.pipelines.resolution import VALIDATED_PERSISTED_GEOMETRY
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _earned_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, tiled=True, tile_size=224, tile_size_source="derived"))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.export_predictions("m.pt", str(tmp_path), str(out), trait="catkin")
+    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out), trait="catkin")
     assert "error" not in r, r
     assert r["tile_size_validated"] == VALIDATED_PERSISTED_GEOMETRY
     assert r["validated"] is True
@@ -707,10 +729,10 @@ def test_export_predictions_never_gates_tile_size_when_untiled(
     because the run's own bundle happens to carry a non-gating tile_size entry."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference",
-                        lambda **kw: _earned_run_inference_result(tmp_path, tiled=False))
+    monkeypatch.setattr(itools, "_run_inference_verified",
+                        lambda *a, **kw: _earned_run_inference_result(tmp_path, tiled=False))
     out = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
-    r = itools.export_predictions("m.pt", str(tmp_path), str(out), trait="catkin")
+    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out), trait="catkin")
     assert "error" not in r, r
     assert r["tile_size_validated"] is None
     assert r["validated"] is True
@@ -722,12 +744,12 @@ def test_export_predictions_acknowledge_writes_and_floors_the_sidecar_stamp(tmp_
     reading it would treat a fabricated tile scale as trustworthy."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _fake_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _fake_run_inference_result(
         conf_ref=VALIDATED_HELD_OUT,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
     out = tmp_path / "preds"
-    r = itools.export_predictions("m.pt", str(tmp_path), str(out), acknowledge_unvalidated=True)
+    r = itools.export_predictions(_dummy_checkpoint(tmp_path), str(tmp_path), str(out), acknowledge_unvalidated=True)
     assert "error" not in r
     assert r["tile_size_validated"] == VALIDATED_FALSE
     assert r["validated"] is False  # floored despite conf's own clean reference
@@ -1517,11 +1539,11 @@ def test_the_count_tool_records_what_it_verified_in_the_bucket_own_dataset_log(t
     """
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kw: _earned_run_inference_result(
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *a, **kw: _earned_run_inference_result(
         tmp_path, trait=fx.COUNT_TRAIT, tiled=False))
     bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
 
-    r = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
                                trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
                                predictions_dir=str(bucket))
 
