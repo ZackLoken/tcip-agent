@@ -59,6 +59,31 @@ def test_split_write_refused_against_a_watchdog_failed_record_leaves_it_failed(t
     assert refusals[0]["status"] == "refused"
 
 
+def test_update_status_refusal_audits_the_launch_root_not_the_current_one(tmp_path, monkeypatch):
+    """A launch's wall-clock watchdog passes the root it captured at launch; its refused write's
+    audit line must land on that root's own log, not whatever this process has since adopted."""
+    from tcip_mcp.experiments import create_experiment, update_status
+
+    launch_root = tmp_path / "launch"
+    other_root = tmp_path / "other"
+    launch_root.mkdir()
+    other_root.mkdir()
+
+    eid = "exp-021-hazelnut-catkin-det"
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(launch_root))
+    create_experiment(eid, {"model_source": {"builder": "my_models:catkin_det"}})
+    update_status(eid, "completed")
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(other_root))
+    result = update_status(
+        eid, "failed", error="exceeded max_wall_clock_seconds (5)", root=launch_root
+    )
+    assert "error" in result
+
+    assert _refusals(launch_root)
+    assert not _refusals(other_root)
+
+
 def test_split_write_still_lands_against_a_running_record(tmp_path):
     """The guard admits the ordinary case: a live run's own split write still succeeds."""
     from tcip_mcp.experiments import create_experiment, update_status

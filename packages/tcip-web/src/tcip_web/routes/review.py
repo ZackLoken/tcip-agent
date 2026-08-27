@@ -1369,7 +1369,8 @@ def rehydrate_for_current_root() -> None:
     Called at startup and again after this process repins to another root, the same
     treatment ``routes.inference``/``routes.tuning`` give their own registries. The worker
     thread behind a persisted non-terminal job is gone, so it is surfaced as ``interrupted``;
-    the queue it built isn't persisted, so a rehydrated job has an empty one.
+    its ranked queue is restored from what :func:`_pq_summary` persisted, so a completed job
+    still answers its own ranked images after a restart or a repin.
     """
     from tcip_web import jobstore
 
@@ -1389,6 +1390,7 @@ def rehydrate_for_current_root() -> None:
                 dataset_root="",
                 status=status,
                 error=s.get("error"),
+                queue=s.get("queue") or [],
                 total_candidates=s.get("total_candidates", 0),
                 reviewed_skipped=s.get("reviewed_skipped", 0),
                 platform_root=s.get("platform_root") or root,

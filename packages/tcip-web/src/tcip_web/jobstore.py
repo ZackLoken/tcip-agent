@@ -7,10 +7,12 @@ atomically persist job summaries to ``.tcip/state/<name>.json`` and evict the ol
 their threads are gone, so the persisted file is a record, not a resumable state.)
 
 One registry document per job kind per platform root: a job carries the root it launched
-under (``platform_root``, set on the request thread at launch), :func:`persist_grouped`
-writes each root's own jobs to that root's own key, and :func:`evict_terminal` bounds one
+under (``platform_root``, set on the request thread at launch), and :func:`persist_grouped`
+writes each root's own jobs to that root's own key. :func:`evict_terminal` bounds both one
 root's own share of the in-memory dict, so one project's history cannot push another
-project's jobs out of memory or overwrite its persisted file.
+project's jobs out of memory or overwrite its persisted file, and the dict as a whole, so the
+process's memory stays bounded whatever roots it has adopted, not just whichever root is
+still actively registering jobs.
 """
 
 from __future__ import annotations
@@ -97,9 +99,9 @@ def persist_grouped(name: str, summaries: list[dict]) -> None:
 def persist_to(key: Key, summaries: list[dict]) -> None:
     """Atomically write job summaries to a registry key the caller already resolved.
 
-    The form a background worker takes: it is handed its key when it is spawned and writes
-    through this, so the write lands under the root its launch resolved rather than under
-    whatever the environment names by the time the worker gets there.
+    :func:`persist_grouped`'s own writer, once per root it grouped a registry's live jobs
+    into, so the write lands under each job's own launch root rather than under whatever the
+    environment names by the time the write happens.
 
     A failure here loses the GUI's history of this registry across a restart, not the jobs
     themselves, so it is logged with the registry it belongs to rather than raised into the
@@ -127,25 +129,29 @@ def load(name: str) -> list[dict]:
 
 
 def evict_terminal(jobs: dict, root: str | None, max_jobs: int = MAX_JOBS) -> None:
-    """Drop the oldest terminal jobs of one root, in place, once that root's own share of
-    ``jobs`` exceeds ``max_jobs``, so one project's history cannot push another project's
-    jobs out of memory.
+    """Drop the oldest terminal jobs, in place, once ``jobs`` overflows ``max_jobs``: once for
+    ``root``'s own share, so one project's history cannot push another project's jobs out of
+    memory, and once for the whole dict, so the process's memory stays bounded whatever roots
+    it has adopted rather than growing by ``max_jobs`` for every root that ever registers a job.
 
-    ``root`` scopes which of ``jobs`` count towards ``max_jobs`` and are eligible for
-    eviction: pass a job's own ``platform_root`` for a per-root registry (inference, HPO,
-    the review priority queue). A registry with no root concept of its own (nothing in
-    ``jobs`` carries a ``platform_root``) passes ``None``, matching every entry and bounding
-    the whole dict as one collection, its original behaviour.
+    ``root`` scopes the first pass: pass a job's own ``platform_root`` for a per-root registry
+    (inference, HPO, the review priority queue). A registry with no root concept of its own
+    (nothing in ``jobs`` carries a ``platform_root``) passes ``None``, matching every entry, so
+    the two passes coincide and it keeps its original single-collection behaviour.
 
-    Relies on dict insertion order (oldest first, within that root's own entries);
-    running/pending jobs are never evicted.
+    Relies on dict insertion order (oldest first); running/pending jobs are never evicted.
     """
     scoped = [jid for jid, job in jobs.items() if getattr(job, "platform_root", None) == root]
     overflow = len(scoped) - max_jobs
-    if overflow <= 0:
-        return
-    evictable = [
-        jid for jid in scoped if getattr(jobs[jid], "status", "") in TERMINAL_STATUSES
-    ]
-    for jid in evictable[:overflow]:
-        jobs.pop(jid, None)
+    if overflow > 0:
+        evictable = [jid for jid in scoped if getattr(jobs[jid], "status", "") in TERMINAL_STATUSES]
+        for jid in evictable[:overflow]:
+            jobs.pop(jid, None)
+
+    total_overflow = len(jobs) - max_jobs
+    if total_overflow > 0:
+        evictable_any = [
+            jid for jid, job in jobs.items() if getattr(job, "status", "") in TERMINAL_STATUSES
+        ]
+        for jid in evictable_any[:total_overflow]:
+            jobs.pop(jid, None)
