@@ -50,8 +50,9 @@ def _resolve_active() -> tuple[str, str]:
       - ``"active"``: the marker names a project whose ``.tcip`` exists; ``detail`` is its root.
       - ``"none"``: no marker is set; ``detail`` is empty.
       - ``"unreadable"``: the marker could not be read (a store refusal, e.g. a workspace still
-        holding loose files under the database backend) or names a project whose ``.tcip`` is
-        gone; ``detail`` names why.
+        holding loose files under the database backend) or names a project that is not
+        adoptable; ``detail`` is ``workspace.marker_problem``'s own text, the one place that
+        tells those cases apart, rather than this hook's own re-encoding of the same fold.
       - ``"import_error"``: the platform packages could not be imported from this interpreter;
         ``detail`` is the error.
 
@@ -78,12 +79,12 @@ def _resolve_active() -> tuple[str, str]:
         _, path = found
         return "active", str(path)
     try:
-        name = workspace.read_active_project(create=False)
+        problem = workspace.marker_problem(create=False)
     except Exception as exc:  # noqa: BLE001, same as above
         return "unreadable", str(exc)
-    if not name:
+    if problem is None:
         return "none", ""
-    return "unreadable", f"the marker names {name!r}, whose .tcip is not a directory"
+    return "unreadable", problem
 
 
 def _root_divergence_note(proj: str) -> str:
