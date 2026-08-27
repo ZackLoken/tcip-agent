@@ -411,9 +411,9 @@ def checkpoint_key(output_dir: Path | str, name: str) -> Key:
 def write_checkpoint(payload: dict, key: Key) -> Path:
     """Write one checkpoint's bytes and return where they landed.
 
-    A crash or an OOM mid-save cannot destroy the previous checkpoint, and a concurrent
-    reader (GUI inference tab, ``evaluate_model`` on a live run) never observes a
-    half-written file: the stream becomes the checkpoint only on a clean exit.
+    A crash or an OOM mid-save cannot destroy the previous checkpoint, and a concurrent reader
+    (the GUI's inference tab) never observes a half-written file: the stream becomes the
+    checkpoint only on a clean exit.
     """
     with store.write_blob(key) as handle:
         torch.save(payload, handle)

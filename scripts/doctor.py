@@ -186,7 +186,8 @@ TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
 
 
 def check_registry(root: Path, findings: list) -> None:
-    """Flag registered models whose checkpoint is missing or points into a test/temp tree.
+    """Flag registered models whose checkpoint is missing or points into a test/temp tree, and
+    every prediction bucket whose stamp names a checkpoint digest no registry entry carries.
 
     Every way the registry index can refuse to be read comes out as a finding, not as a
     traceback: the doctor's contract is an exit code and a list, and a check that dies takes the
@@ -195,7 +196,9 @@ def check_registry(root: Path, findings: list) -> None:
     """
     from tcip_store import StoreError
 
+    from tcip_mcp.dataset_layout import list_models, prediction_root
     from tcip_mcp.model_registry import read_registry_index
+    from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
     try:
         entries = read_registry_index(root)
@@ -203,7 +206,8 @@ def check_registry(root: Path, findings: list) -> None:
         findings.append(("error", "the model registry index will not decode or read, so this "
                         f"project's registered models could not be checked at all: {exc}"))
         return
-    for m in entries if isinstance(entries, list) else []:
+    entry_list = entries if isinstance(entries, list) else []
+    for m in entry_list:
         ckpt = m.get("checkpoint_path", "")
         if "metrics_source" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
@@ -214,6 +218,23 @@ def check_registry(root: Path, findings: list) -> None:
                             f"checkpoint: {ckpt}"))
         elif ckpt and not Path(ckpt).is_file():
             findings.append(("error", f"registry entry {m.get('name')!r} checkpoint missing: {ckpt}"))
+
+    # A bucket predating the checkpoint-digest rail may name a digest no entry carries; visible
+    # here, never floored. The sidecar is read through the store seam, not a plain-file glob.
+    registered_shas = {m.get("sha256") for m in entry_list}
+    pred_root = prediction_root(root)
+    if pred_root.is_dir():
+        for model in list_models(root):
+            model_dir = pred_root / model
+            if not model_dir.is_dir():
+                continue
+            for bucket in sorted(p for p in model_dir.iterdir() if p.is_dir()):
+                sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
+                if sha and sha not in registered_shas:
+                    findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "
+                                    f"stamp names checkpoint {sha}, which no registry entry "
+                                    "names; register the checkpoint to make this bucket's "
+                                    "provenance verifiable going forward."))
 
 
 def check_provenance(root: Path, findings: list) -> None:

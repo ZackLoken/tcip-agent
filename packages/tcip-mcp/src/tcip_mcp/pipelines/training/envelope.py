@@ -521,11 +521,25 @@ def _finalize_run(ctx: TrainContext) -> None:
                 logger.warning("Run %s: completion refused (%s); weights at %s stay on disk, "
                                "unregistered.", run.run_id, result["error"], ctx.final_weights)
             else:
+                from tcip_mcp.audit import record_event
+
                 try:
-                    register_model_from_experiment(exp_id, ctx.final_weights)
+                    reg_result = register_model_from_experiment(exp_id, ctx.final_weights)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Run %s: model registration failed for weights at %s: %s",
                                    run.run_id, ctx.final_weights, exc)
+                    record_event("model_registration_failed", {
+                        "run_id": run.run_id, "experiment_id": exp_id,
+                        "weights_path": str(ctx.final_weights), "reason": str(exc),
+                    })
+                else:
+                    if "error" in reg_result:
+                        logger.warning("Run %s: model registration refused for weights at %s: %s",
+                                       run.run_id, ctx.final_weights, reg_result["error"])
+                        record_event("model_registration_failed", {
+                            "run_id": run.run_id, "experiment_id": exp_id,
+                            "weights_path": str(ctx.final_weights), "reason": reg_result["error"],
+                        })
         elif run.status == "completed":
             # No discoverable weights (no model_best.pt/model_final.pt, ctx.set_final_weights()
             # never called): a phantom deliverable, refuse rather than register a nonexistent path.

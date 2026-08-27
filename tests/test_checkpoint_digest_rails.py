@@ -382,6 +382,42 @@ def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_f
     assert r["checkpoint_sha256"] == checkpoint_sha256(ckpt)
 
 
+# Rail 11: a registration that fails after completion appends model_registration_failed.
+
+def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_path, monkeypatch):
+    import tcip_mcp.experiments as experiments_mod
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.pipelines.training.envelope import TrainContext, _finalize_run
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    exp_id = "exp-rail11"
+    create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+    update_status(exp_id, "running")
+    run = create_run({"data": {}}, str(tmp_path / "out"))
+    run.status = "completed"
+    ckpt = tmp_path / "out" / "model_best.pt"
+    ckpt.parent.mkdir(parents=True, exist_ok=True)
+    _bespoke_checkpoint(ckpt)
+
+    def _boom(*a, **kw):
+        raise ValueError("registration exploded")
+
+    monkeypatch.setattr(experiments_mod, "register_model_from_experiment", _boom)
+
+    ctx = TrainContext(run=run, train_loader=None, experiment_id=exp_id, final_weights=str(ckpt))
+    _finalize_run(ctx)
+
+    import tcip_store
+    from tcip_mcp.audit import audit_log_key
+
+    page = tcip_store.read_log(audit_log_key(tmp_path))
+    events = [r for r in page.records if r["tool"] == "model_registration_failed"]
+    assert len(events) == 1, events
+    assert events[0]["arguments"]["weights_path"] == str(ckpt)
+    assert "registration exploded" in events[0]["arguments"]["reason"]
+
+
 # Rail 10: register_model and load_registered_checkpoint agree on one file's digest.
 
 def test_registration_digest_and_load_digest_agree(tmp_path, monkeypatch):
@@ -463,3 +499,49 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     assert "error" in refused
     assert identity in refused["error"]
     assert not out2.exists()
+
+
+# Rail 8: the doctor lists a prediction bucket whose stamp digest no entry names, and stays
+# silent on one whose digest an entry names.
+
+def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    reg = _register(tmp_path, str(ckpt), name="good-model")
+
+    stale_ckpt = tmp_path / "stale.pt"
+    _bespoke_checkpoint(stale_ckpt, tile_size=96)
+    _register(tmp_path, str(stale_ckpt), name="stale-model")
+
+    images_dir, _ = _images(tmp_path)
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    good_dir = tmp_path / "predictions" / "baseline" / "2026-01-01"
+    r_good = export_predictions(str(ckpt), str(images_dir), str(good_dir), tile=False)
+    assert "error" not in r_good, r_good
+    assert r_good["checkpoint_sha256"] == reg["sha256"]
+
+    stale_dir = tmp_path / "predictions" / "stale" / "2026-01-01"
+    r_stale = export_predictions(str(stale_ckpt), str(images_dir), str(stale_dir), tile=False)
+    assert "error" not in r_stale, r_stale
+
+    # Supersede stale-model's entry under the same name: its digest no longer names any entry,
+    # the same pre-rail state a bucket already on disk can be in.
+    replacement = tmp_path / "replacement.pt"
+    _bespoke_checkpoint(replacement, tile_size=128)
+    _register(tmp_path, str(replacement), name="stale-model")
+
+    import importlib.util
+
+    doctor_path = Path(__file__).resolve().parents[1] / "scripts" / "doctor.py"
+    spec = importlib.util.spec_from_file_location("tcip_digest_rail_doctor", doctor_path)
+    doctor_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(doctor_module)
+
+    findings: list = []
+    doctor_module.check_registry(tmp_path, findings)
+    messages = [m for _, m in findings]
+    stale_findings = [m for m in messages if r_stale["checkpoint_sha256"] in m]
+    assert len(stale_findings) == 1, messages
+    assert not any(r_good["checkpoint_sha256"] in m for m in messages)
