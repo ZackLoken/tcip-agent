@@ -1313,6 +1313,7 @@ def run_hpo(
     baseline_params: dict | None = None,
     max_concurrent: int = 1,
     resources_per_trial: dict | None = None,
+    study_name: str | None = None,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
@@ -1360,6 +1361,9 @@ def run_hpo(
         resources_per_trial: Ray resource request per trial, omit to derive one from the
             host's real GPU count and ``max_concurrent`` (see ``hpo._default_trial_resources``);
             an explicit value always wins over the derivation.
+        study_name: The sweep's id, for a caller (the Tuning route's launch) that already
+            minted one and must have its own registry entry, manifest and every sweep route
+            agree on it; omitted mints one the way this always has.
     """
     from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
 
@@ -1402,7 +1406,7 @@ def run_hpo(
 
     hpo_dir = hpo_root(output_dir)
     hpo_dir.mkdir(parents=True, exist_ok=True)
-    study_name = f"hpo_{uuid.uuid4().hex[:8]}"
+    study_name = study_name or f"hpo_{uuid.uuid4().hex[:8]}"
     sweep_root = sweep_dir(study_name, output_dir)
     sweep_root.mkdir(parents=True, exist_ok=True)
 

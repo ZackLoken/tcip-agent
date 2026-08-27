@@ -121,24 +121,35 @@ def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | N
     return manifest if isinstance(manifest, dict) else None
 
 
+def _sweep_launch_root(sweep_id: str) -> Optional[str]:
+    """The root this sweep's own live registry entry says it launched under, or ``None`` when
+    the registry has forgotten it (never launched here, or launched before a restart), the
+    only case a bare disk listing can resolve under the current root instead.
+
+    The one lookup shared by everywhere a sweep's own files (its trial directory, its
+    TensorBoard link farm) must be addressed under the root the sweep actually belongs to.
+    """
+    with _lock:
+        job = _sweeps.get(sweep_id)
+    return job.platform_root if job is not None else None
+
+
 def _sweep_root(sweep_id: str) -> Path:
     """The directory a sweep's trials live in, once a manifest proves the sweep exists.
 
     A sweep this process's own live registry still remembers is addressed under the root it
-    launched under (``job.platform_root``, stamped once at launch), so a running or finished
-    sweep stays reachable through the sweep detail, trial view and TensorBoard routes across
-    a repin to another project. A sweep the registry has forgotten (never launched here, or
-    launched before a restart) is addressed under the current root instead, the only root a
-    bare disk listing can mean.
+    launched under (:func:`_sweep_launch_root`), so a running or finished sweep stays
+    reachable through the sweep detail, trial view and TensorBoard routes across a repin to
+    another project. A sweep the registry has forgotten (never launched here, or launched
+    before a restart) is addressed under the current root instead, the only root a bare disk
+    listing can mean.
 
     The sweep's own resolved location is what this is, not a path recorded inside the
     manifest: an absolute path in a file is not a path this process should follow.
     """
     from tcip_mcp.tools.training_tools import sweep_dir
 
-    with _lock:
-        job = _sweeps.get(sweep_id)
-    root = job.platform_root if job is not None else None
+    root = _sweep_launch_root(sweep_id)
     if _read_manifest(sweep_id, root=root) is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
     return sweep_dir(sweep_id, root=root)
@@ -226,6 +237,7 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
             output_dir=output_dir,
             search_alg=payload.search_alg,
             scheduler=payload.scheduler,
+            study_name=job.sweep_id,
         )
         job.result = res if isinstance(res, dict) else {"raw": res}
         job.status = "completed"
@@ -416,14 +428,22 @@ def _link_dir(link: Path, target: Path) -> None:
         raise OSError(f"could not link {link} -> {target}: {result.stderr.strip()}")
 
 
-def _trial_view_dir(sweep_id: str) -> Path:
-    """Where this sweep's clean-named trial links live, apart from the real trial dirs."""
+def _trial_view_dir(sweep_id: str, *, root: Optional[str] = None) -> Path:
+    """Where this sweep's clean-named trial links live, apart from the real trial dirs.
+
+    ``root`` (the sweep's own launch root, from :func:`_sweep_launch_root`) wins when given,
+    so the link farm always lands beside the sweep's own trial directories rather than inside
+    whichever project this process is currently pinned to; omitted, this falls back to the
+    current platform root, the historical behaviour for a sweep the registry has forgotten.
+    """
     from tcip_mcp.project_paths import resolve_state
 
+    if root is not None:
+        return Path(root) / ".tcip" / "state" / "tensorboard_views" / sweep_id
     return resolve_state(Path(".tcip") / "state" / "tensorboard_views" / sweep_id)
 
 
-def _ensure_trial_view(sweep_id: str, sweep_root: Path) -> Path:
+def _ensure_trial_view(sweep_id: str, sweep_root: Path, *, root: Optional[str] = None) -> Path:
     """A directory where every trial with a tensorboard dir today is linked under its bare
     ``trial_<id>`` name, so TensorBoard's own per-run picker shows that instead of
     ``trial_<id>\\tensorboard`` -- the leaf-directory name TensorBoard would otherwise read off
@@ -434,7 +454,7 @@ def _ensure_trial_view(sweep_id: str, sweep_root: Path) -> Path:
     created, is never moved -- and TensorBoard's own ``--reload_interval`` picks up a link added
     after it already started, the same as it would a new subdirectory.
     """
-    view = _trial_view_dir(sweep_id)
+    view = _trial_view_dir(sweep_id, root=root)
     view.mkdir(parents=True, exist_ok=True)
     for trial_dir in sorted(sweep_root.iterdir()):
         if not trial_dir.is_dir() or not trial_dir.name.startswith(_TRIAL_DIR_PREFIX):
@@ -464,7 +484,8 @@ def launch_sweep_tensorboard(sweep_id: str, payload: EmptyBodyPayload) -> dict:
     """
     from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
 
-    view = _ensure_trial_view(sweep_id, _sweep_root(sweep_id))
+    root = _sweep_launch_root(sweep_id)
+    view = _ensure_trial_view(sweep_id, _sweep_root(sweep_id), root=root)
     return launch_tensorboard(str(view), run_id=f"sweep_{sweep_id}")
 
 
