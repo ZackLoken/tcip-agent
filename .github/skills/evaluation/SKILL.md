@@ -81,9 +81,11 @@ stays visible on review.
 `run_inference`/`force_redraw_cal_holdout_split` also take `split_manifest_dir`: draw the
 calibration universe from one capture date's held-out side of a named `split_manifest` record
 instead of every labelled stem with an image, so the operating point measures on exactly the set
-the shipped checkpoint was chosen against. Its subject/attribute must match the checkpoint's own
-recorded training scope, and it conflicts with an explicit `group_by`/`group_key_map`, whose
-default becomes `None` for this reason (resolved to `tile_prefix` when neither was given).
+the shipped checkpoint was chosen against. The manifest's own subject/attribute must match this
+call's (`force_redraw_cal_holdout_split` takes `subject`/`attribute` directly; `run_inference`
+resolves them from the run's own training scope), and `split_manifest_dir` conflicts with an
+explicit `group_by`/`group_key_map`, whose default becomes `None` for this reason (resolved to
+`tile_prefix` when neither was given).
 
 ## Failure Triage
 

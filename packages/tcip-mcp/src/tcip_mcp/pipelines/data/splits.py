@@ -968,7 +968,8 @@ def calibration_universe_from_manifest(
             f"the split manifest's held-out side for date {date!r} gives a calibration universe "
             f"of {n_groups} group(s) ({len(stems)} stem(s)) after excluding what isn't present: "
             "a held-out half needs at least two groups, or the operating point would stamp "
-            "unvalidated silently."
+            "unvalidated silently. Draw the manifest again with more groups or a different "
+            "held-out ratio, or calibrate over the whole directory without split_manifest_dir."
         )
     return stems, group_by, group_key_map, excluded
 

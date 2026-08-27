@@ -47,6 +47,53 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
     assert anns[0]["created_by"] == f"model:m@{checkpoint_sha256(ckpt)[:12]}"
 
 
+def test_export_predictions_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
+    """A manifest-restricted calibration's evidence can only earn a validation record through
+    this door if the door actually forwards split_manifest_dir to run_inference."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    captured = {}
+
+    def _fake_run_inference(**kwargs):
+        captured.update(kwargs)
+        return {"error": "stop: plumbing check only"}
+
+    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+
+    itools.export_predictions(
+        "ckpt.pt", images_dir=str(tmp_path), output_dir=str(tmp_path / "out"),
+        split_manifest_dir=str(tmp_path / "m"))
+
+    assert captured.get("split_manifest_dir") == str(tmp_path / "m")
+
+
+def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
+    """A manifest-restricted calibration's evidence can only earn a validation record through
+    this door if the door actually forwards split_manifest_dir to run_inference."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    captured = {}
+
+    def _fake_run_inference(**kwargs):
+        captured.update(kwargs)
+        return {"error": "stop: plumbing check only"}
+
+    monkeypatch.setattr(itools, "run_inference", _fake_run_inference)
+    stated = type("Stated", (), {"ok": True, "message": ""})()
+    monkeypatch.setattr(
+        "tcip_mcp.operationalization.resolve_trait_and_record",
+        lambda trait, kind: (object(), object(), tmp_path))
+    monkeypatch.setattr(
+        "tcip_mcp.operationalization.check_operationalization",
+        lambda spec, record, kind, registry=None: stated)
+
+    itools.tabulate_counts(
+        "ckpt.pt", str(tmp_path), str(tmp_path / "out.csv"), "some_trait",
+        split_manifest_dir=str(tmp_path / "m"))
+
+    assert captured.get("split_manifest_dir") == str(tmp_path / "m")
+
+
 def _fake_predictor(monkeypatch):
     class FakePredictor:
         def __init__(self, checkpoint_path=None, **kwargs):

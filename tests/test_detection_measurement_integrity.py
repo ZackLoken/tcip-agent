@@ -888,6 +888,46 @@ def test_cross_dataset_inheritance_flagged(tmp_path, monkeypatch):
     assert r["validated"] is False  # not shippable under the target actually used
 
 
+def test_manifest_calibration_subset_of_inference_target_is_still_comparable(tmp_path, monkeypatch):
+    """Under a manifest the calibration's own universe is a held-out subset of the labelled
+    directory; inferring the whole directory is still the same labelled set, so the firewall
+    compares real hashes instead of reading a fully-labelled target as unlabeled."""
+    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+
+    from PIL import Image
+
+    cal, hold = _good_dense_cal_holdout()
+    inputs = {"tiled": False, "dataset_hash": "H", "calibration_records": cal,
+             "holdout_records": hold, "staged_conf_floor": 0.01}
+    bundle = resolve_operating_point("catkin", experiment_id=None, **inputs)
+    evidence = {
+        "resolver": "resolve_operating_point", "inputs": inputs,
+        "reference_inputs": {
+            "label_stems": {"calibration": {"path": str(tmp_path), "stems": ["a"]}},
+            "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
+        },
+        "calibration_stems": ["a"],
+    }
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, "H", 0, evidence))
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CalStub())
+    monkeypatch.chdir(tmp_path)
+
+    img_a, img_b = tmp_path / "a.png", tmp_path / "b.png"
+    Image.new("RGB", (100, 100)).save(img_a)
+    Image.new("RGB", (100, 100)).save(img_b)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    r = itools.run_inference(
+        str(ckpt), image_paths=[str(img_a), str(img_b)], images_dir=str(tmp_path), device="cpu",
+        tile=False, trait="catkin", calibration_labels_dir=str(tmp_path),
+        split_manifest_dir=str(tmp_path / "m"))
+
+    assert r["cross_dataset_check"] == "same-labeled-set"
+
+
 def test_unlabeled_target_is_not_comparable_but_shippable(tmp_path, monkeypatch):
     """An unlabeled inference target has no GT hash to compare: record it as such and still ship when
     the held-out calibration passed (no validated/shippable_issues contradiction)."""
