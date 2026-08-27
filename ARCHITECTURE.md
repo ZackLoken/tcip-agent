@@ -706,7 +706,7 @@ Docstring is the function's docstring first line, verbatim.
 | `cancel_training` | `training_tools.py:898` | yes | Request graceful cancellation of a running training run. |
 | `inspect_compute_resources` | `training_tools.py:927` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
 | `run_hpo` | `training_tools.py:1305` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2503` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `evaluate_model` | `training_tools.py:2506` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, Sized
 
 from tcip_store import (
     LOG_JSON,
@@ -320,10 +320,10 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
 
     # Four-way spatial split feasibility (reserve_calibration_fraction, opt-in): must refuse by
     # name when infeasible, not silently degrade to no validation (see the helper's own docstring).
-    reserve_cal_frac = split_cfg.get("reserve_calibration_fraction") if isinstance(split_cfg, dict) else None
+    reserve_cal_frac = split_cfg_dict.get("reserve_calibration_fraction")
     if reserve_cal_frac:
         issues.extend(_reserve_calibration_feasibility_issues(
-            model_source, data_cfg, split_cfg, reserve_cal_frac, smoke=smoke))
+            model_source, data_cfg_dict, split_cfg_dict, reserve_cal_frac, smoke=smoke))
 
     # Trainable-sample coverage: trainable_stems' own partition was computed
     # by DetectionDataset/InstanceSegDataset and then thrown away, a run whose label store admits
@@ -346,11 +346,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
                     labels_dir, images_dir, subject=data_cfg.get("subject"),
                     date=data_cfg.get("date"), contradicted_out=contradicted_negatives)
             except UnreadableLabelDocument as exc:
-                stems, sample_counts = None, None
+                stems, sample_counts = [], {}
                 # A run over this labels_dir fails on the same file, so this blocks, not warns.
                 issues.append(f"data.labels_dir: {exc}")
             except (OSError, ValueError):
-                stems, sample_counts = None, None
+                stems, sample_counts = [], {}
             if contradicted_negatives:
                 warnings.append(
                     f"data: {sorted(contradicted_negatives)} are recorded negative for the "
@@ -788,9 +788,9 @@ def check_training_status(run_id: str) -> dict:
     tb_url = None
     try:
         from tcip_mcp.pipelines.training.tensorboard_manager import _TB_PROCESSES
-        proc = _TB_PROCESSES.get(run_id)
-        if proc and proc.poll() is None:
-            tb_url = f"http://localhost:{proc._tb_port}"
+        entry = _TB_PROCESSES.get(run_id)
+        if entry is not None and entry.proc.poll() is None:
+            tb_url = f"http://localhost:{entry.port}"
     except Exception:
         pass
     result["tensorboard_url"] = tb_url
@@ -1842,6 +1842,7 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
 
         src = _dataset_source_kwargs(task, data_cfg)
         ds = build_dataset(task, **src, transforms=transforms, tiling=data_cfg.get("tiling"))
+        assert isinstance(ds, Sized), "every build_dataset task backend defines __len__"
         items = [ds[i] for i in range(min(n, len(ds)))]
         if not items:
             return None, "the dataset built but is empty"
@@ -1918,7 +1919,7 @@ def _reserve_calibration_feasibility_issues(
 
 def _spatial_single_source_split(
     stem: str, data_cfg: dict, tiling: dict, base, split_cfg: dict, transforms,
-) -> tuple:
+) -> tuple | None:
     """A train/val split over one detection source's own tile lattice, by disjoint pixel strips.
 
     Called only from ``_auto_train_val``'s single-source branch: there is no second stem to hold
@@ -1982,8 +1983,8 @@ def _spatial_single_source_split(
     seed = int(split_cfg.get("seed", 42))
     if reserve_cal:
         train_ratio = 1.0 - val_ratio - test_ratio - reserve_cal
-        split_names = ("train", "val", "test", "calibration")
-        fractions = (train_ratio, val_ratio, test_ratio, reserve_cal)
+        split_names: tuple[str, ...] = ("train", "val", "test", "calibration")
+        fractions: tuple[float, ...] = (train_ratio, val_ratio, test_ratio, reserve_cal)
     else:
         train_ratio = 1.0 - val_ratio - test_ratio
         split_names = ("train", "val", "test")
@@ -2035,7 +2036,8 @@ def _spatial_single_source_split(
         return None
 
     def _identities(ds) -> list[str]:
-        return sorted({spatial.identity_for(s, tx, ty) for s, tx, ty in ds.tile_entries} - {None})
+        raw = {spatial.identity_for(s, tx, ty) for s, tx, ty in ds.tile_entries}
+        return sorted(name for name in raw if name is not None)
 
     split_cfg["resolved_group_by"] = "spatial_strip"
     split_cfg["spatial_manifest"] = {
@@ -2148,6 +2150,7 @@ def _build_full_admitted_dataset(task: str, data_cfg: dict, src: dict, transform
         from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, assemble_coco
         subject, attribute = src.get("subject"), src.get("attribute")
         _reg, id_map = _resolve_registry_id_map(labels_dir, subject, attribute)
+        assert subject is not None, "_resolve_registry_id_map already refused an empty subject"
         build_src["coco_data"] = assemble_coco(
             labels_dir, images_dir, subject=subject, attribute=attribute, id_map=id_map,
             date=src.get("date"))
