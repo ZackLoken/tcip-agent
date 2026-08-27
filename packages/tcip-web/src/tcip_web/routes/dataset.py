@@ -109,14 +109,24 @@ def _dir_mtime_ns(p: Path) -> int:
 def _subjects_by_date(root: Path, dates: list[str]) -> tuple[dict[str, list[str]], Optional[str]]:
     """``subjects_with_labels`` per date, and the first date's problem when one won't read.
 
-    A date whose labels won't read reports an empty subject list for that date rather than
-    aborting the scan: every other date's own labels are unaffected by one date's corrupt file.
+    A date whose labels won't read, or whose annotations directory the path guard refuses,
+    reports an empty subject list for that date rather than aborting the scan: every other
+    date's own labels are unaffected by one date's corrupt file or disallowed storage. The guard
+    checked here is the one ``routes/classes.py``'s ``load_classes`` applies to the same
+    directory, so a dataset the class registry route 403s never lists its subjects here instead.
     """
     from tcip_annotation.json_io import UnreadableLabelDocument
 
     by_date: dict[str, list[str]] = {}
     problem: Optional[str] = None
     for d in dates:
+        try:
+            assert_path_allowed(str(annotation_dir(root, d)))
+        except ValueError as exc:
+            by_date[d] = []
+            if problem is None:
+                problem = str(exc)
+            continue
         try:
             by_date[d] = subjects_with_labels(root, d, reader=cached_label_annotations)
         except UnreadableLabelDocument as exc:

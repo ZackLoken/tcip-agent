@@ -64,6 +64,16 @@ def _image(path: Path) -> Path:
     return path
 
 
+def _link_to(link: Path, target: Path) -> None:
+    """A directory symlink from ``link`` to ``target``, skipping the test where this machine
+    cannot make one rather than failing on an environment limitation."""
+    target.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks not available on this machine: {exc}")
+
+
 # ── the derived allow-set ──────────────────────────────────────────────────
 
 
@@ -189,6 +199,65 @@ def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
     assert listed.status_code == 200 and listed.json()["images"] == ["a.jpg"]
     _open(client, inside)
     assert store.project_root == inside.resolve()
+
+
+def test_an_annotations_link_inside_an_allowed_root_loads_in_both_routes(
+    client: TestClient, tmp_path: Path, closed_project,
+) -> None:
+    """The class registry route and the dataset tree's per-date scan read one directory under
+    one guard: a symlink whose target genuinely sits inside the allow-set is admitted by both."""
+    from tcip_annotation.json_io import write_annotations
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_web.routes.dataset import _subjects_by_date
+
+    project = _project(tmp_path)
+    date = "2026-02-11"
+    real_annotations = tmp_path.parent / "nas" / "annotations_store" / date
+    real_annotations.mkdir(parents=True)
+    write_annotations(str(real_annotations / "IMG_0001.json"),
+                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 10, 10)
+    ann_dir = project / "annotations"
+    ann_dir.mkdir()
+    _link_to(ann_dir / date, real_annotations)
+
+    by_date, problem = _subjects_by_date(project, [date])
+    assert by_date[date] == ["catkin"]
+    assert problem is None
+
+    load = client.get("/api/classes/load", params={
+        "project_root": str(project), "dataset_root": str(project),
+        "annotations_dir": str(ann_dir / date)})
+    assert load.status_code == 200
+    assert set(load.json()["subjects"]) == {"catkin"}
+
+
+def test_an_annotations_link_outside_every_allowed_root_is_refused_by_both_routes(
+    client: TestClient, tmp_path: Path, outside: Path, closed_project,
+) -> None:
+    """The same directory 403s the class registry route and is reported as this date's problem
+    by the dataset tree, rather than the tree quietly listing what the registry route refuses."""
+    from tcip_annotation.json_io import write_annotations
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_web.routes.dataset import _subjects_by_date
+
+    project = _project(tmp_path)
+    date = "2026-02-11"
+    real_annotations = outside / "nas" / "annotations_store" / date
+    real_annotations.mkdir(parents=True)
+    write_annotations(str(real_annotations / "IMG_0001.json"),
+                      [Annotation(subject="catkin", geometry=BBox(1, 1, 5, 5))], 10, 10)
+    ann_dir = project / "annotations"
+    ann_dir.mkdir()
+    _link_to(ann_dir / date, real_annotations)
+
+    by_date, problem = _subjects_by_date(project, [date])
+    assert by_date[date] == []
+    assert problem is not None and "outside the allowed roots" in problem
+
+    resp = client.get("/api/classes/load", params={
+        "project_root": str(project), "dataset_root": str(project),
+        "annotations_dir": str(ann_dir / date)})
+    assert resp.status_code == 403
 
 
 def test_the_state_store_persists_under_the_guarded_root_not_the_snapshot_it_loaded(
