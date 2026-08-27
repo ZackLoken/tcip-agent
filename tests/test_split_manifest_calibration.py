@@ -267,6 +267,23 @@ def test_calibrate_operating_point_manifest_refuses_an_images_root_mismatch(tmp_
             split_manifest_dir=str(out), **_CAL_KWARGS)
 
 
+def test_calibrate_operating_point_manifest_requires_images_dir(tmp_path: Path):
+    """A labels-only universe can include a stem whose image is gone, a lock the redraw would
+    address that no manifest-restricted calibration ever draws; refuse by name rather than raise
+    a bare ``KeyError`` out of the stem-to-image narrowing."""
+    import tcip_mcp.tools.inference_tools as itools
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    kwargs = dict(_CAL_KWARGS)
+
+    with pytest.raises(ValueError, match="images_dir"):
+        itools._calibrate_operating_point(
+            _CalStub(), "catkin", str(root / "annotations" / DATES[0]), None,
+            split_manifest_dir=str(out), **kwargs)
+
+
 def test_calibrate_operating_point_manifest_refuses_a_moved_images_root_by_name(tmp_path: Path):
     """A manifest's recorded images_root that no longer exists on disk answers the named
     refusal, never a bare crash from comparing against a gone path."""
@@ -282,6 +299,24 @@ def test_calibrate_operating_point_manifest_refuses_a_moved_images_root_by_name(
         itools._calibrate_operating_point(
             _CalStub(), "catkin", str(root / "annotations" / DATES[0]), str(moved),
             split_manifest_dir=str(out), **_CAL_KWARGS)
+
+
+# -- run_inference's own split_manifest_dir refusal --------------------------------
+
+
+def test_run_inference_refuses_split_manifest_dir_without_calibration_labels_dir(tmp_path: Path):
+    """A manifest with no ``calibration_labels_dir`` scopes a calibration that will never run
+    (``trait``/``calibration_labels_dir`` is what turns the manifest into a bounded universe), so
+    the call is refused by name rather than silently training without validation."""
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    result = run_inference(
+        str(ckpt), image_paths=[str(tmp_path / "a.png")], split_manifest_dir=str(tmp_path / "m"))
+
+    assert "error" in result and "split_manifest_dir" in result["error"]
 
 
 # -- force_redraw_cal_holdout_split with a manifest --------------------------------

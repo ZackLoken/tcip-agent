@@ -200,9 +200,10 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     by stating that root.
 
     Raises ``ValueError`` (propagated from ``resolve_locked_cal_holdout_split``) when the lock
-    references a stem whose image/label no longer exists, or its lock file is corrupt, the caller
-    (``run_inference``) turns this into a clean ``{"error": ...}`` rather than letting a bare
-    ``KeyError`` surface from a stale ``stem_to_image`` lookup.
+    references a stem whose image/label no longer exists, or its lock file is corrupt; also
+    raised by name when ``split_manifest_dir`` is given with no ``images_dir``, a labels-only
+    universe the redraw refuses the same way. The caller (``run_inference``) turns either into a
+    clean ``{"error": ...}``.
 
     ``labels_dir`` is read as a measurement reference, so it goes through
     ``json_io.require_reference_ground_truth`` first (the same admissibility rule the classifier
@@ -279,6 +280,12 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
     excluded = None
     if split_manifest_dir is not None:
+        if not images_dir:
+            raise ValueError(
+                "split_manifest_dir requires calibration_images_dir (or images_dir): a "
+                "labels-only universe can include a stem whose image is gone, a lock the redraw "
+                "would address that no manifest-restricted calibration ever draws."
+            )
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
             calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
@@ -782,10 +789,17 @@ def run_inference(
             subject/attribute must equal the checkpoint's own recorded training scope, the
             calibration labels' date must be one the manifest holds members under, and the
             manifest's ``images_root`` for that date must be ``calibration_images_dir`` (or
-            ``images_dir``), each refusing by name.
+            ``images_dir``), each refusing by name. The response carries
+            ``n_excluded_training_stems`` and ``n_excluded_unassigned_stems``, the present stems
+            the manifest's universe left out (its training side, and stems the draw never
+            assigned), beside ``n_excluded_incomplete_attribute``.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
+    if split_manifest_dir and not calibration_labels_dir:
+        return {"error": "split_manifest_dir requires calibration_labels_dir: it scopes a "
+                         "calibration this call has no trait/calibration_labels_dir to run, so "
+                         "the manifest would be silently dropped rather than bounding one."}
 
     # An unstated cap falls to the shared platform default for the pass while staying unstated for
     # the resolver, the only thing that can derive one from the data.
@@ -960,7 +974,12 @@ def run_inference(
         else:
             comparable = bool(same_images and inf_stems and set(inf_stems) == cal_label_stems)
         if comparable:
-            target_hash, cross_dataset_check = dataset_hash(calibration_labels_dir, stems=inf_stems), "same-labeled-set"
+            # The bundle's own hash covers the calibration universe under a manifest, not the
+            # (larger) inference stem list, so the target must be hashed over that same universe.
+            hashed_stems = evidence.get("calibration_stems", []) if split_manifest_dir is not None \
+                else inf_stems
+            target_hash, cross_dataset_check = (
+                dataset_hash(calibration_labels_dir, stems=hashed_stems), "same-labeled-set")
         else:
             target_hash, cross_dataset_check = None, "not-comparable-unlabeled-target"
         issues = bundle.shippable_issues(target_dataset_hash=target_hash)
@@ -1787,6 +1806,10 @@ def export_predictions(
         return {"error": "calibration_labels_dir is not supported for a raster_path export: "
                          "block calibration (trait alone, see below) validates against the "
                          "mosaic's own reserved regions instead of a caller-supplied labeled dir."}
+    if raster_path is not None and split_manifest_dir:
+        return {"error": "split_manifest_dir is not supported for a raster_path export: block "
+                         "calibration draws no split-manifest universe, so it would be silently "
+                         "dropped rather than scoping anything."}
     if raster_path is not None:
         # The images_dir regime gets this for free from run_inference's own check; this regime
         # builds its predictor directly, so a missing file would otherwise raise uncaught.

@@ -67,6 +67,19 @@ def test_export_predictions_forwards_split_manifest_dir_to_run_inference(tmp_pat
     assert captured.get("split_manifest_dir") == str(tmp_path / "m")
 
 
+def test_export_predictions_refuses_split_manifest_dir_with_raster_path(tmp_path):
+    """The raster regime draws no split-manifest universe (block calibration validates against
+    the mosaic's own reserved regions instead), so a caller-given manifest is refused by name
+    rather than silently dropped before it ever reaches the raster pass."""
+    from tcip_mcp.tools.inference_tools import export_predictions
+
+    result = export_predictions(
+        "ckpt.pt", output_dir=str(tmp_path / "out"),
+        raster_path=str(tmp_path / "mosaic.tif"), split_manifest_dir=str(tmp_path / "m"))
+
+    assert "error" in result and "split_manifest_dir" in result["error"]
+
+
 def test_tabulate_counts_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):
     """A manifest-restricted calibration's evidence can only earn a validation record through
     this door if the door actually forwards split_manifest_dir to run_inference."""
