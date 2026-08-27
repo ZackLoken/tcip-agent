@@ -197,6 +197,20 @@ def test_make_splits_stats_only_carries_dataset_hash(data_dir: Path):
     assert result["dataset_hash"]
 
 
+def test_make_splits_manifest_answer_carries_each_dates_hash(data_dir: Path, tmp_path: Path):
+    """A manifest call's answer identifies the labels it partitioned per capture date, the same
+    hashes the written manifest's ``members`` blocks record, so the caller need not open the
+    record to cite what the draw covered."""
+    out = tmp_path / "manifests"
+    result = make_splits(str(data_dir), output_path=str(out), subject="catkin")
+    assert "error" not in result
+
+    members = ts.read(split_manifest_key(out))["members"]
+    assert result["dataset_hashes_by_date"] == {
+        key: block["dataset_hash"] for key, block in members.items()}
+    assert result["dataset_hashes_by_date"]["2-11-26"]
+
+
 def test_make_splits_bad_ratios(data_dir: Path):
     result = make_splits(str(data_dir), train_ratio=0.5, val_ratio=0.5, test_ratio=0.5)
     assert "error" in result

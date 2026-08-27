@@ -690,6 +690,7 @@ def make_splits(
         "attribute": attribute,
         "admission_counts": admission_counts,
         "manifest_dir": str(out_dir),
+        "dataset_hashes_by_date": {key: block["dataset_hash"] for key, block in members.items()},
     }
 
     if materialize:
