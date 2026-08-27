@@ -700,13 +700,13 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `preflight_config` | `training_tools.py:68` | yes | Validate a training configuration before launching. |
-| `launch_training` | `training_tools.py:518` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
-| `check_training_status` | `training_tools.py:746` | yes | Check the status of a training run. |
-| `list_training_runs` | `training_tools.py:882` | yes | List every training run this platform can currently account for. |
-| `cancel_training` | `training_tools.py:896` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:925` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1303` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2482` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `launch_training` | `training_tools.py:520` | yes | Launch a training run in an isolated subprocess from a bespoke ``model_source`` builder. |
+| `check_training_status` | `training_tools.py:748` | yes | Check the status of a training run. |
+| `list_training_runs` | `training_tools.py:884` | yes | List every training run this platform can currently account for. |
+| `cancel_training` | `training_tools.py:898` | yes | Request graceful cancellation of a running training run. |
+| `inspect_compute_resources` | `training_tools.py:927` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
+| `run_hpo` | `training_tools.py:1305` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2503` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
