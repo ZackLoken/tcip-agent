@@ -223,6 +223,26 @@ def test_inspect_project_reports_no_divergence_when_root_matches_the_marker(
     assert "platform_root_diverges_from_marker" not in status
 
 
+def test_inspect_project_reports_the_current_platform_root_binding_after_a_repin(
+    tmp_path: Path, monkeypatch
+):
+    """platform_root_binding is the substitute for a log line no process here emits: it must
+    name the just-adopted root, not whatever pin_project_root last decided at process startup."""
+    from tcip_mcp import workspace
+
+    ws = tmp_path / "ws"
+    proj = ws / "hazelnut_catkin_valley"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    workspace.set_active_project("hazelnut_catkin_valley")
+    status = inspect_project(str(proj))
+
+    binding = status["platform_root_binding"]
+    assert binding["root"] == str(proj)
+    assert binding["source"] == "adopted"
+
+
 def test_inspect_project_reports_marker_problem_for_a_dangling_marker(
     tmp_path: Path, monkeypatch
 ):

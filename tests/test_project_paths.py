@@ -139,3 +139,69 @@ def test_resolve_state_absolute_passes_through(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setenv(pp.ENV_VAR, str(tmp_path / "pinned"))
     abs_path = tmp_path / "isolated" / "audit.jsonl"
     assert pp.resolve_state(abs_path) == abs_path
+
+
+def test_pin_from_marker_keeps_a_transient_read_failure_even_when_a_retry_would_succeed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A lock timeout on the marker read must not be discarded by a second, independent read
+    that happens to succeed: the transient failure is what the binding records."""
+    from tcip_mcp import workspace
+
+    proj_root = workspace.project_path("chestnut_demo")
+    (proj_root / ".tcip").mkdir(parents=True)
+    workspace.set_active_project("chestnut_demo")
+
+    real_active = workspace.active_project_if_present
+    calls = {"n": 0}
+
+    def flaky(*, create=False):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("could not acquire the workspace lock within 30s")
+        return real_active(create=create)
+
+    monkeypatch.setattr(workspace, "active_project_if_present", flaky)
+
+    binding = pp.pin_project_root(from_marker=True)
+    assert binding.marker_problem == "could not acquire the workspace lock within 30s"
+
+
+def test_repin_platform_root_updates_the_root_binding(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv(pp.ENV_VAR, raising=False)
+    other = tmp_path.parent / "elsewhere"
+    other.mkdir()
+
+    pp.repin_platform_root(other)
+
+    binding = pp.root_binding()
+    assert binding is not None
+    assert binding.root == other
+    assert binding.source == "adopted"
+    assert binding.inherited_root is None
+    assert binding.marker_problem is None
+
+
+def test_repin_platform_root_records_the_previous_root_as_inherited(
+    monkeypatch, tmp_path: Path
+) -> None:
+    first = tmp_path.parent / "first"
+    second = tmp_path.parent / "second"
+    first.mkdir()
+    second.mkdir()
+    monkeypatch.setenv(pp.ENV_VAR, str(first))
+
+    pp.repin_platform_root(second)
+
+    binding = pp.root_binding()
+    assert binding.root == second
+    assert binding.inherited_root == str(first)
+
+
+def test_restore_binding_resets_the_root_binding_to_a_snapshot() -> None:
+    original = pp.root_binding()
+    pp.pin_project_root(from_marker=False)
+    assert pp.root_binding() is not original
+
+    pp.restore_binding(original)
+    assert pp.root_binding() is original

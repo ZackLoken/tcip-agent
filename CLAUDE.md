@@ -313,11 +313,15 @@ for a name you expected, or a tool you know was renamed still appears under its 
 the client is holding a stale tool index cached from an earlier server build. Restart
 the MCP client (or reconnect) so it re-reads the running server's tools; confirm against
 `python scripts/list_tools.py`, which reflects the source, not the cache. Durable platform
-state (the audit log, the experiment records) resolves via `$TCIP_PROJECT_ROOT`, which the
-web backend, and an MCP server running inside the platform's own agent terminal, pin from the
-workspace's active-project marker at startup; every other process pins to whatever it
-inherited, or the repo root. Either way a process started from a subdir no longer fragments
-`.tcip/`.
+state (the audit log, the experiment records) resolves via `$TCIP_PROJECT_ROOT`. Only two
+processes ever pin it themselves: the web backend, once it serves, and an MCP server started
+inside the platform's own agent terminal; each binds from the workspace's active-project
+marker at startup, falling back to whatever it inherited, or (with nothing inherited) the
+repo root. Every other process (a `scripts/` run, `tcip_annotation` used standalone) never
+calls the pin itself: a training child inherits the variable only because it copies its
+launching process's already-pinned environment, and a process with neither a pin nor an
+inherited value resolves against its own current directory, so a subdir-launched process
+with nothing set still fragments `.tcip/` there.
 
 Reindexing `claude-context` (`mcp__claude-context__index_codebase`/`clear_index`) against this
 repo: `get_indexing_status`'s `Status: completed` is not a completion signal here, confirmed

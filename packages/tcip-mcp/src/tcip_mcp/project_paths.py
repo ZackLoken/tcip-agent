@@ -114,16 +114,20 @@ def repo_root_from_here() -> Path:
 
 @dataclass(frozen=True)
 class RootBinding:
-    """How a process's platform-state root was decided by :func:`pin_project_root`.
+    """How a process's platform-state root was decided by :func:`pin_project_root`, or set
+    since by :func:`repin_platform_root`.
 
     ``source`` is ``"marker"`` (the workspace's active-project marker supplied the root),
-    ``"inherited"`` (the process kept a root it was launched with), or ``"repo_root"``
-    (neither was available). ``inherited_root`` is the variable's value before this bind,
-    ``None`` when nothing was inherited, kept so an overridden value stays visible.
+    ``"inherited"`` (the process kept a root it was launched with), ``"repo_root"`` (neither
+    was available), or ``"adopted"`` (a later :func:`repin_platform_root` call, an explicit
+    adopt rather than the startup bind). ``inherited_root`` is the variable's value before this
+    bind, ``None`` when nothing was inherited, kept so an overridden value stays visible; for
+    an ``"adopted"`` binding it is the root this process was pinned to just before the repin.
     ``marker_problem`` is ``None`` when the process either did not consult the marker or the
     marker named no project; otherwise the text of why the marker could not be used: a store
     refusal, a lock timeout, or a name :func:`tcip_mcp.workspace.adoptable_project_root`
-    refuses to open.
+    refuses to open. Always ``None`` on an ``"adopted"`` binding, since a repin only ever
+    follows an adopt that already resolved a real root.
     """
 
     root: Path
@@ -141,14 +145,32 @@ def root_binding() -> Optional[RootBinding]:
     return _binding
 
 
+def restore_binding(binding: Optional[RootBinding]) -> None:
+    """Restore this process's :class:`RootBinding` to a snapshot a caller took earlier.
+
+    For a caller that must undo its own :func:`pin_project_root`/:func:`repin_platform_root`
+    calls once it is done, the way a test's fixture restores the ``$TCIP_PROJECT_ROOT``
+    environment variable around a test that adopts a project.
+    """
+    global _binding
+    _binding = binding
+
+
 def repin_platform_root(root: Path) -> None:
-    """Set ``$TCIP_PROJECT_ROOT`` to ``root``.
+    """Set ``$TCIP_PROJECT_ROOT`` to ``root`` and record the change as an ``"adopted"``
+    :class:`RootBinding`.
 
     The one writer of the variable: :func:`pin_project_root`'s startup bind,
     ``workspace.set_active_project``'s adopt, and the web backend's repin on the agent's
-    adopt signal all go through here, so there is one place that changes it.
+    adopt signal all go through here, so there is one place that changes it, and
+    :func:`root_binding` reports the current root immediately after any of them.
     """
+    global _binding
+    inherited_root = os.environ.get(ENV_VAR)
     os.environ[ENV_VAR] = str(root)
+    _binding = RootBinding(
+        root=Path(root), source="adopted", inherited_root=inherited_root, marker_problem=None
+    )
 
 
 def pin_project_root(*, from_marker: bool) -> RootBinding:
@@ -186,7 +208,7 @@ def pin_project_root(*, from_marker: bool) -> RootBinding:
         if found is not None:
             _, root = found
             source = "marker"
-        else:
+        elif marker_problem is None:
             marker_problem = workspace.marker_problem(create=False)
 
     if root is None:
