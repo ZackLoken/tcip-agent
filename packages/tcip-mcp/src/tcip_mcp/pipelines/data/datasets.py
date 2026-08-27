@@ -436,34 +436,6 @@ def _raw_status_store(labels_dir) -> object:
     return {} if root is None else read_image_status_store(root)
 
 
-def confirmed_negative_records_every_date(
-    labels_dir, *, subject: str, quarantined_out: set[str] | None = None,
-    contradicted_out: set[str] | None = None,
-) -> dict[str, dict[str, str]]:
-    """This subject's confirmed negatives from every bucket the store names it under, by image name.
-
-    For a caller whose answer must span every capture date a subject was ever confirmed under,
-    rather than one date's own bucket. The dates come from
-    :func:`~tcip_mcp.dataset_layout.bucket_dates_for_subject`, the keys writers actually stated, so
-    no bucket is missed and none is invented; each one is then read through
-    :func:`confirmed_negative_records`, quarantine and the label-content exclusion included, rather
-    than by a second reader.
-
-    An image name confirmed under more than one date resolves to the last date's record, which is
-    the same merge a caller reading each date itself would perform. Pass ``contradicted_out`` (a
-    set, mutated in place) to learn which names were excluded because their label file now holds
-    the subject, contradicting the stored negative.
-    """
-    from tcip_mcp.dataset_layout import bucket_dates_for_subject
-
-    out: dict[str, dict[str, str]] = {}
-    for date in bucket_dates_for_subject(_raw_status_store(labels_dir), subject):
-        out.update(confirmed_negative_records(
-            labels_dir, subject=subject, date=date, quarantined_out=quarantined_out,
-            contradicted_out=contradicted_out))
-    return out
-
-
 def confirmed_negative_names(
     labels_dir, *, subject: str | None, date, quarantined_out: set[str] | None = None,
     contradicted_out: set[str] | None = None,
