@@ -183,7 +183,9 @@ def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_p
 def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_repin(
     tmp_path, monkeypatch
 ):
-    """The review priority-queue registry gets the same per-root treatment as inference/tuning."""
+    """The review priority-queue registry persists, lists and rehydrates per root the same way
+    inference/tuning do; only its by-id lookup differs from those two, spanning every root this
+    process holds, the same contract inference and tuning already hold for theirs."""
     from tcip_store import read
 
     from tcip_mcp import workspace
@@ -206,7 +208,7 @@ def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_r
     review._pq_register(job_b)
 
     try:
-        assert review._pq_get("pq-a1") is None       # not this root's job
+        assert review._pq_get("pq-a1") is job_a      # reachable by id across the repin
         assert review._pq_get("pq-b1") is not None
 
         docs_a = read(
@@ -359,6 +361,68 @@ def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path,
         assert miss.value.status_code == 404
     finally:
         _jobs.clear()
+
+
+def test_rehydrate_bounds_the_whole_dict_across_every_root_it_adopts(tmp_path, monkeypatch):
+    """Adopting three roots that each hold a full persisted registry, without registering a
+    single job here, must not grow this process's memory by MAX_JOBS per root: rehydrate
+    bounds the dict the same way registering a job already does."""
+    from tcip_mcp import workspace
+    from tcip_web.jobstore import MAX_JOBS, job_registry_key, persist_to
+    from tcip_web.routes import inference
+
+    names = ("root_x", "root_y", "root_z")
+    for name in names:
+        proj = workspace.project_path(name)
+        (proj / ".tcip").mkdir(parents=True)
+        summaries = [
+            {"job_id": f"{name}-{i}", "status": "completed", "done": 1, "total": 1,
+             "images_dir": "i", "output_dir": "o", "error": None,
+             "platform_root": str(proj.resolve())}
+            for i in range(MAX_JOBS)
+        ]
+        persist_to(job_registry_key("inference_jobs", root=proj), summaries)
+
+    inference._jobs.clear()
+    try:
+        for name in names:
+            workspace.set_active_project(name)
+            inference.rehydrate_for_current_root()
+        assert len(inference._jobs) <= MAX_JOBS
+    finally:
+        inference._jobs.clear()
+
+
+def test_priority_queue_by_id_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):
+    """Answering a ranked queue one launched is legitimate work, the same contract inference
+    already holds: a repin to another project must not make the job invisible by id, only to
+    the list route (which has none of its own for the priority queue)."""
+    from fastapi import HTTPException
+
+    from tcip_mcp import workspace
+    from tcip_web.routes.review import (
+        PriorityQueueJob, _pq_get, _pq_jobs, _pq_register, get_priority_queue_job,
+    )
+
+    job = PriorityQueueJob(
+        job_id="pq-under-a", checkpoint_path="c", images_dir="i", dataset_root="d",
+        status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
+    )
+    _pq_register(job)
+
+    try:
+        proj_b = workspace.project_path("chestnut_burr_other")
+        (proj_b / ".tcip").mkdir(parents=True)
+        workspace.set_active_project("chestnut_burr_other")
+
+        assert _pq_get("pq-under-a") is job
+        assert get_priority_queue_job("pq-under-a")["job_id"] == "pq-under-a"
+
+        with pytest.raises(HTTPException) as miss:
+            get_priority_queue_job("pq-never-launched")
+        assert miss.value.status_code == 404
+    finally:
+        _pq_jobs.clear()
 
 
 def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, monkeypatch):

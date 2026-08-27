@@ -8,11 +8,14 @@ their threads are gone, so the persisted file is a record, not a resumable state
 
 One registry document per job kind per platform root: a job carries the root it launched
 under (``platform_root``, set on the request thread at launch), and :func:`persist_grouped`
-writes each root's own jobs to that root's own key. :func:`evict_terminal` bounds both one
-root's own share of the in-memory dict, so one project's history cannot push another
-project's jobs out of memory or overwrite its persisted file, and the dict as a whole, so the
-process's memory stays bounded whatever roots it has adopted, not just whichever root is
-still actively registering jobs.
+writes each root's own jobs to that root's own key. :func:`evict_terminal` bounds one root's
+own share of the in-memory dict first, then the dict as a whole across every root this
+process holds, so the process's memory stays bounded whatever roots it has adopted rather
+than growing by ``max_jobs`` for every root that ever registers a job. The whole-dict pass
+can evict another root's own oldest terminal job even when that root's own share never
+overflowed, and the persist that follows a registration writes that root's file one entry
+shorter: one project's activity can shorten another project's persisted registry of
+terminal jobs.
 """
 
 from __future__ import annotations
@@ -128,16 +131,34 @@ def load(name: str) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+def find_job(jobs: dict, job_id: str):
+    """A job by id, from any root this process holds.
+
+    A job id is unique per process and the breeder that launched it holds the id, so a repin
+    to another project must not make an in-flight job unreachable by it. The one by-id lookup
+    every per-root registry (inference, HPO, the review priority queue) shares, so their
+    by-id routes agree without each re-deriving whether a lookup is root-scoped; a caller's
+    list route stays scoped by filtering on its own job's ``platform_root`` instead, which
+    this function is never the right tool for.
+    """
+    return jobs.get(job_id)
+
+
 def evict_terminal(jobs: dict, root: str | None, max_jobs: int = MAX_JOBS) -> None:
     """Drop the oldest terminal jobs, in place, once ``jobs`` overflows ``max_jobs``: once for
-    ``root``'s own share, so one project's history cannot push another project's jobs out of
-    memory, and once for the whole dict, so the process's memory stays bounded whatever roots
-    it has adopted rather than growing by ``max_jobs`` for every root that ever registers a job.
+    ``root``'s own share, then once for the whole dict across every root this process holds, so
+    the process's memory stays bounded whatever roots it has adopted rather than growing by
+    ``max_jobs`` for every root that ever registers a job.
 
     ``root`` scopes the first pass: pass a job's own ``platform_root`` for a per-root registry
     (inference, HPO, the review priority queue). A registry with no root concept of its own
     (nothing in ``jobs`` carries a ``platform_root``) passes ``None``, matching every entry, so
     the two passes coincide and it keeps its original single-collection behaviour.
+
+    The second pass evicts the oldest terminal job in the whole dict regardless of which root
+    it belongs to, so a root whose own share never overflowed can still lose an entry here; the
+    persist that follows a registration writes that root's file one entry shorter, so one
+    project's activity can shorten another project's persisted registry of terminal jobs.
 
     Relies on dict insertion order (oldest first); running/pending jobs are never evicted.
     """

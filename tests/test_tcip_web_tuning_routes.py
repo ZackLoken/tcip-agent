@@ -411,3 +411,48 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
     link = Path(logdir) / "trial_aaa_00000"
     assert link.is_dir()
     assert (link / "marker.txt").is_file()
+
+
+def test_a_web_launched_sweep_runs_only_the_routes_own_tensorboard(
+    client, hpo_root, real_hpo_base_config, monkeypatch, tb_launches
+) -> None:
+    """The real run_hpo, driven through the launch route, must not auto-launch a TensorBoard
+    of its own: the route serves its own per-sweep view on demand (the sweep-detail call
+    below), so a second, unaddressable process over the same trials would be pure waste."""
+    from tcip_web.routes import tuning
+
+    def fake_search(**kw):
+        study_name = kw["study_name"]
+        sweep = Path(kw["storage_path"]) / study_name
+        trial = sweep / "trial_aaa_00000"
+        (trial / "tensorboard").mkdir(parents=True)
+        (trial / "tensorboard" / "marker.txt").write_text("x", encoding="utf-8")
+        return {
+            "best_params": {}, "best_value": 0.0, "n_trials": 1,
+            "study_name": study_name, "tensorboard_logdir": str(sweep),
+        }
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+
+    resp = client.post(
+        "/api/tuning/launch",
+        json={
+            "base_config": real_hpo_base_config,
+            "param_space": {"training.batch_size": [2, 4]},
+            "n_trials": 1,
+            "output_dir": "",
+            "search_alg": "random",
+            "scheduler": "asha",
+        },
+    )
+    assert resp.status_code == 200
+    sweep_id = resp.json()["sweep_id"]
+    assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
+    assert tb_launches == []  # run_hpo's own auto-launch stayed off for this caller
+
+    tb_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/tensorboard", json={})
+    assert tb_resp.status_code == 200
+
+    assert len(tb_launches) == 1
+    (_, run_id), = tb_launches
+    assert run_id == f"sweep_{sweep_id}"

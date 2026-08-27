@@ -92,6 +92,30 @@ def test_run_hpo_stamps_a_running_manifest_and_namespaces_trial_dirs(
     assert finished["result"]["best_params"] == {"lr": 0.1}
 
 
+def test_run_hpo_honours_a_callers_study_name(tmp_path, real_hpo_base_config, monkeypatch):
+    """A caller that already minted its own sweep id (the Tuning route's launch, so its own
+    registry entry, manifest and every sweep route agree on it) must have the real search,
+    not a stand-in, write the manifest and the sweep directory under that same id."""
+    import tcip_mcp.tools.training_tools as tt
+
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search",
+        lambda **kw: {"best_params": {"lr": 0.1}, "best_value": 0.25, "n_trials": 1,
+                     "study_name": kw["study_name"]},
+    )
+
+    given_id = "hpo-caller-supplied-id"
+    result = tt.run_hpo(
+        base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path),
+        study_name=given_id,
+    )
+
+    assert result["study_name"] == given_id
+    manifest = ts.read(tt.sweep_manifest_key(given_id, str(tmp_path)))
+    assert manifest["study_name"] == given_id
+    assert Path(manifest["sweep_dir"]) == tmp_path / given_id
+
+
 def test_run_hpo_marks_the_manifest_failed_when_the_search_raises(
     tmp_path, real_hpo_base_config, monkeypatch
 ):
