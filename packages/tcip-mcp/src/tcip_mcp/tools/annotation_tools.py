@@ -646,20 +646,17 @@ def focus(
         iou_threshold: Review only, IoU cutoff for the TP/FP/FN match classification.
         conf_threshold: Review only, confidence cutoff for showing predictions.
     """
-    try:
-        if tab == "annotate":
-            return _focus_annotate(project_root, dataset_root, subject, date, mode=mode,
-                                   image_index=image_index)
-        if tab == "review":
-            if not model_name:
-                return {"error": "tab='review' requires model_name"}
-            return _focus_review(
-                project_root, dataset_root, subject, date, model_name,
-                image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
-                iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-            )
-    except UnreadableLabelDocument as exc:
-        return {"error": str(exc)}
+    if tab == "annotate":
+        return _focus_annotate(project_root, dataset_root, subject, date, mode=mode,
+                               image_index=image_index)
+    if tab == "review":
+        if not model_name:
+            return {"error": "tab='review' requires model_name"}
+        return _focus_review(
+            project_root, dataset_root, subject, date, model_name,
+            image_index=image_index, detection_idx=detection_idx, filter_type=filter_type,
+            iou_threshold=iou_threshold, conf_threshold=conf_threshold,
+        )
     return {"error": f"tab must be 'annotate' or 'review', got {tab!r}"}
 
 
@@ -1018,6 +1015,8 @@ def stage_proposals(
         )
     except BucketHasVerdicts as exc:
         return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
+    except ValueError as exc:
+        return {"error": str(exc)}
     bucket = staged["bucket"]
 
     note = ("staged to predictions/ for canvas review, not committed as ground truth; the human "
