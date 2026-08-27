@@ -183,15 +183,30 @@ def test_record_artifact_additive_only_when_terminal(exp_store):
 
 def test_make_splits_manifest_embeds_hash_and_seed(data_dir, tmp_path):
     import tcip_store as ts
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
 
+    # A manifest write needs at least four foreground groups to clear the floor; the fixture's
+    # own three (img_001..003) need one more, added here rather than in the shared fixture.
+    from PIL import Image
+
+    images_dir = data_dir / "images" / "2-11-26"
+    labels_dir = data_dir / "annotations" / "2-11-26"
+    Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / "img_004.jpg")
+    json_io.write_annotations(
+        labels_dir / "img_004.json",
+        [Annotation(subject="catkin", geometry=BBox(288, 216, 352, 264))], 640, 480,
+    )
+
     out = tmp_path / "splits"
-    result = make_splits(str(data_dir), output_path=str(out), seed=7, subject="catkin")
+    result = make_splits(str(data_dir), output_path=str(out), seed=7, subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
     assert result["seed"] == 7
     manifest = ts.read(split_manifest_key(out))
     assert manifest["seed"] == 7
     assert manifest["members"]["2-11-26"]["dataset_hash"]
-    assert set(manifest["splits"]) == {"train", "val"}
+    assert set(manifest["splits"]) == {"train", "val", "calibration"}
 
 
 # ── R2: delivery CSVs carry the producing-model provenance columns ────────────

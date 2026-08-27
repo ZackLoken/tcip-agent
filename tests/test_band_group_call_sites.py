@@ -310,17 +310,32 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
 def test_make_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
     """A materialized split places every sibling band a group names plus its manifest, not the
     manifest alone: the manifest resolves to nothing once its siblings are absent."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.image_utils import resolve_image_source
     from tcip_mcp.tools.data_tools import make_splits
 
+    # The fixture's own two groups (capture_001, plain_002) need two more to clear a manifest
+    # write's foreground floor, added here rather than in the shared fixture.
+    images_dir = grouped_dataset / "images" / "2026-04-01"
+    labels_dir = grouped_dataset / "annotations" / "2026-04-01"
+    for stem in ("plain_003", "plain_004"):
+        Image.new("RGB", (16, 16), (5, 5, 5)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="catkin", geometry=BBox(2, 2, 6, 6))], 16, 16,
+        )
+
     out = grouped_dataset / "splits"
     result = make_splits(str(grouped_dataset), output_path=str(out), materialize=True,
-                         subject="catkin")
-    assert "error" not in result
+                         subject="catkin", train_ratio=0.5, val_ratio=0.25,
+                         calibration_ratio=0.25)
+    assert "error" not in result, result
 
     split_dir = next(
-        out / s / "images" for s in ("train", "val")
+        out / s / "images" for s in ("train", "val", "calibration")
         if (out / s / "images" / "capture_001.bandgroup").is_file()
     )
     resolved = resolve_image_source(split_dir, "capture_001")

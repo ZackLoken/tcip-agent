@@ -23,8 +23,12 @@ per-subject admission and refuses to write a manifest without one.
 Usage:
     python scripts/plant_aware_group_splits.py <dataset_root> --plant-csv <plants.csv> \
         [--plant-csv <more_plants.csv> ...] --subject <subject> [--attribute <attribute>] \
-        [--train-ratio 0.8] [--val-ratio 0.2] [--test-ratio 0.0] [--seed 42] \
+        [--train-ratio 0.8] [--val-ratio 0.2] --calibration-ratio <ratio> [--seed 42] \
         [--tolerance-m 5.0] [--output-path <dir>] [--materialize] [--no-copy]
+
+``--calibration-ratio`` has no default and is required beside ``--output-path`` or
+``--materialize``: a split manifest's calibration side is the universe every calibration drawn
+under it draws from, so a manifest write states all three ratios.
 """
 
 from __future__ import annotations
@@ -134,11 +138,13 @@ def main(argv: list[str] | None = None) -> int:
                          help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
     parser.add_argument("--train-ratio", type=float, default=0.8,
                          help="Defaults to 0.8, the complement of --val-ratio's unchanged 0.2 "
-                              "once --test-ratio is 0.")
+                              "once --calibration-ratio is stated.")
     parser.add_argument("--val-ratio", type=float, default=0.2)
-    parser.add_argument("--test-ratio", type=float, default=0.0,
-                         help="Must be 0: no launch path honours a held-out test list, so "
-                              "make_splits writes train and val only.")
+    parser.add_argument("--calibration-ratio", type=float, default=None,
+                         help="Required beside --output-path or --materialize: a manifest's "
+                              "calibration side is the universe every calibration drawn under "
+                              "it draws from, so a manifest write states all three ratios. "
+                              "Omitted for a stats-only call (neither flag given).")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tolerance-m", type=float, default=None,
                          help="Max GPS distance (m) to the nearest plant. Defaults to "
@@ -156,6 +162,10 @@ def main(argv: list[str] | None = None) -> int:
                          help="Scope the draw to instances already assessed for this attribute "
                               "of --subject; omitted, every instance of --subject counts.")
     args = parser.parse_args(argv)
+    writing_manifest = bool(args.output_path or args.materialize)
+    if writing_manifest and args.calibration_ratio is None:
+        parser.error("--calibration-ratio is required when --output-path or --materialize is given.")
+    calibration_ratio = args.calibration_ratio if args.calibration_ratio is not None else 0.0
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
@@ -196,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         folder_path=args.dataset_root,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
+        calibration_ratio=calibration_ratio,
         seed=args.seed,
         group_key_map=group_key_map,
         output_path=args.output_path,

@@ -1,4 +1,4 @@
-"""Group-aware, annotation-stratified train/val/test splitting.
+"""Group-aware, annotation-stratified train/val/calibration splitting.
 
 Pure standard library, intentionally imports no torch and no ``datasets`` so it
 can be used from ``tcip_mcp.tools.data_tools`` (which is in the server's
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 # the full stem.
 _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 
-SPLIT_NAMES = ("train", "val", "test")
+SPLIT_NAMES = ("train", "val", "calibration")
 
 
 def default_group_key(stem: str) -> str:
@@ -84,11 +84,20 @@ def count_lines(label_path: str | Path) -> int:
         return 0
 
 
-def count_label_lines(labels_dir: str | Path, stem: str) -> int:
+def count_label_lines(
+    labels_dir: str | Path, stem: str, *, subject: str | None = None, attribute: str | None = None,
+) -> int:
     """Annotation count for ``stem`` from its name-based per-image ``<stem>.json``.
 
-    Drives stratified splitting (a foreground-density proxy across all subjects in the file). A
-    missing file scores 0 foreground; a present, unreadable one raises
+    Drives stratified splitting, a foreground-density proxy. With ``subject`` omitted, every
+    record in the file counts regardless of subject (the whole-tree proxy a stats-only draw
+    still uses); given ``subject``, only that subject's records count, further narrowed to those
+    already assessed for ``attribute`` when one is given (an instance never assessed for it is
+    not yet a foreground fact for this scope). A manifest draw is subject-scoped, so it always
+    states its own ``subject`` here: an unscoped count would read a group's annotations of some
+    other subject sharing the file as this draw's own foreground.
+
+    A missing file scores 0 foreground; a present, unreadable one raises
     :class:`~tcip_annotation.json_io.UnreadableLabelDocument` rather than scoring 0, since a
     corrupt document is not the same fact as an empty one.
     """
@@ -98,7 +107,13 @@ def count_label_lines(labels_dir: str | Path, stem: str) -> int:
     jp = Path(labels_dir) / label_filename(stem)
     if not jp.is_file():
         return 0
-    return len(json_io.read_annotations(str(jp)))
+    records = json_io.read_annotations(str(jp))
+    if subject is None:
+        return len(records)
+    return sum(
+        1 for a in records
+        if a.subject == subject and (attribute is None or a.attributes.get(attribute) is not None)
+    )
 
 
 def image_extent_from_labels(labels_dir: str | Path, stem: str) -> tuple[int, int] | None:
@@ -133,8 +148,9 @@ def group_balanced_split(
     splits: tuple[float, float, float] = (0.7, 0.2, 0.1),
     seed: int = 42,
     require_foreground: bool = False,
+    min_foreground_groups: dict[str, int] | None = None,
 ) -> dict[str, list[str]]:
-    """Partition ``stems`` into train/val/test, keeping each group intact.
+    """Partition ``stems`` into train/val/calibration, keeping each group intact.
 
     Parameters
     ----------
@@ -146,15 +162,24 @@ def group_balanced_split(
     group_key_fn:
         Maps a stem to its group key (default: strip ``_<x>_<y>`` tile offset).
     splits:
-        ``(train, val, test)`` fractions. A 0.0 fraction disables that split.
+        ``(train, val, calibration)`` fractions. A 0.0 fraction disables that split.
     seed:
         Deterministic seed.
     require_foreground:
         Raise ``ValueError`` when there is no foreground signal at all.
+    min_foreground_groups:
+        Per-side minimum count of foreground groups the balancing pass guarantees before it runs
+        its ordinary largest-first assignment, met first with the smallest foreground groups so
+        the dense ones remain for balancing. Omitted, every active side gets a minimum of one
+        (today's shape, so :func:`cal_holdout_split` and a stats-only draw are untouched); a side
+        named here with no active fraction is ignored. A tree with fewer foreground groups than a
+        minimum asks for simply gets fewer than that side's floor met, this function never raises
+        on it (a caller wanting a hard floor calls :func:`refuse_insufficient_foreground_groups`
+        first, before any write).
 
     Returns
     -------
-    ``{"train": [...], "val": [...], "test": [...]}``, a partition of ``stems``.
+    ``{"train": [...], "val": [...], "calibration": [...]}``, a partition of ``stems``.
     """
     if group_key_fn is None:
         group_key_fn = GROUP_KEY_FNS["tile_prefix"]
@@ -203,17 +228,12 @@ def group_balanced_split(
     rng = random.Random(seed)
     rng.shuffle(fg_groups)
 
-    # Minimum-foreground guarantee (fraction-gated): train always; val if >=2 fg
-    # groups exist; test if >=3. Met first with the smallest foreground groups so
-    # the dense ones remain for the balancing pass.
-    n_fg = len(fg_groups)
-    min_fg: dict[str, int] = {}
-    if "train" in active:
-        min_fg["train"] = 1
-    if "val" in active and n_fg >= 2:
-        min_fg["val"] = 1
-    if "test" in active and n_fg >= 3:
-        min_fg["test"] = 1
+    # Each active side's minimum, met first with the smallest foreground groups (dense ones stay
+    # for the balancing pass); a short tree just meets fewer minimums, nothing here raises on it.
+    if min_foreground_groups is None:
+        min_fg = {n: 1 for n in active}
+    else:
+        min_fg = {n: min_foreground_groups[n] for n in active if n in min_foreground_groups}
 
     fg_smallest_first = sorted(fg_groups, key=lambda gk: group_ann[gk])
     for split_name, need in min_fg.items():
@@ -257,6 +277,29 @@ def group_balanced_split(
     for gk, gs in groups.items():
         result[assignment.get(gk, active[0])].extend(gs)
     return {n: sorted(result[n]) for n in SPLIT_NAMES}
+
+
+def refuse_insufficient_foreground_groups(
+    foreground_groups: int, minimums: dict[str, int],
+) -> None:
+    """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum
+    of the per-side minimums a caller states.
+
+    :func:`~tcip_mcp.tools.data_tools.make_splits` calls this once, over the whole tree, ahead of
+    drawing a manifest; :func:`calibration_universe_from_manifest` calls it for its one held-out
+    side in place of its own inline count. Names every requested side and its minimum, the
+    foreground groups actually found, and the remedy: annotate or confirm more foreground groups,
+    or drop a side by removing it from ``minimums`` (setting its draw ratio to zero).
+    """
+    needed = sum(minimums.values())
+    if foreground_groups >= needed:
+        return
+    sides = ", ".join(f"{name}={n}" for name, n in sorted(minimums.items()))
+    raise ValueError(
+        f"the draw holds {foreground_groups} foreground group(s) of the draw's own subject, "
+        f"fewer than the {needed} the requested sides need ({sides}): annotate or confirm more "
+        "foreground groups, or drop a side by setting its ratio to zero."
+    )
 
 
 def resolve_group_key_fn(
@@ -318,17 +361,23 @@ def date_of_manifest_key(key: str) -> str | None:
 @dataclass(frozen=True)
 class ManifestBinding:
     """What binding a run to a split manifest resolved for one capture date: the run's own
-    train/val membership, as bare stems under that date, plus the counts a run's ``split.json``
-    records beside them. Never the manifest's own member lists (those already live in the
-    manifest itself); ``assigned``/``train_bound``/``val_bound``/``other_dates`` are the small,
-    checkpoint-safe summary :func:`bind_manifest_stems`'s caller persists instead.
+    train/val membership, as bare stems under that date, plus the manifest's calibration
+    membership under that date (placed on neither loader, held out from both training and
+    selection), plus the counts a run's ``split.json`` records beside them. Never the manifest's
+    own member lists in full (those already live in the manifest itself);
+    ``assigned``/``train_bound``/``val_bound``/``calibration_bound``/``calibration_unadmitted``/
+    ``other_dates`` are the small, checkpoint-safe summary :func:`bind_manifest_stems`'s caller
+    persists instead.
     """
 
     train: list[str]
     val: list[str]
+    calibration: list[str]
     assigned: int
     train_bound: int
     val_bound: int
+    calibration_bound: int
+    calibration_unadmitted: int
     other_dates: int
 
 
@@ -344,17 +393,23 @@ def bind_manifest_stems(
     - the manifest's ``subject``/``attribute`` disagree with the run's;
     - the manifest holds no members under ``date`` (its ``members`` keys, via
       :func:`manifest_date_key`, name what it does hold);
-    - a stem the run admits that the manifest assigns to neither ``train`` nor ``val`` (training
-      it would put it on a side the manifest never chose; the remedy is regenerating the split
-      over the current data, which draws through the same admission);
-    - a manifest member under ``date`` that the run does not admit (the data moved under the
-      manifest: a label emptied, a confirmation withdrawn, an assessment removed), naming
+    - a stem the run admits that the manifest assigns to none of ``train``, ``val`` or
+      ``calibration`` (training it would put it on a side the manifest never chose; the remedy is
+      regenerating the split over the current data, which draws through the same admission);
+    - a ``train`` or ``val`` member under ``date`` the run does not admit (the data moved under
+      the manifest: a label emptied, a confirmation withdrawn, an assessment removed), naming
       ``admission_counts`` when the caller supplied it;
-    - an empty side (``train`` or ``val``) once the two are narrowed to ``date``.
+    - an empty ``train`` or ``val`` side once narrowed to ``date``.
+
+    A ``calibration`` member is never a reason to refuse: it is held out from training and from
+    selection, so it is placed on neither loader whether or not the run currently admits it (its
+    count of unadmitted members is recorded, not refused on) and whether the third side is empty
+    for this date or not; the calibration door's own floor is where an insufficient calibration
+    side bites, never a training launch.
 
     Because the manifest was drawn through the same admission with the same subject/attribute
-    scope, the last two refusals fire only when the data moved since the split was drawn, and the
-    remedy they name (regenerate the split) exists.
+    scope, the train/val refusals fire only when the data moved since the split was drawn, and
+    the remedy they name (regenerate the split) exists.
     """
     manifest_subject, manifest_attribute = manifest.get("subject"), manifest.get("attribute")
     if (manifest_subject, manifest_attribute) != (subject, attribute):
@@ -373,22 +428,26 @@ def bind_manifest_stems(
         )
 
     splits = manifest.get("splits") or {}
-    train_ids, val_ids = set(splits.get("train") or []), set(splits.get("val") or [])
-    this_date_ids = {i for i in train_ids | val_ids if member_identity_parts(i)[0] == date}
-    other_dates = len(train_ids | val_ids) - len(this_date_ids)
+    train_ids = set(splits.get("train") or [])
+    val_ids = set(splits.get("val") or [])
+    calibration_ids = set(splits.get("calibration") or [])
+    all_ids = train_ids | val_ids | calibration_ids
+    this_date_ids = {i for i in all_ids if member_identity_parts(i)[0] == date}
+    other_dates = len(all_ids) - len(this_date_ids)
 
     admitted_ids = {member_identity(date, s) for s in admitted}
-    unassigned = sorted(admitted_ids - train_ids - val_ids)
+    unassigned = sorted(admitted_ids - all_ids)
     if unassigned:
         preview = [member_identity_parts(i)[1] for i in unassigned[:10]]
         more = f" (+{len(unassigned) - 10} more)" if len(unassigned) > 10 else ""
         raise ValueError(
-            f"{len(unassigned)} stem(s) this run admits are assigned to neither side of the split "
+            f"{len(unassigned)} stem(s) this run admits are assigned to no side of the split "
             f"manifest: {preview}{more}. Training would put them on a side the manifest never "
             "chose; regenerate the split over the current data (make_splits draws through the "
             "same admission this run does)."
         )
-    not_admitted = sorted(this_date_ids - admitted_ids)
+    this_date_train_val = {i for i in this_date_ids if i in train_ids or i in val_ids}
+    not_admitted = sorted(this_date_train_val - admitted_ids)
     if not_admitted:
         preview = [member_identity_parts(i)[1] for i in not_admitted[:10]]
         more = f" (+{len(not_admitted) - 10} more)" if len(not_admitted) > 10 else ""
@@ -408,9 +467,14 @@ def bind_manifest_stems(
             f"binding to the split manifest under date {date!r} leaves an empty side "
             f"(train={len(train_bound)}, val={len(val_bound)}); a run needs both."
         )
+    calibration_this_date = this_date_ids & calibration_ids
+    calibration_bound = sorted(member_identity_parts(i)[1] for i in calibration_this_date)
+    calibration_unadmitted = len(calibration_this_date - admitted_ids)
     return ManifestBinding(
-        train=train_bound, val=val_bound, assigned=len(this_date_ids),
-        train_bound=len(train_bound), val_bound=len(val_bound), other_dates=other_dates,
+        train=train_bound, val=val_bound, calibration=calibration_bound,
+        assigned=len(this_date_ids), train_bound=len(train_bound), val_bound=len(val_bound),
+        calibration_bound=len(calibration_bound), calibration_unadmitted=calibration_unadmitted,
+        other_dates=other_dates,
     )
 
 
@@ -778,9 +842,10 @@ def cal_holdout_split(
 ) -> dict[str, list[str]]:
     """A disjoint, group-coherent, annotation-balanced calibration/holdout split.
 
-    A thin wrapper over :func:`group_balanced_split` (never reimplemented): the ``test``
-    fraction is always 0, and the ``{"train", "val"}`` output is remapped to
-    ``{"calibration", "holdout"}`` for the calibration callers.
+    A thin wrapper over :func:`group_balanced_split` (never reimplemented): its third split's
+    fraction is always 0, and the resulting ``{"train", "val"}`` parts are the two halves of
+    whatever universe ``stems`` holds, remapped to ``{"calibration", "holdout"}`` for the
+    calibration callers.
     """
     parts = group_balanced_split(
         stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
@@ -964,14 +1029,15 @@ def calibration_universe_from_manifest(
 
     group_key_fn = resolve_group_key_fn(group_by or "tile_prefix", stems, group_key_map=group_key_map)
     n_groups = len({group_key_fn(s) for s in stems})
-    if n_groups < 2:
+    try:
+        refuse_insufficient_foreground_groups(n_groups, {"calibration": 2})
+    except ValueError as exc:
         raise ValueError(
             f"the split manifest's held-out side for date {date!r} gives a calibration universe "
             f"of {n_groups} group(s) ({len(stems)} stem(s)) after excluding what isn't present: "
-            "a held-out half needs at least two groups, or the operating point would stamp "
-            "unvalidated silently. Draw the manifest again with more groups or a different "
-            "held-out ratio, or calibrate over the whole directory without split_manifest_dir."
-        )
+            f"{exc} Draw the manifest again with more groups or a different held-out ratio, or "
+            "calibrate over the whole directory without split_manifest_dir."
+        ) from exc
     return stems, group_by, group_key_map, excluded
 
 

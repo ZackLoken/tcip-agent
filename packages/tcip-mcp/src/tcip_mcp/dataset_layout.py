@@ -40,8 +40,6 @@ _ANY_EXTS = (".json",)
 DEFAULT_MODEL = "live"
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
 TASKS = ("detect", "segment")
-#: Split names ``make_splits(materialize=True)`` emits.
-SPLIT_NAMES = ("train", "val", "test")
 CLASSES_FILENAME = "classes.json"
 
 UNDATED_BUCKET = "undated"

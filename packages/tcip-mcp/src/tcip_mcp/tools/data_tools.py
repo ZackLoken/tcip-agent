@@ -77,12 +77,18 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     run names its ``data.split.manifest_dir`` through.
 
     Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
-    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, or carries a ``splits``
-    block with no ``train`` or no ``val``. Because ``seed`` is required here, a caller that reads
-    it off the returned manifest (a run's bind, resolving its own seed from the manifest's) never
-    sees it absent and falls through to a ``None`` in its place.
+    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, lacks any name
+    :data:`~tcip_mcp.pipelines.data.splits.SPLIT_NAMES` states under ``splits``, or whose sides
+    are not pairwise disjoint (a member on two sides would be trained on and selected on, or
+    trained on and held out for calibration, at once). One reader, one refusal: the binder, the
+    calibration universe, preflight and every door read a manifest through here and never test
+    its shape themselves. Because ``seed`` is required here, a caller that reads it off the
+    returned manifest (a run's bind, resolving its own seed from the manifest's) never sees it
+    absent and falls through to a ``None`` in its place.
     """
     from tcip_store import DecodeError
+
+    from tcip_mcp.pipelines.data.splits import SPLIT_NAMES
 
     try:
         manifest = tcip_store.read(split_manifest_key(split_dir), default=None)
@@ -102,10 +108,27 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
             "always carries every key make_splits writes."
         )
     splits = manifest.get("splits")
-    if not isinstance(splits, dict) or "train" not in splits or "val" not in splits:
+    missing_sides = sorted(set(SPLIT_NAMES) - set(splits if isinstance(splits, dict) else {}))
+    if not isinstance(splits, dict) or missing_sides:
         raise ValueError(
-            f"the split manifest at {split_dir} carries no splits.train or splits.val: a "
-            "split_manifest record's splits block always carries both."
+            f"the split manifest at {split_dir} carries no splits.{missing_sides}: a manifest "
+            "drawn before the platform held out a calibration side binds nothing here; "
+            "regenerate it with make_splits over the current data, stating all three ratios "
+            "(train_ratio, val_ratio, calibration_ratio)."
+        )
+    overlaps: dict[tuple[str, str], list[str]] = {}
+    for i, side_a in enumerate(SPLIT_NAMES):
+        for side_b in SPLIT_NAMES[i + 1:]:
+            shared = sorted(set(splits.get(side_a) or []) & set(splits.get(side_b) or []))
+            if shared:
+                overlaps[(side_a, side_b)] = shared
+    if overlaps:
+        detail = "; ".join(f"{a}/{b}: {ids[:10]}" for (a, b), ids in sorted(overlaps.items()))
+        raise ValueError(
+            f"the split manifest at {split_dir} assigns the same identity to more than one side "
+            f"({detail}): a member on train and calibration would be trained on it, one on val "
+            "and calibration selected on it, and the binder builds its loaders from the sides as "
+            "recorded."
         )
     return manifest
 
@@ -432,7 +455,7 @@ def make_splits(
     folder_path: str,
     train_ratio: float = 0.8,
     val_ratio: float = 0.2,
-    test_ratio: float = 0.0,
+    calibration_ratio: float = 0.0,
     seed: int = 42,
     group_by: str = "tile_prefix",
     group_key_map: dict[str, str] | None = None,
@@ -443,14 +466,14 @@ def make_splits(
     subject: str | None = None,
     attribute: str | None = None,
 ) -> dict:
-    """Compute a leakage-free, annotation-stratified train/val split.
+    """Compute a leakage-free, annotation-stratified train/val/calibration split.
 
-    Non-destructive by default: emits ``{train,val}.json`` stem manifests plus a stats
-    dict. Sibling tiles of one source image are kept in the same split (no tree-/canopy-level
-    leakage), and, when ``stratify_foreground`` is set, splits are balanced by annotation
-    count so dense and sparse sources are proportionally represented. Groups whole source images;
-    a within-image split for a folder holding a single source is a training run's own automatic
-    route (``data.tiling`` in the run config), not this tool.
+    Non-destructive by default: emits ``{train,val,calibration}.json`` stem manifests plus a
+    stats dict. Sibling tiles of one source image are kept in the same split (no tree-/
+    canopy-level leakage), and, when ``stratify_foreground`` is set, splits are balanced by
+    annotation count so dense and sparse sources are proportionally represented. Groups whole
+    source images; a within-image split for a folder holding a single source is a training run's
+    own automatic route (``data.tiling`` in the run config), not this tool.
 
     Writing a manifest (``output_path`` given, or ``materialize=True``) draws its members
     through the platform's own admission for the tasks a manifest can bind to
@@ -464,8 +487,19 @@ def make_splits(
     ``stratify_foreground`` only toggles the annotation-count balancing; it does not change which
     images are eligible to enter the split.
 
+    The third side, ``calibration``, is the universe every calibration drawn under this manifest
+    draws from (the operating point is measured on it, never on ``train`` or ``val``); a manifest
+    write therefore has no default for ``calibration_ratio`` and refuses a zero one. The draw
+    refuses, before any write, when the tree holds fewer foreground groups of ``subject`` (and
+    ``attribute``, when scoped) than the sides being drawn need at minimum (one each for
+    ``train``/``val``, two for ``calibration``, so the locked calibration/holdout draw the
+    calibration door makes later can still halve it); the answer's
+    ``calibration_foreground_groups_by_date`` then reports, per date, how many of the calibration
+    side's own groups actually carry a foreground annotation, since the floor above is over the
+    whole draw and a single date can still land short.
+
     With ``materialize=True`` it additionally lays out a
-    ``{train,val}/{images,labels}/`` tree under ``output_path`` (defaulting to
+    ``{train,val,calibration}/{images,labels}/`` tree under ``output_path`` (defaulting to
     ``folder_path/splits``), copying (or symlinking, ``copy_files=False``) each stem's image and
     label, and adds ``output_dir`` / ``structure`` to the return. Refused when the drawn
     membership spans more than one capture date: the materialized tree is a flat, undated
@@ -475,11 +509,12 @@ def make_splits(
     Args:
         folder_path: Path to the dataset root directory.
         train_ratio: Fraction for training set. Defaults to 0.8, the complement of the
-            unchanged 0.2 validation default once ``test_ratio`` is 0.
+            unchanged 0.2 validation default once ``calibration_ratio`` is 0.
         val_ratio: Fraction for validation set.
-        test_ratio: Must be 0. No launch path honours a held-out test list, so make_splits
-            writes train and val only; a non-zero value is refused rather than writing a
-            partition nothing downstream can consume.
+        calibration_ratio: Fraction held out as the calibration universe. No default for a
+            manifest write (``output_path`` given, or ``materialize=True``): the caller states
+            all three ratios, and a zero one is refused there. A stats-only call keeps the
+            0.0 default and may pass a non-zero value too, both admitted.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing
             ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per member). Ignored when
@@ -492,7 +527,7 @@ def make_splits(
         output_path: Where to write manifests (and, when materializing, the file tree).
             Defaults to ``folder_path/splits`` when materializing, else manifests are
             written only if this is set.
-        materialize: Also copy/symlink files into a {train,val}/{images,labels}/ tree.
+        materialize: Also copy/symlink files into a {train,val,calibration}/{images,labels}/ tree.
         copy_files: Copy files (True) or create symlinks (False) when materializing.
         subject: The object class the split is drawn for. Required to write a manifest
             (``output_path`` given, or ``materialize=True``): it governs both which images the
@@ -503,29 +538,33 @@ def make_splits(
             entirely, the same rail a training run applies. ``None`` draws over every instance of
             ``subject`` regardless of attribute state.
     """
-    if test_ratio != 0:
-        return {"error": "test_ratio must be 0: no launch path honours a held-out test list, so "
-                         "make_splits writes train and val only."}
-    if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.01:
-        return {"error": "test_ratio must be 0 and train_ratio + val_ratio must sum to 1.0."}
+    if abs(train_ratio + val_ratio + calibration_ratio - 1.0) > 0.01:
+        return {"error": "train_ratio, val_ratio and calibration_ratio must sum to 1.0 (got "
+                         f"{train_ratio}, {val_ratio}, {calibration_ratio})."}
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.pipelines.data.splits import (
+        SPLIT_NAMES,
         count_label_lines,
         group_balanced_split,
         manifest_date_key,
         member_identity,
         member_identity_parts,
+        refuse_insufficient_foreground_groups,
         resolve_group_key_fn,
     )
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
-    # make_splits emits no test partition (see test_ratio, refused above); train and val are the
-    # only two names carried into the stem lists, the manifest and this call's own summary.
-    kept_splits = ("train", "val")
+    kept_splits = SPLIT_NAMES
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
+    if out_dir is not None and calibration_ratio == 0:
+        return {"error": "calibration_ratio must be non-zero to write a split manifest: a "
+                         "manifest's calibration side is the universe every calibration drawn "
+                         "under it draws from, so a manifest write states all three ratios "
+                         "(train_ratio, val_ratio, calibration_ratio). Omit output_path and "
+                         "materialize for a stats-only call, whose calibration_ratio may be 0."}
 
     if out_dir is None:
         # A stats-only call writes no manifest, so the draw is a plain image/label scan: no
@@ -560,7 +599,7 @@ def make_splits(
         resolved_group_by = "explicit_map" if group_key_map else group_by
         parts = group_balanced_split(
             stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-            splits=(train_ratio, val_ratio, test_ratio), seed=seed,
+            splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
         )
         counts = annotation_counts or {}
         dataset_hashes_by_date: dict[str, str] = {}
@@ -659,30 +698,51 @@ def make_splits(
                 }
 
         stems = sorted(identity_locations)
-        if stems and stratify_foreground:
+        foreground_counts: dict[str, int] = {}
+        if stems:
             labels_dir_of = {date: labels_dir for date, labels_dir, _ in date_dirs}
-            annotation_counts = {
-                identity: count_label_lines(labels_dir_of[date], stem)
+            foreground_counts = {
+                identity: count_label_lines(
+                    labels_dir_of[date], stem, subject=subject, attribute=attribute)
                 for identity, (date, stem) in identity_locations.items()
             }
+        if stratify_foreground:
+            annotation_counts = foreground_counts
 
+        calibration_foreground_groups_by_date: dict[str, int] = {}
         if stems:
             try:
                 group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
             except ValueError as exc:
                 return {"error": str(exc)}
             resolved_group_by = "explicit_map" if group_key_map else group_by
+            min_foreground_groups = {"train": 1, "val": 1, "calibration": 2}
+            fg_groups = {group_key_fn(s) for s in stems if foreground_counts.get(s, 0) > 0}
+            try:
+                refuse_insufficient_foreground_groups(len(fg_groups), min_foreground_groups)
+            except ValueError as exc:
+                return {"error": str(exc)}
             parts = group_balanced_split(
                 stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-                splits=(train_ratio, val_ratio, test_ratio), seed=seed,
+                splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
+                min_foreground_groups=min_foreground_groups,
             )
+            cal_groups_by_date: dict[str, set[str]] = {}
+            for identity in parts["calibration"]:
+                if foreground_counts.get(identity, 0) > 0:
+                    cal_date, _ = member_identity_parts(identity)
+                    cal_groups_by_date.setdefault(
+                        manifest_date_key(cal_date), set()).add(group_key_fn(identity))
+            calibration_foreground_groups_by_date = {
+                k: len(v) for k, v in cal_groups_by_date.items()
+            }
 
             distinct_dates = {date for date, _ in identity_locations.values()}
             if materialize and len(distinct_dates) > 1:
                 named = sorted(d if d is not None else "annotations/ (loose labels)"
                                for d in distinct_dates)
                 return {"error": f"materialize=True refuses a manifest spanning more than one "
-                                 f"capture date ({named}): its flat {{train,val}}/"
+                                 f"capture date ({named}): its flat {{train,val,calibration}}/"
                                  "{images,labels}/ tree is keyed by file name and its negative "
                                  "carry writes one undated bucket, so two dates sharing a name "
                                  "would collide silently. Write the manifest without "
@@ -772,6 +832,7 @@ def make_splits(
         "admission_counts": admission_counts,
         "manifest_dir": str(out_dir),
         "dataset_hashes_by_date": {key: block["dataset_hash"] for key, block in members.items()},
+        "calibration_foreground_groups_by_date": calibration_foreground_groups_by_date,
     }
 
     if materialize:
@@ -795,7 +856,7 @@ def make_splits(
         if negative_carry is not None and negative_carry.contradicted:
             result["contradicted_negatives"] = sorted(negative_carry.contradicted)
         result["output_dir"] = str(out_dir)
-        result["structure"] = f"{out_dir}/{{train,val}}/{{images,labels}}/"
+        result["structure"] = f"{out_dir}/{{train,val,calibration}}/{{images,labels}}/"
 
     return result
 
@@ -818,7 +879,7 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
     """Reads the source subject's confirmed negatives and assigns each to the split holding its
     image, entirely before any split-tree file is written (see the call site).
 
-    A split tree is ``{train,val}/labels`` by construction and cannot recover the subject from
+    A split tree is ``{train,val,calibration}/labels`` by construction and cannot recover the subject from
     its path, so the confirmations are carried explicitly under the threaded ``subject`` (keyed by
     ``status_bucket(subject, None)``, since the split carries no date). Without this, every image a
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.

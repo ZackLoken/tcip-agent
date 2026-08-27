@@ -1,6 +1,6 @@
 """Carrying human-confirmed negatives into a materialized split tree.
 
-A split tree is ``{train,val,test}/{images,labels}/`` and cannot recover a subject or a date from
+A split tree is ``{train,val,calibration}/{images,labels}/`` and cannot recover a subject or a date from
 its own path, so every confirmation it inherits has to be re-attributed explicitly: to the right
 split, under the key the resolver computes for a dateless tree, and with the status token that
 means "a human looked and found nothing" rather than the token that means "a human finished an
@@ -69,15 +69,15 @@ def _materialize(tmp_path: Path, *, subject: str | None) -> tuple[Path, dict]:
     out = tmp_path / "splits"
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=subject,
-        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
-    assert "error" not in result
-    assert all(result["splits"][name] > 0 for name in ("train", "val"))
+    assert "error" not in result, result
+    assert all(result["splits"][name] > 0 for name in ("train", "val", "calibration"))
     return out, result
 
 
 def _split_holding(out: Path, image_name: str) -> str:
-    holders = [name for name in ("train", "val")
+    holders = [name for name in ("train", "val", "calibration")
                if (out / name / "images" / image_name).is_file()]
     assert len(holders) == 1, f"{image_name} landed in {holders}"
     return holders[0]
@@ -89,7 +89,7 @@ def test_confirmation_is_carried_only_into_the_split_that_holds_its_image(tmp_pa
     out, _ = _materialize(tmp_path, subject=SUBJECT)
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
 
-    with_store = [name for name in ("train", "val")
+    with_store = [name for name in ("train", "val", "calibration")
                   if ts.exists(image_status_key(out / name))]
 
     assert with_store == [holder]
@@ -162,7 +162,7 @@ def test_materialize_with_no_subject_is_refused(tmp_path: Path):
 
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=None,
-        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
 
     assert "error" in result
@@ -181,7 +181,7 @@ def test_carried_registry_declares_the_same_document_as_the_source(tmp_path: Pat
     out = tmp_path / "splits"
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
-        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
     assert "error" not in result
     holder = _split_holding(out, f"{NEGATIVE_STEM}.jpg")
@@ -205,7 +205,7 @@ def test_a_contradicted_negative_is_excluded_from_the_carry_and_named_in_the_res
 
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
-        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3,
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3,
     )
 
     assert result.get("contradicted_negatives") == [f"{NEGATIVE_STEM}.jpg"]
@@ -227,10 +227,11 @@ def test_a_failed_carry_computation_writes_no_split_tree(tmp_path: Path, monkeyp
     monkeypatch.setattr(data_tools_mod, "_compute_negative_carry", _boom)
     with pytest.raises(RuntimeError, match="boom"):
         make_splits(str(root), output_path=str(out), materialize=True, subject=SUBJECT,
-                    train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3)
+                    train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3)
 
     assert not (out / "train").exists()
     assert not (out / "val").exists()
+    assert not (out / "calibration").exists()
 
 
 def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
@@ -246,7 +247,7 @@ def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
 
     result = make_splits(
         str(root), output_path=str(out), materialize=True, subject=SUBJECT,
-        train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=3, stratify_foreground=False,
+        train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25, seed=3, stratify_foreground=False,
     )
 
     assert "error" in result
