@@ -2192,8 +2192,8 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
          does a build failure while binding, never degrading to training on the manifest's
          held-out side with no validation. The manifest's calibration side never builds a
          loader; its own bound count and unadmitted count ride into ``manifest_binding`` beside
-         ``labels_hash_now`` (now over all three bound sides) and ``labels_hash_at_split``, a
-         pair nothing currently reads back, kept for a reviewer to compare by eye.
+         ``labels_hash_now`` (over all three bound sides) and ``labels_hash_at_split``, a pair
+         nothing currently reads back, kept for a reviewer to compare by eye.
       2. ``data.auto_val`` (default True) and a stem-capable task
          (detection / instance_seg / semantic_seg / classification) -> derive a
          group-aware train/val split (no held-out test) so the trainer receives
@@ -2608,13 +2608,20 @@ def evaluate_model(
         date: The capture date this split's confirmed negatives were recorded under, the bucket
             key the delivery-grade path reads them by. A GT dir under ``annotations/<date>/``
             states that date; a split tree or a curated dataset carries none and leaves this
-            unset. It is never recovered from ``labels_dir``.
+            unset. Outside ``split_manifest_dir``, never recovered from ``labels_dir``; under it,
+            derived from ``labels_dir`` (``annotation_date``) the same way the manifest's own
+            universe is drawn, and a stated value that disagrees refuses, naming both, so the
+            negative confirmations and the calibration universe are always read under one date.
         split_manifest_dir: Score the checkpoint over this split manifest's ``calibration``
             members under ``labels_dir``'s own date instead of the whole directory: the same
             subject/attribute/date/images-root checks the calibration door applies, refusing the
             same way (detection/instance_seg only, and not combined with
-            ``use_tiled_inference``). ``test_results.json`` then records ``split_manifest_dir``
-            and the evaluated stem count; omitted, the whole directory is scored, as today.
+            ``use_tiled_inference``), except its own floor of one foreground group, since this
+            door draws no lock and halves nothing. ``test_results.json`` then records
+            ``split_manifest_dir`` and the evaluated stem count, the loader's own count, refused
+            by name (naming the difference and the remedy) when the loader admits fewer than the
+            universe the manifest drew, since the data moved under the manifest since the split
+            was drawn; omitted, the whole directory is scored, as today.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -2670,12 +2677,18 @@ def evaluate_model(
         manifest = read_split_manifest_dir(split_manifest_dir)
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            manifest_stems, _group_by, _group_key_map, _excluded, _cal_date = \
+            manifest_stems, _group_by, _group_key_map, _excluded, cal_date = \
                 resolve_manifest_calibration_universe(
                     manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
-                    present)
+                    present, min_foreground_groups={"calibration": 1})
         except ValueError as exc:
             return {"error": str(exc)}
+        if date is not None and date != cal_date:
+            return {"error": f"date={date!r} disagrees with the date labels_dir={labels_dir!r} "
+                             f"is under ({cal_date!r}); a split manifest binds under one date, "
+                             "so the negative confirmations and the calibration universe must be "
+                             "read under the same one."}
+        date = cal_date
 
     # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
     if use_tiled_inference and task == "detection":
@@ -2721,6 +2734,21 @@ def evaluate_model(
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 
+    evaluated_stem_count = None
+    if manifest_stems is not None:
+        loader_stems = list(getattr(dataset, "stems", []) or [])
+        evaluated_stem_count = len(loader_stems)
+        if evaluated_stem_count < len(manifest_stems):
+            missing = sorted(set(manifest_stems) - set(loader_stems))
+            preview = missing[:10]
+            more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+            return {"error": f"the split manifest's calibration universe for date {date!r} "
+                             f"holds {len(manifest_stems)} stem(s), but the loader admitted only "
+                             f"{evaluated_stem_count}: {preview}{more}. The data moved under the "
+                             "manifest since the split was drawn (a label emptied, a "
+                             "confirmation withdrawn); regenerate the split over the current "
+                             "data."}
+
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # 100 is the COCOeval maxDets convention for this tile-level/diagnostic regime, distinct
@@ -2731,5 +2759,5 @@ def evaluate_model(
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
         split_manifest_dir=split_manifest_dir,
-        evaluated_stem_count=len(manifest_stems) if manifest_stems is not None else None,
+        evaluated_stem_count=evaluated_stem_count,
     )
