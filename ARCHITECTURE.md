@@ -319,6 +319,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/imageLoader.ts | Shared image loader for /api/images serves. | 1 | 7 |
 | packages/tcip-web/frontend/src/lib/imageStatus.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/imageStatus.ts | (none found) | 1 | 4 |
+| packages/tcip-web/frontend/src/lib/labelProblemToast.ts | Toast a dataset selection's label_problem, shared by every path that installs a new selection through /dataset/select. | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/labelSerde.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/labelSerde.ts | The single mapping between the unified name-based label file (one Annotation list per image) and the Annotate canvas' drawing model (boxes + polygons + points + geometry-less ratings). | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/openProject.test.ts | (none found) | 3 | 0 |
@@ -781,11 +782,11 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/load` | `load_classes` | `routes/classes.py:97` |
-| POST | `/save` | `save_classes` | `routes/classes.py:162` |
-| GET | `/image_status` | `get_image_status` | `routes/classes.py:296` |
-| POST | `/image_status` | `set_image_status` | `routes/classes.py:306` |
-| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:337` |
-| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:367` |
+| POST | `/save` | `save_classes` | `routes/classes.py:161` |
+| GET | `/image_status` | `get_image_status` | `routes/classes.py:295` |
+| POST | `/image_status` | `set_image_status` | `routes/classes.py:305` |
+| POST | `/image_status/bulk` | `set_image_status_bulk` | `routes/classes.py:336` |
+| POST | `/image_status/derive` | `derive_image_status` | `routes/classes.py:366` |
 
 ### routes/coverage.py, prefix `/api/coverage` (5 routes)
 
@@ -801,10 +802,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:144` |  <!-- queued: P5-83 unify -->
-| GET | `/images` | `list_images` | `routes/dataset.py:190` |  <!-- queued: P5-84 delete -->
-| POST | `/select` | `select_dataset` | `routes/dataset.py:212` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:301` |
+| GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:154` |  <!-- queued: P5-83 unify -->
+| GET | `/images` | `list_images` | `routes/dataset.py:200` |  <!-- queued: P5-84 delete -->
+| POST | `/select` | `select_dataset` | `routes/dataset.py:222` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:311` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
@@ -871,15 +872,15 @@ registered at HEAD.
 |---|---|---|---|
 | POST | `/matches` | `compute_image_matches` | `routes/review.py:458` |
 | POST | `/action` | `record_action` | `routes/review.py:584` |
-| POST | `/mark_complete` | `mark_complete` | `routes/review.py:718` |
+| POST | `/mark_complete` | `mark_complete` | `routes/review.py:720` |
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:781` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:802` |
 | POST | `/validate_reference` | `validate_reference` | `routes/review.py:853` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1197` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1198` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1250` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1280` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1444` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1472` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1281` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1445` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1473` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1168,8 +1169,8 @@ named third consumer, `scripts/check_dataset_identity.py`, is never executed by 
 Path: `<dataset_root>/.tcip/state/image_status.json`.
 
 Writers: `set_image_status`,
-`packages/tcip-web/src/tcip_web/routes/classes.py:306`; `set_image_status_bulk`,
-`routes/classes.py:337`; `tcip_mcp.tools.data_tools._apply_negative_carry`
+`packages/tcip-web/src/tcip_web/routes/classes.py:305`; `set_image_status_bulk`,
+`routes/classes.py:336`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy; every confirmed negative is read before the split's stem lists,
 manifest or file tree are written, by `negative_carry = _compute_negative_carry(label_map, parts, image_map, subject)`
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:634`, then applied by
@@ -1188,7 +1189,7 @@ before the outgoing digest is gone.
 `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:669`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
-`packages/tcip-web/src/tcip_web/routes/review.py:718`, derives it from the GT file through
+`packages/tcip-web/src/tcip_web/routes/review.py:720`, derives it from the GT file through
 `annotations_hold_subject`, scoped to the confirmed subject, and the browser posts that value on
 through `set_image_status`.
 
@@ -1205,12 +1206,12 @@ has not been re-verified; MCP-side readers test membership through
 
 Path: `<dataset_root>/.tcip/state/image_status_digest.json`.
 
-Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:266`, called from
+Writers: `_stamp_digest`, `packages/tcip-web/src/tcip_web/routes/classes.py:265`, called from
 `set_image_status`/`set_image_status_bulk` at confirmation time; and
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, called through `replace_registry`
 (`packages/tcip-mcp/src/tcip_mcp/class_registry.py:321`) by both registry writers,
-`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:162`) and `write_class_map`
+`save_classes` (`packages/tcip-web/src/tcip_web/routes/classes.py:161`) and `write_class_map`
 (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:1021`), before the new registry lands.
 A status and its stamp are two transactions, status first, so unstamped confirmations
 legitimately exist; the outgoing registry is the last moment their digest is recoverable, so the
@@ -1873,7 +1874,7 @@ Phase 3 verdict: single.
 
 Must agree: the GUI editor, the path resolver, and the training loader read one registry shape.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:4` (`The on-disk registry (`` `<dataset_root>/classes.json` ``) is self-describing and name-based::`).
-Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:177` (`from tcip_mcp.dataset_layout import classes_path`).
+Side B: `packages/tcip-web/src/tcip_web/routes/classes.py:176` (`from tcip_mcp.dataset_layout import classes_path`).
 Phase 3 verdict: single.
 
 ## S21. Training name-to-id assignment versus inference decode map
