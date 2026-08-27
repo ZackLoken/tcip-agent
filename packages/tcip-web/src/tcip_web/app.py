@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import threading
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -109,9 +110,20 @@ def bind_startup_root() -> None:
     pin_project_root(from_marker=True)
 
 
-# Serializes concurrent first requests onto one marker read: the second waits here, then
-# finds the root already bound and returns immediately.
-_bind_startup_root_lock = asyncio.Lock()
+_bind_startup_root_lock = threading.Lock()
+
+
+def _bind_startup_root_serialized() -> None:
+    """:func:`bind_startup_root` under the module lock, the body the middleware runs in a
+    worker thread.
+
+    Concurrent first requests serialize onto one marker read here: the second waits, then
+    finds the root already bound and returns. The lock is a thread lock taken inside the
+    worker thread, never an asyncio lock, since concurrent requests may arrive on several
+    event loops (one ``TestClient`` per thread), which a lock bound to one loop cannot serve.
+    """
+    with _bind_startup_root_lock:
+        bind_startup_root()
 
 
 class _BindStartupRootMiddleware:
@@ -130,8 +142,7 @@ class _BindStartupRootMiddleware:
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope["type"] in ("http", "websocket"):
-            async with _bind_startup_root_lock:
-                await asyncio.to_thread(bind_startup_root)
+            await asyncio.to_thread(_bind_startup_root_serialized)
         await self.app(scope, receive, send)
 
 

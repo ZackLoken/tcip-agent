@@ -206,3 +206,32 @@ def test_event_branch_reports_the_shared_marker_problem_text(monkeypatch):
         json={"event_type": PANEL_EVENT_ACTIVE_PROJECT_CHANGED, "data": {}},
     )
     assert resp.json()["platform_root_problem"] == "a distinctive marker problem"
+
+
+def test_concurrent_first_requests_on_separate_loops_bind_once(tmp_path, monkeypatch):
+    """Eight clients on eight threads, each request on its own event loop, all reach the
+    startup bind at once: every one is answered and the root is bound once, so the
+    serialization the middleware applies holds across loops and threads, not only within
+    one loop."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import tcip_store
+
+    from tcip_mcp.project_paths import project_root
+
+    ws = tmp_path / "ws"
+    proj = ws / "elderberry_cyme_bloom"
+    (proj / ".tcip").mkdir(parents=True)
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+    monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
+    project_paths.restore_binding(None)
+    tcip_store.replace(workspace.active_project_key(), "elderberry_cyme_bloom")
+
+    def get(_):
+        return TestClient(app, base_url="http://127.0.0.1").get("/health").status_code
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        statuses = list(ex.map(get, range(8)))
+
+    assert statuses == [200] * 8
+    assert project_root().resolve() == proj.resolve()
