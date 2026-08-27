@@ -573,3 +573,43 @@ def test_preflight_config_accepts_an_empty_string_attribute_the_child_normalizes
 
     manifest_issues = [i for i in result["issues"] if "manifest" in i]
     assert manifest_issues == []
+
+
+def test_hpo_trial_snapshot_carries_the_manifest_binding(tmp_path: Path, monkeypatch):
+    """A tuning trial binds to the manifest its base config names through the same
+    ``_auto_train_val`` branch a launched run uses, and the trial's persisted resolved config
+    carries that binding, so a sweep's provenance names the partition each trial trained on."""
+    import torch.utils.data as tud
+
+    import tcip_store as ts
+    from tcip_mcp.pipelines.data import samplers
+    from tcip_mcp.pipelines.training import generic_trainer as gt
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    base_config = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": _run_data_cfg(root, out, DATES[0]),
+        "training": {"batch_size": 2},
+    }
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    monkeypatch.setattr(gt, "train", fake_train)
+    monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
+    monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
+    trial_dir = tmp_path / "sweep" / "trial_0"
+    _run_hpo_trial({"lr": 3e-4}, [].append, base_config, str(trial_dir))
+
+    snapshot = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    binding = snapshot["data"]["split"]["manifest_binding"]
+    assert binding["manifest_dir"] == str(out)
+    assert binding["subject"] == SUBJECT
+    assert binding["date"] == DATES[0]
