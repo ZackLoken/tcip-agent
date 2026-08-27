@@ -1180,7 +1180,7 @@ attributed to a split by
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:724`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
-`packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:439`; `_status_bucket_for`,
+`packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
 `packages/tcip-web/src/tcip_web/routes/sessions.py:269`;
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, which enumerates every bucket of a
@@ -2038,7 +2038,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the builder the reader resolves off `data.dataset_source` returns a Dataset the trainer's loaders accept.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:310` (`dataset_source = (config.get("data") or {}).get(DATASET_SOURCE_KEY)`).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1632` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:1631` (`def build_dataset(task: str, dataset_source: dict | None = None, **kwargs) -> Dataset:`).
 Phase 3 verdict: duplicated.
 
 ## S44. Model-contract smoke batch versus the trainer's real batch
