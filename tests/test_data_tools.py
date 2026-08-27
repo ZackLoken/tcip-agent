@@ -10,6 +10,7 @@ from tcip_annotation.state import Annotation, BBox
 from pathlib import Path
 
 from tcip_mcp.tools.data_tools import (
+    read_split_manifest_dir,
     scan_dataset,
     validate_data_quality,
     make_splits,
@@ -297,6 +298,36 @@ def test_make_splits_stats_only_carries_dataset_hash(data_dir: Path):
     result = make_splits(str(data_dir))
     assert "error" not in result
     assert result["dataset_hash"]
+    assert result["dataset_hashes_by_date"] == {"2-11-26": result["dataset_hash"]}
+
+
+def test_make_splits_stats_only_over_two_dates_names_both_hashes_and_no_single_hash(
+    tmp_path: Path,
+):
+    """A stats-only call over a tree with more than one labels directory names each date's own
+    hash and carries no single dataset_hash, which would be blind to every other date's
+    content: the same hash implementation the manifest write calls per date."""
+    from PIL import Image
+
+    root = tmp_path / "ds"
+    for date, stems in (("2-11-26", ("a", "b")), ("2-12-01", ("c", "d"))):
+        images_dir = root / "images" / date
+        labels_dir = root / "annotations" / date
+        images_dir.mkdir(parents=True)
+        labels_dir.mkdir(parents=True)
+        for stem in stems:
+            Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+            json_io.write_annotations(
+                labels_dir / f"{stem}.json",
+                [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+            )
+
+    result = make_splits(str(root))
+
+    assert "error" not in result, result
+    assert result["dataset_hash"] is None
+    assert set(result["dataset_hashes_by_date"]) == {"2-11-26", "2-12-01"}
+    assert result["dataset_hashes_by_date"]["2-11-26"] != result["dataset_hashes_by_date"]["2-12-01"]
 
 
 def test_make_splits_manifest_answer_carries_each_dates_hash(data_dir: Path, tmp_path: Path):
@@ -844,3 +875,52 @@ def test_validate_data_quality_admits_a_confirmed_negative_under_dated_labels_fl
 
     assert result["is_valid"] is True
     assert result["issues"] == []
+
+
+def test_read_split_manifest_dir_admits_the_writers_own_record(tmp_path: Path):
+    """A manifest make_splits actually wrote carries every key the reader requires: the
+    required set never rejects the writer's own output."""
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    write_result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
+    assert "error" not in write_result
+
+    manifest = read_split_manifest_dir(out)
+
+    assert manifest["subject"] == "catkin"
+    assert manifest["seed"] == 1
+
+
+def test_read_split_manifest_dir_refuses_each_missing_required_key_by_name(tmp_path: Path):
+    """A manifest missing any key make_splits writes is refused before a bind ever reads it,
+    naming the missing key, rather than reaching a downstream cast with nothing to fall back to."""
+    keys_a_written_manifest_carries = (
+        "seed", "group_by", "dataset_fingerprint", "subject", "attribute", "id_map",
+        "members", "splits", "admission_counts",
+    )
+    root = _multi_source_dataset(tmp_path / "ds")
+    for missing_key in keys_a_written_manifest_carries:
+        out = tmp_path / f"m_{missing_key}"
+        result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
+        assert "error" not in result
+
+        full = ts.read(split_manifest_key(out))
+        del full[missing_key]
+        ts.replace(split_manifest_key(out), full)
+
+        with pytest.raises(ValueError, match=missing_key):
+            read_split_manifest_dir(out)
+
+
+def test_read_split_manifest_dir_refuses_a_splits_block_missing_train_or_val(tmp_path: Path):
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), seed=1, subject="catkin")
+    assert "error" not in result
+
+    full = ts.read(split_manifest_key(out))
+    full["splits"] = {"train": full["splits"]["train"]}
+    ts.replace(split_manifest_key(out), full)
+
+    with pytest.raises(ValueError, match="val"):
+        read_split_manifest_dir(out)
