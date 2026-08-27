@@ -6,6 +6,7 @@
  */
 
 import { api, type ProjectSummary } from "@/api/client";
+import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { recordRecentProject } from "@/lib/recentProjects";
 import { useStore } from "@/store";
 import type { DatasetSelection } from "@/store/types";
@@ -38,9 +39,7 @@ export async function openWorkspaceProject(
   });
   recordRecentProject(p.name, p.path);
   useStore.getState().applyRestoredDataset(res.selection);
-  if (res.label_problem) {
-    useStore.getState().pushToast(res.label_problem);
-  }
+  toastLabelProblem(res.label_problem);
   return res.selection;
 }
 

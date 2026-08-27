@@ -8,6 +8,7 @@
  */
 
 import { api } from "@/api/client";
+import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { useStore } from "@/store";
 import type { Mode } from "@/store/types";
 
@@ -36,7 +37,8 @@ export async function applyAnnotateFocus(d: AnnotateFocusData): Promise<void> {
       date: d.date ?? null,
       model_name: null,
     });
-    useStore.getState().patchGui({ dataset: res.selection });
+    useStore.getState().applyRestoredDataset(res.selection);
+    toastLabelProblem(res.label_problem);
   }
   // Apply the view controls after any dataset switch has resolved, so a same-identity
   // snapshot (which keeps index/mode local) can't overwrite them.
