@@ -375,11 +375,11 @@ def preflight_config(config: dict, smoke: bool = False, overfit: bool = False) -
             val_labels_dir = data_cfg.get("val_labels_dir") or labels_dir
             if val_labels_dir and Path(val_labels_dir).is_dir():
                 from tcip_annotation.json_io import (
-                    UnreadableLabelDocument as _ULD, load_label_document, prediction_documents,
+                    UnreadableLabelDocument as _ULD, prediction_documents, read_annotations,
                 )
                 for label_path in prediction_documents(val_labels_dir):
                     try:
-                        load_label_document(label_path)
+                        read_annotations(str(label_path))
                     except _ULD as exc:
                         issues.append(f"data.val_labels_dir: {exc}")
 

@@ -30,9 +30,10 @@ def test_detect_format_dir_json_coco(tmp_path):
 
 def test_detect_format_dir_excludes_a_bucket_sidecar(tmp_path):
     """The directory branch walks through prediction_documents, so a bucket's own provenance
-    stamp is never read as a candidate label document: a directory holding only one is
-    undetectable, the same answer an empty directory gives."""
-    (tmp_path / "operating_point.json").write_text("{}")
+    stamp is never read as a candidate label document, even one carrying a recognizable format
+    marker of its own: a directory holding only one is undetectable, the same answer an empty
+    directory gives."""
+    (tmp_path / "operating_point.json").write_text('{"annotations": []}')
     with pytest.raises(ValueError):
         detect_format(str(tmp_path))
 

@@ -137,12 +137,13 @@ def test_assemble_coco_pairs_labels_with_images(tmp_path):
 
 def test_assemble_coco_with_no_stems_excludes_a_bucket_sidecar(tmp_path):
     """With no explicit ``stems``, the stem universe comes from prediction_documents, so a
-    sidecar beside a real label never mints a spurious entry."""
+    sidecar beside a real label never mints a spurious entry, even when an image happens to
+    share the sidecar's own stem (a stray file the platform never ingested this way)."""
     from tcip_mcp.pipelines.data.datasets import assemble_coco
     images = tmp_path / "images"
     labels = tmp_path / "detect"
     labels.mkdir()
-    _make_images(images, ["img0"])
+    _make_images(images, ["img0", "operating_point"])
     _reg, id_map = _reg_id_map()
     json_io.write_annotations(labels / "img0.json", [_box(10, 10, 50, 50)], 100, 100)
     (labels / "operating_point.json").write_text("{}")

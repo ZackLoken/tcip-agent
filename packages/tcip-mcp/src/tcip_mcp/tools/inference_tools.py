@@ -614,10 +614,9 @@ def force_redraw_cal_holdout_split(
                              "never reads, so state the root those labels' own lock lives under."}
 
     if identity_hash is None:
-        try:
-            identity_hash = dataset_hash(labels_dir, stems=manifest_stems)
-        except UnreadableLabelDocument as exc:
-            return {"error": str(exc)}
+        # dataset_hash enumerates through prediction_documents and hashes each file's raw bytes;
+        # it never parses one, so it cannot raise the named error the other reads here guard for.
+        identity_hash = dataset_hash(labels_dir, stems=manifest_stems)
 
     try:
         old_lock = store.read(cal_holdout_lock_key(identity_hash, scope_root=scope_root),

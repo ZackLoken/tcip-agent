@@ -92,6 +92,38 @@ def test_focus_review_empty_prediction_file_is_not_a_target(tmp_path: Path) -> N
     assert res["n_with_predictions"] == 1
 
 
+def test_focus_review_navigates_past_an_unreadable_prediction_on_another_frame(tmp_path: Path) -> None:
+    """A corrupt prediction document elsewhere on the date does not close the call: the frame it
+    lands on is readable, and the unreadable one is named instead of raising."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
+    _pred(root, "baseline", date, "IMG_0002", [("catkin", 0.9)])
+    bad = Path(prediction_dir(root, "baseline", date)) / "IMG_0000.json"
+    bad.write_bytes(b"{not json")
+
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline")
+
+    assert "error" not in res
+    assert res["image"] == "IMG_0002.JPG"
+    assert res["unreadable"] == ["IMG_0000.JPG"]
+
+
+def test_focus_review_refuses_an_explicitly_named_unreadable_frame(tmp_path: Path) -> None:
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
+    bad = Path(prediction_dir(root, "baseline", date)) / "IMG_0000.json"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"{not json")
+
+    res = focus("review", str(_project_root(tmp_path)), str(root), "catkin", date, model_name="baseline",
+               image_index=0)
+
+    assert "error" in res
+    assert str(bad) in res["error"]
+
+
 def test_focus_review_explicit_index_and_filter(tmp_path: Path) -> None:
     root = tmp_path / "proj"
     date = "2026-02-11"
