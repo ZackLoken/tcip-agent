@@ -385,3 +385,22 @@ def test_parse_coco_json_refuses_an_undecodable_document(tmp_path):
     path.write_bytes(b"{not json")
     with pytest.raises(UnreadableLabelDocument):
         _parse_coco_json(str(path))
+
+
+def test_write_coco_drops_a_geometry_the_stored_grid_collapses(tmp_path):
+    """The interop export applies the per-image export's own drop: a polygon or box that rounds
+    to no extent at the stored 2-decimal grid emits no record, while a real one still does."""
+    collapsing_polygon = Polygon([[(10.001, 10.001), (10.002, 10.001), (10.002, 10.002)]])
+    collapsing_box = BBox(10.001, 10.001, 10.004, 10.004)
+    kept = Polygon([[(10, 20), (50, 20), (50, 80), (10, 80)]])
+    anns = [Annotation(subject="leaf", geometry=collapsing_polygon),
+            Annotation(subject="leaf", geometry=collapsing_box),
+            Annotation(subject="leaf", geometry=kept)]
+    path = str(tmp_path / "seg.json")
+    write_coco(path, {"IMG_0001.jpg": (anns, 640, 480)})
+
+    with open(path) as f:
+        coco = json.load(f)
+
+    assert len(coco["annotations"]) == 1
+    assert coco["annotations"][0]["bbox"] == [10.0, 20.0, 40.0, 60.0]
