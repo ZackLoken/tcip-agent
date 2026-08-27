@@ -60,9 +60,8 @@ def cached_label_annotations(path: Path) -> tuple:
     if cached is not None and cached[0] == digest:
         _cache.move_to_end(key)
         return cached[1]
-    source = str(path)
-    text = _decode_label_bytes(data, source=source)
-    annotations = tuple(_annotations_of(parse_label_document(text, source=source)))
+    text = _decode_label_bytes(data, source=key)
+    annotations = tuple(_annotations_of(parse_label_document(text, source=key)))
     _cache[key] = (digest, annotations)
     _cache.move_to_end(key)
     if len(_cache) > _CACHE_MAX:
