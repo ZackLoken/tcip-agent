@@ -283,12 +283,20 @@ async def select_dataset(req: SelectionRequest) -> dict:
     if req.date:
         from tcip_annotation.json_io import UnreadableLabelDocument
 
+        labels_this_date: list[str] = []
         try:
-            labels_this_date = subjects_with_labels(root, req.date, reader=cached_label_annotations)
-        except UnreadableLabelDocument as exc:
-            # Advisory only, stated above: an unreadable label must not block a selection.
-            labels_this_date = []
+            # The one guard load_classes and the dataset tree apply to this directory: a
+            # directory they refuse is reported here, never scanned.
+            assert_path_allowed(annotations_dir or "")
+        except ValueError as exc:
             label_problem = str(exc)
+        else:
+            try:
+                labels_this_date = subjects_with_labels(
+                    root, req.date, reader=cached_label_annotations)
+            except UnreadableLabelDocument as exc:
+                # Advisory only, stated above: an unreadable label must not block a selection.
+                label_problem = str(exc)
         if req.subject:
             annotations_present = req.subject in labels_this_date
     predictions_present = bool(
