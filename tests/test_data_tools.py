@@ -183,6 +183,31 @@ def test_make_splits_reports_an_unreadable_label_sorted_last(
     assert str(bad) in result["error"]
 
 
+def test_make_splits_stats_only_reports_an_unreadable_first_sorted_label(data_dir: Path):
+    """A stats-only call (no output_path, no materialize) draws no subject-scoped admission at
+    all: its own scan raises on the first-sorted candidate, the same as scan_dataset would."""
+    bad = data_dir / "annotations" / "2-11-26" / "img_001.json"
+    bad.write_bytes(b"{not json")
+
+    result = make_splits(str(data_dir))
+
+    assert "error" in result
+    assert str(bad) in result["error"]
+
+
+def test_make_splits_stats_only_reports_an_unreadable_label_during_stratification(data_dir: Path):
+    """A stats-only call still reads every stem's label to count its annotations for stratified
+    balancing, so a corrupt label reached after a readable first candidate is an error naming the
+    file, not a raw raise."""
+    bad = data_dir / "annotations" / "2-11-26" / "img_003.json"
+    bad.write_bytes(b"{not json")
+
+    result = make_splits(str(data_dir))
+
+    assert "error" in result
+    assert str(bad) in result["error"]
+
+
 def test_make_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
     """A raw file colliding with a band group's own canonical stem is an error naming the
     directory, never a raise through the tool boundary, the same contract the unreadable-label

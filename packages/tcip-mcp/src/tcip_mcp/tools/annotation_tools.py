@@ -776,7 +776,12 @@ def _focus_review(
     conf_threshold: float = DEFAULT_CONF,
 ) -> dict:
     """Drive the live Review tab to a model's predictions of ``subject`` on a frame. Posts a
-    ``review_focus`` event the GUI honors with local setters."""
+    ``review_focus`` event the GUI honors with local setters.
+
+    Refuses only when the landed-on (or explicitly named) frame's own prediction document will
+    not read, naming that document's path in the error; every other image whose prediction will
+    not read is named instead (by image file name) in the result's ``unreadable``, the same
+    stance ``_focus_annotate`` takes."""
     from tcip_mcp.dataset_layout import image_dir, label_filename, prediction_dir
     from tcip_mcp.web_client import PANEL_EVENT_REVIEW_FOCUS, post_panel_event
     from tcip_mcp.workspace import is_valid_name
@@ -803,8 +808,14 @@ def _focus_review(
 
     n_with_preds = 0
     first_idx: int | None = None
+    unreadable: dict[str, str] = {}
     for i, name in enumerate(images):
-        if _has_pred(Path(name).stem):
+        try:
+            has_pred = _has_pred(Path(name).stem)
+        except UnreadableLabelDocument as exc:
+            unreadable[name] = str(exc)
+            continue
+        if has_pred:
             n_with_preds += 1
             if first_idx is None:
                 first_idx = i
@@ -812,6 +823,10 @@ def _focus_review(
     if image_index is None:
         image_index = first_idx if first_idx is not None else 0
     image_index = max(0, min(image_index, len(images) - 1))
+
+    target_name = images[image_index]
+    if target_name in unreadable:
+        return {"error": unreadable[target_name]}
 
     payload = {
         "project_root": project_root, "dataset_root": dataset_root,
@@ -826,6 +841,7 @@ def _focus_review(
         "subject": subject, "date": date, "model_name": model_name,
         "image_index": image_index, "detection_idx": detection_idx, "filter_type": filter_type,
         "n_images": len(images), "n_with_predictions": n_with_preds, "image": images[image_index],
+        "unreadable": sorted(unreadable),
     }
 
 

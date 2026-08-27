@@ -589,6 +589,10 @@ def make_splits(
     members: dict[str, Any] = {}
     identity_locations: dict[str, tuple[str | None, str]] = {}  # identity -> (date, bare stem)
     admission_counts: dict[str, int] = {}
+    annotation_counts = None
+    negative_carry: "_NegativeCarry | None" = None
+    # The admission below reads every candidate stem's label first, so neither the count nor the
+    # carry can raise this error over a stem the admission already read without raising.
     try:
         for date, labels_dir, images_dir in date_dirs:
             admitted, counts = trainable_stems(
@@ -605,68 +609,62 @@ def make_splits(
                     "images_root": str(images_dir),
                     "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
                 }
-    except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
-        return {"error": str(exc)}
 
-    stems = sorted(identity_locations)
-    if not stems:
-        return {"error": f"no sample of subject {subject!r} was admitted under {folder_path} "
-                         f"(attribute={attribute!r}): {admission_counts}. Annotate an instance or "
-                         "confirm a negative before splitting."}
-
-    annotation_counts = None
-    if stratify_foreground:
-        labels_dir_of = {date: labels_dir for date, labels_dir, _ in date_dirs}
-        try:
+        stems = sorted(identity_locations)
+        if stems and stratify_foreground:
+            labels_dir_of = {date: labels_dir for date, labels_dir, _ in date_dirs}
             annotation_counts = {
                 identity: count_label_lines(labels_dir_of[date], stem)
                 for identity, (date, stem) in identity_locations.items()
             }
-        except UnreadableLabelDocument as exc:
-            return {"error": str(exc)}
 
-    try:
-        group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
-    except ValueError as exc:
+        if stems:
+            try:
+                group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
+            except ValueError as exc:
+                return {"error": str(exc)}
+            resolved_group_by = "explicit_map" if group_key_map else group_by
+            parts = group_balanced_split(
+                stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
+                splits=(train_ratio, val_ratio, test_ratio), seed=seed,
+            )
+
+            distinct_dates = {date for date, _ in identity_locations.values()}
+            if materialize and len(distinct_dates) > 1:
+                named = sorted(d for d in distinct_dates if d is not None)
+                return {"error": f"materialize=True refuses a manifest spanning more than one "
+                                 f"capture date ({named}): its flat {{train,val}}/"
+                                 "{images,labels}/ tree is keyed by file name and its negative "
+                                 "carry writes one undated bucket, so two dates sharing a name "
+                                 "would collide silently. Write the manifest without "
+                                 "materializing, or scope this call to one capture date."}
+
+            if materialize:
+                from tcip_mcp.pipelines.image_utils import list_logical_images
+
+                (only_date,) = distinct_dates
+                labels_dir_for_date = next(d for date, d, _ in date_dirs if date == only_date)
+                images_dir_for_date = next(d for date, _, d in date_dirs if date == only_date)
+                image_map = list_logical_images(images_dir_for_date)
+                label_map = {
+                    stem: labels_dir_for_date / f"{stem}.json" for stem in image_map
+                    if (labels_dir_for_date / f"{stem}.json").is_file()
+                }
+                bare_parts = {
+                    split_name: sorted(member_identity_parts(identity)[1] for identity in identities)
+                    for split_name, identities in parts.items() if split_name in kept_splits
+                }
+                # Read every confirmed negative before anything (a stem list, the manifest, the
+                # split tree) is written: a refusal here must leave nothing persisted.
+                negative_carry = _compute_negative_carry(
+                    label_map, bare_parts, image_map, subject, only_date)
+    except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
         return {"error": str(exc)}
-    resolved_group_by = "explicit_map" if group_key_map else group_by
-    parts = group_balanced_split(
-        stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
-        splits=(train_ratio, val_ratio, test_ratio), seed=seed,
-    )
 
-    distinct_dates = {date for date, _ in identity_locations.values()}
-    if materialize and len(distinct_dates) > 1:
-        named = sorted(d for d in distinct_dates if d is not None)
-        return {"error": f"materialize=True refuses a manifest spanning more than one capture "
-                         f"date ({named}): its flat {{train,val}}/{{images,labels}}/ tree is "
-                         "keyed by file name and its negative carry writes one undated bucket, "
-                         "so two dates sharing a name would collide silently. Write the manifest "
-                         "without materializing, or scope this call to one capture date."}
-
-    negative_carry: "_NegativeCarry | None" = None
-    if materialize:
-        from tcip_mcp.pipelines.image_utils import list_logical_images
-
-        (only_date,) = distinct_dates
-        labels_dir_for_date = next(d for date, d, _ in date_dirs if date == only_date)
-        images_dir_for_date = next(d for date, _, d in date_dirs if date == only_date)
-        image_map = list_logical_images(images_dir_for_date)
-        label_map = {
-            stem: labels_dir_for_date / f"{stem}.json" for stem in image_map
-            if (labels_dir_for_date / f"{stem}.json").is_file()
-        }
-        bare_parts = {
-            split_name: sorted(member_identity_parts(identity)[1] for identity in identities)
-            for split_name, identities in parts.items() if split_name in kept_splits
-        }
-        # Read every confirmed negative this split will carry before anything (a stem list, the
-        # manifest, the split tree) is written: a refusal here must leave nothing persisted.
-        try:
-            negative_carry = _compute_negative_carry(
-                label_map, bare_parts, image_map, subject, only_date)
-        except UnreadableLabelDocument as exc:
-            return {"error": str(exc)}
+    if not stems:
+        return {"error": f"no sample of subject {subject!r} was admitted under {folder_path} "
+                         f"(attribute={attribute!r}): {admission_counts}. Annotate an instance or "
+                         "confirm a negative before splitting."}
 
     manifest: dict[str, Any] = {
         "seed": seed,

@@ -274,6 +274,45 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(tmp_pa
     assert any("bad.json" in i for i in r["issues"]), r["issues"]
 
 
+@pytest.mark.parametrize("bad_document", [
+    '{"image": "bad", "width": 20, "height": 20, "annotations": 5}',
+    '{"image": "bad", "width": 20, "height": 20, "annotations": [7]}',
+])
+def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(tmp_path, bad_document):
+    """A document that decodes to a dict but whose annotations field is not a list, or whose
+    record cannot be coerced, is exactly what the run's own admission (read_annotations) refuses
+    at launch: preflight reads through the same call so it blocks here too, rather than passing a
+    document the launch then aborts on."""
+    pytest.importorskip("torch")
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    imgs = tmp_path / "images"
+    lbls = tmp_path / "annotations"
+    val_imgs = tmp_path / "val_images"
+    val_lbls = tmp_path / "val_annotations"
+    for d in (imgs, lbls, val_imgs, val_lbls):
+        d.mkdir()
+    Image.new("RGB", (20, 20)).save(imgs / "ann.jpg")
+    Image.new("RGB", (20, 20)).save(val_imgs / "bad.jpg")
+    json_io.write_annotations(lbls / "ann.json",
+                              [Annotation(subject="catkin", geometry=BBox(2, 2, 10, 10))], 20, 20)
+    (val_lbls / "bad.json").write_text(bad_document, encoding="utf-8")
+
+    cfg = {
+        "model_source": {"builder": "tests.bespoke_models:build_bespoke_detection",
+                         "builder_kwargs": {"num_classes": 1}, "task": "detection"},
+        "data": {"images_dir": str(imgs), "labels_dir": str(lbls), "subject": "catkin",
+                 "val_images_dir": str(val_imgs), "val_labels_dir": str(val_lbls)},
+        "training": {"batch_size": 2},
+    }
+    r = preflight_config(cfg)
+    assert r["valid"] is False
+    assert any(i.startswith("data.val_labels_dir:") for i in r["issues"]), r["issues"]
+
+
 def test_preflight_config_blocks_an_unreadable_label_in_val_labels_dir(tmp_path):
     """An unreadable label under an explicit validation source aborts the launch (the explicit
     validation build re-raises rather than degrading to no validation), so it blocks here too,
