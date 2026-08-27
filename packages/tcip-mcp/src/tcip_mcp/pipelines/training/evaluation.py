@@ -1281,6 +1281,7 @@ def run_test_evaluation(
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
     iou_type: str | None = None, max_dets: int = 100, score_weights: dict | None = None,
     tiling: dict | None = None, trait: str | None = None,
+    split_manifest_dir: str | None = None, evaluated_stem_count: int | None = None,
 ) -> dict:
     """Load ``model_best.pt``, evaluate ``loader``, write ``test_results.json``.
 
@@ -1288,6 +1289,10 @@ def run_test_evaluation(
     caller): a tile-level run scores per-tile predictions against per-tile GT (a diagnostic that
     matches the training-run val mAP), not the delivery regime, the stamp keeps the two from being
     silently conflated. See ``run_full_frame_evaluation`` for a delivery-grade metric.
+
+    ``split_manifest_dir``/``evaluated_stem_count`` are the caller's own record of a manifest
+    the loader was narrowed to (``evaluate_model``'s own binding, resolved before the loader was
+    built): recorded verbatim when given, absent otherwise, never re-derived here.
     """
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY, build_model
 
@@ -1309,6 +1314,9 @@ def run_test_evaluation(
         "tiled": tiled,
         "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
     }
+    if split_manifest_dir is not None:
+        result["split_manifest_dir"] = split_manifest_dir
+        result["evaluated_stem_count"] = evaluated_stem_count
     store.replace(evaluation_results_key(output_dir), result)
     result["results_path"] = str(evaluation_results_path(output_dir))
     return result

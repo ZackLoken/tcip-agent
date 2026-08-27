@@ -286,30 +286,12 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                 "labels-only universe can include a stem whose image is gone, a lock the redraw "
                 "would address that no manifest-restricted calibration ever draws."
             )
-        from tcip_mcp.dataset_layout import annotation_date
-        from tcip_mcp.pipelines.data.splits import (
-            calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
-        )
+        from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(split_manifest_dir)
-        if (manifest.get("subject"), manifest.get("attribute")) != (_subject, _attribute):
-            raise ValueError(
-                f"split manifest at {split_manifest_dir!r} was drawn for subject="
-                f"{manifest.get('subject')!r}, attribute={manifest.get('attribute')!r}, but this "
-                f"run's recorded training scope is subject={_subject!r}, attribute={_attribute!r}."
-            )
-        cal_date = annotation_date(labels_dir)
-        date_block = (manifest.get("members") or {}).get(manifest_date_key(cal_date))
-        if date_block is None:
-            raise ValueError(
-                f"split manifest at {split_manifest_dir!r} holds no members under date "
-                f"{cal_date!r}; it holds members under {sorted(manifest.get('members') or {})}."
-            )
-        refuse_if_images_root_moved(
-            "images_dir", images_dir, date_block.get("images_root"), cal_date)
-        stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
-            manifest, cal_date, stems)
+        stems, group_by, group_key_map, excluded, cal_date = resolve_manifest_calibration_universe(
+            manifest, split_manifest_dir, labels_dir, images_dir, _subject, _attribute, stems)
         stem_to_image = {s: stem_to_image[s] for s in stems}
     else:
         group_by = group_by or "tile_prefix"
@@ -581,33 +563,18 @@ def force_redraw_cal_holdout_split(
 
     manifest_stems: list[str] | None = None
     if split_manifest_dir is not None:
-        from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
-            calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
+            label_image_stems, resolve_manifest_calibration_universe,
         )
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(split_manifest_dir)
-        if (manifest.get("subject"), manifest.get("attribute")) != (subject, attribute):
-            return {"error": f"split manifest at {split_manifest_dir!r} was drawn for subject="
-                             f"{manifest.get('subject')!r}, attribute="
-                             f"{manifest.get('attribute')!r}, but this call states "
-                             f"subject={subject!r}, attribute={attribute!r}."}
-        cal_date = annotation_date(labels_dir)
-        date_block = (manifest.get("members") or {}).get(manifest_date_key(cal_date))
-        if date_block is None:
-            return {"error": f"split manifest at {split_manifest_dir!r} holds no members under "
-                             f"date {cal_date!r}; it holds members under "
-                             f"{sorted(manifest.get('members') or {})}."}
-        try:
-            refuse_if_images_root_moved(
-                "images_dir", images_dir, date_block.get("images_root"), cal_date)
-        except ValueError as exc:
-            return {"error": str(exc)}
         present, _ = label_image_stems(labels_dir, images_dir)
         try:
-            manifest_stems, group_by, group_key_map, _excluded = calibration_universe_from_manifest(
-                manifest, cal_date, present)
+            manifest_stems, group_by, group_key_map, _excluded, cal_date = \
+                resolve_manifest_calibration_universe(
+                    manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
+                    present)
         except ValueError as exc:
             return {"error": str(exc)}
 

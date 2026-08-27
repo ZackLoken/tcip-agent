@@ -1717,11 +1717,13 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
     was refused is a failed run, not a silently degraded one.
 
     The one writer of that member; :func:`~tcip_mcp.experiments.read_split_manifest` is the one
-    reader every consumer of the membership goes through. When ``data_cfg["split"]`` carries a
-    ``manifest_binding`` (a run bound to a ``data.split.manifest_dir`` split manifest, see
-    :func:`_auto_train_val`), its counts and the two dataset hashes ride into this record too, so
-    a reviewer opening this one file can see that a recorded partition, not a drawn one, governed
-    the run.
+    reader every consumer of the membership goes through. Records ``date``, the labels
+    directory's own capture date (``None`` for a flat tree), for every run, bound or not, so a
+    later selection check can scope itself to one date without re-deriving it from the config.
+    When ``data_cfg["split"]`` carries a ``manifest_binding`` (a run bound to a
+    ``data.split.manifest_dir`` split manifest, see :func:`_auto_train_val`), its counts and the
+    two dataset hashes ride into this record too, so a reviewer opening this one file can see
+    that a recorded partition, not a drawn one, governed the run.
     """
     def _stems(ds) -> list[str]:
         # set(): a tiled dataset's ``stems`` repeats one entry per tile, and a manifest member
@@ -1733,6 +1735,7 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
     try:
         from tcip_store import store
 
+        from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.experiments import experiment_exists, refuse_if_terminal, split_key, status_key
         from tcip_mcp.pipelines.resolution import dataset_hash
 
@@ -1758,6 +1761,9 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             # The actually resolved grouping ("explicit_map"/"external"/a named strategy/
             # "spatial_strip"/None); _train_disjointness recomputes group keys from this.
             "group_by": resolved_group_by,
+            # The labels directory's own capture date (None for a flat tree), so the selection
+            # check can scope itself to one date without reading the config record.
+            "date": annotation_date(labels_dir),
         }
         resolved_group_key_map = split.get("resolved_group_key_map") or split.get("group_key_map")
         if resolved_group_by == "explicit_map" and resolved_group_key_map:
@@ -2184,7 +2190,10 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
          explicit split ``auto_val`` does not govern, checked ahead of its gate below; every
          conflict, task, date, images-root and binding refusal here raises to the caller, and so
          does a build failure while binding, never degrading to training on the manifest's
-         held-out side with no validation.
+         held-out side with no validation. The manifest's calibration side never builds a
+         loader; its own bound count and unadmitted count ride into ``manifest_binding`` beside
+         ``labels_hash_now`` (now over all three bound sides) and ``labels_hash_at_split``, a
+         pair nothing currently reads back, kept for a reviewer to compare by eye.
       2. ``data.auto_val`` (default True) and a stem-capable task
          (detection / instance_seg / semantic_seg / classification) -> derive a
          group-aware train/val split (no held-out test) so the trainer receives
@@ -2341,10 +2350,13 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         split_cfg["manifest_binding"] = {
             "manifest_dir": manifest_dir, "subject": subject, "attribute": attribute,
             "date": date, "labels_hash_at_split": date_block.get("dataset_hash"),
-            "labels_hash_now": dataset_hash(labels_dir, stems=binding.train + binding.val),
+            "labels_hash_now": dataset_hash(
+                labels_dir, stems=binding.train + binding.val + binding.calibration),
             "dataset_fingerprint_at_split": manifest.get("dataset_fingerprint"),
             "assigned": binding.assigned, "train_bound": binding.train_bound,
-            "val_bound": binding.val_bound, "other_dates": binding.other_dates,
+            "val_bound": binding.val_bound, "calibration_bound": binding.calibration_bound,
+            "calibration_unadmitted": binding.calibration_unadmitted,
+            "other_dates": binding.other_dates,
         }
         # Only detection/instance_seg reach here (checked above), so the build is the plain
         # stems=-narrowed geometry path, never the classification CSV/folder branch below.
@@ -2538,6 +2550,7 @@ def evaluate_model(
     subject: str | None = None,
     attribute: str | None = None,
     date: str | None = None,
+    split_manifest_dir: str | None = None,
 ) -> dict:
     """Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json.
 
@@ -2596,6 +2609,12 @@ def evaluate_model(
             key the delivery-grade path reads them by. A GT dir under ``annotations/<date>/``
             states that date; a split tree or a curated dataset carries none and leaves this
             unset. It is never recovered from ``labels_dir``.
+        split_manifest_dir: Score the checkpoint over this split manifest's ``calibration``
+            members under ``labels_dir``'s own date instead of the whole directory: the same
+            subject/attribute/date/images-root checks the calibration door applies, refusing the
+            same way (detection/instance_seg only, and not combined with
+            ``use_tiled_inference``). ``test_results.json`` then records ``split_manifest_dir``
+            and the evaluated stem count; omitted, the whole directory is scored, as today.
     """
     import torch
     from torch.utils.data import DataLoader
@@ -2632,6 +2651,31 @@ def evaluate_model(
         subject = run_data_cfg.get("subject")
     if attribute is None:
         attribute = run_data_cfg.get("attribute")
+
+    manifest_stems: list[str] | None = None
+    if split_manifest_dir is not None:
+        if task not in ("detection", "instance_seg"):
+            return {"error": f"split_manifest_dir names a split manifest, and only detection "
+                             f"and instance_seg admit through the trainable_stems draw a "
+                             f"manifest is drawn through; task={task!r} cannot bind to one."}
+        if use_tiled_inference:
+            return {"error": "split_manifest_dir is not combined with use_tiled_inference: that "
+                             "delivery-grade path scans images_dir/labels_dir on its own, never "
+                             "narrowed to a manifest's stems."}
+        from tcip_mcp.pipelines.data.splits import (
+            label_image_stems, resolve_manifest_calibration_universe,
+        )
+        from tcip_mcp.tools.data_tools import read_split_manifest_dir
+
+        manifest = read_split_manifest_dir(split_manifest_dir)
+        present, _ = label_image_stems(labels_dir, images_dir)
+        try:
+            manifest_stems, _group_by, _group_key_map, _excluded, _cal_date = \
+                resolve_manifest_calibration_universe(
+                    manifest, split_manifest_dir, labels_dir, images_dir, subject, attribute,
+                    present)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
     # Delivery-grade full-frame path (tiled inference + full-frame GT matching).
     if use_tiled_inference and task == "detection":
@@ -2670,6 +2714,8 @@ def evaluate_model(
     data_cfg = {"images_dir": images_dir, "labels_dir": labels_dir, "masks_dir": labels_dir,
                 "csv_path": labels_dir, "subject": subject, "attribute": attribute, "date": date}
     ds_kwargs = _dataset_source_kwargs(task, data_cfg)
+    if manifest_stems is not None:
+        ds_kwargs["stems"] = manifest_stems
     try:
         dataset = build_dataset(task, **ds_kwargs, tiling=tiling)
     except Exception as exc:  # noqa: BLE001
@@ -2677,12 +2723,13 @@ def evaluate_model(
 
     loader = DataLoader(dataset, batch_size=4, collate_fn=task_collate(task))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # 100 is the COCOeval maxDets convention for this tile-level/diagnostic
-    # regime, distinct from the delivery-grade path's 1000 above, resolved here (not via a
-    # shared sentinel value) so an explicit caller max_dets<=100 is never silently substituted.
+    # 100 is the COCOeval maxDets convention for this tile-level/diagnostic regime, distinct
+    # from the delivery-grade path's 1000 above; an explicit caller max_dets is honored verbatim.
     resolved_max_dets = 100 if max_dets is None else max_dets
     return run_test_evaluation(
         ckpt, loader, device, task, str(Path(ckpt).parent),
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
         iou_type=iou_type, max_dets=resolved_max_dets, tiling=tiling, trait=trait,
+        split_manifest_dir=split_manifest_dir,
+        evaluated_stem_count=len(manifest_stems) if manifest_stems is not None else None,
     )

@@ -646,8 +646,13 @@ def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     _persist_split_manifest("exp_manifest_binding", train_ds, val_ds, data_cfg)
 
     persisted = read_split_manifest("exp_manifest_binding")
-    assert persisted["manifest_binding"]["manifest_dir"] == str(out)
-    assert persisted["manifest_binding"]["date"] == DATES[0]
+    assert persisted["date"] == DATES[0]
+    binding = persisted["manifest_binding"]
+    assert binding["manifest_dir"] == str(out)
+    assert binding["date"] == DATES[0]
+    assert binding["calibration_bound"] >= 0
+    assert binding["calibration_unadmitted"] == 0
+    assert binding["other_dates"] > 0  # the manifest's other date's members, across all three sides
 
 
 def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_bind(
@@ -682,6 +687,7 @@ def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_b
 
     persisted = read_split_manifest("exp_relaunch_no_manifest")
     assert "manifest_binding" not in persisted
+    assert persisted["date"] == DATES[0]  # every run's split.json carries its own date, bound or not
 
 
 def test_patch_experiment_config_split_merges_into_the_durable_record(tmp_path: Path):
@@ -850,3 +856,71 @@ def test_hpo_trial_snapshot_carries_the_manifest_binding(tmp_path: Path, monkeyp
     assert binding["manifest_dir"] == str(out)
     assert binding["subject"] == SUBJECT
     assert binding["date"] == DATES[0]
+
+
+# -- evaluate_model's split_manifest_dir ------------------------------------------
+
+
+def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_from_manifests_side(
+    tmp_path: Path, monkeypatch,
+):
+    """evaluate_model given split_manifest_dir scores the checkpoint over exactly the stems
+    calibration_universe_from_manifest hands back for the labels directory's own date (the same
+    universe the calibration door draws through), and records the stem count. The universe's own
+    source side within the manifest is calibration_universe_from_manifest's concern, not
+    duplicated here."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.tools.training_tools import evaluate_model
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    present, _ = label_image_stems(labels_dir, images_dir)
+    expected_universe, *_rest = calibration_universe_from_manifest(manifest, DATES[0], present)
+    assert expected_universe
+
+    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                               "subject": SUBJECT}}, str(tmp_path / "runs"))
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+
+    captured: dict = {}
+
+    def _fake(ckpt, loader, device, task, output_dir, **kw):
+        captured["ds"] = loader.dataset
+        captured["kw"] = kw
+        return {"tiled": False, "eval_regime": "tile-level"}
+
+    monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+
+    res = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+                         split_manifest_dir=str(out))
+
+    assert "error" not in res, res
+    assert sorted(captured["ds"].stems) == sorted(expected_universe)
+    assert captured["kw"]["split_manifest_dir"] == str(out)
+    assert captured["kw"]["evaluated_stem_count"] == len(expected_universe)
+
+
+def test_evaluate_model_manifest_refuses_a_subject_mismatch(tmp_path: Path):
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+
+    root = _two_subject_two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+
+    images_dir, labels_dir = root / "images" / DATES[0], root / "annotations" / DATES[0]
+    run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
+                               "subject": OTHER_SUBJECT}}, str(tmp_path / "runs"))
+    Path(run.output_dir).mkdir(parents=True, exist_ok=True)
+    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+
+    result = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
+                            split_manifest_dir=str(out))
+
+    assert "error" in result and "subject" in result["error"]
