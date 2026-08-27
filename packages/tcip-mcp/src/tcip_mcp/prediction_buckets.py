@@ -273,6 +273,13 @@ def stage_prediction_shapes(
     """
     from tcip_annotation import json_io
 
+    if json_io.is_sidecar_name(f"{stem}.json"):
+        raise ValueError(
+            f"{stem} names one of a prediction bucket's own provenance stamps; an image whose "
+            "stem is reserved this way can never be written as a bucket's per-image prediction "
+            "document, since the stamp write would then destroy or refuse over it."
+        )
+
     pred_dir, resolution = resolve_prediction_bucket(
         dataset_root,
         model_name,
