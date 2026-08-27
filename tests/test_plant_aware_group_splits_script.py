@@ -282,11 +282,11 @@ def test_main_cli_end_to_end(tmp_path: Path, four_plant_csv: Path) -> None:
     assert ts.exists(split_manifest_key(out_dir))
 
 
-def test_main_cli_default_invocation_states_all_three_ratios(
+def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_manifest(
     tmp_path: Path, four_plant_csv: Path,
 ) -> None:
-    """No train/val ratio flags named: the script's own defaults (0.8/0.2) still write a real
-    train/val split beside the stated calibration side."""
+    """--train-ratio, --val-ratio and --calibration-ratio have no default and are all stated:
+    the write lands a real three-sided manifest."""
     from tcip_mcp.tools.data_tools import split_manifest_key, split_stem_list_key
 
     dataset_root = _four_plant_dataset(tmp_path)
@@ -304,16 +304,16 @@ def test_main_cli_default_invocation_states_all_three_ratios(
     assert set(manifest["splits"]) == {"train", "val", "calibration"}
 
 
-def test_main_cli_without_calibration_ratio_refuses(tmp_path: Path, four_plant_csv: Path) -> None:
-    """``--calibration-ratio`` has no default and is required beside ``--output-path`` or
-    ``--materialize``: the script's plain default invocation (train/val ratios only) now
-    refuses rather than silently writing a two-sided manifest."""
+def test_main_cli_missing_a_required_ratio_flag_refuses(tmp_path: Path, four_plant_csv: Path) -> None:
+    """--train-ratio, --val-ratio and --calibration-ratio all have no default and are required:
+    omitting --train-ratio (which used to default to 0.8) refuses via argparse before anything
+    is written, rather than silently falling back to a stale default."""
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
 
     with pytest.raises(SystemExit):
         main([str(dataset_root), "--plant-csv", str(four_plant_csv), "--subject", SUBJECT,
-             "--output-path", str(out_dir)])
+             "--val-ratio", "0.2", "--calibration-ratio", "0.2", "--output-path", str(out_dir)])
 
     assert not out_dir.exists()
 
@@ -322,6 +322,7 @@ def test_main_cli_reports_refusal_and_nonzero_exit(tmp_path: Path, two_plant_csv
     dataset_root = tmp_path / "dataset"
     _write_dataset_stem(dataset_root, "2026-02-01", "far_stem", FAR_TIEPOINT)
 
-    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT])
+    rc = main([str(dataset_root), "--plant-csv", str(two_plant_csv), "--subject", SUBJECT,
+              "--train-ratio", "0.8", "--val-ratio", "0.1", "--calibration-ratio", "0.1"])
 
     assert rc == 1

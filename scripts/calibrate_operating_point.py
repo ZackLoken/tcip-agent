@@ -140,7 +140,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     dh = dataset_hash(args.labels_dir, stems=(stems if args.split_manifest_dir else None))
-    annotation_counts = {s: count_label_lines(args.labels_dir, s) for s in stems}
+    annotation_counts = {
+        s: count_label_lines(args.labels_dir, s, subject=args.subject, attribute=args.attribute)
+        for s in stems
+    }
     # Detector-cap censoring: the flat DEFAULT_MAX_DETS below can still truncate a dense
     # calibration image's raw detections the same way a too-high conf floor censors them, so
     # derive the collection-pass cap from this labeled split's own density (same ~1.5x p99 formula

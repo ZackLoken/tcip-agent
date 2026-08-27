@@ -489,14 +489,22 @@ def make_splits(
 
     The third side, ``calibration``, is the universe every calibration drawn under this manifest
     draws from (the operating point is measured on it, never on ``train`` or ``val``); a manifest
-    write therefore has no default for ``calibration_ratio`` and refuses a zero one. The draw
-    refuses, before any write, when the tree holds fewer foreground groups of ``subject`` (and
-    ``attribute``, when scoped) than the sides being drawn need at minimum (one each for
-    ``train``/``val``, two for ``calibration``, so the locked calibration/holdout draw the
-    calibration door makes later can still halve it); the answer's
-    ``calibration_foreground_groups_by_date`` then reports, per date, how many of the calibration
-    side's own groups actually carry a foreground annotation, since the floor above is over the
-    whole draw and a single date can still land short.
+    write therefore has no default for any of the three ratios and refuses a zero one, naming it.
+    The draw refuses, before any write, when the tree holds fewer foreground groups of
+    ``subject`` (and ``attribute``, when scoped) than the three sides need at minimum (one each
+    for ``train``/``val``, two for ``calibration``, so the locked calibration/holdout draw the
+    calibration door makes later can still halve it), counted for the draw's own subject
+    regardless of ``stratify_foreground``: that flag only toggles the balancing pass, never
+    whether the minimum pass sees real foreground. The answer's
+    ``calibration_foreground_groups_by_date`` (also carried on the persisted manifest record)
+    then reports, per date the draw holds members under, how many of the calibration side's own
+    groups for that date actually carry a foreground annotation, ``0`` for a date that drew short,
+    since the floor above is over the whole draw and a single date can still land short. Both the
+    answer and the manifest record also carry ``realized_ratios``, each side's member share of
+    the draw actually delivered: on a tree sized at the floor, the minimum pass can consume every
+    foreground group before the balancing pass ever sees the caller's fractions, so the delivered
+    shares can diverge from the ratios asked for, and this states the shape actually drawn beside
+    them.
 
     With ``materialize=True`` it additionally lays out a
     ``{train,val,calibration}/{images,labels}/`` tree under ``output_path`` (defaulting to
@@ -511,10 +519,11 @@ def make_splits(
         train_ratio: Fraction for training set. Defaults to 0.8, the complement of the
             unchanged 0.2 validation default once ``calibration_ratio`` is 0.
         val_ratio: Fraction for validation set.
-        calibration_ratio: Fraction held out as the calibration universe. No default for a
-            manifest write (``output_path`` given, or ``materialize=True``): the caller states
-            all three ratios, and a zero one is refused there. A stats-only call keeps the
-            0.0 default and may pass a non-zero value too, both admitted.
+        calibration_ratio: Fraction held out as the calibration universe. Defaults to 0.0 for a
+            stats-only call, and a non-zero value is admitted there too. A manifest write
+            (``output_path`` given, or ``materialize=True``) refuses a zero ratio on any of the
+            three (``train_ratio``, ``val_ratio``, ``calibration_ratio``), naming it, since a
+            manifest always draws all three sides.
         seed: Random seed for reproducibility.
         group_by: Group selector: ``"tile_prefix"`` (strip a trailing
             ``_<x>_<y>`` tile offset) or ``"stem"`` (one group per member). Ignored when
@@ -559,12 +568,17 @@ def make_splits(
 
     kept_splits = SPLIT_NAMES
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
-    if out_dir is not None and calibration_ratio == 0:
-        return {"error": "calibration_ratio must be non-zero to write a split manifest: a "
-                         "manifest's calibration side is the universe every calibration drawn "
-                         "under it draws from, so a manifest write states all three ratios "
-                         "(train_ratio, val_ratio, calibration_ratio). Omit output_path and "
-                         "materialize for a stats-only call, whose calibration_ratio may be 0."}
+    if out_dir is not None:
+        zero_ratios = [name for name, ratio in (
+            ("train_ratio", train_ratio), ("val_ratio", val_ratio),
+            ("calibration_ratio", calibration_ratio),
+        ) if ratio == 0]
+        if zero_ratios:
+            return {"error": f"{', '.join(zero_ratios)} must be non-zero to write a split "
+                             "manifest: a manifest's three sides are all drawn from, so a "
+                             "manifest write states all three ratios (train_ratio, val_ratio, "
+                             "calibration_ratio) as non-zero. Omit output_path and materialize "
+                             "for a stats-only call, whose ratios may include a zero."}
 
     if out_dir is None:
         # A stats-only call writes no manifest, so the draw is a plain image/label scan: no
@@ -710,6 +724,7 @@ def make_splits(
             annotation_counts = foreground_counts
 
         calibration_foreground_groups_by_date: dict[str, int] = {}
+        realized_ratios: dict[str, float] = {}
         if stems:
             try:
                 group_key_fn = resolve_group_key_fn(group_by, stems, group_key_map=group_key_map)
@@ -725,8 +740,12 @@ def make_splits(
             parts = group_balanced_split(
                 stems, annotation_counts=annotation_counts, group_key_fn=group_key_fn,
                 splits=(train_ratio, val_ratio, calibration_ratio), seed=seed,
-                min_foreground_groups=min_foreground_groups,
+                min_foreground_groups=min_foreground_groups, foreground_counts=foreground_counts,
             )
+            total_drawn = sum(len(parts[k]) for k in kept_splits)
+            realized_ratios = {
+                k: (len(parts[k]) / total_drawn if total_drawn else 0.0) for k in kept_splits
+            }
             cal_groups_by_date: dict[str, set[str]] = {}
             for identity in parts["calibration"]:
                 if foreground_counts.get(identity, 0) > 0:
@@ -734,7 +753,8 @@ def make_splits(
                     cal_groups_by_date.setdefault(
                         manifest_date_key(cal_date), set()).add(group_key_fn(identity))
             calibration_foreground_groups_by_date = {
-                k: len(v) for k, v in cal_groups_by_date.items()
+                date_key: len(cal_groups_by_date.get(date_key, set()))
+                for date_key in sorted(members)
             }
 
             distinct_dates = {date for date, _ in identity_locations.values()}
@@ -806,6 +826,8 @@ def make_splits(
         "members": members,
         "splits": {k: sorted(parts[k]) for k in kept_splits},
         "admission_counts": admission_counts,
+        "calibration_foreground_groups_by_date": calibration_foreground_groups_by_date,
+        "realized_ratios": realized_ratios,
     }
     if group_key_map:
         manifest["group_key_map"] = group_key_map
@@ -833,6 +855,7 @@ def make_splits(
         "manifest_dir": str(out_dir),
         "dataset_hashes_by_date": {key: block["dataset_hash"] for key, block in members.items()},
         "calibration_foreground_groups_by_date": calibration_foreground_groups_by_date,
+        "realized_ratios": realized_ratios,
     }
 
     if materialize:

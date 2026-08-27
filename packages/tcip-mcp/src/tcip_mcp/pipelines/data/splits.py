@@ -149,6 +149,7 @@ def group_balanced_split(
     seed: int = 42,
     require_foreground: bool = False,
     min_foreground_groups: dict[str, int] | None = None,
+    foreground_counts: dict[str, int] | None = None,
 ) -> dict[str, list[str]]:
     """Partition ``stems`` into train/val/calibration, keeping each group intact.
 
@@ -176,6 +177,16 @@ def group_balanced_split(
         minimum asks for simply gets fewer than that side's floor met, this function never raises
         on it (a caller wanting a hard floor calls :func:`refuse_insufficient_foreground_groups`
         first, before any write).
+    foreground_counts:
+        The minimum pass's own foreground signal, independent of ``annotation_counts`` (which
+        stays the balancing pass's signal, gated by whatever a caller's own stratification flag
+        does before this function is ever called). Omitted, the minimum pass draws from whatever
+        ``annotation_counts`` produced (today's shape); given, a group counts toward a side's
+        minimum only when its ``foreground_counts`` sum is positive, even when
+        ``annotation_counts`` is ``None`` and the balancing pass is running its no-foreground,
+        every-group-is-foreground fallback. A manifest draw passes its subject-scoped foreground
+        count here on every draw, so the calibration side's floor is met with real foreground
+        regardless of whether balancing itself is stratified.
 
     Returns
     -------
@@ -235,7 +246,14 @@ def group_balanced_split(
     else:
         min_fg = {n: min_foreground_groups[n] for n in active if n in min_foreground_groups}
 
-    fg_smallest_first = sorted(fg_groups, key=lambda gk: group_ann[gk])
+    if foreground_counts is None:
+        min_pass_pool = fg_groups
+    else:
+        min_pass_pool = [
+            gk for gk in fg_groups
+            if sum(int(foreground_counts.get(s, 0)) for s in groups[gk]) > 0
+        ]
+    fg_smallest_first = sorted(min_pass_pool, key=lambda gk: group_ann[gk])
     for split_name, need in min_fg.items():
         taken = 0
         for gk in fg_smallest_first:
@@ -286,10 +304,11 @@ def refuse_insufficient_foreground_groups(
     of the per-side minimums a caller states.
 
     :func:`~tcip_mcp.tools.data_tools.make_splits` calls this once, over the whole tree, ahead of
-    drawing a manifest; :func:`calibration_universe_from_manifest` calls it for its one held-out
-    side in place of its own inline count. Names every requested side and its minimum, the
-    foreground groups actually found, and the remedy: annotate or confirm more foreground groups,
-    or drop a side by removing it from ``minimums`` (setting its draw ratio to zero).
+    drawing a manifest, over the three sides a manifest write always draws (a write refuses a
+    zero ratio on any of them, so every side named here is always requested);
+    :func:`calibration_universe_from_manifest` calls it for its one held-out side in place of its
+    own inline count. Names every requested side and its minimum, the foreground groups actually
+    found, and the remedy: annotate or confirm more foreground groups of the draw's own subject.
     """
     needed = sum(minimums.values())
     if foreground_groups >= needed:
@@ -298,7 +317,7 @@ def refuse_insufficient_foreground_groups(
     raise ValueError(
         f"the draw holds {foreground_groups} foreground group(s) of the draw's own subject, "
         f"fewer than the {needed} the requested sides need ({sides}): annotate or confirm more "
-        "foreground groups, or drop a side by setting its ratio to zero."
+        "foreground groups of this subject."
     )
 
 
@@ -1057,9 +1076,8 @@ def calibration_universe_from_manifest(
         raise ValueError(
             f"the split manifest's calibration side for date {date!r} gives a calibration "
             f"universe of {n_groups} foreground group(s) ({len(stems)} stem(s) total) after "
-            f"excluding what isn't present: {exc} Redraw the manifest with more groups or more "
-            f"foreground on {date!r}, or calibrate over the whole directory without "
-            "split_manifest_dir."
+            f"excluding what isn't present: {exc} Redraw the manifest with a larger "
+            f"calibration_ratio or more foreground groups on {date!r}."
         ) from exc
     return stems, group_by, group_key_map, excluded
 

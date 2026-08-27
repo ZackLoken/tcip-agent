@@ -31,6 +31,7 @@ GOLDEN_MAKE_SPLITS = {
     "stratified": True,
 }
 GOLDEN_CALIBRATION_FOREGROUND_GROUPS_BY_DATE = {"2-11-26": 2}
+GOLDEN_REALIZED_RATIOS = {"train": 0.25, "val": 0.25, "calibration": 0.5}
 
 # split_dataset (seed=1) and make_splits (seed=1) assign the same groups per split.
 GOLDEN_TREE = sorted([
@@ -88,6 +89,7 @@ def test_make_splits_stats_golden(tmp_path: Path):
     assert list(hashes) == ["2-11-26"] and hashes["2-11-26"]
     assert result.pop("calibration_foreground_groups_by_date") == \
         GOLDEN_CALIBRATION_FOREGROUND_GROUPS_BY_DATE
+    assert result.pop("realized_ratios") == GOLDEN_REALIZED_RATIOS
     assert result == GOLDEN_MAKE_SPLITS
 
 
