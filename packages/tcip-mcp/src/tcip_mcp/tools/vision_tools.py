@@ -1049,6 +1049,8 @@ def accept_proposals(
         )
     except BucketHasVerdicts as exc:
         return {"error": str(exc), "verdict_count": exc.count, "suggested_bucket": exc.suggested}
+    except ValueError as exc:
+        return {"error": str(exc)}
     bucket = staged["bucket"]
 
     # Render final result for QA
