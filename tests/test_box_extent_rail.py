@@ -388,6 +388,31 @@ def test_write_predictions_json_drops_a_box_that_rounds_to_zero_extent(tmp_path)
     assert len(read_annotations(out)) == 1
 
 
+def test_write_predictions_json_refuses_a_reserved_stem(tmp_path):
+    """An image stem reserved for a bucket's own provenance stamp must never reach a per-image
+    prediction write: the stamp write into that same bucket would otherwise destroy or refuse
+    over it, naming the operator at a file that was never the actual cause."""
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    out = tmp_path / "operating_point.json"
+    result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
+
+    with pytest.raises(ValueError, match="operating_point"):
+        write_predictions_json(out, result, id_map={"leaf": 0})
+    assert not out.exists()
+
+
+def test_write_predictions_json_still_writes_an_ordinary_stem(tmp_path):
+    from tcip_annotation.json_io import read_annotations
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
+
+    out = tmp_path / "IMG_0001.json"
+    result = {"width": 100, "height": 100, "boxes": [[1, 1, 5, 5]], "scores": [0.9], "labels": [1]}
+
+    write_predictions_json(out, result, id_map={"leaf": 0})
+    assert len(read_annotations(out)) == 1
+
+
 def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
     from tcip_mcp.tools.annotation_tools import stage_proposals
 

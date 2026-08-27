@@ -119,7 +119,9 @@ def _scan_dataset(root: str) -> dict:
     bucket's own provenance stamp the way :func:`~tcip_mcp.dataset_layout.subjects_on_date` and
     every bucket walk through ``prediction_documents`` would not; ``reserved_name_labels`` names
     each one, so a caller comparing this census against those walks can tell the difference is a
-    known exclusion rather than a disagreement.
+    known exclusion rather than a disagreement. ``reserved_name_images`` names every image whose
+    own stem is reserved the same way, since such an image otherwise counts as an ordinary
+    unlabelled one with no signal at all that its label can never be read through any bucket walk.
     """
     from tcip_annotation.json_io import is_sidecar_name, prediction_documents
     from tcip_annotation.review_engine import BASELINE_DIRNAME
@@ -132,6 +134,7 @@ def _scan_dataset(root: str) -> dict:
     labels: list[str] = []
     preds: list[str] = []
     reserved_name_labels: list[str] = []
+    reserved_name_images: list[str] = []
     detected_format: str | None = None
 
     # Find images (recurse to catch the canonical images/<date>/ layout).
@@ -140,6 +143,8 @@ def _scan_dataset(root: str) -> dict:
     for f in sorted(scan_root.rglob("*")):
         if f.is_file() and f.suffix.lower() in image_exts:
             images.append(str(f))
+            if is_sidecar_name(f"{f.stem}.json"):
+                reserved_name_images.append(str(f))
 
     # Ground-truth labels: annotations/[<date>/]<stem>.json (one file per image, every subject),
     # a review baseline copy under BASELINE_DIRNAME excluded: it is a snapshot, not a label.
@@ -180,7 +185,7 @@ def _scan_dataset(root: str) -> dict:
 
     return {
         "images": images, "labels": labels, "predictions": preds, "format": detected_format,
-        "reserved_name_labels": reserved_name_labels,
+        "reserved_name_labels": reserved_name_labels, "reserved_name_images": reserved_name_images,
     }
 
 
@@ -198,6 +203,9 @@ def scan_dataset(folder_path: str) -> dict:
     ``reserved_name_labels`` names every label counted in ``labels_count`` whose filename is
     reserved for a prediction bucket's own provenance stamp: this census walks with ``rglob`` and
     counts it, while the bucket walks this platform reads labels through exclude it.
+    ``reserved_name_images`` names every image counted in ``image_count`` whose own stem is
+    reserved the same way; such an image otherwise sits in ``unlabelled_images`` with no signal
+    at all that its label can never be read through any bucket walk.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -228,6 +236,7 @@ def scan_dataset(folder_path: str) -> dict:
         "unlabelled_images": unlabelled,
         "image_stems_sample": sorted(image_stems.keys())[:10],
         "reserved_name_labels": scan["reserved_name_labels"],
+        "reserved_name_images": scan["reserved_name_images"],
     }
 
 
@@ -272,6 +281,8 @@ def validate_data_quality(folder_path: str) -> dict:
     whose filename is reserved for a prediction bucket's own provenance stamp, the same
     ``scan_dataset`` field: this scan's per-file checks still run on it (it is a present file the
     census counted), but no bucket walk elsewhere in the platform would ever read it as a label.
+    ``reserved_name_images`` is the same ``scan_dataset`` field for an image whose own stem is
+    reserved.
 
     Args:
         folder_path: Path to the dataset root directory.
@@ -364,6 +375,7 @@ def validate_data_quality(folder_path: str) -> dict:
         "issue_count": len(issues),
         "is_valid": all(i["level"] != "error" for i in issues),
         "reserved_name_labels": scan["reserved_name_labels"],
+        "reserved_name_images": scan["reserved_name_images"],
     }
 
 
@@ -380,6 +392,7 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
     admission for the tasks a split manifest can bind to draws through the per-image tree, never
     that document.
     """
+    from tcip_annotation.json_io import prediction_documents
     from tcip_mcp.dataset_layout import (
         annotation_dir, annotation_root, is_bucket_name, resolve_images_dir,
     )
@@ -390,7 +403,7 @@ def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Pa
         return []
     subdirs = sorted(d.name for d in ann_root.iterdir() if d.is_dir() and is_bucket_name(d.name))
     entries = [(d, annotation_dir(root, d), resolve_images_dir(root, d)) for d in subdirs]
-    loose_labels = any(p.is_file() for p in ann_root.glob("*.json"))
+    loose_labels = bool(prediction_documents(ann_root))
     if loose_labels or not subdirs:
         entries.append((None, ann_root, resolve_images_dir(root, None)))
     return entries

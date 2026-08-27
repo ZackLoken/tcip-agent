@@ -94,6 +94,13 @@ def write_predictions_json(
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.class_registry import decode_class_ids
 
+    p = Path(json_path)
+    if json_io.is_sidecar_name(p.name):
+        raise ValueError(
+            f"{p.name} names one of a prediction bucket's own provenance stamps; an image whose "
+            "stem is reserved this way can never be written as a bucket's per-image prediction "
+            "document, since the stamp write would then destroy or refuse over it."
+        )
     w = result.get("width") or 0
     h = result.get("height") or 0
     created_at = datetime.now(timezone.utc).isoformat() if created_by else None

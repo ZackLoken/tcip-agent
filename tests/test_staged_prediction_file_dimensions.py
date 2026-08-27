@@ -57,3 +57,21 @@ def test_staged_geometry_stays_inside_the_frame_the_file_declares(tmp_path: Path
     assert box.y2 / header["height"] == pytest.approx(300.0 / height)
     assert box.x2 / header["width"] <= 1.0
     assert box.y2 / header["height"] <= 1.0
+
+
+def test_stage_prediction_shapes_refuses_a_reserved_stem(tmp_path: Path) -> None:
+    """An image stem reserved for a bucket's own provenance stamp must never reach a staged
+    per-image prediction write, since the stamp write into that same bucket would otherwise
+    destroy or refuse over it."""
+    with pytest.raises(ValueError, match="operating_point"):
+        stage_prediction_shapes(
+            str(tmp_path / "proj"), "detector", DATE, "operating_point",
+            annotations=[Annotation(subject="catkin", geometry=BBox(1.0, 1.0, 5.0, 5.0))],
+            img_w=100, img_h=100,
+        )
+    assert not (tmp_path / "proj").exists()
+
+
+def test_stage_prediction_shapes_still_writes_an_ordinary_stem(tmp_path: Path) -> None:
+    staged = _stage(tmp_path / "proj", LANDSCAPE, BBox(10.0, 20.0, 60.0, 90.0))
+    assert Path(staged["path"]).is_file()

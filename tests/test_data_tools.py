@@ -90,6 +90,25 @@ def test_scan_and_validate_report_a_reserved_stem_the_census_still_counted(tmp_p
     assert quality_result["reserved_name_labels"] == [reserved_label]
 
 
+def test_scan_and_validate_report_a_reserved_stem_image_with_no_label(tmp_path: Path):
+    """An image whose own stem is reserved for a bucket's own provenance stamp must be named,
+    not folded into unlabelled_images with no signal that its label can never be read through
+    any bucket walk."""
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    (images_dir / "operating_point.jpg").write_bytes(b"\xff\xd8\xff")
+    (images_dir / "ordinary.jpg").write_bytes(b"\xff\xd8\xff")
+    reserved_image = str(images_dir / "operating_point.jpg")
+
+    scan_result = scan_dataset(str(root))
+    quality_result = validate_data_quality(str(root))
+
+    assert scan_result["reserved_name_images"] == [reserved_image]
+    assert quality_result["reserved_name_images"] == [reserved_image]
+    assert scan_result["unlabelled_images"] == 2
+
+
 def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     out = tmp_path / "splits"
     result = make_splits(str(data_dir), output_path=str(out), materialize=True, subject="catkin")
@@ -486,6 +505,39 @@ def test_make_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: 
     assert identities == {
         "2-11-26/a", "2-11-26/b", "2-11-26/c", "loose1", "loose2",
     }
+
+
+def test_split_date_dirs_ignores_a_stray_stamp_named_document(tmp_path: Path):
+    """A bucket's own provenance stamp sitting loose directly under ``annotations/`` is not a
+    loose label: it must never mint a dateless entry the way a real loose label would, the same
+    exclusion every bucket walk through ``prediction_documents`` already applies."""
+    from tcip_mcp.tools.data_tools import _split_date_dirs
+
+    root = tmp_path / "ds"
+    (root / "annotations" / "2-11-26").mkdir(parents=True)
+    (root / "images" / "2-11-26").mkdir(parents=True)
+    (root / "annotations" / "operating_point.json").write_text('{"trait": null}', encoding="utf-8")
+
+    entries = _split_date_dirs(root)
+
+    assert [date for date, _, _ in entries] == ["2-11-26"]
+
+
+def test_split_date_dirs_still_admits_a_real_loose_label(tmp_path: Path):
+    from tcip_mcp.tools.data_tools import _split_date_dirs
+
+    root = tmp_path / "ds"
+    (root / "annotations" / "2-11-26").mkdir(parents=True)
+    (root / "images" / "2-11-26").mkdir(parents=True)
+    (root / "images").mkdir(parents=True, exist_ok=True)
+    json_io.write_annotations(
+        root / "annotations" / "loose.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+
+    entries = _split_date_dirs(root)
+
+    assert {date for date, _, _ in entries} == {None, "2-11-26"}
 
 
 def test_make_splits_writes_no_member_block_for_a_date_that_admits_nothing(tmp_path: Path):
