@@ -425,8 +425,9 @@ def refuse_if_images_root_moved(
     A no-op when either side is empty: nothing recorded to compare against, or no images_dir the
     caller stated. ``label`` is how the caller names its own side in the message
     (``"images_dir"`` for a bare tool argument, ``"data.images_dir"`` for a run config field);
-    every door this backs (preflight, the training child, both inference doors) reads it
-    identically, one implementation rather than each re-deriving the comparison.
+    every door this backs (preflight, the training child, both inference doors, and
+    ``scripts/calibrate_operating_point.py``) reads it identically, one implementation rather
+    than each re-deriving the comparison.
     """
     if not images_dir or not manifest_images_root:
         return

@@ -427,3 +427,92 @@ def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(
 
     assert "error" not in result
     assert result["identity_hash"] == expected_hash
+
+
+# -- a manifest-restricted calibration's evidence, through the real count door -----
+
+
+def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
+        tmp_path: Path, monkeypatch):
+    """A manifest-restricted calibration's evidence, driven through the real count door
+    (``export_predictions``), earns a record whose reference identity carries the manifest's
+    universe, and the delivery reader's own verification of the stamp's binding passes against
+    the bucket as it was actually written."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.tools.inference_tools as itools
+    from tests._dense_op_fixtures import dense_records
+
+    from tcip_mcp.experiments import find_validation
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import (
+        dataset_hash, read_operating_point_sidecar, verify_stamp_binding,
+    )
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    universe = ["a", "b"]
+    dh = dataset_hash(root / "annotations" / DATES[0], stems=universe)
+
+    n_images, objects_per_image = 20, 80
+    miss, fp = [0] * n_images, [1] * n_images
+    inputs = {
+        "dataset_hash": dh, "tiled": False, "staged_conf_floor": 0.01,
+        "calibration_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "holdout_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+    }
+    bundle = resolve_operating_point(SUBJECT, experiment_id=None, **inputs)
+    evidence = {
+        "resolver": "resolve_operating_point", "inputs": inputs,
+        "reference_inputs": {
+            "label_stems": {"calibration": {
+                "path": str(root / "annotations" / DATES[0]), "stems": universe}},
+            "stated_values": {"split_manifest_dir": str(out)},
+        },
+        "calibration_stems": universe,
+    }
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, dh, 0, evidence))
+
+    class _BucketStub:
+        def __init__(self) -> None:
+            from types import SimpleNamespace
+
+            self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
+            self.device = "cpu"
+            self.score_threshold = 0.5
+            self.train_tile_size = None
+            self.train_overlap = None
+
+        def predict_batch(self, paths, **kw):
+            return [{"image": p, "width": IMG, "height": IMG,
+                     "boxes": [[2, 2, 10, 10]], "scores": [0.95], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _BucketStub())
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    result = itools.export_predictions(
+        str(ckpt), images_dir=str(root / "images" / DATES[0]),
+        output_dir=str(root / "predictions" / "baseline" / DATES[0]),
+        device="cpu", tile=False, trait=SUBJECT,
+        calibration_labels_dir=str(root / "annotations" / DATES[0]),
+        split_manifest_dir=str(out))
+    assert "error" not in result, result
+    bucket = result["output_dir"]
+
+    stamp = read_operating_point_sidecar(bucket)
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait=SUBJECT)
+    assert binding.ok is True
+    assert binding.claimed is True
+
+    pointer = stamp["validated_by"]
+    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    identity = row["reference_identity"]
+    assert identity["label_stems"]["calibration"]["count"] == len(universe)
+    assert identity["stated_values"]["split_manifest_dir"] == str(out)
