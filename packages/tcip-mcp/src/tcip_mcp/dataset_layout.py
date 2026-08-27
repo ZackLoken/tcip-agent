@@ -158,20 +158,25 @@ def resolve_images_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
 
 
 def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str) -> Optional[str]:
-    """The on-disk display name of the logical image at ``stem`` in one date bucket.
+    """The on-disk display name of the logical image at ``stem`` for one capture date.
 
-    A plain capture's own file name, or a ``.bandgroup``-grouped capture's manifest file name:
-    the same resolution :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` gives every
-    other by-name reader, over that module's own extension set, so a name behind a
-    confirmed-negative lookup is never fabricated from a guessed extension and never resolved
-    against the wrong bucket by a stem two dates happen to share. ``None`` when no logical image
-    at ``stem`` resolves in that bucket; a caller looking up a status-store entry treats that as
-    unresolvable rather than guessing a name to look one up under.
+    Resolves through :func:`resolve_images_dir`, the same directory a subject-scoped draw
+    (``make_splits``, a training run's own admission) reads that date's images from, so a label
+    dated while its images were never split into date buckets resolves here the way it is
+    admitted there, instead of naming a different directory than the draw does. Within that
+    directory, the same resolution :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source`
+    gives every other by-name reader, over that module's own extension set, so a name behind a
+    confirmed-negative lookup is never fabricated from a guessed extension. ``None`` when no
+    logical image at ``stem`` resolves in that directory; a caller looking up a status-store entry
+    treats that as unresolvable rather than guessing a name to look one up under. A stem sitting at
+    the flat ``images/`` root while a dated bucket for the same date also exists on disk is a mixed
+    layout this does not pair: :func:`resolve_images_dir` picks the dated bucket whenever one
+    exists, with no per-stem fallback to the flat root.
     """
     from tcip_mcp.pipelines.image_utils import logical_image_name, resolve_image_source
 
     try:
-        source = resolve_image_source(image_dir(dataset_root, date), stem)
+        source = resolve_image_source(resolve_images_dir(dataset_root, date), stem)
     except FileNotFoundError:
         return None
     return logical_image_name(source)

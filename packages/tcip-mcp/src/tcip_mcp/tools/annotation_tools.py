@@ -923,7 +923,10 @@ def stage_proposals(
     except (FileNotFoundError, BandGroupIncomplete):
         img_source = None
     if img_source is None:
-        return {"error": f"no image found for stem {stem!r} under {idir}"}
+        return {"error": f"no image found for stem {stem!r} under {idir}: an image at a "
+                         "different images/ location (the flat root, or another capture "
+                         "date's bucket) is not resolved for this date; move it into this "
+                         "directory, or ingest it here."}
     img_w, img_h = image_dimensions(img_source)
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin

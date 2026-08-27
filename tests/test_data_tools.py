@@ -469,6 +469,132 @@ def test_make_splits_refuses_to_materialize_a_multi_date_manifest(tmp_path: Path
     assert not out.exists()
 
 
+def test_make_splits_multi_date_refusal_names_the_loose_label_bucket(tmp_path: Path):
+    """A loose-label entry beside a dated bucket is named in the multi-date materialize
+    refusal, not dropped from the list of spanned dates it claims to name."""
+    from PIL import Image
+
+    root = tmp_path / "ds"
+    dated_images = root / "images" / "2-11-26"
+    dated_labels = root / "annotations" / "2-11-26"
+    dated_images.mkdir(parents=True)
+    dated_labels.mkdir(parents=True)
+    Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / "a.jpg")
+    json_io.write_annotations(
+        dated_labels / "a.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+    Image.new("RGB", (100, 80), (128, 128, 128)).save(root / "images" / "loose.jpg")
+    json_io.write_annotations(
+        root / "annotations" / "loose.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
+                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0, seed=1)
+
+    assert "error" in result
+    assert "2-11-26" in result["error"]
+    assert "annotations/ (loose labels)" in result["error"]
+    assert not out.exists()
+
+
+def _two_date_flat_images_dataset(root: Path, subject: str) -> Path:
+    """Two dated label directories whose images were never split into date buckets: both
+    entries fall back to the same flat images/ root."""
+    from PIL import Image
+
+    images_dir = root / "images"
+    images_dir.mkdir(parents=True)
+    for date in ("2-11-26", "2-12-01"):
+        labels_dir = root / "annotations" / date
+        labels_dir.mkdir(parents=True)
+        for stem in ("w", "x", "y", "z"):
+            dst = images_dir / f"{stem}.jpg"
+            if not dst.exists():
+                Image.new("RGB", (100, 80), (128, 128, 128)).save(dst)
+            json_io.write_annotations(
+                labels_dir / f"{stem}.json",
+                [Annotation(subject=subject, geometry=BBox(4, 4, 12, 12))], 100, 80,
+            )
+    return root
+
+
+def test_make_splits_refuses_two_dated_label_dirs_sharing_a_flat_images_root(tmp_path: Path):
+    """Two label dates whose images were never split into date buckets both resolve to the
+    same flat images/ root: a manifest keyed by <date>/<stem> would admit one image file once
+    per date and could place the same pixels on both sides of the split."""
+    root = _two_date_flat_images_dataset(tmp_path / "ds", subject="leaf")
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), subject="leaf")
+
+    assert "error" in result
+    assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
+    assert not out.exists()
+
+
+def test_make_splits_refuses_a_dated_dir_and_loose_labels_sharing_a_flat_images_root(
+    tmp_path: Path,
+):
+    """A dated label directory with no images/<date>/ bucket of its own and a loose label
+    beside it both fall back to the same flat images/ root: the same leak, mirrored."""
+    from PIL import Image
+
+    root = tmp_path / "ds"
+    images_dir = root / "images"
+    dated_labels = root / "annotations" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    dated_labels.mkdir(parents=True)
+    for stem in ("a", "b", "c", "d"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+    for stem in ("b", "c", "d"):
+        json_io.write_annotations(
+            dated_labels / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    json_io.write_annotations(
+        root / "annotations" / "a.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), subject="leaf")
+
+    assert "error" in result
+    assert "2-11-26" in result["error"]
+    assert "annotations/ (loose labels)" in result["error"]
+    assert not out.exists()
+
+
+def test_make_splits_nothing_admitted_names_the_searched_directories_and_the_unpaired_move(
+    tmp_path: Path,
+):
+    """A tree whose labels sit flat while its images were split into a date bucket admits
+    nothing: the refusal names each entry's searched directory and the unpaired bucket."""
+    from PIL import Image
+
+    root = tmp_path / "ds"
+    dated_images = root / "images" / "2-11-26"
+    dated_images.mkdir(parents=True)
+    (root / "annotations").mkdir(parents=True)
+    Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / "a.jpg")
+    json_io.write_annotations(
+        root / "annotations" / "a.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), subject="leaf")
+
+    assert "error" in result
+    assert "annotations/ (loose labels)" in result["error"]
+    assert str(root / "images") in result["error"]
+    assert str(dated_images) in result["error"]
+    assert not out.exists()
+
+
 def _dated_labels_flat_images_dataset(root: Path, stems: tuple[str, ...]) -> Path:
     """Labels dated but images never split into date buckets: a layout the platform's other
     readers already resolve (``annotation_tools.py``'s stage-shape door)."""
@@ -638,3 +764,25 @@ def test_make_splits_materialize_negative_carry_reads_only_the_materializing_dat
     store = read_image_status_store(split_dir)
     record = store[status_bucket("leaf", None)]["neg.jpg"]
     assert record["recorded_by"] == "user:right"
+
+
+def test_validate_data_quality_admits_a_confirmed_negative_under_dated_labels_flat_images(
+    tmp_path: Path,
+):
+    """A human-confirmed negative resolves the same way validate_data_quality reads it as the
+    draw that admits it: labels dated, images never split into date buckets."""
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+
+    root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0",))
+    (root / "annotations" / "2-11-26" / "p0.json").unlink()
+    json_io.write_annotations(
+        root / "annotations" / "2-11-26" / "p0.json", [], 100, 80, keep_empty=True,
+    )
+    record_image_statuses(
+        root, status_bucket("leaf", "2-11-26"), {"p0.jpg": "negative"}, recorded_by="user:right",
+    )
+
+    result = validate_data_quality(str(root))
+
+    assert result["is_valid"] is True
+    assert result["issues"] == []

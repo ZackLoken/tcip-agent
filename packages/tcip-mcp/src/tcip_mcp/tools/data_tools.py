@@ -581,6 +581,22 @@ def make_splits(
         return {"error": f"{folder_path} holds no per-image label tree (annotations/<date>/ or a "
                          "flat annotations/) for make_splits to draw a subject-scoped split from; "
                          "a dataset-level assembled COCO at the root is not walked here."}
+
+    entries_by_images_dir: dict[Path, list[str]] = {}
+    for entry_date, _, entry_images_dir in date_dirs:
+        entries_by_images_dir.setdefault(entry_images_dir, []).append(
+            entry_date if entry_date is not None else "annotations/ (loose labels)"
+        )
+    colliding = {d: names for d, names in entries_by_images_dir.items() if len(names) > 1}
+    if colliding:
+        detail = "; ".join(
+            f"{img_dir}: {sorted(names)}" for img_dir, names in sorted(colliding.items())
+        )
+        return {"error": f"{folder_path} has label entries that resolve to the same images "
+                         f"directory ({detail}): a manifest keyed by <date>/<stem> would admit "
+                         "one image file once per entry and could place the same pixels on "
+                         "both sides of the split. Give each date its own images/<date>/ "
+                         "bucket, or merge the colliding label entries into one."}
     try:
         _, id_map = _resolve_registry_id_map(date_dirs[0][1], subject, attribute)
     except ValueError as exc:
@@ -631,7 +647,8 @@ def make_splits(
 
             distinct_dates = {date for date, _ in identity_locations.values()}
             if materialize and len(distinct_dates) > 1:
-                named = sorted(d for d in distinct_dates if d is not None)
+                named = sorted(d if d is not None else "annotations/ (loose labels)"
+                               for d in distinct_dates)
                 return {"error": f"materialize=True refuses a manifest spanning more than one "
                                  f"capture date ({named}): its flat {{train,val}}/"
                                  "{images,labels}/ tree is keyed by file name and its negative "
@@ -662,9 +679,25 @@ def make_splits(
         return {"error": str(exc)}
 
     if not stems:
+        from tcip_mcp.dataset_layout import image_dir as _image_dir, list_dates as _list_dates
+
+        searched = ", ".join(
+            f"{(entry_date or 'annotations/ (loose labels)')} -> {entry_images_dir}"
+            for entry_date, _, entry_images_dir in date_dirs
+        )
+        used_images_dirs = {entry_images_dir for _, _, entry_images_dir in date_dirs}
+        unused_date_buckets = sorted(
+            d for d in _list_dates(folder_path) if _image_dir(folder_path, d) not in used_images_dirs
+        )
+        remedy = ""
+        if unused_date_buckets:
+            listed = ", ".join(str(_image_dir(folder_path, d)) for d in unused_date_buckets)
+            remedy = (f" {listed} exist with no label entry resolved against them; move the "
+                     "labels into a matching annotations/<date>/ bucket, or move the images "
+                     "to the flat images/ root, to pair them.")
         return {"error": f"no sample of subject {subject!r} was admitted under {folder_path} "
-                         f"(attribute={attribute!r}): {admission_counts}. Annotate an instance or "
-                         "confirm a negative before splitting."}
+                         f"(attribute={attribute!r}): {admission_counts}. Searched {searched}."
+                         f"{remedy} Annotate an instance or confirm a negative before splitting."}
 
     manifest: dict[str, Any] = {
         "seed": seed,
