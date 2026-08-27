@@ -80,6 +80,8 @@ def test_make_splits_stats_golden(tmp_path: Path):
     assert result.pop("attribute") is None
     admission_counts = result.pop("admission_counts")
     assert admission_counts["annotated"] == 12
+    hashes = result.pop("dataset_hashes_by_date")
+    assert list(hashes) == ["2-11-26"] and hashes["2-11-26"]
     assert result == GOLDEN_MAKE_SPLITS
 
 
