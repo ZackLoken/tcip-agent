@@ -14,24 +14,33 @@ Costs one trivial model turn on the machine's Claude Code account.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-web" / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "tcip-mcp" / "src"))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from tcip_web.app import app  # noqa: E402
-from tcip_web.routes import terminal as terminal_routes  # noqa: E402
-
 MARKER = "SMOKE_OK"
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[>=()][0-9A-Za-z]?")
 
 
-def main() -> int:
+def main(workspace: str | None = None) -> int:
+    """Drive the smoke flow against ``workspace`` (a fresh temp directory when omitted),
+    never the machine's own workspace: the first request this process issues binds the served
+    app's platform-state root from whatever project that workspace's active-project marker
+    names, and every audit line the session writes lands there.
+    """
+    os.environ["TCIP_WORKSPACE"] = workspace or tempfile.mkdtemp(prefix="terminal-smoke-ws-")
+
+    from fastapi.testclient import TestClient
+
+    from tcip_web.app import app
+    from tcip_web.routes import terminal as terminal_routes
+
     client = TestClient(app, base_url="http://127.0.0.1")
 
     status = client.get("/api/terminal/status").json()

@@ -225,3 +225,23 @@ def test_session_start_notes_which_processes_bind_from_the_marker(
     assert "web backend" in ctx and "its own startup" in ctx
     assert "next start" in ctx
     assert "set_active_project" in ctx
+
+
+def test_session_start_reports_a_traversal_marker_through_the_shared_fold(
+    tmp_path, monkeypatch, capsys
+):
+    """A marker naming an unsafe path (traversal) is not adoptable for a reason the hook must
+    report through ``workspace.marker_problem``, the one place that fold lives, rather than a
+    reason this hook re-derives on its own and gets wrong."""
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("TCIP_WORKSPACE", str(ws))
+
+    import tcip_store
+    from tcip_mcp import workspace
+
+    tcip_store.replace(workspace.active_project_key(), "../escapee")
+
+    out = _run(monkeypatch, capsys, '{"source":"startup"}')
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "could not be adopted" in ctx
+    assert workspace.marker_problem(create=False) in ctx
