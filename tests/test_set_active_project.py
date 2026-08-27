@@ -29,6 +29,10 @@ def test_set_active_writes_marker(monkeypatch):
     assert result["gui_notified"] is False
     assert result["project_path"].endswith("hazelnut_catkin_valley-farm")
     assert workspace.read_active_project() == "hazelnut_catkin_valley-farm"
+    # No backend answered at all: the docstring's down-backend case.
+    assert result["backend_repinned"] is False
+    assert result["backend_platform_root"] is None
+    assert result["backend_root_problem"] is None
 
 
 def test_set_active_reports_gui_notified_when_delivered(monkeypatch):
@@ -38,6 +42,41 @@ def test_set_active_reports_gui_notified_when_delivered(monkeypatch):
     (workspace.project_path("chestnut_burr_site-a") / ".tcip").mkdir(parents=True)
     result = set_active_project(name="chestnut_burr_site-a")
     assert result["gui_notified"] is True
+    # Delivered, but with no response body: still the down-backend shape for the three fields.
+    assert result["backend_repinned"] is False
+    assert result["backend_platform_root"] is None
+    assert result["backend_root_problem"] is None
+
+
+def test_set_active_reports_the_root_the_backend_repinned_to(monkeypatch):
+    import tcip_mcp.web_client as web_client
+
+    monkeypatch.setattr(
+        web_client, "post_panel_event",
+        lambda *a, **k: {"delivered": True, "response": {"platform_root": "/repinned/root"}},
+    )
+    (workspace.project_path("elderberry_cyme_bloom-site") / ".tcip").mkdir(parents=True)
+    result = set_active_project(name="elderberry_cyme_bloom-site")
+    assert result["backend_repinned"] is True
+    assert result["backend_platform_root"] == "/repinned/root"
+    assert result["backend_root_problem"] is None
+
+
+def test_set_active_reports_why_the_backend_could_not_repin(monkeypatch):
+    import tcip_mcp.web_client as web_client
+
+    monkeypatch.setattr(
+        web_client, "post_panel_event",
+        lambda *a, **k: {
+            "delivered": True,
+            "response": {"platform_root_problem": "the marker's project has no .tcip"},
+        },
+    )
+    (workspace.project_path("persimmon_calyx_site-a") / ".tcip").mkdir(parents=True)
+    result = set_active_project(name="persimmon_calyx_site-a")
+    assert result["backend_repinned"] is False
+    assert result["backend_platform_root"] is None
+    assert result["backend_root_problem"] == "the marker's project has no .tcip"
 
 
 def test_a_marker_that_does_not_decode_reads_as_no_active_project():

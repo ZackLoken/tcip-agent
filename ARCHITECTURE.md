@@ -687,8 +687,8 @@ Docstring is the function's docstring first line, verbatim.
 | `set_active_project` | `project_tools.py:230` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:319` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:366` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:500` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:627` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `archive_project` | `project_tools.py:502` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:629` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 ### scale_tools.py (1 tool)
 
@@ -707,7 +707,7 @@ Docstring is the function's docstring first line, verbatim.
 | `cancel_training` | `training_tools.py:898` | yes | Request graceful cancellation of a running training run. |
 | `inspect_compute_resources` | `training_tools.py:927` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
 | `run_hpo` | `training_tools.py:1305` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2506` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `evaluate_model` | `training_tools.py:2511` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -754,14 +754,14 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| GET | `/api/state` | `get_state` | `app.py:184` |
-| POST | `/api/state/tab` | `set_active_tab` | `app.py:193` |
-| WS | `/ws/state` | `state_ws` | `app.py:201` |
+| GET | `/api/state` | `get_state` | `app.py:193` |
+| POST | `/api/state/tab` | `set_active_tab` | `app.py:202` |
+| WS | `/ws/state` | `state_ws` | `app.py:210` |
 | GET | `/health` | `health` | `app.py:295` |
-| GET | `/` | `index` | `app.py:303` |
-| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:367` |
-| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:418` |  <!-- queued: P5-82 delete -->
-| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:427` |
+| GET | `/` | `index` | `app.py:312` |
+| POST | `/api/events/{panel}` | `post_panel_event` | `app.py:376` |
+| GET | `/api/events/{panel}/recent` | `get_recent_panel_events` | `app.py:427` |  <!-- queued: P5-82 delete -->
+| WS | `/ws/panel/{panel}` | `panel_ws` | `app.py:436` |
 
 ### routes/annotate.py, prefix `/api/annotate` (3 routes)
 
@@ -827,11 +827,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:435` |  <!-- queued: P5-105 delete -->
-| GET | `/jobs` | `list_jobs` | `routes/inference.py:535` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:540` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:554` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:564` |
+| POST | `/launch` | `launch_inference` | `routes/inference.py:439` |  <!-- queued: P5-105 delete -->
+| GET | `/jobs` | `list_jobs` | `routes/inference.py:539` |
+| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:544` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:558` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:568` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -845,7 +845,7 @@ registered at HEAD.
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `` (root) | `list_projects` | `routes/projects.py:100` |
-| POST | `/active` | `set_active_project` | `routes/projects.py:141` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
+| POST | `/active` | `set_active_project` | `routes/projects.py:142` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
 ### routes/results.py, prefix `/api/results` (14 routes)
 
@@ -879,8 +879,8 @@ registered at HEAD.
 | GET | `/image_status` | `get_image_status` | `routes/review.py:1198` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1250` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1281` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1445` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1473` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1450` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1478` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -919,15 +919,15 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:253` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:284` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:302` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:333` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:366` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:390` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:476` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:493` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:507` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:258` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:289` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:307` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:339` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:372` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:396` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:482` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:499` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:513` |
 
 ### 11 routes with no located frontend caller
 
@@ -1022,11 +1022,13 @@ from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:6
 67-68), writes the bound port under the workspace root's `.tcip/state/web_port.txt`
 (`_write_port_file`, line 43), and starts the app via `uvicorn.run("tcip_web.app:app", ...)`
 (line 72). The port write resolves under the workspace root, not the platform-state root, so
-it needs no pin first; the app itself pins the platform-state root at import, from the
-workspace's active-project marker (`tcip_mcp.project_paths.pin_project_root(from_marker=True)`,
-`packages/tcip-web/src/tcip_web/app.py`), so every way the app is served (this entry point, a
-bare `uvicorn tcip_web.app:app`, `--lifespan off`, the reloader's child) pins the same root
-before anything resolves a `.tcip` path. Exposure is a property
+it needs no pin first; the app pins the platform-state root at the lifespan's startup or,
+when a request is served before the lifespan has run, at that first request, never at import:
+`bind_startup_root` (`packages/tcip-web/src/tcip_web/app.py:90`) reads the workspace's
+active-project marker (`tcip_mcp.project_paths.pin_project_root(from_marker=True)`) the first
+time either the lifespan (`app.py:50`) or the startup middleware (`app.py:131`) calls it, so
+every way the app is served (this entry point, a bare `uvicorn tcip_web.app:app`,
+`--lifespan off`, the reloader's child) pins a root before anything resolves a `.tcip` path. Exposure is a property
 of the accepted connection rather than the configured bind host, so this entry point always
 binds the requested host and port; whether an arrival through a non-loopback address is served
 is decided per request by `tcip_web.trust_boundary.TrustBoundaryMiddleware` (`trust_boundary.py:
@@ -1331,22 +1333,24 @@ declared; the numbered range 10-15 carries six of them, and `env.json` and `vali
 are listed here with the rest rather than taking numbers of their own.
 
 - `config.json` (`config_key`, `experiments.py:114`): written by `create_experiment`,
-  `experiments.py:332`, and `overwrite_config_if_pristine`, `experiments.py:474` (rewrites only
-  while the record is still pristine, no metrics logged). Read by `get_experiment`,
-  `experiments.py:942`, and `compare_experiments`, `experiments.py:1397`.
-- `status.json` (`status_key`, line 140): written by `create_experiment` (364), `update_status`
-  (`experiments.py:490`), `stamp_run_identity` (`experiments.py:627`), `_touch_heartbeat`
-  (`experiments.py:749`). Read by `get_experiment` (1201), `reconstruct_run_status`
-  (`experiments.py:712`), `resolve_experiment_dir_for_run` (`experiments.py:651`). `state` is
-  terminal-locked once `"completed"`/`"failed"`.
-- `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (364) and
-  `update_lineage`, `experiments.py:1146`. Read by `get_experiment` (1201) and
+  `experiments.py:397` (`def create_experiment(`), and `overwrite_config_if_pristine`,
+  `experiments.py:474` (rewrites only while the record is still pristine, no metrics logged).
+  Read by `get_experiment`, `experiments.py:1288` (`def get_experiment(`), and
+  `compare_experiments`, `experiments.py:1397`.
+- `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
+  `experiments.py:523` (`def update_status(`), `stamp_run_identity` (`experiments.py:627`),
+  `_touch_heartbeat`, `experiments.py:823` (`def _touch_heartbeat(`). Read by `get_experiment`
+  (1288), `reconstruct_run_status`, `experiments.py:770` (`def reconstruct_run_status(`),
+  `resolve_experiment_dir_for_run` (`experiments.py:651`). `state` is terminal-locked once
+  `"completed"`/`"failed"`.
+- `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (397) and
+  `update_lineage`, `experiments.py:1146`. Read by `get_experiment` (1288) and
   `get_experiment_lineage`, `experiments.py:1484`.
-- `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (364) and
-  `record_artifact`, `experiments.py:1112`. Read by `get_experiment` (1201).
+- `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397) and
+  `record_artifact`, `experiments.py:1112`. Read by `get_experiment` (1288).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
   `log_metrics`, `experiments.py:855`. Read by `read_metrics`, `experiments.py:842`, which
-  `get_experiment` (1201, paginated) and `reconstruct_run_status` (712, last row only) go through.
+  `get_experiment` (1288, paginated) and `reconstruct_run_status` (770, last row only) go through.
 - `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
@@ -1522,7 +1526,7 @@ Reader: `StateStore.load_from_disk`, `tcip_web/state.py:259`.
 `StateStore.mutate`, `tcip_web/state.py:30`, validates the merged mutation through `GuiState`
 before holding it, raising `GuiMutationInvalid` (`tcip_web/state.py:29`) on a field that does not
 validate or a key `GuiState` does not declare; `app.py`'s `_gui_mutation_invalid_handler`,
-`packages/tcip-web/src/tcip_web/app.py:156`, answers a route that raises it with 400 and the
+`packages/tcip-web/src/tcip_web/app.py:165`, answers a route that raises it with 400 and the
 validation message rather than the 500 an unhandled `ValueError` would produce.
 
 Seam S10 ("Live GUI state .tcip/state/gui.json"), verdict `both-sides-restated`,
@@ -1605,9 +1609,9 @@ Seam S02 ("Workspace root and the .active project marker"), verdict `both-sides-
 `tests/test_agent_fence.py:142`, `tests/test_agent_ritual_hooks.py:41`,
 `tests/test_active_context.py:33`. `agent_session_start.py`'s `_resolve_active` reads through
 `workspace.py` itself, not a re-implementation:
-`packages/tcip-web/src/tcip_web/agent_session_start.py:68` (`from tcip_mcp import workspace`)
+`packages/tcip-web/src/tcip_web/agent_session_start.py:69` (`from tcip_mcp import workspace`)
 imports it lazily inside the function, and
-`packages/tcip-web/src/tcip_web/agent_session_start.py:74`
+`packages/tcip-web/src/tcip_web/agent_session_start.py:75`
 (`workspace.active_project_if_present(create=False)`) reads the marker through the same seam
 `set_active_project` writes. Its tests write the marker through `workspace.set_active_project`,
 `tests/test_agent_ritual_hooks.py:58`; `test_session_start_hook_runs_as_a_real_subprocess`,
@@ -1743,7 +1747,7 @@ Phase 3 verdict: single.
 
 Must agree: every process names the same workspace directory and the same active project.
 Side A: `packages/tcip-mcp/src/tcip_mcp/workspace.py:33` (`ACTIVE_MARKER = ".active"`).
-Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:74` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
+Side B: `packages/tcip-web/src/tcip_web/agent_session_start.py:75` (`workspace.active_project_if_present(create=False)`, reading the marker through `workspace.py` rather than a loose file the SessionStart hook resolved itself).
 Phase 3 verdict: single.
 
 ## S03. Backend port discovery file .tcip/state/web_port.txt
@@ -1757,14 +1761,14 @@ Phase 3 verdict: single.
 
 Must agree: sender and receiver accept the same set of panel names.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:165` (`VALID_PANELS = frozenset(`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:34` (`VALID_PANELS,`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:35` (`VALID_PANELS,`).
 Phase 3 verdict: duplicated.
 
 ## S05. Panel event_type vocabulary  <!-- queued: P5-272 unify -->
 
 Must agree: the Python poster, the FastAPI hub, and the browser handler use the same event_type strings.
 Side A: `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:760` (`result = post_panel_event("app", "annotate_focus", payload)`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:390` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:399` (`if event.event_type == PANEL_EVENT_REVIEW_FOCUS:`).
 Phase 3 verdict: single. The posted payload carries `active_subject` beside `subject` (`packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:914`), the key both readers take (`packages/tcip-web/src/tcip_web/app.py:296`, `frontend/src/lib/annotateFocus.ts:21,54`), held by `tests/test_event_integration.py`'s producer-driven test, which posts the focus tool's own event and asserts the advisory state's `active_subject`.
 
 ## S06. Append-only audit log .tcip/audit.jsonl
@@ -1792,7 +1796,7 @@ Phase 3 verdict: single. An HPO trial with no experiment record still appends to
 
 Must agree: a job's own summary is written and reloaded against the root it launched under, not
 whatever root this process happens to have pinned when either side runs.
-Side A: `packages/tcip-web/src/tcip_web/jobstore.py:61` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:32`; an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
+Side A: `packages/tcip-web/src/tcip_web/jobstore.py:64` (`def job_registry_key(`, the one address each registry is written and reloaded through, on the store `JOB_REGISTRY_STORE` declared at `jobstore.py:45` (`JOB_REGISTRY_STORE = "job_registry"`); an explicit `root` composes the key directly, and only its absence falls back to `current_root`, which itself resolves `project_root`).
 Side B: `packages/tcip-web/src/tcip_web/routes/inference.py` (inference job registry, calls `jobstore.persist_grouped`/`jobstore.load`).
 Phase 3 verdict: duplicated.
 
@@ -2073,7 +2077,7 @@ Phase 3 verdict: duplicated.
 ## S48. State WebSocket snapshot protocol  <!-- queued: P5-288 unify -->
 
 Must agree: the browser knows which slices of a broadcast snapshot are backend-authoritative and orders them by version.
-Side A: `packages/tcip-web/src/tcip_web/app.py:200` (`@app.websocket("/ws/state")`).
+Side A: `packages/tcip-web/src/tcip_web/app.py:209` (`@app.websocket("/ws/state")`).
 Side B: `packages/tcip-web/src/tcip_web/state.py:175` (`def version(self) -> int:`, "Monotonic version, bumped on every state change.").
 Phase 3 verdict: duplicated.
 
@@ -2087,8 +2091,8 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:563` (`@router.websocket("/jobs/{job_id}/stream")`).
-Side B: `packages/tcip-web/src/tcip_web/jobstore.py:77` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:567` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side B: `packages/tcip-web/src/tcip_web/jobstore.py:80` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
 ## S51. Training run stream WebSocket  <!-- queued: P5-297 unify -->
@@ -2116,14 +2120,14 @@ Phase 3 verdict: single.
 
 Must agree: the directory Vite writes is one of the directories the backend looks in.
 Side A: `packages/tcip-web/frontend/vite.config.ts:25` (`outDir: "../static",`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:259` (`def _find_static_dir() -> Path:`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:268` (`def _find_static_dir() -> Path:`).
 Phase 3 verdict: duplicated.
 
 ## S55. Vite dev-server proxy prefixes  <!-- queued: P5-306 unify -->
 
 Must agree: every backend path the browser calls in dev falls under a proxied prefix.
 Side A: `packages/tcip-web/frontend/vite.config.ts:20` (`proxy: {`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:200` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
+Side B: `packages/tcip-web/src/tcip_web/app.py:209` (`@app.websocket("/ws/state")`, one of the endpoints not under the `/api` prefix).
 Phase 3 verdict: duplicated. The prefix literals still stand on their own, but `tests/test_frontend_route_paths.py` now fails when a path the frontend references falls outside them, sockets under the API prefix included.
 
 ## S56. Tab-name vocabulary  <!-- queued: P5-290 unify -->
@@ -2158,7 +2162,7 @@ Phase 3 verdict: single.
 
 Must agree: every WebSocket endpoint applies the same origin policy before accept().
 Side A: `packages/tcip-web/src/tcip_web/trust_boundary.py:256` (`def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:`).
-Side B: `packages/tcip-web/src/tcip_web/app.py:203` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
+Side B: `packages/tcip-web/src/tcip_web/app.py:212` (`if not origin_allowed(websocket.headers.get("origin"), websocket.scope):`).
 Phase 3 verdict: single.
 
 ## S61. Bash guard and PowerShell guard protected-path sets

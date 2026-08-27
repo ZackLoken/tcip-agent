@@ -59,8 +59,8 @@ def _write_port_file(port: int) -> None:
 
 
 def main() -> None:
-    # The port handoff is written here, before uvicorn imports the app (which pins the
-    # platform-state root and binds its own backend for the served process).
+    # The port handoff is written here, before uvicorn imports the app (which binds its own
+    # storage backend at import; the served app pins the platform-state root later).
     bind_default()
     # A non-loopback host binds, and the app's trust boundary then serves this machine's own
     # connections and refuses network ones until the operator opts in (tcip_web.trust_boundary).

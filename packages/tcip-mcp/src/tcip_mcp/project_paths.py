@@ -140,8 +140,9 @@ _binding: Optional[RootBinding] = None
 
 
 def root_binding() -> Optional[RootBinding]:
-    """This process's :class:`RootBinding`, or ``None`` before :func:`pin_project_root` has
-    run: every test, and any standalone use, since neither calls it."""
+    """This process's :class:`RootBinding`, or ``None`` before either :func:`pin_project_root`
+    or :func:`repin_platform_root` has run: every test (until it calls ``set_active_project``,
+    which repins) and any other standalone use, since none of those call either."""
     return _binding
 
 
