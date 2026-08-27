@@ -8,11 +8,25 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 logger = logging.getLogger(__name__)
 
-_TB_PROCESSES: dict[str, subprocess.Popen] = {}
+
+@dataclass
+class _Launched:
+    """A TensorBoard child this process is tracking: its port and output capture live here,
+    not stuffed onto the ``Popen`` object, since an attribute added to it at runtime is invisible
+    to callers that only know the process's declared type."""
+
+    proc: subprocess.Popen
+    port: int
+    output: IO[bytes]
+
+
+_TB_PROCESSES: dict[str, _Launched] = {}
 
 # How long to let the child prove it survived before reporting a URL. A bad logdir, a
 # taken port, or a missing tensorboard install all fail within this window; anything
@@ -43,14 +57,12 @@ def _collect_output(handle) -> str:
         handle.close()
 
 
-def _release_output(proc: subprocess.Popen) -> None:
+def _release_output(entry: _Launched) -> None:
     """Close the capture file a process that is no longer tracked was writing to."""
-    handle = getattr(proc, "_tb_output", None)
-    if handle is not None:
-        try:
-            handle.close()
-        except Exception:
-            pass
+    try:
+        entry.output.close()
+    except Exception:
+        pass
 
 
 def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
@@ -65,10 +77,11 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
 
     # Check if already running
     if key in _TB_PROCESSES:
-        proc = _TB_PROCESSES[key]
-        if proc.poll() is None:  # still alive
+        entry = _TB_PROCESSES[key]
+        if entry.proc.poll() is None:  # still alive
             # Recover port from stored info
-            return {"url": f"http://localhost:{proc._tb_port}", "port": proc._tb_port, "pid": proc.pid, "logdir": logdir}
+            return {"url": f"http://localhost:{entry.port}", "port": entry.port,
+                    "pid": entry.proc.pid, "logdir": logdir}
         else:
             _release_output(_TB_PROCESSES.pop(key))
 
@@ -102,9 +115,7 @@ def launch_tensorboard(logdir: str, run_id: str | None = None) -> dict:
             "logdir": logdir,
         }
 
-    proc._tb_port = port  # type: ignore[attr-defined]
-    proc._tb_output = output  # type: ignore[attr-defined]
-    _TB_PROCESSES[key] = proc
+    _TB_PROCESSES[key] = _Launched(proc=proc, port=port, output=output)
     logger.info("TensorBoard started: http://localhost:%d (pid=%d, logdir=%s)", port, proc.pid, logdir)
     return {
         "url": f"http://localhost:{port}",
@@ -120,29 +131,29 @@ def stop_tensorboard(run_id: str | None = None, logdir: str | None = None) -> di
     if not key or key not in _TB_PROCESSES:
         return {"status": "not_running"}
 
-    proc = _TB_PROCESSES.pop(key)
-    if proc.poll() is None:
-        proc.terminate()
+    entry = _TB_PROCESSES.pop(key)
+    if entry.proc.poll() is None:
+        entry.proc.terminate()
         try:
-            proc.wait(timeout=5)
+            entry.proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.kill()
-    _release_output(proc)
-    return {"status": "stopped", "pid": proc.pid}
+            entry.proc.kill()
+    _release_output(entry)
+    return {"status": "stopped", "pid": entry.proc.pid}
 
 
 def list_tensorboard() -> list[dict]:
     """List all running TensorBoard instances."""
     result = []
-    for key, proc in list(_TB_PROCESSES.items()):
-        alive = proc.poll() is None
+    for key, entry in list(_TB_PROCESSES.items()):
+        alive = entry.proc.poll() is None
         if not alive:
             _release_output(_TB_PROCESSES.pop(key))
             continue
         result.append({
             "key": key,
-            "url": f"http://localhost:{proc._tb_port}",
-            "port": proc._tb_port,
-            "pid": proc.pid,
+            "url": f"http://localhost:{entry.port}",
+            "port": entry.port,
+            "pid": entry.proc.pid,
         })
     return result
