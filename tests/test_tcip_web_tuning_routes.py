@@ -355,30 +355,27 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
 ) -> None:
     """A sweep this process launched is addressed by the root it launched under: its detail
     and its TensorBoard route keep answering after this process repins to another project,
-    rather than looking for its manifest under wherever the platform root has since moved."""
-    import uuid
-
+    rather than looking for its manifest under wherever the platform root has since moved,
+    and the TensorBoard link farm itself lands beside the sweep's own trials, not inside
+    whatever project this process has since adopted."""
     from tcip_mcp import workspace
     from tcip_web.routes import tuning
 
     launch_root = tmp_path
-    fixed_uuid = uuid.uuid4()
-    monkeypatch.setattr(uuid, "uuid4", lambda: fixed_uuid)
-    expected_id = f"hpo-{fixed_uuid.hex[:8]}"
 
-    def fake_run_hpo(**kwargs):
+    def fake_run_hpo(*, study_name, **kwargs):
         import tcip_store
         from tcip_mcp.tools.training_tools import sweep_manifest_key
 
-        sweep = hpo_root / expected_id
+        sweep = hpo_root / study_name
         tb_dir = sweep / "trial_aaa_00000" / "tensorboard"
         tb_dir.mkdir(parents=True)
         (tb_dir / "marker.txt").write_text("x", encoding="utf-8")
         tcip_store.replace(
-            sweep_manifest_key(expected_id),
-            {"study_name": expected_id, "status": "completed", "n_trials": 1},
+            sweep_manifest_key(study_name),
+            {"study_name": study_name, "status": "completed", "n_trials": 1},
         )
-        return {"study_name": expected_id}
+        return {"study_name": study_name}
 
     monkeypatch.setattr("tcip_mcp.tools.training_tools.run_hpo", fake_run_hpo)
 
@@ -395,7 +392,6 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
     )
     assert resp.status_code == 200
     sweep_id = resp.json()["sweep_id"]
-    assert sweep_id == expected_id
     assert tuning.wait_for_workers(timeout_s=_worker_join_bound()) == ()
     assert tuning._sweeps[sweep_id].platform_root == str(launch_root)
 
@@ -410,6 +406,8 @@ def test_a_launched_sweep_stays_reachable_after_the_backend_repins(
     tb_resp = client.post(f"/api/tuning/sweeps/{sweep_id}/tensorboard", json={})
     assert tb_resp.status_code == 200
     (logdir, _), = tb_launches
+    expected_view = launch_root / ".tcip" / "state" / "tensorboard_views" / sweep_id
+    assert Path(logdir) == expected_view  # the link farm sits under the launch root, not chestnut_burr_other
     link = Path(logdir) / "trial_aaa_00000"
     assert link.is_dir()
-    assert (link / "marker.txt").is_file()  # resolves through to the launch root's own trial
+    assert (link / "marker.txt").is_file()
