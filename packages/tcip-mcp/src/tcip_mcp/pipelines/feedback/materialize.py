@@ -252,27 +252,10 @@ def materialize_dataset(
             counts["missing_images"] += 1
             continue
 
-        from tcip_mcp.pipelines.image_utils import BandGroupRef, image_dimensions
+        from tcip_mcp.pipelines.image_utils import image_dimensions, place_logical_image, stem_of
 
-        if isinstance(src, BandGroupRef):
-            # A grouped capture materializes as every sibling band file plus the .bandgroup
-            # manifest itself: the manifest is what stands in for "the image" in the output
-            # (its own filename is what every by-name reader treats as this capture's name).
-            for band_path in src.bands.values():
-                dst_band = images_out / band_path.name
-                if not dst_band.exists():
-                    place(str(band_path), str(dst_band))
-            dst_manifest = images_out / src.manifest_path.name
-            if not dst_manifest.exists():
-                place(str(src.manifest_path), str(dst_manifest))
-            record_name = src.manifest_path.name
-            stem = src.stem
-        else:
-            dst_img = images_out / src.name
-            if not dst_img.exists():
-                place(str(src), str(dst_img))
-            record_name = src.name
-            stem = src.stem
+        record_name = place_logical_image(src, images_out, place)
+        stem = stem_of(src)
         label_path = labels_out / label_filename(stem)
         img_w, img_h = image_dimensions(src)
 

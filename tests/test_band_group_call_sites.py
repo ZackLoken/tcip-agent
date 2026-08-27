@@ -302,3 +302,27 @@ def test_materialize_dataset_dims_from_the_grouped_capture(tmp_path):
     box = anns[0].geometry
     # cx=cy=0.5, w=h=0.25 on a 16x16 frame -> [6,6,10,10]
     assert (box.x1, box.y1, box.x2, box.y2) == (6.0, 6.0, 10.0, 10.0)
+
+
+# ── tools/data_tools.py: make_splits(materialize=True) ───────────────────────────────────
+
+
+def test_make_splits_materialize_resolves_a_grouped_capture(grouped_dataset):
+    """A materialized split places every sibling band a group names plus its manifest, not the
+    manifest alone: the manifest resolves to nothing once its siblings are absent."""
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.image_utils import resolve_image_source
+    from tcip_mcp.tools.data_tools import make_splits
+
+    out = grouped_dataset / "splits"
+    result = make_splits(str(grouped_dataset), output_path=str(out), materialize=True,
+                         subject="catkin")
+    assert "error" not in result
+
+    split_dir = next(
+        out / s / "images" for s in ("train", "val")
+        if (out / s / "images" / "capture_001.bandgroup").is_file()
+    )
+    resolved = resolve_image_source(split_dir, "capture_001")
+    assert isinstance(resolved, BandGroupRef)
+    assert all(p.is_file() for p in resolved.bands.values())

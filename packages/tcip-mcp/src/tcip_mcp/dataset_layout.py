@@ -144,6 +144,19 @@ def image_path(dataset_root: str | Path, date: Optional[str], stem: str, ext: st
     return _entry_path(_IMAGE_TREE, dataset_root, (*_date_seg(date), image_filename(stem, ext)))
 
 
+def resolve_images_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
+    """The directory one date's images actually live in: ``images/<date>/`` when that bucket
+    exists on disk, else the flat ``images/`` root.
+
+    A canonical dataset nests images under their capture date, but a labels tree can be dated
+    while its images never were split into date buckets; a caller that needs one directory for a
+    date (a label/image pair-up, an admission draw) resolves it here instead of assuming the
+    dated bucket is where the bytes are.
+    """
+    dated = image_dir(dataset_root, date)
+    return dated if dated.is_dir() else image_dir(dataset_root, None)
+
+
 def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str) -> Optional[str]:
     """The on-disk display name of the logical image at ``stem`` in one date bucket.
 
@@ -155,13 +168,13 @@ def resolve_image_name(dataset_root: str | Path, date: Optional[str], stem: str)
     at ``stem`` resolves in that bucket; a caller looking up a status-store entry treats that as
     unresolvable rather than guessing a name to look one up under.
     """
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, resolve_image_source
+    from tcip_mcp.pipelines.image_utils import logical_image_name, resolve_image_source
 
     try:
         source = resolve_image_source(image_dir(dataset_root, date), stem)
     except FileNotFoundError:
         return None
-    return source.manifest_path.name if isinstance(source, BandGroupRef) else source.name
+    return logical_image_name(source)
 
 
 IMAGERY_STORE = "imagery"

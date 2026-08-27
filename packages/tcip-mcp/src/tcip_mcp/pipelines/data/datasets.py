@@ -27,8 +27,8 @@ from torch.utils.data import Dataset
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import BandGroupIncomplete, BandGroupRef
 from tcip_mcp.pipelines.image_utils import (
-    IMAGE_EXTS, crop_pad_tile, image_dimensions, list_logical_images, load_image, pad_tile,
-    pil_to_tensor, resolve_image_source, to_pil_if_faithful,
+    IMAGE_EXTS, crop_pad_tile, image_dimensions, list_logical_images, load_image,
+    logical_image_name, pad_tile, pil_to_tensor, resolve_image_source, to_pil_if_faithful,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,10 +41,7 @@ def image_name_map(images_dir) -> dict[str, str]:
     stands in for the grouped capture everywhere a name is matched against a store
     (``image_status.json``, a COCO ``file_name``), never one of its sibling band files.
     """
-    result: dict[str, str] = {}
-    for stem, src in list_logical_images(images_dir).items():
-        result[stem] = src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
-    return result
+    return {stem: logical_image_name(src) for stem, src in list_logical_images(images_dir).items()}
 
 
 def _authored_frame(stem: str, labels_dir, fmt: str, coco=None,
@@ -445,8 +442,8 @@ def confirmed_negative_records_every_date(
 ) -> dict[str, dict[str, str]]:
     """This subject's confirmed negatives from every bucket the store names it under, by image name.
 
-    For a consumer whose own output carries no capture date and therefore folds a whole dataset's
-    confirmations into one bucket (``make_splits(materialize=True)``). The dates come from
+    For a caller whose answer must span every capture date a subject was ever confirmed under,
+    rather than one date's own bucket. The dates come from
     :func:`~tcip_mcp.dataset_layout.bucket_dates_for_subject`, the keys writers actually stated, so
     no bucket is missed and none is invented; each one is then read through
     :func:`confirmed_negative_records`, quarantine and the label-content exclusion included, rather
