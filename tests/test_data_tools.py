@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
@@ -148,12 +149,12 @@ def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_pat
     assert str(bad) in result["error"]
 
 
-def test_make_splits_reports_an_unreadable_label_reached_only_through_stratification(
+def test_make_splits_reports_an_unreadable_label_sorted_last(
     data_dir: Path, tmp_path: Path,
 ):
-    """A corrupt label sorted after the scan's own format-probe file is caught by the
-    stratification count, not the scan: a different site than the first-sorted case above, and
-    it must answer the same error dict, never a raw raise."""
+    """A corrupt label reached last in sort order is caught by the same per-stem admission read
+    as the first-sorted case above, regardless of where in the candidate order it falls, and
+    answers the same error dict, never a raw raise."""
     bad = sorted((data_dir / "annotations" / "2-11-26").glob("*.json"))[-1]
     bad.write_bytes(b"{not json")
 
@@ -161,6 +162,39 @@ def test_make_splits_reports_an_unreadable_label_reached_only_through_stratifica
 
     assert "error" in result
     assert str(bad) in result["error"]
+
+
+def test_make_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_path: Path):
+    """A raw file colliding with a band group's own canonical stem is an error naming the
+    directory, never a raise through the tool boundary, the same contract the unreadable-label
+    cases above state."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    (root / "annotations" / "2-11-26").mkdir(parents=True)
+
+    band_a, band_b = images_dir / "plotA_B1.npy", images_dir / "plotA_B2.npy"
+    np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
+    np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
+    write_band_group_manifest(images_dir, "plotA", {"B1": band_a, "B2": band_b})
+    (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
+
+    result = make_splits(str(root), output_path=str(tmp_path / "manifests"), subject="leaf")
+
+    assert "error" in result
+    assert "plotA" in result["error"]
+
+
+def test_make_splits_stats_only_carries_dataset_hash(data_dir: Path):
+    """A stats-only call's answer identifies the labels it partitioned, the same as a manifest
+    call's own per-date record."""
+    result = make_splits(str(data_dir))
+    assert "error" not in result
+    assert result["dataset_hash"]
 
 
 def test_make_splits_bad_ratios(data_dir: Path):
@@ -375,3 +409,141 @@ def test_make_splits_refuses_to_materialize_a_multi_date_manifest(tmp_path: Path
     assert "error" in result
     assert "2-11-26" in result["error"] and "2-12-01" in result["error"]
     assert not out.exists()
+
+
+def _dated_labels_flat_images_dataset(root: Path, stems: tuple[str, ...]) -> Path:
+    """Labels dated but images never split into date buckets: a layout the platform's other
+    readers already resolve (``annotation_tools.py``'s stage-shape door)."""
+    from PIL import Image
+
+    images_dir = root / "images"
+    labels_dir = root / "annotations" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    for stem in stems:
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    return root
+
+
+def test_make_splits_manifest_admits_dated_labels_over_flat_images(tmp_path: Path):
+    root = _dated_labels_flat_images_dataset(tmp_path / "ds", ("p0", "p1", "p2", "p3", "p4"))
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    assert "error" not in result
+    assert result["total_stems"] == 5
+    assert result["admission_counts"]["annotated"] == 5
+
+
+def test_make_splits_manifest_admits_a_loose_label_beside_a_dated_one(tmp_path: Path):
+    """A label sitting loose in ``annotations/`` beside a dated bucket enters the draw as a
+    dateless member, rather than being invisible to both the manifest and its own counts."""
+    from PIL import Image
+
+    root = tmp_path / "ds"
+    dated_images = root / "images" / "2-11-26"
+    dated_labels = root / "annotations" / "2-11-26"
+    dated_images.mkdir(parents=True)
+    dated_labels.mkdir(parents=True)
+    for stem in ("a", "b", "c"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(dated_images / f"{stem}.jpg")
+        json_io.write_annotations(
+            dated_labels / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    for stem in ("loose1", "loose2"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(root / "images" / f"{stem}.jpg")
+        json_io.write_annotations(
+            root / "annotations" / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject="leaf")
+
+    assert "error" not in result
+    assert result["total_stems"] == 5
+    assert result["admission_counts"]["annotated"] == 5
+    manifest = ts.read(split_manifest_key(out))
+    identities = {i for ids in manifest["splits"].values() for i in ids}
+    assert identities == {
+        "2-11-26/a", "2-11-26/b", "2-11-26/c", "loose1", "loose2",
+    }
+
+
+def test_make_splits_writes_no_member_block_for_a_date_that_admits_nothing(tmp_path: Path):
+    """A capture date whose only label resolves to no image anywhere writes no ``members`` block
+    for it, so binding a run to that date names it as one the manifest never held, not one it
+    holds empty."""
+    from PIL import Image
+
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    labels_dir = root / "annotations" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    for stem in ("a", "b", "c", "d"):
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    orphan_labels = root / "annotations" / "2-12-26"
+    orphan_labels.mkdir(parents=True)
+    json_io.write_annotations(
+        orphan_labels / "orphan.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+
+    out = tmp_path / "m"
+    result = make_splits(str(root), output_path=str(out), subject="leaf")
+    assert "error" not in result
+    manifest = ts.read(split_manifest_key(out))
+
+    assert "2-12-26" not in manifest["members"]
+    with pytest.raises(ValueError, match=r"holds members under \['2-11-26'\]"):
+        bind_manifest_stems(manifest, "2-12-26", "leaf", None, [])
+
+
+def test_make_splits_materialize_negative_carry_reads_only_the_materializing_dates_bucket(
+    tmp_path: Path,
+):
+    """A confirmed negative recorded under a different date's bucket for a same-named image is
+    not this split's to carry: the carry reads the one bucket the materializing date's own
+    admission read, never a merge across every bucket the store names the subject under."""
+    from PIL import Image
+
+    from tcip_mcp.dataset_layout import (
+        read_image_status_store, record_image_statuses, status_bucket,
+    )
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    labels_dir = root / "annotations" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir.mkdir(parents=True)
+    Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / "neg.jpg")
+    json_io.write_annotations(labels_dir / "neg.json", [], 100, 80, keep_empty=True)
+
+    record_image_statuses(
+        root, status_bucket("leaf", "2-11-26"), {"neg.jpg": "negative"}, recorded_by="user:right",
+    )
+    record_image_statuses(
+        root, status_bucket("leaf", "2-99-99"), {"neg.jpg": "negative"}, recorded_by="user:wrong",
+    )
+
+    out = tmp_path / "splits"
+    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf")
+    assert "error" not in result
+
+    split_dir = next(
+        out / s for s in ("train", "val") if (out / s / "images" / "neg.jpg").is_file()
+    )
+    store = read_image_status_store(split_dir)
+    record = store[status_bucket("leaf", None)]["neg.jpg"]
+    assert record["recorded_by"] == "user:right"

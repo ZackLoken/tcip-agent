@@ -52,12 +52,9 @@ def _logical_image_names(images_dir) -> list[str]:
     Folding sibling band files into one name here is what lets this tool's frame index agree with
     the frontend's own image_list, which now enumerates the same way.
     """
-    from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+    from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 
-    return [
-        src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
-        for src in list_logical_images(images_dir).values()
-    ]
+    return [logical_image_name(src) for src in list_logical_images(images_dir).values()]
 
 
 def _ann_dict(a: Annotation) -> dict:
@@ -873,7 +870,7 @@ def stage_proposals(
     """
     from tcip_annotation.json_io import ring_vertex
 
-    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.dataset_layout import resolve_images_dir
     from tcip_mcp.prediction_buckets import BucketHasVerdicts, stage_prediction_shapes
     from tcip_mcp.workspace import is_valid_name
 
@@ -903,15 +900,13 @@ def stage_proposals(
             return {"error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; cx/cy/w/h must be in [0,1]"}
         norm_boxes.append((subject, conf, cx, cy, w, h))
 
-    img_source = None
-    for idir in (image_dir(dataset_root, date), image_dir(dataset_root, None)):
-        try:
-            img_source = resolve_image_source(idir, stem)
-            break
-        except (FileNotFoundError, BandGroupIncomplete):
-            continue
+    idir = resolve_images_dir(dataset_root, date)
+    try:
+        img_source = resolve_image_source(idir, stem)
+    except (FileNotFoundError, BandGroupIncomplete):
+        img_source = None
     if img_source is None:
-        return {"error": f"no image found for stem {stem!r} under {image_dir(dataset_root, date)}"}
+        return {"error": f"no image found for stem {stem!r} under {idir}"}
     img_w, img_h = image_dimensions(img_source)
 
     # A rounding-slop margin in pixels, not a fraction of the image size: a fractional margin

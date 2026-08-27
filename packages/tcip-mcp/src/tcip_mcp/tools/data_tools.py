@@ -369,24 +369,31 @@ def validate_data_quality(folder_path: str) -> dict:
 
 def _split_date_dirs(folder_path: str | Path) -> list[tuple[str | None, Path, Path]]:
     """Every ``(date, labels_dir, images_dir)`` a dataset's per-image label tree holds: one entry
-    per ``annotations/<date>/`` beside its ``images/<date>/`` under a canonical date-nested
-    layout, or one dateless entry for a flat ``annotations/`` beside a flat ``images/``.
+    per ``annotations/<date>/`` beside its images (``images/<date>/`` when that bucket exists, else
+    the flat ``images/`` root), plus one dateless entry for any label loose directly in
+    ``annotations/`` beside a dated tree, so a mixed layout's flat labels are never dropped from
+    the draw. A fully flat dataset (no date subdirectories at all) yields exactly that one
+    dateless entry.
 
     Empty when the dataset holds no per-image label tree at all (a root-level assembled COCO
     only, which :func:`_scan_dataset` counts as a label but this never walks): the platform's own
     admission for the tasks a split manifest can bind to draws through the per-image tree, never
     that document.
     """
-    from tcip_mcp.dataset_layout import annotation_dir, annotation_root, image_dir, is_bucket_name
+    from tcip_mcp.dataset_layout import (
+        annotation_dir, annotation_root, is_bucket_name, resolve_images_dir,
+    )
 
     root = Path(folder_path)
     ann_root = annotation_root(root)
     if not ann_root.is_dir():
         return []
     subdirs = sorted(d.name for d in ann_root.iterdir() if d.is_dir() and is_bucket_name(d.name))
-    if subdirs:
-        return [(d, annotation_dir(root, d), image_dir(root, d)) for d in subdirs]
-    return [(None, ann_root, image_dir(root, None))]
+    entries = [(d, annotation_dir(root, d), resolve_images_dir(root, d)) for d in subdirs]
+    loose_labels = any(p.is_file() for p in ann_root.glob("*.json"))
+    if loose_labels or not subdirs:
+        entries.append((None, ann_root, resolve_images_dir(root, None)))
+    return entries
 
 
 @mcp.tool()
@@ -422,11 +429,10 @@ def make_splits(
     ``subject`` (with every instance assessed for ``attribute``, when one is given) or a human's
     negative confirmation for it. ``subject`` is therefore required to write a manifest; a call
     with neither ``output_path`` nor ``materialize`` answers over every image in the tree instead,
-    no subject needed, unchanged from before this admission rule existed. Each admitted member's
-    identity is ``<date>/<stem>`` (the bare ``<stem>`` under a flat, dateless tree), since a stem
-    is unique only within one capture date. ``stratify_foreground`` only toggles the
-    annotation-count balancing now; it no longer changes which images are eligible to enter the
-    split.
+    no subject needed. Each admitted member's identity is ``<date>/<stem>`` (the bare ``<stem>``
+    under a flat, dateless tree), since a stem is unique only within one capture date.
+    ``stratify_foreground`` only toggles the annotation-count balancing; it does not change which
+    images are eligible to enter the split.
 
     With ``materialize=True`` it additionally lays out a
     ``{train,val}/{images,labels}/`` tree under ``output_path`` (defaulting to
@@ -491,8 +497,8 @@ def make_splits(
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)
 
     if out_dir is None:
-        # A stats-only call writes no manifest, so the draw stays the plain image/label scan it
-        # has always been: no subject required, every image eligible.
+        # A stats-only call writes no manifest, so the draw is a plain image/label scan: no
+        # subject required, every image eligible.
         try:
             scan = _scan_dataset(folder_path)
         except UnreadableLabelDocument as exc:
@@ -526,6 +532,12 @@ def make_splits(
             splits=(train_ratio, val_ratio, test_ratio), seed=seed,
         )
         counts = annotation_counts or {}
+        dataset_hash = None
+        if label_map:
+            from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
+
+            labels_root = Path(next(iter(label_map.values()))).parent
+            dataset_hash = _dataset_hash(labels_root, stems=stems)
         return {
             "splits": {k: len(parts[k]) for k in kept_splits},
             "foreground_annotations": {
@@ -535,6 +547,7 @@ def make_splits(
             "total_annotations": sum(int(v) for v in counts.values()),
             "groups": len({group_key_fn(s) for s in stems}),
             "seed": seed,
+            "dataset_hash": dataset_hash,
             "group_by": resolved_group_by,
             "stratified": stratified,
             "manifest_dir": None,
@@ -546,9 +559,8 @@ def make_splits(
                          "or materialize=True): pass the object class the run will admit under, "
                          "or drop both output_path and materialize for a stats-only call."}
 
-    from tcip_mcp.pipelines.data.datasets import (
-        _resolve_registry_id_map, image_name_map, trainable_stems,
-    )
+    from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, trainable_stems
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
 
     date_dirs = _split_date_dirs(folder_path)
@@ -574,12 +586,13 @@ def make_splits(
                 admission_counts[key] = admission_counts.get(key, 0) + value
             for stem in admitted:
                 identity_locations[member_identity(date, stem)] = (date, stem)
-            members[date or ""] = {
-                "labels_root": str(labels_dir),
-                "images_root": str(images_dir),
-                "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
-            }
-    except UnreadableLabelDocument as exc:
+            if admitted:
+                members[date or ""] = {
+                    "labels_root": str(labels_dir),
+                    "images_root": str(images_dir),
+                    "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
+                }
+    except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
         return {"error": str(exc)}
 
     stems = sorted(identity_locations)
@@ -620,13 +633,14 @@ def make_splits(
 
     negative_carry: "_NegativeCarry | None" = None
     if materialize:
+        from tcip_mcp.pipelines.image_utils import list_logical_images
+
         (only_date,) = distinct_dates
         labels_dir_for_date = next(d for date, d, _ in date_dirs if date == only_date)
         images_dir_for_date = next(d for date, _, d in date_dirs if date == only_date)
-        names = image_name_map(images_dir_for_date)
-        image_map = {stem: images_dir_for_date / fname for stem, fname in names.items()}
+        image_map = list_logical_images(images_dir_for_date)
         label_map = {
-            stem: labels_dir_for_date / f"{stem}.json" for stem in names
+            stem: labels_dir_for_date / f"{stem}.json" for stem in image_map
             if (labels_dir_for_date / f"{stem}.json").is_file()
         }
         bare_parts = {
@@ -636,7 +650,8 @@ def make_splits(
         # Read every confirmed negative this split will carry before anything (a stem list, the
         # manifest, the split tree) is written: a refusal here must leave nothing persisted.
         try:
-            negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject)
+            negative_carry = _compute_negative_carry(
+                label_map, bare_parts, image_map, subject, only_date)
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
 
@@ -678,6 +693,8 @@ def make_splits(
     }
 
     if materialize:
+        from tcip_mcp.pipelines.image_utils import place_logical_image
+
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name in kept_splits:
             split_stems = bare_parts[split_name]
@@ -686,10 +703,7 @@ def make_splits(
             img_dir.mkdir(parents=True, exist_ok=True)
             lbl_dir.mkdir(parents=True, exist_ok=True)
             for stem in split_stems:
-                src_img = Path(image_map[stem])
-                dst_img = img_dir / src_img.name
-                if not dst_img.exists():
-                    place_fn(str(src_img), str(dst_img))
+                place_logical_image(image_map[stem], img_dir, place_fn)
                 if stem in label_map:
                     src_lbl = Path(label_map[stem])
                     dst_lbl = lbl_dir / src_lbl.name
@@ -718,7 +732,7 @@ class _NegativeCarry:
 
 
 def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
-                            subject: str | None) -> "_NegativeCarry | None":
+                            subject: str | None, date: str | None) -> "_NegativeCarry | None":
     """Reads the source subject's confirmed negatives and assigns each to the split holding its
     image, entirely before any split-tree file is written (see the call site).
 
@@ -728,13 +742,12 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
     human confirmed negative reads as an unconfirmed empty in the split and is dropped from training.
     No subject threaded -> nothing to attribute the confirmations to, so ``None`` is returned.
 
-    A split partitions whatever the source dataset holds, across every capture date at once, and
-    lands it in one undated bucket. So the source side reads every bucket the store names this
-    subject under, the keys writers actually stated, rather than a date derived from each label
-    directory's path: a confirmation recorded under a key that does not spell the directory it sits
-    in is still the human's, and deriving the key would drop it. A name whose label file now holds
-    the subject is excluded the way :func:`confirmed_negative_records_every_date` always excludes
-    one, named in the returned carry's ``contradicted`` rather than silently dropped.
+    ``materialize=True`` draws exactly one capture date, so the source side reads that date's own
+    ``status_bucket(subject, date)`` bucket, through :func:`confirmed_negative_records`, the same
+    predicate ``trainable_stems``' admission already reads: a confirmation this split's own
+    admission never saw is not this split's to carry. A name whose label file now holds the
+    subject is excluded the way :func:`confirmed_negative_records` always excludes one, named in
+    the returned carry's ``contradicted`` rather than silently dropped.
     """
     if not subject:
         return None
@@ -742,7 +755,8 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
         RegistryError, attribute_schema_digest, read_registry,
     )
     from tcip_mcp.dataset_layout import classes_path, dataset_root_of
-    from tcip_mcp.pipelines.data.datasets import confirmed_negative_records_every_date
+    from tcip_mcp.pipelines.data.datasets import confirmed_negative_records
+    from tcip_mcp.pipelines.image_utils import logical_image_name
 
     src_dirs = {Path(p).parent for p in label_map.values()}
     if not src_dirs:
@@ -750,8 +764,8 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
     negatives: dict[str, dict[str, str]] = {}
     contradicted: set[str] = set()
     for d in sorted(src_dirs):
-        negatives.update(confirmed_negative_records_every_date(
-            d, subject=subject, contradicted_out=contradicted))
+        negatives.update(confirmed_negative_records(
+            d, subject=subject, date=date, contradicted_out=contradicted))
     if not negatives:
         return _NegativeCarry(by_split={}, contradicted=contradicted, digest=None, src_classes=None)
 
@@ -776,7 +790,7 @@ def _compute_negative_carry(label_map: dict, parts: dict, image_map: dict,
 
     by_split: dict[str, dict[str, dict[str, str]]] = {}
     for split_name, split_stems in parts.items():
-        names = {Path(image_map[s]).name for s in split_stems if s in image_map}
+        names = {logical_image_name(image_map[s]) for s in split_stems if s in image_map}
         carried = {n: negatives[n] for n in sorted(set(negatives) & names)}
         if carried:
             by_split[split_name] = carried

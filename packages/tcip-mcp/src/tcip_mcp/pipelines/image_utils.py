@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,8 +24,8 @@ if TYPE_CHECKING:
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
     "crop_pad_tile", "image_dimensions", "list_logical_images", "load_image",
-    "load_multiband", "pad_tile", "pil_to_tensor", "resolve_image_source", "stem_of",
-    "to_pil_if_faithful",
+    "load_multiband", "logical_image_name", "pad_tile", "pil_to_tensor",
+    "place_logical_image", "resolve_image_source", "stem_of", "to_pil_if_faithful",
 ]
 
 
@@ -114,6 +115,44 @@ def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroup
                 "the surviving siblings, or restore the missing file(s)."
             )
     return src
+
+
+def logical_image_name(source: "Path | BandGroupRef") -> str:
+    """The name a by-name reader (an image-status bucket, a COCO ``file_name``) resolves this
+    logical image under: a :class:`BandGroupRef`'s own ``.bandgroup`` manifest name, since that
+    file stands in for the whole grouped capture everywhere a name is matched against a store;
+    a plain path's own name otherwise.
+    """
+    return source.manifest_path.name if isinstance(source, BandGroupRef) else source.name
+
+
+def place_logical_image(
+    source: "Path | BandGroupRef", dest_dir: str | Path, place_fn: "Callable[[str, str], None]",
+) -> str:
+    """Copies (or symlinks, via ``place_fn``) one logical image into ``dest_dir`` and returns the
+    name :func:`logical_image_name` gives it there.
+
+    A :class:`BandGroupRef` places every sibling band it names plus its own ``.bandgroup``
+    manifest: the manifest alone resolves to nothing once its siblings are absent, so a caller
+    materializing a band-grouped capture (a curated review tree, a train/val split) must place the
+    whole group, never the manifest by itself. A plain path places just that one file. A
+    destination already present is left alone, so calling this once per split member for a group
+    shared across members does no redundant work.
+    """
+    dest_dir = Path(dest_dir)
+    if isinstance(source, BandGroupRef):
+        for band_path in source.bands.values():
+            dst_band = dest_dir / band_path.name
+            if not dst_band.exists():
+                place_fn(str(band_path), str(dst_band))
+        dst_manifest = dest_dir / source.manifest_path.name
+        if not dst_manifest.exists():
+            place_fn(str(source.manifest_path), str(dst_manifest))
+        return source.manifest_path.name
+    dst = dest_dir / source.name
+    if not dst.exists():
+        place_fn(str(source), str(dst))
+    return source.name
 
 
 def stem_of(source: "str | Path | BandGroupRef") -> str:
