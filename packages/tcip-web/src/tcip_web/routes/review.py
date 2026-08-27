@@ -698,9 +698,10 @@ def _is_negative_for_subject(
     class identity) only as an admission gate: membership proves the bucket assessed this subject
     at all (an attribute-scoped bucket's map is keyed by attribute values, not the object's subject
     name, so it admits no object subject). The comparison itself is by the decoded name
-    (``read_annotations``' own ``subject`` field), never the id, since the bucket's own predictions
-    were already decoded through that same map. A subject the map does not admit is ``None``: the
-    caller omits the coverage entry rather than guessing one.
+    (``cached_label_annotations``' own ``subject`` field), never the id, since the bucket's own
+    predictions were already decoded through that same map, and both branches read the file
+    through this one memo so they cannot disagree about its current content. A subject the map
+    does not admit is ``None``: the caller omits the coverage entry rather than guessing one.
     """
     if not pred_dir:
         return True
@@ -712,7 +713,7 @@ def _is_negative_for_subject(
     id_map = bucket_id_map(Path(pred_dir))
     if id_map is None or subject not in id_map:
         return None
-    return not any(a.subject == subject for a in read_annotations(str(pred_file)))
+    return not any(a.subject == subject for a in cached_label_annotations(pred_file))
 
 
 @router.post("/mark_complete")

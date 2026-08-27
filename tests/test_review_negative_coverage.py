@@ -12,6 +12,7 @@ The per-image prediction file is addressed by the image's stem, so ``IMG_0007.JP
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,42 @@ def test_complete_with_no_subject_records_completion_with_a_null_status(
     assert resp.status_code == 200
     assert resp.json()["annotation_status"] is None
     assert _shard(dataset_root, "IMG_0080.JPG")["adjudication_covered"] == {"*": True}
+
+
+def test_is_negative_for_subject_agrees_across_branches_after_a_same_size_edit(
+    tmp_path: Path,
+) -> None:
+    """Both the subject-less and the named-subject branch read the prediction file through the
+    same memo, so an in-place edit forced onto the file's prior timestamp and byte count is
+    answered the same way by both, never one from a parse made before the edit and the other
+    fresh."""
+    from tcip_web.routes.review import _is_negative_for_subject
+
+    d = tmp_path / "predictions" / "baseline" / "2-11-26"
+    d.mkdir(parents=True)
+    pred_file = d / "IMG_0007.json"
+    write_annotations(
+        str(pred_file),
+        [Annotation(subject="catkin", geometry=BBox(12.0, 20.0, 52.0, 44.0), score=0.71)],
+        IMG_W, IMG_H,
+    )
+    populated = pred_file.read_bytes()
+    os.utime(pred_file, (1_000_000, 1_000_000))
+    _seed_sidecar(d, {"checkpoint_sha256": CHECKPOINT_SHA, "id_map": {"catkin": 0}})
+
+    assert _is_negative_for_subject(str(d), "IMG_0007.JPG", None) is False
+    assert _is_negative_for_subject(str(d), "IMG_0007.JPG", "catkin") is False
+
+    write_annotations(str(pred_file), [], IMG_W, IMG_H, keep_empty=True)
+    emptied = pred_file.read_bytes()
+    # Trailing whitespace is not significant JSON content; padding to the populated document's
+    # exact byte count reproduces a same-size in-place edit without hand-authoring the document.
+    assert len(emptied) < len(populated)
+    pred_file.write_bytes(emptied + b" " * (len(populated) - len(emptied)))
+    os.utime(pred_file, (1_000_000, 1_000_000))  # identical mtime and byte count as the populated write
+
+    subject_less = _is_negative_for_subject(str(d), "IMG_0007.JPG", None)
+    named = _is_negative_for_subject(str(d), "IMG_0007.JPG", "catkin")
+    assert subject_less is True
+    assert named is True
+    assert subject_less == named
