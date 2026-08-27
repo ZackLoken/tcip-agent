@@ -598,21 +598,6 @@ def bucket_subject_date(bucket: str) -> tuple[str, Optional[str]]:
     return subject, (date or None)
 
 
-def bucket_dates_for_subject(raw: object, subject: str) -> list[Optional[str]]:
-    """Every ``date`` a stored bucket names ``subject`` under, the undated bucket reported as
-    ``None``.
-
-    For a reader whose answer spans a subject's whole store rather than one capture date (the
-    split materializer, whose output tree carries no date and so folds every source bucket into
-    one). It enumerates the keys writers actually stated, so such a reader never derives a date
-    from a labels path and never misses a bucket that was written under a different one. Undated
-    first, then by date, so the order does not depend on the store's insertion order.
-    """
-    dates = {d for b in status_confirmations(raw)
-             for s, d in (bucket_subject_date(b),) if s == subject}
-    return sorted(dates, key=lambda d: (d is not None, d or ""))
-
-
 def status_of(record: object) -> Optional[str]:
     """The status token a stored record holds, or ``None`` when the value is not one.
 
