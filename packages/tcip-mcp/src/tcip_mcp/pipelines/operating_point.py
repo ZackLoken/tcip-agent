@@ -596,7 +596,9 @@ def _selection_disjointness(
     (``review_calibration.py`` renders it), for: no manifest named and no ``manifest_binding`` on
     the record; a ``spatial_strip`` record (the within-image route's own ``calibration_region`` is
     a different check, untouched here); an empty ``val``; ``resolved_group_by == "external"`` (the
-    ``val`` came from a directory the record's ``date`` says nothing about); or a
+    ``val`` came from a directory the record's ``date`` says nothing about); ``calibration_date is
+    None`` (the caller derived no date to compare at all, never read as matching a flat record,
+    whose own ``date`` is ``manifest_date_key``'s empty string, not ``None``); or a
     ``calibration_date`` other than the record's own ``date`` (a bare stem means the same image
     only under one date). Unresolvable, rather than not-applicable, when the calibration names a
     manifest but there is no experiment record to check it against
@@ -644,6 +646,11 @@ def _selection_disjointness(
         return {"applicable": False,
                 "reason": "the run validated against an explicit val_images_dir; its date says "
                           "nothing about that directory's own membership",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+    if calibration_date is None:
+        return {"applicable": False,
+                "reason": "this calibration derived no date to check against the run's own "
+                          "selection date",
                 **_NOT_APPLICABLE_SELECTION_SHAPE}
     record_date = split.get("date")
     if calibration_date != record_date:
@@ -1252,8 +1259,12 @@ def resolve_classifier_operating_point(
     otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
 
     ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way
-    :func:`resolve_operating_point` does; the classifier door draws no manifest today, so no
-    caller populates them and the check reads not-applicable, structurally present all the same.
+    :func:`resolve_operating_point` does; the classifier door draws no manifest today, so
+    ``split_manifest_dir`` is never populated, and its one caller states ``calibration_date``
+    from its own calibration GT directory (``manifest_date_key`` for a flat one, never the bare
+    ``annotation_date`` result). ``calibration_date is None`` means the caller derived no date at
+    all and the check reads not-applicable with that reason; it is never read as matching a flat
+    run's own record, whose ``date`` is the same empty-string key, not ``None`` either.
     """
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
@@ -1518,6 +1529,8 @@ def resolve_ordinal_operating_point(
     holdout_items: list[dict] | None = None,
     experiment_id: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
+    split_manifest_dir: str | None = None,
+    calibration_date: str | None = None,
 ) -> dict:
     """Ordinal-mode calibration gate for a trait's rank prediction.
 
@@ -1534,6 +1547,11 @@ def resolve_ordinal_operating_point(
     "failures", "sweep_data"}``, never a shape a generic writer could mistake for the count
     operating point's ``conf`` param. Callers write this into ``ordinal_operating_point.json`` via
     :func:`tcip_mcp.pipelines.resolution.reconcile_ordinal_validity`.
+
+    ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way
+    :func:`resolve_operating_point` does; the caller's own CSV directory, when it sits under a
+    capture date, is the date to state (``manifest_date_key`` for a flat one), ``None`` when it
+    derived none, never a bare guess.
 
     See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics (disjointness,
     train-disjointness, the holdout-only criterion score, the compensating-error floor).
@@ -1552,6 +1570,7 @@ def resolve_ordinal_operating_point(
         provisional_floor=_PROVISIONAL_ORDINAL_AGREEMENT_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,
         experiment_id=experiment_id, validated_reference=validated_reference,
+        split_manifest_dir=split_manifest_dir, calibration_date=calibration_date,
     )
 
 
@@ -1563,6 +1582,8 @@ def resolve_regression_operating_point(
     holdout_items: list[dict] | None = None,
     experiment_id: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
+    split_manifest_dir: str | None = None,
+    calibration_date: str | None = None,
 ) -> dict:
     """Regression-mode calibration gate for a trait's continuous-value prediction.
 
@@ -1580,6 +1601,9 @@ def resolve_regression_operating_point(
     "failures", "sweep_data"}``. Callers write this into ``regression_operating_point.json`` via
     :func:`tcip_mcp.pipelines.resolution.reconcile_regression_validity`.
 
+    ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way
+    :func:`resolve_ordinal_operating_point` states it.
+
     See :func:`_resolve_scalar_operating_point` for the shared calibration mechanics.
     """
     if criterion not in REGRESSION_CRITERIA:
@@ -1596,4 +1620,5 @@ def resolve_regression_operating_point(
         provisional_floor=_PROVISIONAL_REGRESSION_SKILL_FLOOR,
         calibration_items=calibration_items, holdout_items=holdout_items,
         experiment_id=experiment_id, validated_reference=validated_reference,
+        split_manifest_dir=split_manifest_dir, calibration_date=calibration_date,
     )

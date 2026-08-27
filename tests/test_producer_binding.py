@@ -309,10 +309,29 @@ def test_a_row_stating_split_manifest_dir_with_a_checked_no_leak_selection_disjo
         pred_dir, _count_stamp(), dataset_root=root,
         reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
+                                "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
                                 "group_check": "performed"},
     )
 
     assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+
+
+def test_a_row_stating_split_manifest_dir_with_a_leaking_selection_disjointness_floors(tmp_path):
+    """A row that reports checked=True but names a leaked group still floors: "checked with no
+    leak" is enforced from the row's own leak fields, not read off the pass/fail booleans alone."""
+    root = tmp_path / "ds"
+    pred_dir = _bucket(root)
+    write_bound_sidecar(
+        pred_dir, _count_stamp(), dataset_root=root,
+        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        selection_disjointness={"applicable": True, "reason": None, "checked": True,
+                                "unresolvable": False, "leaked_groups": ["g1"],
+                                "leaked_stems": [], "group_check": "performed"},
+    )
+
+    validity = _count_validity(pred_dir)
+    assert validity["validated"] == "false"
+    assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
 
 
 def test_classifier_trust_set_ignores_unbacked_ids(tmp_path):

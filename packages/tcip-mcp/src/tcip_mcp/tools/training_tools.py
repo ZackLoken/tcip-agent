@@ -1718,8 +1718,10 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
 
     The one writer of that member; :func:`~tcip_mcp.experiments.read_split_manifest` is the one
     reader every consumer of the membership goes through. Records ``date``, the labels
-    directory's own capture date (``None`` for a flat tree), for every run, bound or not, so a
-    later selection check can scope itself to one date without re-deriving it from the config.
+    directory's own capture date (``manifest_date_key``'s empty string for a flat tree, never
+    ``None``), for every run, bound or not, so a later selection check can scope itself to one
+    date without re-deriving it from the config, and can tell a flat run's own date apart from a
+    caller that derived no date to compare at all.
     When ``data_cfg["split"]`` carries a ``manifest_binding`` (a run bound to a
     ``data.split.manifest_dir`` split manifest, see :func:`_auto_train_val`), its counts and the
     two dataset hashes ride into this record too, so a reviewer opening this one file can see
@@ -1737,6 +1739,7 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
 
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.experiments import experiment_exists, refuse_if_terminal, split_key, status_key
+        from tcip_mcp.pipelines.data.splits import manifest_date_key
         from tcip_mcp.pipelines.resolution import dataset_hash
 
         labels_dir = data_cfg.get("labels_dir", "")
@@ -1761,9 +1764,9 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
             # The actually resolved grouping ("explicit_map"/"external"/a named strategy/
             # "spatial_strip"/None); _train_disjointness recomputes group keys from this.
             "group_by": resolved_group_by,
-            # The labels directory's own capture date (None for a flat tree), so the selection
-            # check can scope itself to one date without reading the config record.
-            "date": annotation_date(labels_dir),
+            # manifest_date_key's empty string for a flat tree, never None: a selection check
+            # must tell a flat run's own date apart from a caller that derived none to compare.
+            "date": manifest_date_key(annotation_date(labels_dir)),
         }
         resolved_group_key_map = split.get("resolved_group_key_map") or split.get("group_key_map")
         if resolved_group_by == "explicit_map" and resolved_group_key_map:

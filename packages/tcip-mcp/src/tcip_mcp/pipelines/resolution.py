@@ -1250,13 +1250,16 @@ def _resolver_value(result: Any, param_key: str) -> Any:
     return _UNCOMPARED
 
 
-def resolver_train_disjointness(result: Any, document: str) -> dict | None:
-    """Whether and how a resolver's own live result checked train-disjointness: the two facts the
-    gate itself records, ``{"checked": bool, "group_check": str | None}``, never a bare ``true``
-    over a check the gate's own record says did not run. ``None`` for ``resolve_scale``, whose gate
-    has no training run to check against. One branch per declared document (:data:`_DOCUMENT_PARAM`)
-    rather than a generic read keyed only by ``result``'s own shape, so a document this platform does
-    not declare raises here instead of silently sealing ``null`` for a check nobody ran.
+def _disjointness_sweep(result: Any, document: str, caller: str) -> dict | None:
+    """The sweep dict a disjointness-reading resolver checks, for one declared document
+    (:data:`_DOCUMENT_PARAM`): the document guard and the live-result-to-sweep extraction
+    :func:`resolver_train_disjointness` and :func:`resolver_selection_disjointness` both need,
+    in one place so declaring a fifth checked document, or changing how a sweep is pulled out of
+    a live result, edits one function rather than two that must agree.
+
+    ``None`` for ``resolve_scale`` (no training run to check against) and for a result carrying
+    no sweep at all. A document neither resolver knows how to read from raises, naming ``caller``,
+    rather than silently sealing ``null`` for a check nobody ran.
     """
     if document == "resolve_scale":
         return None
@@ -1265,16 +1268,23 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
         "regression_operating_point",
     ):
         raise ValueError(
-            f"{document!r} is not a document resolver_train_disjointness knows how to read a "
-            f"train-disjointness check from; declared documents are {sorted(_DOCUMENT_PARAM)}"
+            f"{document!r} is not a document {caller} knows how to read a disjointness check "
+            f"from; declared documents are {sorted(_DOCUMENT_PARAM)}"
         )
     param_key, _ = _DOCUMENT_PARAM[document]
     if isinstance(result, ResolvedBundle):
-        sweep = result.get(param_key).sweep
-    elif isinstance(result, Mapping):
-        sweep = result.get("sweep_data")
-    else:
-        sweep = None
+        return result.get(param_key).sweep
+    if isinstance(result, Mapping):
+        return result.get("sweep_data")
+    return None
+
+
+def resolver_train_disjointness(result: Any, document: str) -> dict | None:
+    """Whether and how a resolver's own live result checked train-disjointness: the two facts the
+    gate itself records, ``{"checked": bool, "group_check": str | None}``, never a bare ``true``
+    over a check the gate's own record says did not run.
+    """
+    sweep = _disjointness_sweep(result, document, "resolver_train_disjointness")
     td = (sweep or {}).get("train_disjointness")
     if not isinstance(td, dict):
         return None
@@ -1284,35 +1294,22 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
 def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
     """Whether and how a resolver's own live result checked selection-disjointness (the
     checkpoint's own selection side, ``split.json``'s ``val``, disjoint from the reference): the
-    same two facts :func:`resolver_train_disjointness` records, ``checked`` and ``group_check``,
-    plus ``applicable``/``reason`` (this check runs only when a split manifest is in play, unlike
-    train-disjointness, which runs on every calibration). ``None`` for ``resolve_scale``, whose
-    gate has no training run to check against; the same declared-document guard
-    ``resolver_train_disjointness`` applies.
+    same shape a live sweep carries, ``applicable``, ``reason``, ``checked``, ``unresolvable``,
+    ``leaked_groups``, ``leaked_stems`` and ``group_check`` (``applicable``/``reason`` since this
+    check runs only when a split manifest is in play, unlike train-disjointness, which runs on
+    every calibration), so the row a delivery door reads carries the leak fields its floor gates
+    on, not only the pass/fail booleans.
     """
-    if document == "resolve_scale":
-        return None
-    if document not in (
-        "operating_point", "classifier_operating_point", "ordinal_operating_point",
-        "regression_operating_point",
-    ):
-        raise ValueError(
-            f"{document!r} is not a document resolver_selection_disjointness knows how to read a "
-            f"selection-disjointness check from; declared documents are {sorted(_DOCUMENT_PARAM)}"
-        )
-    param_key, _ = _DOCUMENT_PARAM[document]
-    if isinstance(result, ResolvedBundle):
-        sweep = result.get(param_key).sweep
-    elif isinstance(result, Mapping):
-        sweep = result.get("sweep_data")
-    else:
-        sweep = None
+    sweep = _disjointness_sweep(result, document, "resolver_selection_disjointness")
     sd = (sweep or {}).get("selection_disjointness")
     if not isinstance(sd, dict):
         return None
     return {
         "applicable": bool(sd.get("applicable")), "reason": sd.get("reason"),
-        "checked": bool(sd.get("checked")), "group_check": sd.get("group_check"),
+        "checked": bool(sd.get("checked")), "unresolvable": bool(sd.get("unresolvable")),
+        "leaked_groups": list(sd.get("leaked_groups") or []),
+        "leaked_stems": list(sd.get("leaked_stems") or []),
+        "group_check": sd.get("group_check"),
     }
 
 
@@ -1794,7 +1791,8 @@ def verify_stamp_binding(
         sd = row.get("selection_disjointness")
         sd_ok = isinstance(sd, dict) and (
             (sd.get("applicable") is False and sd.get("reason"))
-            or (sd.get("applicable") is True and sd.get("checked") is True)
+            or (sd.get("applicable") is True and sd.get("checked") is True
+                and not sd.get("leaked_groups") and not sd.get("leaked_stems"))
         )
         if not sd_ok:
             return floored(
