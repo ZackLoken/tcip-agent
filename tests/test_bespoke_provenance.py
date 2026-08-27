@@ -209,7 +209,15 @@ def test_build_predictor_rebuilds_bespoke_and_predicts(tmp_path):
 
     assert detect_kind(str(ckpt)) == KIND_TCIP_MODULE  # kind sniffed from disk
 
-    predictor = build_predictor(checkpoint_path=str(ckpt), device="cpu", score_threshold=0.0)
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.tools.model_tools import register_model
+
+    reg_result = register_model(name="bespoke-detector", checkpoint_path=str(ckpt), config={},
+                                project_path=str(tmp_path))
+    assert "error" not in reg_result, reg_result
+    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+
+    predictor = build_predictor(checkpoint, device="cpu", score_threshold=0.0)
     assert predictor.kind == KIND_TCIP_MODULE
     assert predictor.task == "detection"
     assert predictor.in_chans == 3
@@ -235,7 +243,15 @@ def test_predictor_loads_at_two_channels_when_in_chans_is_declared_only_in_build
     payload = stamp_model_ref({"model_state_dict": model.state_dict()}, {"model_source": src})
     torch.save(payload, ckpt)
 
-    predictor = GenericPredictor(str(ckpt), device="cpu")
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.tools.model_tools import register_model
+
+    reg_result = register_model(name="bespoke-classifier", checkpoint_path=str(ckpt), config={},
+                                project_path=str(tmp_path))
+    assert "error" not in reg_result, reg_result
+    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+
+    predictor = GenericPredictor(checkpoint, device="cpu")
     assert predictor.in_chans == 2
 
     arr = (np.random.rand(16, 16, 2) * 255).astype(np.uint8)

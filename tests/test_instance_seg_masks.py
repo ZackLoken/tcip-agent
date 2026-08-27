@@ -209,10 +209,23 @@ def _image(directory: Path, name: str = "img.png", size: int = 128) -> str:
     return str(p)
 
 
+def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
+    """Register the module-scoped checkpoint against one test's own pinned project root."""
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(name="instance-seg-test-model", checkpoint_path=ckpt_path,
+                            config={}, project_path=str(project_root))
+    assert "error" not in result, result
+
+
 def test_predict_tiled_require_masks_false_returns_boxes_only(instance_seg_ckpt, tmp_path):
     """The opt-out tiles normally and returns no masks key at all, never a partial one, while the
     same predictor's untiled path still carries masks (an opt-out, not a global downgrade)."""
-    pred = GenericPredictor(instance_seg_ckpt, device="cpu", score_threshold=0.5)
+    from tcip_mcp.model_registry import load_registered_checkpoint
+
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
+    checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
+    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.5)
     assert pred.task == "instance_seg"
     img = _image(tmp_path / "images")
 
@@ -232,6 +245,7 @@ def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_se
     shape."""
     from tcip_mcp.tools.inference_tools import run_inference
 
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
                       tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
@@ -249,6 +263,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
     through the cross-tile reconstruction/merge now, so this checkpoint tiles like any other."""
     from tcip_mcp.tools.inference_tools import run_inference
 
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     r = run_inference(instance_seg_ckpt, image_paths=[_image(tmp_path / "images")], device="cpu",
                       tile=True, tile_size=TILE, conf_threshold=0.0)
     assert "error" not in r
@@ -260,6 +275,7 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(ins
 def test_export_predictions_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, tmp_path):
     from tcip_mcp.tools.inference_tools import export_predictions
 
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
     r = export_predictions(instance_seg_ckpt, str(images_dir), str(tmp_path / "preds"),
@@ -279,6 +295,7 @@ def test_tabulate_counts_instance_seg_writes_csv_tiled(instance_seg_ckpt, tmp_pa
     out_path = tmp_path / "counts.csv"
     from tests import _operationalization_fixtures as fx
 
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
     r = tabulate_counts(instance_seg_ckpt, str(images_dir), str(out_path),
                         trait=fx.COUNT_TRAIT, device="cpu", tile_size=TILE,
@@ -298,6 +315,7 @@ def test_export_predictions_stamps_mask_binarize_provenance_when_masks_present(i
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
     from tcip_mcp.tools.inference_tools import export_predictions
 
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
@@ -318,6 +336,7 @@ def test_export_predictions_instance_seg_explicit_tile_true_writes_tiled(instanc
     the tiled path into the written prediction bucket."""
     from tcip_mcp.tools.inference_tools import export_predictions
 
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images"
     _image(images_dir)
     out = tmp_path / "preds"
@@ -333,6 +352,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     import tcip_store as ts
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.training.evaluation import (
         evaluation_results_key,
         run_full_frame_evaluation,
@@ -344,7 +364,9 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_boxes(instance_seg_
     json_io.write_annotations(str(labels_dir / "a.json"),
                               [Annotation(subject="catkin", geometry=BBox(54, 54, 74, 74))], 128, 128)
 
-    r = run_full_frame_evaluation(instance_seg_ckpt, str(images_dir), str(labels_dir),
+    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
+    checkpoint = load_registered_checkpoint(instance_seg_ckpt, project_path=str(tmp_path))
+    r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
                                   str(tmp_path / "out"), subject="catkin",
                                   tile_size=TILE, overlap=0.2)
     assert r["eval_regime"] == "full-frame-tiled-inference"

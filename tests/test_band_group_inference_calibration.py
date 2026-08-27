@@ -40,6 +40,7 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
 def _detection_checkpoint(tmp_path: Path) -> str:
     from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.tools.model_tools import register_model
 
     model_source = {
         "builder": "tests.bespoke_models:build_bespoke_detection",
@@ -52,6 +53,9 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    result = register_model(name="band-group-test-model", checkpoint_path=str(ckpt), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
     return str(ckpt)
 
 
@@ -86,9 +90,12 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.tools.inference_tools import _calibrate_operating_point
 
+    from tcip_mcp.model_registry import load_registered_checkpoint
+
     images_dir, labels_dir = _grouped_dataset(tmp_path)
     ckpt = _detection_checkpoint(tmp_path)
-    predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
 
     seen_sources = []
     from tcip_mcp.pipelines import raster_source
@@ -119,13 +126,14 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     assert {g.stem for g in grouped} == {"capture_001", "capture_002"}
 
 
-def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
+def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path, monkeypatch):
     """run_inference's own images_dir listing fallback (~line 576) must route through
     list_logical_images rather than a bare image_exts scan, or a grouped capture's sibling band
     files each enumerate as their own (spurious) image instead of folding into one. Real forward
     pass, no images_dir mixing (see module docstring)."""
     from tcip_mcp.tools.inference_tools import run_inference
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     _write_group(images_dir, "capture_001")
@@ -141,12 +149,14 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
 def test_calibrate_operating_point_crashes_without_the_fix(tmp_path):
     """Stringifying the BandGroupRef reproduces the crash, against the same real
     predictor/dataset this module's other test proves now works."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.splits import label_image_stems
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     images_dir, labels_dir = _grouped_dataset(tmp_path)
     ckpt = _detection_checkpoint(tmp_path)
-    predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
 
     stems, stem_to_image = label_image_stems(str(labels_dir), str(images_dir))
     # The pre-fix call shape: str(stem_to_image[s]) instead of the raw Path|BandGroupRef.

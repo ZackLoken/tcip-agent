@@ -199,7 +199,9 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
 
 
 def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp_path):
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
@@ -209,8 +211,12 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp
                 "model_state_dict": build_model({"model_source": model_source}).state_dict(),
                 "config": {"data": {"tiling": {"enabled": False}, "train_native_size": [TILE, TILE]},
                            "augmentation": {"resize": [32, 32]}}}, str(ckpt))
+    result = register_model(name="native-frame-carry", checkpoint_path=str(ckpt), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
+    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
 
-    pred = GenericPredictor(str(ckpt), device="cpu", score_threshold=0.0)
+    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
 
     assert pred.train_tile_size is None
     assert pred.train_native_size == [TILE, TILE]
@@ -382,7 +388,8 @@ def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | str | None = N
     return str(ckpt)
 
 
-def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on(tmp_path, caplog):
+def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on(
+        tmp_path, caplog, monkeypatch):
     """The rail admits the work: a caller who asks to tile a checkpoint whose only geometry is its
     untiled training frame gets a real pass at that frame's edge, the tier's own (accepted, weaker)
     geometry reference in the provenance, and the basis logged rather than warned about, since a
@@ -390,10 +397,17 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
     import logging
 
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _native_frame_checkpoint(tmp_path, {"resize": [32, 32]})
+    result = register_model(name="native-frame-tiles", checkpoint_path=ckpt, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
 
     with caplog.at_level(logging.INFO):
-        r = run_inference(_native_frame_checkpoint(tmp_path, {"resize": [32, 32]}),
-                          image_paths=[_image(tmp_path)], device="cpu", tile=True, conf_threshold=0.0)
+        r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
+                          conf_threshold=0.0)
 
     assert "error" not in r
     assert r["tiled"] is True and len(r["results"]) == 1
@@ -404,24 +418,36 @@ def test_run_inference_tiles_a_native_frame_checkpoint_and_says_what_it_rests_on
     assert any("untiled training frame" in m and "(32, 32)" in m for m in caplog.messages)
 
 
-def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp_path):
+def test_run_inference_leaves_a_native_frame_checkpoint_untiled_unless_asked(tmp_path, monkeypatch):
     """``tile`` unset still derives the checkpoint's own regime, and an untiled-trained checkpoint's
     regime is untiled: the tier is a capability a caller opts into, never a silent upgrade."""
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
 
-    r = run_inference(_native_frame_checkpoint(tmp_path), image_paths=[_image(tmp_path)],
-                      device="cpu", conf_threshold=0.0)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _native_frame_checkpoint(tmp_path)
+    result = register_model(name="native-frame-untiled", checkpoint_path=ckpt, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
+
+    r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
 
     assert r["tiled"] is False
     assert r["operating_point"]["tile_size"]["value"] is None
 
 
-def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run(tmp_path):
+def test_an_unreadable_recorded_augmentation_config_does_not_sink_an_untiled_run(
+        tmp_path, monkeypatch):
     """The recorded config is only consulted to reproduce a training input geometry, which an
     untiled run never does; a run that reads no tile geometry must not be refused over it."""
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _native_frame_checkpoint(tmp_path, {"not_a_transform": 0.5})
+    result = register_model(name="native-frame-unreadable-aug", checkpoint_path=ckpt, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
 
     r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", conf_threshold=0.0)
 
@@ -473,22 +499,24 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.inference.predictor import resolve_tile_regime
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
     labels_dir.mkdir()
     _native_frame_gt(images_dir, labels_dir)
+    checkpoint = stub_verified_checkpoint("ckpt.pt")
 
     build = predictor_mod.build_predictor
     try:
-        predictor_mod.build_predictor = lambda **kw: _persisted_regime_predictor()
+        predictor_mod.build_predictor = lambda *a, **kw: _persisted_regime_predictor()
         persisted = run_full_frame_evaluation(
-            "ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"),
+            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_persisted"),
             subject="catkin")
 
-        predictor_mod.build_predictor = lambda **kw: _native_frame_regime_predictor()
+        predictor_mod.build_predictor = lambda *a, **kw: _native_frame_regime_predictor()
         native = run_full_frame_evaluation(
-            "ckpt.pt", str(images_dir), str(labels_dir), str(tmp_path / "out_native"),
+            checkpoint, str(images_dir), str(labels_dir), str(tmp_path / "out_native"),
             subject="catkin")
     finally:
         predictor_mod.build_predictor = build
@@ -526,6 +554,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     silently run each tile at its own native size."""
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.training.evaluation import run_full_frame_evaluation
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
     images_dir.mkdir()
@@ -534,7 +563,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     captured: dict = {}
 
-    def _spy_predictor(**kw):
+    def _spy_predictor(*a, **kw):
         p = _native_frame_regime_predictor()
         real_predict_tiled = p.predict_tiled
 
@@ -548,8 +577,8 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
     build = predictor_mod.build_predictor
     try:
         predictor_mod.build_predictor = _spy_predictor
-        r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
-                                      str(tmp_path / "out"), subject="catkin")
+        r = run_full_frame_evaluation(stub_verified_checkpoint("ckpt.pt"), str(images_dir),
+                                      str(labels_dir), str(tmp_path / "out"), subject="catkin")
     finally:
         predictor_mod.build_predictor = build
 
@@ -681,12 +710,18 @@ def _native_frame_checkpoint_of_size(tmp_path: Path, size: int) -> str:
     return str(ckpt)
 
 
-def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry(tmp_path):
+def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry(
+        tmp_path, monkeypatch):
     """A caller-typed tile edge that differs from the checkpoint's own persisted training geometry
     is a real contradiction, never a caller override to trust blindly."""
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _tiled_checkpoint(tmp_path, 128)
+    result = register_model(name="tiled-128-contradiction", checkpoint_path=ckpt, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
 
     r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
                       tile_size=64, conf_threshold=0.0)
@@ -695,12 +730,18 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_persisted_geometry
     assert "64" in r["error"] and "128" in r["error"]
 
 
-def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(tmp_path):
+def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(
+        tmp_path, monkeypatch):
     """The same contradiction, checked against the checkpoint's own recorded untiled training frame
     when it persists no tiled geometry."""
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _native_frame_checkpoint_of_size(tmp_path, 512)
+    result = register_model(name="native-512-contradiction", checkpoint_path=ckpt, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
 
     r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
                       tile_size=64, conf_threshold=0.0)
@@ -709,11 +750,16 @@ def test_run_inference_refuses_a_stated_edge_that_contradicts_the_native_frame(t
     assert "64" in r["error"] and "512" in r["error"]
 
 
-def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_path):
+def test_run_inference_admits_an_explicit_edge_matching_persisted_geometry(tmp_path, monkeypatch):
     """The rail refuses a contradiction, not an explicit edge that simply agrees."""
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _tiled_checkpoint(tmp_path, TILE)
+    result = register_model(name="tiled-native-edge-match", checkpoint_path=ckpt, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
 
     r = run_inference(ckpt, image_paths=[_image(tmp_path)], device="cpu", tile=True,
                       tile_size=TILE, conf_threshold=0.0)
