@@ -263,6 +263,40 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     assert report.get("final_state") in ("nan", "positive_infinity", "negative_infinity")
 
 
+def test_the_launch_record_the_worker_reads_carries_the_seed_and_the_hoisted_training_keys(
+        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    """The writer is the real launch_training, driven the same way the tests above drive it
+    (training_tools_launch over _canonical_dataset/_detection_config, Popen and TensorBoard
+    stubbed by recorded_children so no subprocess actually spawns). The reader is the same read
+    the training child performs: tcip_store.read(launch_config_key(output_dir)), the call
+    subprocess_worker.run() makes, not a second parse of config.json. normalize_train_config
+    (schemas.py) hoists every key set under config["training"] onto the top level when the top
+    level doesn't already have it, and generic_trainer.create_run draws a seed into
+    config["seed"] before this document is written, so the document the worker reads must carry
+    both, plus the model_contract launch_training records and the resolved experiment_id: a
+    document only the writer's own test has seen is one the worker's read could silently
+    disagree with."""
+    pytest.importorskip("torchvision")
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(project))
+
+    images_dir, labels_dir = _canonical_dataset(project / "ds")
+    res = training_tools_launch(_detection_config(images_dir, labels_dir), "")
+
+    from tcip_mcp.tools.training_tools import launch_config_key
+
+    launch_config = ts.read(launch_config_key(Path(res["output_dir"])))
+
+    assert isinstance(launch_config["seed"], int)
+    assert isinstance(launch_config["model_contract"], dict)
+    assert launch_config["experiment_id"] == res["experiment_id"]
+    # "device" is set only under config["training"] in _detection_config; normalize_train_config
+    # hoists it to the top level, which is what this checks actually happened.
+    assert launch_config["training"]["device"] == "cpu"
+    assert launch_config["device"] == "cpu"
+
+
 def training_tools_launch(config: dict, output_dir: str) -> dict:
     """Launch and assert the config was accepted, so a preflight refusal never reads as a
     provenance failure in the tests above."""
