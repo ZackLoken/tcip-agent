@@ -77,14 +77,15 @@ def test_no_adoption_keeps_cwd_default(tmp_path, monkeypatch):
     assert project_root() == tmp_path
 
 
-def test_app_import_pins_the_platform_root_from_the_marker(tmp_path, monkeypatch):
-    """Every way ``tcip_web.app`` is served pins the same way, at import: a fresh interpreter
-    that only imports the module, with no ``TCIP_PROJECT_ROOT`` inherited, ends up on the
-    workspace marker's project rather than its own cwd."""
+def test_app_import_alone_leaves_the_platform_root_at_cwd(tmp_path, monkeypatch):
+    """Importing ``tcip_web.app`` is a served app's own bind, never an importer's: a fresh
+    interpreter that only imports the module, with no ``TCIP_PROJECT_ROOT`` inherited, stays
+    on its own cwd rather than silently repinning to the workspace marker's project (see
+    tests/test_tcip_web_app_startup_root.py for when the pin actually happens)."""
     import subprocess
     import sys
 
-    proj = _adopt(tmp_path, monkeypatch)
+    _adopt(tmp_path, monkeypatch)
     monkeypatch.delenv("TCIP_PROJECT_ROOT", raising=False)
 
     code = (
@@ -93,7 +94,7 @@ def test_app_import_pins_the_platform_root_from_the_marker(tmp_path, monkeypatch
         "print(project_root())\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60,
+        [sys.executable, "-c", code], capture_output=True, text=True, cwd=str(tmp_path), timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == str(proj)
+    assert result.stdout.strip() == str(tmp_path)
