@@ -123,14 +123,13 @@ def load_classes(
     )
     from tcip_mcp.dataset_layout import classes_path
 
-    if annotations_dir:
-        _guard_dataset_root(annotations_dir)
+    guarded_dir = _guard_dataset_root(annotations_dir) if annotations_dir else None
     root = _resolve_dataset_root(dataset_root, annotations_dir)
 
     subjects: set[str] = set()
     unreadable: list[str] = []
-    if annotations_dir and Path(annotations_dir).is_dir():
-        subjects, unreadable = _subjects_in_dir(Path(annotations_dir))
+    if guarded_dir and Path(guarded_dir).is_dir():
+        subjects, unreadable = _subjects_in_dir(Path(guarded_dir))
 
     if root:
         p = classes_path(root)
@@ -379,9 +378,8 @@ def derive_image_status(payload: DerivePayload) -> dict:
     from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 
     # An absolute-path read needs its own confinement (no-op unless TCIP_IMAGE_ROOTS is set).
-    if payload.annotations_dir:
-        _guard_dataset_root(payload.annotations_dir)
-    adir = Path(payload.annotations_dir) if payload.annotations_dir else None
+    guarded_dir = _guard_dataset_root(payload.annotations_dir) if payload.annotations_dir else None
+    adir = Path(guarded_dir) if guarded_dir else None
     complete_set = set(payload.complete_override)
 
     statuses: dict[str, str] = {}

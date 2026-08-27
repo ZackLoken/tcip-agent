@@ -310,6 +310,25 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
+def test_load_reports_the_guards_resolved_path_not_the_clients_spelling(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A dotdot segment names the same directory once resolved; the unreadable path reported is
+    the guard's resolved path, never the client's own unnormalized string."""
+    ann = tmp_path / "annotations" / "d"
+    ann.mkdir(parents=True)
+    (ann / "IMG_B.json").write_text("not json {][", encoding="utf-8")
+    (tmp_path / "annotations" / "sibling").mkdir()
+    raw = str(tmp_path / "annotations" / "sibling" / ".." / "d")
+    assert raw != str(ann)
+
+    load = client.get(
+        "/api/classes/load",
+        params={"project_root": str(tmp_path), "annotations_dir": raw},
+    ).json()
+    assert load["unreadable"] == [str(ann.resolve() / "IMG_B.json")]
+
+
 def test_cached_label_annotations_raises_on_a_read_failure_other_than_absence(
     tmp_path: Path, monkeypatch
 ) -> None:
