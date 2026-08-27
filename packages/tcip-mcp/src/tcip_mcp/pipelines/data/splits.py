@@ -497,6 +497,25 @@ def bind_manifest_stems(
     )
 
 
+def same_directory(a: str | Path | None, b: str | Path | None) -> bool:
+    """Whether ``a`` and ``b`` name the identical on-disk directory, by filesystem identity
+    (``os.path.samefile``) rather than a bare string comparison, so a trailing separator,
+    forward slashes or a relative spelling of the same directory reads as the same path.
+
+    ``False`` whenever either side is empty or does not exist as a directory: there is nothing
+    to compare a missing path against, and a caller distinguishing "same" from "cannot tell" gets
+    the honest "not the same" rather than a crash. The one comparison every caller checking a
+    recorded directory against a caller-stated one shares (:func:`refuse_if_images_root_moved`
+    and the bound-checkpoint manifest comparison in ``inference_tools.py``), never a second
+    re-derivation of it.
+    """
+    if not a or not b:
+        return False
+    a_path, b_path = Path(a), Path(b)
+    return (a_path.is_dir() and b_path.is_dir()
+            and os.path.samefile(a_path.resolve(), b_path.resolve()))
+
+
 def refuse_if_images_root_moved(
     label: str, images_dir: str | Path | None, manifest_images_root: str | Path | None,
     date: str | None,
@@ -514,9 +533,7 @@ def refuse_if_images_root_moved(
     """
     if not images_dir or not manifest_images_root:
         return
-    images_path, manifest_path = Path(images_dir), Path(manifest_images_root)
-    if (images_path.is_dir() and manifest_path.is_dir()
-            and os.path.samefile(images_path.resolve(), manifest_path.resolve())):
+    if same_directory(images_dir, manifest_images_root):
         return
     raise ValueError(
         f"{label}={str(images_dir)!r} is not the split manifest's images_root for date "

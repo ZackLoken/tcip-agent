@@ -553,6 +553,77 @@ def test_selection_disjointness_not_applicable_for_a_manifest_less_calibration(t
     assert b.get("conf").validated_against == "held_out_annotations"
 
 
+def test_selection_disjointness_not_applicable_for_a_flat_run_with_no_calibration_date(
+    tmp_path, monkeypatch,
+):
+    """calibration_date=None means the caller derived no date at all: never read as matching a
+    flat run's own record (also date-empty, the manifest's own key, not None), which would
+    wrongly run the check for real and could leak."""
+    from types import SimpleNamespace
+
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import _persist_split_manifest
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    create_experiment("exp_sel_flat_no_date", {})
+    data_cfg = {"labels_dir": str(tmp_path / "annotations"),
+               "split": {"resolved_group_by": "tile_prefix",
+                        "manifest_binding": {"manifest_dir": "some/manifest"}}}
+    _persist_split_manifest(
+        "exp_sel_flat_no_date", SimpleNamespace(stems=["z"]), SimpleNamespace(stems=["c_0"]),
+        data_cfg)
+
+    from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
+
+    cal_items = [{"image_id": "c_0", "is_true_positive": True, "is_pred_positive": True,
+                 "bbox": [0.0, 0.0, 10.0, 10.0]}]
+    hold_items = [{"image_id": "h_0", "is_true_positive": True, "is_pred_positive": True,
+                  "bbox": [0.0, 0.0, 10.0, 10.0]}]
+    result = resolve_classifier_operating_point(
+        "catkin", calibration_items=cal_items, holdout_items=hold_items,
+        experiment_id="exp_sel_flat_no_date",
+    )
+    sd = result["sweep_data"]["selection_disjointness"]
+    assert sd["applicable"] is False and sd["reason"]
+    assert "selection_disjointness_leaked" not in result["failures"]
+
+
+def test_selection_disjointness_applicable_when_a_flat_calibration_matches_a_flat_run(
+    tmp_path, monkeypatch,
+):
+    """A calibration that derives a date for a flat tree (the manifest's own empty key, not
+    ``None``) matches a flat run's own record the same way a dated one matches a dated record,
+    running the check for real."""
+    from types import SimpleNamespace
+
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.pipelines.data.splits import manifest_date_key
+    from tcip_mcp.tools.training_tools import _persist_split_manifest
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    create_experiment("exp_sel_flat_match", {})
+    data_cfg = {"labels_dir": str(tmp_path / "annotations"),
+               "split": {"resolved_group_by": "tile_prefix",
+                        "manifest_binding": {"manifest_dir": "some/manifest"}}}
+    _persist_split_manifest(
+        "exp_sel_flat_match", SimpleNamespace(stems=["z"]), SimpleNamespace(stems=["c_0"]),
+        data_cfg)
+
+    from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
+
+    cal_items = [{"image_id": "c_0", "is_true_positive": True, "is_pred_positive": True,
+                 "bbox": [0.0, 0.0, 10.0, 10.0]}]
+    hold_items = [{"image_id": "h_0", "is_true_positive": True, "is_pred_positive": True,
+                  "bbox": [0.0, 0.0, 10.0, 10.0]}]
+    result = resolve_classifier_operating_point(
+        "catkin", calibration_items=cal_items, holdout_items=hold_items,
+        experiment_id="exp_sel_flat_match", calibration_date=manifest_date_key(None),
+    )
+    sd = result["sweep_data"]["selection_disjointness"]
+    assert sd["applicable"] is True and sd["checked"] is True
+    assert sd["leaked_groups"] == ["c_0"]  # c_0 is on this run's own val
+
+
 def test_selection_disjointness_unresolvable_for_experiment_id_none_under_a_stated_manifest():
     """A calibration that names a manifest but carries no experiment record to check the
     selection side against is unresolvable, not merely not-applicable: the shape a foreign

@@ -260,6 +260,10 @@ def test_calibrate_operating_point_binds_to_the_manifests_calibration_side(tmp_p
     assert set(evidence["calibration_stems"]) == calibration_this_date
     assert "label_stems" in evidence["reference_inputs"]
     assert evidence["reference_inputs"]["stated_values"]["split_manifest_dir"] == str(out)
+    # The persisted evidence's own inputs, what a delivery door reopens the gate with, carry the
+    # manifest and its date: nothing pins the producer writing these two without this assertion.
+    assert evidence["inputs"]["split_manifest_dir"] == str(out)
+    assert evidence["inputs"]["calibration_date"] == DATES[0]
     from tcip_mcp.pipelines.resolution import dataset_hash
     assert dh == dataset_hash(
         str(root / "annotations" / DATES[0]), stems=sorted(calibration_this_date))
@@ -361,6 +365,36 @@ def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_man
         itools._calibrate_operating_point(
             bound, "catkin", str(root / "annotations" / DATES[0]),
             str(root / "images" / DATES[0]), split_manifest_dir=str(out), **_CAL_KWARGS)
+
+
+def test_calibrate_operating_point_admits_a_bound_checkpoint_under_its_own_manifest_respelled(
+    tmp_path: Path,
+):
+    """The bound-checkpoint manifest comparison resolves both paths through filesystem identity,
+    not a bare string comparison: a trailing separator, forward slashes or a relative spelling of
+    the same manifest directory is still the checkpoint's own manifest."""
+    import os
+
+    import tcip_mcp.tools.inference_tools as itools
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+
+    bound = _CalStub()
+    bound.config["data"]["split"] = {"manifest_binding": {"manifest_dir": str(out)}}
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        respellings = [str(out) + os.sep, str(out).replace(os.sep, "/"), os.path.relpath(out)]
+        for spelling in respellings:
+            _bundle, _dh, _n_excl, evidence = itools._calibrate_operating_point(
+                bound, "catkin", str(root / "annotations" / DATES[0]),
+                str(root / "images" / DATES[0]), split_manifest_dir=spelling, **_CAL_KWARGS)
+            assert evidence["reference_inputs"]["stated_values"]["split_manifest_dir"] == spelling
+    finally:
+        os.chdir(cwd)
 
 
 # -- run_inference's own split_manifest_dir refusal --------------------------------

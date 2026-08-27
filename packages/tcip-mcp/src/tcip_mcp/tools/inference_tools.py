@@ -242,8 +242,8 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import _json_det_targets, _resolve_registry_id_map
     from tcip_mcp.pipelines.data.splits import (
-        cal_holdout_scope_root, count_label_lines, label_image_stems,
-        resolve_locked_cal_holdout_split,
+        cal_holdout_scope_root, count_label_lines, label_image_stems, manifest_date_key,
+        resolve_locked_cal_holdout_split, same_directory,
     )
     from tcip_mcp.pipelines.operating_point import (
         attach_split_policy_provenance, derive_max_dets_from_counts, resolve_operating_point,
@@ -269,7 +269,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     _checkpoint_manifest_dir = (
         (_data_cfg.get("split") or {}).get("manifest_binding") or {}).get("manifest_dir")
     if (split_manifest_dir is not None and _checkpoint_manifest_dir is not None
-            and _checkpoint_manifest_dir != split_manifest_dir):
+            and not same_directory(_checkpoint_manifest_dir, split_manifest_dir)):
         raise ValueError(
             f"this checkpoint is bound to split manifest {_checkpoint_manifest_dir!r}, not the "
             f"{split_manifest_dir!r} this calibration names: calibrating a bound checkpoint "
@@ -396,7 +396,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         "cross_tile_nms": cross_tile_nms, "max_dets": max_dets,
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
-        "split_manifest_dir": split_manifest_dir, "calibration_date": cal_date,
+        "split_manifest_dir": split_manifest_dir, "calibration_date": manifest_date_key(cal_date),
     }
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
@@ -424,10 +424,11 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
 def _sweep_summary(conf_param) -> dict:
     """Compact, response-safe view of a calibration sweep (the full curve is written to disk).
 
-    Includes ``disjoint``/``content_overlap_frac``/``train_disjointness`` so the calling agent
-    sees the real reason a calibration refused validation, not only the pass/fail booleans, a
-    refusal from train-provenance or content-overlap would otherwise look identical to a plain
-    holdout-bias failure. Also includes ``split_policy_divergence``/``split_unlocked_stems`` (via
+    Includes ``disjoint``/``content_overlap_frac``/``train_disjointness``/
+    ``selection_disjointness`` so the calling agent sees the real reason a calibration refused
+    validation, not only the pass/fail booleans, a refusal from train-provenance, selection-
+    provenance or content-overlap would otherwise look identical to a plain holdout-bias
+    failure. Also includes ``split_policy_divergence``/``split_unlocked_stems`` (via
     ``attach_split_policy_provenance``) so a caller whose declared ``seed``/``holdout_ratio``/
     ``group_by`` didn't take effect against an existing lock sees that here, in the tool's own
     response, rather than only in the persisted sweep artifact or a server log line.
@@ -468,6 +469,7 @@ def _sweep_summary(conf_param) -> dict:
         "content_overlap_frac": sweep.get("content_overlap_frac"),
         "content_shared_with_calibration": sweep.get("content_shared_with_calibration"),
         "train_disjointness": sweep.get("train_disjointness"),
+        "selection_disjointness": sweep.get("selection_disjointness"),
         "split_policy_divergence": sweep.get("split_policy_divergence"),
         "split_unlocked_stems": sweep.get("split_unlocked_stems"),
     }

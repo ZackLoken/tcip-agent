@@ -571,9 +571,25 @@ def test_resolver_selection_disjointness_reads_a_declared_documents_result():
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
 
     result = {"sweep_data": {"selection_disjointness": {
-        "applicable": True, "reason": None, "checked": True, "group_check": "performed"}}}
+        "applicable": True, "reason": None, "checked": True, "unresolvable": False,
+        "leaked_groups": [], "leaked_stems": [], "group_check": "performed"}}}
     assert resolver_selection_disjointness(result, "classifier_operating_point") == {
-        "applicable": True, "reason": None, "checked": True, "group_check": "performed"}
+        "applicable": True, "reason": None, "checked": True, "unresolvable": False,
+        "leaked_groups": [], "leaked_stems": [], "group_check": "performed"}
+
+
+def test_resolver_selection_disjointness_carries_the_leak_fields():
+    """The row's field carries the same seven keys the live sweep does, unresolvable/
+    leaked_groups/leaked_stems included, not only the pass/fail booleans a caller cannot floor a
+    leaking row from."""
+    from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
+
+    result = {"sweep_data": {"selection_disjointness": {
+        "applicable": True, "reason": None, "checked": True, "unresolvable": False,
+        "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed"}}}
+    assert resolver_selection_disjointness(result, "classifier_operating_point") == {
+        "applicable": True, "reason": None, "checked": True, "unresolvable": False,
+        "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed"}
 
 
 def test_resolver_selection_disjointness_is_none_for_resolve_scale():

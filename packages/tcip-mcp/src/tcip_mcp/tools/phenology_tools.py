@@ -447,6 +447,8 @@ def calibrate_classifier_operating_point(
             disjointness the same way the detector calibration path does. ``None`` (a foreign/
             unregistered checkpoint) skips that check rather than failing closed.
     """
+    from tcip_mcp.dataset_layout import annotation_date
+    from tcip_mcp.pipelines.data.splits import manifest_date_key
     from tcip_mcp.pipelines.operating_point import resolve_classifier_operating_point
     from tcip_mcp.traits import TraitUnknownError, get_trait
 
@@ -475,6 +477,7 @@ def calibrate_classifier_operating_point(
     result = resolve_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,
         experiment_id=experiment_id,
+        calibration_date=manifest_date_key(annotation_date(calibration_gt_dir)),
     )
 
     from tcip_mcp.project_paths import resolve_output_path

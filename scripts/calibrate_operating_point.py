@@ -89,7 +89,9 @@ def main(argv: list[str] | None = None) -> int:
 
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.data.splits import count_label_lines, resolve_locked_cal_holdout_split
+    from tcip_mcp.pipelines.data.splits import (
+        count_label_lines, manifest_date_key, resolve_locked_cal_holdout_split,
+    )
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import (
         attach_split_policy_provenance, derive_max_dets_from_counts, records_over_loader,
@@ -201,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         # tile_size dimension that was never actually operative for this untiled pass.
         tiled=False,
         experiment_id=args.experiment_id, staged_conf_floor=applied.get("score_thresh"),
-        split_manifest_dir=args.split_manifest_dir, calibration_date=cal_date,
+        split_manifest_dir=args.split_manifest_dir, calibration_date=manifest_date_key(cal_date),
     )
     attach_split_policy_provenance(bundle, locked)
 
