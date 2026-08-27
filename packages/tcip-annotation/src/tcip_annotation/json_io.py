@@ -164,6 +164,19 @@ def load_label_document(path: str | Path) -> dict:
     return parse_label_document(_decode_label_bytes(data, source=str(p)), source=str(p))
 
 
+def annotations_from_bytes(data: bytes, *, source: str) -> list[Annotation]:
+    """The typed annotation records a label document's raw bytes hold.
+
+    The one path from bytes to records: the shared decode, :func:`parse_label_document`, then
+    the record construction :func:`read_annotations` performs, so a caller holding a document's
+    bytes (a store-backed reader, a parse memo keyed on the bytes it read) reads exactly what the
+    file reader would. Raises :class:`UnreadableLabelDocument`, naming ``source``, for anything
+    the file reader would refuse.
+    """
+    return _annotations_of(parse_label_document(_decode_label_bytes(data, source=source),
+                                                source=source))
+
+
 SIDECAR_FILENAMES = frozenset({
     "operating_point.json",
     "classifier_operating_point.json",
@@ -457,8 +470,7 @@ def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotatio
     stored = tcip_store.read_blob_versioned(_record_key(target), default=b"")
     if stored.version == Version.ABSENT:
         return [], stored.version
-    text = _decode_label_bytes(stored.value, source=str(target))
-    return _annotations_of(parse_label_document(text, source=str(target))), stored.version
+    return annotations_from_bytes(stored.value, source=str(target)), stored.version
 
 
 # ── reference admissibility ────────────────────────────────────────────────
