@@ -214,9 +214,11 @@ def test_class_distribution_on_a_shared_coco_scopes_to_its_own_stems(tmp_path):
     assert val_ds.class_distribution == {0: 7}
 
 
-def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path):
+def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp_path, caplog):
     """training_tools._auto_train_val's own COCO-assembly branch must refuse the same shape
-    build_dataset does, rather than silently training without validation on it."""
+    build_dataset does, rather than silently training without validation on it: the refusal
+    reaches the caller directly, never as a fallback build's own second raise behind a misleading
+    "training without validation" warning."""
     from tcip_mcp.tools.training_tools import _auto_train_val
 
     images = tmp_path / "images"
@@ -226,9 +228,10 @@ def test_auto_train_val_refuses_a_dataset_level_coco_misrouted_as_labels_dir(tmp
     (labels / "dataset.json").write_text(json.dumps(
         {"images": [{"id": 1, "file_name": "img0.jpg"}], "annotations": [], "categories": []}))
 
-    with pytest.raises(ValueError, match="coco_json"):
+    with pytest.raises(ValueError, match="data.labels_dir="):
         _auto_train_val("detection", {"images_dir": str(images), "labels_dir": str(labels),
                                       "subject": CATKIN}, None)
+    assert "training without validation" not in caplog.text
 
 
 def test_auto_train_val_raises_on_a_corrupt_explicit_validation_label(tmp_path):
