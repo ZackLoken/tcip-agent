@@ -310,24 +310,24 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
     assert load["unreadable"] == [str(ann / "IMG_B.json")]
 
 
-def test_cached_label_annotations_raises_on_a_stat_failure_other_than_absence(
+def test_cached_label_annotations_raises_on_a_read_failure_other_than_absence(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Only a missing file derives an empty status; any other OSError at stat (a permission
-    error on a present file) is a read failure, not a fact about absence."""
+    """Only a missing file derives an empty status; any other OSError reading its bytes (a
+    permission error on a present file) is a read failure, not a fact about absence."""
     from tcip_web.label_annotations_cache import cached_label_annotations
 
     label = tmp_path / "a.json"
     write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
 
-    real_stat = Path.stat
+    real_read_bytes = Path.read_bytes
 
     def _denied(self, *args, **kwargs):
         if self == label:
             raise PermissionError(f"denied: {self}")
-        return real_stat(self, *args, **kwargs)
+        return real_read_bytes(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "stat", _denied)
+    monkeypatch.setattr(Path, "read_bytes", _denied)
 
     from tcip_annotation.json_io import UnreadableLabelDocument
 
@@ -357,6 +357,40 @@ def test_cached_label_annotations_detects_an_edit_that_lands_on_the_same_mtime(
 
     with pytest.raises(UnreadableLabelDocument):
         cached_label_annotations(label)
+
+
+def test_cached_label_annotations_detects_a_same_size_edit_that_lands_on_the_same_mtime(
+    tmp_path: Path,
+) -> None:
+    """A same-size in-place edit (one subject renamed to an equal-length name) forced onto the
+    same mtime as the write it replaces cannot hide behind an (mtime, size) fingerprint; the memo
+    answers the edit's own content."""
+    from tcip_web.label_annotations_cache import cached_label_annotations
+
+    label = tmp_path / "a.json"
+    write_annotations(str(label), [_catkin(1, 1, 2, 2, subject="catkin")], 10, 10)
+    os.utime(label, (1_000_000, 1_000_000))
+    first = cached_label_annotations(label)
+    assert [a.subject for a in first] == ["catkin"]
+
+    write_annotations(str(label), [_catkin(1, 1, 2, 2, subject="leafxx")], 10, 10)
+    os.utime(label, (1_000_000, 1_000_000))  # identical mtime and byte count, different content
+
+    second = cached_label_annotations(label)
+    assert [a.subject for a in second] == ["leafxx"]
+
+
+def test_cached_label_annotations_hands_out_the_same_records_on_a_hit(tmp_path: Path) -> None:
+    """Every caller reading one path under one digest shares the same tuple of records; a memo
+    hit is not a fresh parse."""
+    from tcip_web.label_annotations_cache import cached_label_annotations
+
+    label = tmp_path / "a.json"
+    write_annotations(str(label), [_catkin(1, 1, 2, 2)], 10, 10)
+
+    first = cached_label_annotations(label)
+    second = cached_label_annotations(label)
+    assert first is second
 
 
 def test_image_status_round_trip(client: TestClient, tmp_path: Path) -> None:
