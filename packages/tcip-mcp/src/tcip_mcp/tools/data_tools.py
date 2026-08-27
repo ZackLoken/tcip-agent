@@ -63,13 +63,24 @@ def split_manifest_key(split_dir: str | Path) -> Key:
     return Key(SPLIT_MANIFEST_STORE, str(Path(split_dir).absolute()), _SPLIT_MANIFEST_PARTS)
 
 
+_SPLIT_MANIFEST_REQUIRED_KEYS = (
+    "seed", "group_by", "dataset_fingerprint", "subject", "attribute", "id_map",
+    "members", "splits", "admission_counts",
+)
+"""Every key ``make_splits``' manifest dict literal writes, kept as one tuple so
+:func:`read_split_manifest_dir`'s required set can never drift from what the writer actually
+writes: a manifest missing one of them is refused there, before any caller binds to it."""
+
+
 def read_split_manifest_dir(split_dir: str | Path) -> dict:
     """The ``split_manifest`` record ``make_splits`` wrote under ``split_dir``, the one reader a
     run names its ``data.split.manifest_dir`` through.
 
     Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
-    a mapping, or lacks ``subject`` or ``members``: the two keys every binding needs, and the two
-    a ``split_manifest`` record always carries.
+    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, or carries a ``splits``
+    block with no ``train`` or no ``val``. Because ``seed`` is required here, a caller that reads
+    it off the returned manifest (a run's bind, resolving its own seed from the manifest's) never
+    sees it absent and falls through to a ``None`` in its place.
     """
     from tcip_store import DecodeError
 
@@ -84,11 +95,17 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
             f"the split manifest at {split_dir} decodes to a {type(manifest).__name__}, not the "
             "mapping make_splits writes."
         )
-    missing = [k for k in ("subject", "members") if k not in manifest]
+    missing = [k for k in _SPLIT_MANIFEST_REQUIRED_KEYS if k not in manifest]
     if missing:
         raise ValueError(
             f"the split manifest at {split_dir} carries no {missing}: a split_manifest record "
-            "always carries both."
+            "always carries every key make_splits writes."
+        )
+    splits = manifest.get("splits")
+    if not isinstance(splits, dict) or "train" not in splits or "val" not in splits:
+        raise ValueError(
+            f"the split manifest at {split_dir} carries no splits.train or splits.val: a "
+            "split_manifest record's splits block always carries both."
         )
     return manifest
 
@@ -498,6 +515,7 @@ def make_splits(
     from tcip_mcp.pipelines.data.splits import (
         count_label_lines,
         group_balanced_split,
+        manifest_date_key,
         member_identity,
         member_identity_parts,
         resolve_group_key_fn,
@@ -545,12 +563,25 @@ def make_splits(
             splits=(train_ratio, val_ratio, test_ratio), seed=seed,
         )
         counts = annotation_counts or {}
-        dataset_hash = None
+        dataset_hashes_by_date: dict[str, str] = {}
         if label_map:
+            from tcip_mcp.dataset_layout import annotation_date
             from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
 
-            labels_root = Path(next(iter(label_map.values()))).parent
-            dataset_hash = _dataset_hash(labels_root, stems=stems)
+            stems_by_date_key: dict[str, list[str]] = {}
+            for stem in stems:
+                label_path = label_map.get(stem)
+                if label_path is None:
+                    continue
+                date_key = manifest_date_key(annotation_date(label_path))
+                stems_by_date_key.setdefault(date_key, []).append(stem)
+            for date_key, date_stems in stems_by_date_key.items():
+                labels_dir = Path(label_map[date_stems[0]]).parent
+                dataset_hashes_by_date[date_key] = _dataset_hash(labels_dir, stems=sorted(date_stems))
+        # A single dataset_hash is meaningful only over one labels directory; over more than one
+        # it would be blind to every date but the first, so it is carried only then.
+        dataset_hash = (next(iter(dataset_hashes_by_date.values()))
+                        if len(dataset_hashes_by_date) == 1 else None)
         return {
             "splits": {k: len(parts[k]) for k in kept_splits},
             "foreground_annotations": {
@@ -561,6 +592,7 @@ def make_splits(
             "groups": len({group_key_fn(s) for s in stems}),
             "seed": seed,
             "dataset_hash": dataset_hash,
+            "dataset_hashes_by_date": dataset_hashes_by_date,
             "group_by": resolved_group_by,
             "stratified": stratified,
             "manifest_dir": None,
@@ -620,7 +652,7 @@ def make_splits(
             for stem in admitted:
                 identity_locations[member_identity(date, stem)] = (date, stem)
             if admitted:
-                members[date or ""] = {
+                members[manifest_date_key(date)] = {
                     "labels_root": str(labels_dir),
                     "images_root": str(images_dir),
                     "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
