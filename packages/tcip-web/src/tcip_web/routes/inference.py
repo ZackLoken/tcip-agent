@@ -137,11 +137,11 @@ def _register(job: InferenceJob) -> None:
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
-    from tcip_web import jobstore
-    root = jobstore.current_root()
+    """A job by id, from any root this process holds: a job id is unique per process and the
+    breeder that launched it holds the id, so a repin to another project must not make an
+    in-flight job unreachable for cancelling, previewing or streaming it."""
     with _job_lock:
-        job = _jobs.get(job_id)
-    return job if job is not None and job.platform_root == root else None
+        return _jobs.get(job_id)
 
 
 def _list_jobs() -> list[InferenceJob]:

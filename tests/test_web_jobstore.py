@@ -20,8 +20,10 @@ def test_evict_terminal_caps_and_keeps_running():
     assert "done0" not in jobs      # oldest terminal evicted first
 
 
-def test_evict_terminal_never_touches_another_roots_jobs():
-    """One root's overflow must not push a different root's own jobs out of memory."""
+def test_evict_terminal_prefers_the_overflowing_roots_own_oldest_jobs():
+    """One root's own overflow is trimmed first; the whole dict is then trimmed to max_jobs
+    too (oldest terminal job of any root), so a lone recent job from a different root survives
+    as long as an older job from the overflowing root is still there to take its place."""
     from tcip_web.jobstore import evict_terminal
 
     class J:
@@ -34,7 +36,30 @@ def test_evict_terminal_never_touches_another_roots_jobs():
     evict_terminal(jobs, "root-a", max_jobs=3)
 
     assert "b_done" in jobs
-    assert sum(1 for j in jobs.values() if j.platform_root == "root-a") == 3
+    assert sum(1 for j in jobs.values() if j.platform_root == "root-a") == 2
+
+
+def test_evict_terminal_bounds_the_whole_dict_across_roots():
+    """The whole dict stays bounded at max_jobs even as more roots register their own jobs,
+    not just each root's own share: a root that has stopped receiving launches is trimmed too,
+    the leak this helper exists to close."""
+    from tcip_web.jobstore import evict_terminal
+
+    class J:
+        def __init__(self, status, root):
+            self.status = status
+            self.platform_root = root
+
+    jobs: dict[str, J] = {}
+    for i in range(7):
+        jobs[f"a{i}"] = J("completed", "root-a")
+        evict_terminal(jobs, "root-a", max_jobs=5)
+    for i in range(7):
+        jobs[f"b{i}"] = J("completed", "root-b")
+        evict_terminal(jobs, "root-b", max_jobs=5)
+
+    assert len(jobs) <= 5
+    assert not any(j.platform_root == "root-a" for j in jobs.values())
 
 
 def test_persist_grouped_writes_state_that_reads_back(tmp_path, monkeypatch):
@@ -198,6 +223,25 @@ def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_r
         review._pq_jobs.clear()
 
 
+def test_review_priority_queue_rehydrate_restores_the_persisted_queue(tmp_path, monkeypatch):
+    """A completed job's ranked queue is persisted (_pq_summary carries it); a rehydrate must
+    restore it rather than leaving the dataclass field's empty default."""
+    from tcip_web.routes import review
+
+    job = review.PriorityQueueJob(
+        job_id="pq-done", checkpoint_path="c", images_dir="i", dataset_root="d",
+        status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
+    )
+    review._pq_register(job)
+    review._pq_jobs.clear()
+
+    try:
+        review.rehydrate_for_current_root()
+        assert review._pq_jobs["pq-done"].queue == [{"image": "a.jpg", "score": 0.9}]
+    finally:
+        review._pq_jobs.clear()
+
+
 def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_path, monkeypatch):
     """The same per-root treatment as inference, for the live HPO registry."""
     from tcip_store import read
@@ -282,3 +326,74 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
     from tcip_web.jobstore import load
     data = load("inference_jobs")
     assert any(s["job_id"] == "j1" and s["status"] == "cancelled" for s in data)
+
+
+def test_inference_cancel_reaches_a_job_launched_under_a_previous_root(tmp_path, monkeypatch):
+    """Cancelling a run one launched is legitimate work: a repin to another project must not
+    make the job invisible to preview, cancel or stream, only to the list route."""
+    from fastapi import HTTPException
+
+    from tcip_mcp import workspace
+    from tcip_web.routes._body_common import EmptyBodyPayload
+    from tcip_web.routes.inference import InferenceJob, _get, _jobs, _register, cancel_job
+
+    job = InferenceJob(
+        job_id="launched-under-a", checkpoint_path="c", images_dir="i", output_dir="o",
+        tile=False, conf=0.25, iou=0.7, slice_hw=(640, 640), overlap=0.2,
+    )
+    _register(job)
+
+    try:
+        proj_b = workspace.project_path("chestnut_burr_other")
+        (proj_b / ".tcip").mkdir(parents=True)
+        workspace.set_active_project("chestnut_burr_other")
+
+        assert _get("launched-under-a") is job
+
+        res = cancel_job("launched-under-a", EmptyBodyPayload())
+        assert res["cancel_requested"] is True
+        assert job.cancel_event.is_set()
+
+        with pytest.raises(HTTPException) as miss:
+            cancel_job("never-launched", EmptyBodyPayload())
+        assert miss.value.status_code == 404
+    finally:
+        _jobs.clear()
+
+
+def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, monkeypatch):
+    """The merge every rehydrate performs (job id already live -> skip) must not overwrite a
+    job that is still running under a different root with the interrupted record its own
+    persisted file carries."""
+    from tcip_mcp import workspace
+    from tcip_web.routes import inference
+
+    job_a = inference.InferenceJob(
+        job_id="live-a", checkpoint_path="c", images_dir="i", output_dir="o",
+        tile=False, conf=0.25, iou=0.7, slice_hw=(640, 640), overlap=0.2,
+    )
+    job_a.status = "running"
+    job_a.done, job_a.total = 2, 5
+    inference._register(job_a)
+
+    try:
+        proj_b = workspace.project_path("chestnut_burr_other")
+        (proj_b / ".tcip").mkdir(parents=True)
+        workspace.set_active_project("chestnut_burr_other")
+
+        job_b = inference.InferenceJob(
+            job_id="done-b", checkpoint_path="c", images_dir="i", output_dir="o",
+            tile=False, conf=0.25, iou=0.7, slice_hw=(640, 640), overlap=0.2,
+        )
+        job_b.status = "completed"
+        inference._register(job_b)
+
+        # job_a is never cleared from _jobs: it is still live in memory when the rehydrate
+        # for root B's own registry runs, the shape a repin takes in the running process.
+        inference.rehydrate_for_current_root()
+
+        assert inference._jobs["live-a"] is job_a
+        assert job_a.status == "running"
+        assert job_a.done == 2 and job_a.total == 5
+    finally:
+        inference._jobs.clear()

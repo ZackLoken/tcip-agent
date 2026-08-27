@@ -356,17 +356,23 @@ def refuse_if_terminal(experiment_id: str, op: str, state: str | None) -> None:
         raise ExperimentTerminal(f"Experiment {experiment_id} is {state} (terminal); refusing to {op}.")
 
 
-def _audit_refused(experiment_id: str, op: str, detail: dict[str, Any]) -> None:
+def _audit_refused(
+    experiment_id: str, op: str, detail: dict[str, Any], *, root: Path | str | None = None
+) -> None:
     """Record a refused post-terminal mutation on the append-only audit log.
 
     Through :func:`record_event_or_raise`: the mutation this refusal reports already committed
     (or, for update_status/complete_run, decided not to), so a line that cannot be appended
     raises :class:`AuditEntryNotWritten` to the caller rather than vanishing silently.
+
+    ``root`` is the root the refused write was scoped to (a launch's own watchdog passes the
+    root it captured at launch); the default files the line under the current platform root,
+    unchanged for every caller that has no root of its own to name.
     """
     from tcip_mcp.audit import record_event_or_raise
 
     record_event_or_raise("experiment_mutation_refused", {"experiment_id": experiment_id, "op": op,
-                                                           **detail}, status="refused")
+                                                           **detail}, status="refused", scope=root)
 
 
 def audit_refusal_reraising(experiment_id: str, op: str, detail: dict[str, Any],
@@ -575,7 +581,7 @@ def update_status(
                 txn.write(key, status)
 
     if refused:
-        _audit_refused(experiment_id, "update_status", {"from": current, "to": state})
+        _audit_refused(experiment_id, "update_status", {"from": current, "to": state}, root=root)
         return {"error": f"Experiment {experiment_id} is {current} (terminal); refusing to "
                          f"move it to {state!r}.", "state": current}
     return {"experiment_id": experiment_id, "state": state}
