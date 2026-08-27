@@ -680,17 +680,24 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
 
     import tcip_store as ts
 
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.training.evaluation import evaluation_results_key
+    from tcip_mcp.tools.model_tools import register_model
 
-    r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "seg"))
+    result = register_model(name="iou-type-check", checkpoint_path=str(ckpt_path), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
+    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
+
+    r = run_test_evaluation(checkpoint, None, "cpu", "instance_seg", str(tmp_path / "seg"))
     assert r["iou_type"] == "segm"
     on_disk = ts.read(evaluation_results_key(tmp_path / "seg"))
     assert on_disk["iou_type"] == "segm"
 
-    r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(tmp_path / "det"))
+    r = run_test_evaluation(checkpoint, None, "cpu", "detection", str(tmp_path / "det"))
     assert r["iou_type"] == "bbox"
 
-    r = run_test_evaluation(str(ckpt_path), None, "cpu", "instance_seg", str(tmp_path / "ovr"),
+    r = run_test_evaluation(checkpoint, None, "cpu", "instance_seg", str(tmp_path / "ovr"),
                             iou_type="bbox")
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
@@ -723,7 +730,15 @@ def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch
     monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate", lambda *a, **k: {"loss": 0.1, "map50": 0.5})
 
-    r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(tmp_path / "out"))
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(name="crlf-check", checkpoint_path=str(ckpt_path), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
+    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
+
+    r = run_test_evaluation(checkpoint, None, "cpu", "detection", str(tmp_path / "out"))
 
     raw = Path(r["results_path"]).read_bytes()
     assert b"\r\n" not in raw
@@ -758,8 +773,16 @@ def test_run_test_evaluation_hands_back_the_file_it_wrote(tmp_path, monkeypatch)
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.75})
 
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(name="results-path-check", checkpoint_path=str(ckpt_path), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
+    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
+
     out_dir = tmp_path / "runs" / "test"
-    r = run_test_evaluation(str(ckpt_path), None, "cpu", "detection", str(out_dir))
+    r = run_test_evaluation(checkpoint, None, "cpu", "detection", str(out_dir))
 
     results_path = Path(r["results_path"])
     assert results_path == out_dir / "test_results.json"

@@ -15,12 +15,20 @@ TILE = 64
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
+    """Write a bespoke detection checkpoint and register it against ``tmp_path`` as the project
+    root, so a caller can load it through ``load_registered_checkpoint`` or hand its bare path to
+    an MCP tool that resolves the registry itself."""
+    from tcip_mcp.tools.model_tools import register_model
+
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 1, "min_size": TILE, "max_size": TILE * 2},
                     "task": "detection"}
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    result = register_model(name="test-model", checkpoint_path=str(ckpt), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
     return str(ckpt)
 
 
@@ -32,11 +40,13 @@ def _image(tmp_path: Path, size: int = 128) -> str:
 
 
 def test_predict_tiled_shape_and_bounds(tmp_path):
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
-    pred = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     r = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
 
     assert {"image", "width", "height", "boxes", "scores", "labels", "count"} <= set(r)
@@ -52,11 +62,13 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
     (``self.max_dets``), but the truncation itself was invisible in the returned result: this
     stamps ``cap_hit`` (computed from the pre-truncation count) so a caller building its own
     records (block calibration's ``_band_records``) can surface cap saturation as provenance."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
-    pred = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     uncapped = pred.predict_tiled(img, tile_size=TILE, overlap=0.2)
     assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
         "for this test to force a real truncation, not merely assert an untested edge"
@@ -79,9 +91,10 @@ def test_predict_tiled_stamps_cap_hit_when_the_full_frame_cap_truncates(tmp_path
     assert not_capped["count"] == uncapped["count"]
 
 
-def test_run_inference_tile_flag(tmp_path):
+def test_run_inference_tile_flag(tmp_path, monkeypatch):
     from tcip_mcp.tools.inference_tools import run_inference
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _detection_checkpoint(tmp_path)
     img = _image(tmp_path)
 
@@ -131,18 +144,20 @@ def test_predict_tiled_whole_decode_admits_a_photographic_rgba_file_at_in_chans_
     or every alpha-channel photo would abort a tiled run that untiled inference handles fine."""
     from PIL import Image
 
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     ckpt = _detection_checkpoint(tmp_path)
     path = tmp_path / "rgba.png"
     Image.new("RGBA", (128, 128), (10, 20, 30, 255)).save(path)
 
-    pred = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    pred = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     result = pred.predict_tiled(str(path), tile_size=TILE)
     assert result["width"] == 128 and result["height"] == 128
 
 
-def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path):
+def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path, monkeypatch):
     """When the checkpoint's own config carries a recorded id_map (stamped at train time by
     subprocess_worker.py), run_inference's decode/record map uses it, never re-derived from a
     live registry, and reachable with no images_dir/classes.json at all (proving it is not
@@ -150,6 +165,7 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path):
     import torch as _torch
 
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 3, "min_size": TILE, "max_size": TILE * 2},
@@ -165,6 +181,10 @@ def test_run_inference_prefers_the_checkpoints_own_recorded_id_map(tmp_path):
                    "data": {"subject": "catkin", "attribute": "elongation",
                             "id_map": recorded_id_map}},
     }, str(ckpt_path))
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    result = register_model(name="test-model", checkpoint_path=str(ckpt_path), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
     img = _image(tmp_path)
 
     r = run_inference(str(ckpt_path), image_paths=[img], conf_threshold=0.0)

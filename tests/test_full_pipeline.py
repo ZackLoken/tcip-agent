@@ -128,12 +128,17 @@ class TestFullClassificationPipeline:
         assert "model_state_dict" in ckpt
         assert "model_source" in ckpt
 
-        # --- Step 5: Load checkpoint and run inference ---
+        # --- Step 5: Register the checkpoint, load it verified, and run inference ---
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+        from tcip_mcp.tools.model_tools import register_model
+        from tcip_mcp.model_registry import load_registered_checkpoint
 
-        predictor = GenericPredictor(
-            str(out / "model_best.pt"), device="cpu", score_threshold=0.1,
-        )
+        ckpt_path = str(out / "model_best.pt")
+        result = register_model(name="test-classifier", checkpoint_path=ckpt_path, config={},
+                                project_path=str(tmp_path))
+        assert "error" not in result, result
+        checkpoint = load_registered_checkpoint(ckpt_path, project_path=str(tmp_path))
+        predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.1)
 
         # Pick some test images
         test_images = sorted(Path(tiny_classification_data).rglob("*.png"))[:4]
@@ -289,10 +294,16 @@ class TestDetectionPipelineRealData:
         assert "model_state_dict" in ckpt
         assert "model_source" in ckpt
 
-        # --- Step 4: Inference on real images ---
-        predictor = GenericPredictor(
-            str(out / "model_best.pt"), device="cpu", score_threshold=0.01,
-        )
+        # --- Step 4: Register the checkpoint, load it verified, and run inference ---
+        from tcip_mcp.tools.model_tools import register_model
+        from tcip_mcp.model_registry import load_registered_checkpoint
+
+        ckpt_path = str(out / "model_best.pt")
+        result = register_model(name="test-detector", checkpoint_path=ckpt_path, config={},
+                                project_path=str(tmp_path))
+        assert "error" not in result, result
+        checkpoint = load_registered_checkpoint(ckpt_path, project_path=str(tmp_path))
+        predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.01)
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
         test_images = sorted(p for p in images_dir.iterdir()

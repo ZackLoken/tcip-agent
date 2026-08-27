@@ -61,6 +61,7 @@ def _write_plant_csv(path: Path) -> None:
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, tile_size: int = TILE) -> str:
     from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 1, "in_chans": 3,
@@ -69,6 +70,9 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, tile_size: int = TILE) -> s
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    result = register_model(name="block-calibration-bespoke", checkpoint_path=str(ckpt),
+                            config={}, project_path=str(tmp_path))
+    assert "error" not in result, result
     return str(ckpt)
 
 
@@ -171,13 +175,15 @@ def test_block_calibration_refuses_when_regions_unattested(tmp_path: Path):
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="not fully attested complete"):
         resolve_block_calibration_records(
-            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            predictor, trait_name="catkin",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -191,13 +197,15 @@ def test_block_calibration_completeness_checked_before_feasibility(tmp_path: Pat
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
-            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            predictor, trait_name="catkin",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, k_cal=40, k_test=40, export_tile_size=TILE)
     msg = str(exc_info.value)
     assert "not fully attested complete" in msg
@@ -213,13 +221,15 @@ def test_block_calibration_refuses_when_export_tile_size_differs_from_manifest(t
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused) as exc_info:
         resolve_block_calibration_records(
-            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            predictor, trait_name="catkin",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE * 2)
     msg = str(exc_info.value)
     assert f"{TILE}px" in msg and f"{TILE * 2}px" in msg
@@ -235,12 +245,14 @@ def test_block_calibration_admits_valid_work_once_attested(tmp_path: Path):
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
@@ -271,12 +283,14 @@ def test_block_calibration_prefers_plant_pitch_over_gt_spacing_when_configured(t
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     _bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert prov["block_scale_source"].startswith("plant grid pitch"), prov["block_scale_source"]
@@ -291,12 +305,14 @@ def test_block_calibration_falls_back_to_gt_spacing_with_no_plant_csv_configured
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     _bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert prov["block_scale_source"].startswith("GT object-spacing"), prov["block_scale_source"]
@@ -324,12 +340,14 @@ def test_a_saturated_band_cap_surfaces_as_cap_saturated_frac_provenance(
     monkeypatch.setattr(operating_point_module, "derive_max_dets_from_counts", lambda *a, **k: 1)
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     conf = bundle.get("conf")
@@ -369,13 +387,15 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_exceed_the_real_ra
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
-            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            predictor, trait_name="catkin",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -396,13 +416,15 @@ def test_block_calibration_refuses_by_name_when_manifest_dims_are_smaller_than_t
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="do not match"):
         resolve_block_calibration_records(
-            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            predictor, trait_name="catkin",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -426,13 +448,15 @@ def test_max_dets_stamp_reflects_the_pooled_cal_and_test_density_cap(tmp_path: P
         exp["root"], exp["stem"], [manifest["calibration_region"], manifest["test_region"]])
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import derive_max_dets_from_counts
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     density_cap = derive_max_dets_from_counts(
@@ -896,6 +920,7 @@ def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.operating_point import _current_detections_cap
 
@@ -909,11 +934,12 @@ def test_the_band_passes_run_under_the_max_dets_the_bundle_stamps(tmp_path: Path
     monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_caps)
 
     constructed_max_dets = 1000
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3,
                                 max_dets=constructed_max_dets)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     stamped = bundle.get("max_dets")._raw
@@ -938,6 +964,7 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
     real_predict_tiled = GenericPredictor.predict_tiled
@@ -950,10 +977,11 @@ def test_the_recorded_staged_conf_floor_is_the_floor_the_band_passes_ran_under(
     monkeypatch.setattr(GenericPredictor, "predict_tiled", _capture_floor)
 
     constructed_threshold = 0.4
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=constructed_threshold, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     recorded_floor = bundle.get("conf").sweep["staged_conf_floor"]
@@ -979,6 +1007,7 @@ def _build_attribute_scoped_experiment(
     from tcip_mcp.experiments import create_experiment
     from tcip_mcp.pipelines.model_build import build_model
     from tcip_mcp.pipelines.training.subprocess_worker import _resolve_run_id_map
+    from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
     def _write_registry(values: tuple[str, ...]) -> None:
@@ -1023,6 +1052,9 @@ def _build_attribute_scoped_experiment(
     torch.save({"model_source": model_source, "config": {"data": data_cfg},
                 "model_state_dict": build_model({"model_source": model_source}).state_dict()},
                str(checkpoint_path))
+    result = register_model(name=experiment_id, checkpoint_path=str(checkpoint_path),
+                            config={}, project_path=str(tmp_path))
+    assert "error" not in result, result
     return {
         "root": root, "images_dir": images_dir, "labels_dir": labels_dir, "stem": stem,
         "checkpoint_path": str(checkpoint_path), "experiment_id": experiment_id,
@@ -1047,6 +1079,7 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
 
     from tcip_mcp.class_registry import assign_class_ids, read_registry
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
     live_id_map = assign_class_ids(read_registry(exp["root"] / "classes.json"), "catkin", "stage")
@@ -1054,10 +1087,11 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     live_category = live_id_map["elongated"] + 1
     assert recorded_category != live_category
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, _prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     per_class = bundle.get("conf").sweep["holdout_bias"]["per_class"]
@@ -1068,12 +1102,18 @@ def test_ground_truth_decodes_through_the_checkpoints_own_recorded_id_map(tmp_pa
     assert live_entry["tp"] + live_entry["fn"] == 0
 
 
-def _drop_the_checkpoints_recorded_id_map(checkpoint_path: str) -> None:
+def _drop_the_checkpoints_recorded_id_map(checkpoint_path: str, *, project_root: Path) -> None:
     """Strip ``config['data']['id_map']`` from a saved checkpoint, leaving a run whose decode map
-    can only come from the dataset's registry."""
+    can only come from the dataset's registry, and re-register the rewritten bytes under their own
+    new digest so the mutated file is still a checkpoint the registry names."""
+    from tcip_mcp.tools.model_tools import register_model
+
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     payload["config"]["data"].pop("id_map", None)
     torch.save(payload, checkpoint_path)
+    result = register_model(name="block-calibration-no-id-map", checkpoint_path=checkpoint_path,
+                            config={}, project_path=str(project_root))
+    assert "error" not in result, result
 
 
 def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path):
@@ -1085,19 +1125,21 @@ def test_block_calibration_refuses_when_no_id_map_can_be_resolved(tmp_path: Path
         tmp_path, trained_values=("dormant", "elongated", "shed"),
         reordered_values=("dormant", "elongated", "shed"), labeled_value="elongated",
         experiment_id="exp_block_no_id_map")
-    _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"])
+    _drop_the_checkpoints_recorded_id_map(exp["checkpoint_path"], project_root=tmp_path)
     (exp["root"] / "classes.json").unlink()
 
     from tcip_mcp.pipelines.block_calibration import (
         BlockCalibrationRefused, resolve_block_calibration_records,
     )
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     with pytest.raises(BlockCalibrationRefused, match="records no name->id map"):
         resolve_block_calibration_records(
-            predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+            predictor, trait_name="catkin",
             experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
 
@@ -1114,12 +1156,14 @@ def test_block_calibration_runs_on_a_recorded_id_map_with_no_registry_on_disk(tm
     (exp["root"] / "classes.json").unlink()
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0
@@ -1174,6 +1218,7 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
     assert attested
 
     from tcip_mcp.pipelines.block_calibration import resolve_block_calibration_records
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.predictor import build_predictor
     from tcip_mcp.pipelines.region_completeness import incomplete_cells_for_rect
 
@@ -1181,10 +1226,11 @@ def test_regions_attested_through_the_coverage_route_admit_block_calibration(tmp
         assert incomplete_cells_for_rect(
             str(exp["root"]), "catkin", exp["stem"], tuple(region[0])) == []
 
-    predictor = build_predictor(checkpoint_path=exp["checkpoint_path"], device="cpu",
+    checkpoint = load_registered_checkpoint(exp["checkpoint_path"], project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu",
                                 score_threshold=0.01, nms_iou=0.3, max_dets=1000)
     bundle, prov, _evidence = resolve_block_calibration_records(
-        predictor, checkpoint_path=exp["checkpoint_path"], trait_name="catkin",
+        predictor, trait_name="catkin",
         experiment_id=exp["experiment_id"], global_nms_iou=0.3, export_tile_size=TILE)
 
     assert sum(prov["cal_gt_counts"].values()) > 0

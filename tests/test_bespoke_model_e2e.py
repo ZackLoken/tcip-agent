@@ -57,7 +57,7 @@ def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
 
 def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
     from tcip_mcp.pipelines.inference.predictor import KIND_TCIP_MODULE, build_predictor
@@ -119,7 +119,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert expected_ratios != (0.5, 1.0, 2.0)              # not torchvision's default ratios
     assert expected_sizes != (32, 64, 128, 256, 512)       # not torchvision's default sizes
 
-    predictor = build_predictor(str(ckpt), device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(str(ckpt), project_path=str(tmp_path))
+    predictor = build_predictor(checkpoint, device="cpu", score_threshold=0.0)
     assert predictor.kind == KIND_TCIP_MODULE
     anchor_gen = predictor.model.detector.rpn.anchor_generator
     assert anchor_gen.aspect_ratios == (expected_ratios,)   # anchors are the GT-derived ratios

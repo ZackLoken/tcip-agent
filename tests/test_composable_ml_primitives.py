@@ -144,10 +144,10 @@ class TestTrainConfig:
 # ====================================================================
 
 class TestGenericPredictor:
-    def test_predictor_missing_checkpoint(self):
-        from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    def test_predictor_missing_checkpoint(self, tmp_path):
+        from tcip_mcp.model_registry import load_registered_checkpoint
         with pytest.raises(FileNotFoundError):
-            GenericPredictor("/nonexistent/model.pt")
+            load_registered_checkpoint(str(tmp_path / "nonexistent.pt"), project_path=str(tmp_path))
 
 
 # ====================================================================

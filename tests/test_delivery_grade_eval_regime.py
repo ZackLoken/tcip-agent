@@ -57,9 +57,11 @@ def test_gating_path_honors_explicit_max_dets_le_100(tmp_path, monkeypatch):
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _fake)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-le-100")
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
                    use_tiled_inference=True, max_dets=50)
@@ -78,9 +80,11 @@ def test_gating_path_defaults_max_dets_to_1000_when_unset(tmp_path, monkeypatch)
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _fake)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gating-max-dets-default")
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
                    use_tiled_inference=True)
@@ -101,9 +105,11 @@ def test_diagnostic_path_defaults_max_dets_to_100_when_unset(tmp_path, monkeypat
         return {"tiled": False, "eval_regime": "tile-level"}
 
     monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-default")
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin")
     assert captured["max_dets"] == 100
@@ -120,9 +126,11 @@ def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
         return {"tiled": False, "eval_regime": "tile-level"}
 
     monkeypatch.setattr(evaluation, "run_test_evaluation", _fake)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="diagnostic-max-dets-explicit")
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection", subject="catkin",
                    max_dets=7)
@@ -143,10 +151,16 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
         return {"eval_regime": "full-frame-tiled-inference"}
 
     monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _fake)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
     ckpt = tmp_path / "model.pt"
     torch.save({"config": {"data": {"tiling": {"tile_size": 384, "overlap": 0.15},
                                     "subject": "catkin", "attribute": None}}}, ckpt)
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(name="bare-ckpt-stamped-tiling", checkpoint_path=str(ckpt), config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
 
     evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
                    use_tiled_inference=True)
@@ -168,9 +182,11 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
         raise ValueError("Cannot resolve a trustworthy tile_size for ckpt.pt: ... tiling=")
 
     monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _refuse)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-geometry-refusal")
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
                        subject="catkin", use_tiled_inference=True)
@@ -189,9 +205,11 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
         raise UnreadableLabelDocument("labels/2026-03-02/IMG_0001.json does not decode as JSON")
 
     monkeypatch.setattr(evaluation, "run_full_frame_evaluation", _refuse)
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _det_dataset(tmp_path)
-    ckpt = tmp_path / "model.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, name="gate-unreadable-label")
 
     r = evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
                        subject="catkin", use_tiled_inference=True)
@@ -231,10 +249,13 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path):
                     "scores": [0.9, 0.8, 0.7, 0.6, 0.5], "labels": [1] * 5, "count": 5,
                     "cap_hit": True}
 
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    checkpoint = stub_verified_checkpoint("ckpt.pt")
     build_predictor_orig = predictor_mod.build_predictor
     try:
-        predictor_mod.build_predictor = lambda **kw: _ManyDetectionsStub()
-        r = run_full_frame_evaluation("ckpt.pt", str(images_dir), str(labels_dir),
+        predictor_mod.build_predictor = lambda *a, **kw: _ManyDetectionsStub()
+        r = run_full_frame_evaluation(checkpoint, str(images_dir), str(labels_dir),
                                       str(tmp_path / "out"), subject="catkin", max_dets=2)
     finally:
         predictor_mod.build_predictor = build_predictor_orig

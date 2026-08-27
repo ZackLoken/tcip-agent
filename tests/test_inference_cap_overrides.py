@@ -48,8 +48,11 @@ def _calibration_records() -> list[dict]:
 @pytest.fixture
 def inference_call(tmp_path, monkeypatch):
     """Call ``run_inference`` with the model pass stubbed, the real resolver behind calibration."""
+    from tcip_mcp import model_registry as model_registry_module
     from tcip_mcp.pipelines.inference import predictor as predictor_module
     from tcip_mcp.tools import inference_tools
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     checkpoint = tmp_path / "model.pt"
     checkpoint.write_bytes(b"not-a-real-checkpoint")
@@ -63,7 +66,7 @@ def inference_call(tmp_path, monkeypatch):
     built: dict = {}
     forwarded: dict = {}
 
-    def _stub_build_predictor(**kwargs):
+    def _stub_build_predictor(ckpt, **kwargs):
         built.update(kwargs)
         return _StubPredictor()
 
@@ -82,6 +85,9 @@ def inference_call(tmp_path, monkeypatch):
         return bundle, "d", 0, evidence
 
     monkeypatch.setattr(predictor_module, "build_predictor", _stub_build_predictor)
+    monkeypatch.setattr(
+        model_registry_module, "load_registered_checkpoint",
+        lambda *a, **kw: stub_verified_checkpoint(str(checkpoint)))
     monkeypatch.setattr(inference_tools, "_calibrate_operating_point", _spy_calibrate)
 
     def _call(**kwargs):
@@ -224,7 +230,10 @@ def test_the_dry_run_report_shows_the_applied_conf_never_the_raw_none(tmp_path):
 def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monkeypatch):
     """The raster regime is reached through the same door, so the sentinel has to survive the hop
     rather than being resolved to a number on the way."""
+    from tcip_mcp import model_registry as model_registry_module
     from tcip_mcp.tools import inference_tools
+
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     checkpoint = tmp_path / "model.pt"
     checkpoint.write_bytes(b"not-a-real-checkpoint")
@@ -238,6 +247,9 @@ def test_the_raster_export_path_receives_an_unstated_cap_unstated(tmp_path, monk
         return {"image_count": 1}
 
     monkeypatch.setattr(inference_tools, "_export_predictions_raster", _spy_raster)
+    monkeypatch.setattr(
+        model_registry_module, "load_registered_checkpoint",
+        lambda *a, **kw: stub_verified_checkpoint(str(checkpoint)))
 
     inference_tools.export_predictions(
         checkpoint_path=str(checkpoint), raster_path=str(raster),

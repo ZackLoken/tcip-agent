@@ -209,6 +209,16 @@ def test_pixel_to_native_returns_plain_floats(tmp_path: Path) -> None:
 TILE = 32
 
 
+def _register_checkpoint(tmp_path: Path, ckpt_path: str, *, name: str) -> None:
+    """Register a checkpoint the platform's own producer wrote against tmp_path as project root,
+    the same root each test's own load_registered_checkpoint call resolves the registry from."""
+    from tcip_mcp.tools.model_tools import register_model
+
+    result = register_model(name=name, checkpoint_path=ckpt_path, config={},
+                            project_path=str(tmp_path))
+    assert "error" not in result, result
+
+
 def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
                               channels: int = 4, rowsperstrip: int = 12) -> np.ndarray:
     """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
@@ -260,16 +270,20 @@ def test_predict_tiled_windowed_source_matches_full_array_predict_tiled(tmp_path
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     path = tmp_path / "mosaic.tif"
     arr = _windowed_multiband_tiff(path)
     ckpt = _bespoke_detection_checkpoint(tmp_path, path, in_chans=arr.shape[-1])
+    _register_checkpoint(tmp_path, ckpt, name="ortho-detection")
 
-    full = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    full = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+                            device="cpu", score_threshold=0.0)
     full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
 
-    windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+                                device="cpu", score_threshold=0.0)
     with open_raster(path, arr.shape[-1]) as reader:
         win_result = windowed.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
@@ -306,16 +320,20 @@ def test_predict_tiled_windowed_source_and_predict_tiled_produce_matching_tiled_
     path agrees with the full-array path detection-for-detection, masks included."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
+    _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    full = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    full = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+                            device="cpu", score_threshold=0.0)
     full_result = full.predict_tiled(str(path), tile_size=TILE, overlap=0.2)
 
-    windowed = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    windowed = GenericPredictor(load_registered_checkpoint(ckpt, project_path=str(tmp_path)),
+                                device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
         win_result = windowed.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
@@ -338,13 +356,16 @@ def test_predict_tiled_windowed_source_require_masks_false_carries_no_masks_key(
     empty one, mirroring ``predict_tiled``'s own opt-out contract."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
+    _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
         result = predictor.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, require_masks=False)
@@ -359,14 +380,17 @@ def test_predict_tiled_windowed_source_tiled_mask_polygon_exports_at_correct_off
     pytest.importorskip("torchvision")
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
     path = tmp_path / "mosaic.tif"
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
+    _register_checkpoint(tmp_path, ckpt, name="ortho-instance-seg")
 
-    predictor = GenericPredictor(ckpt, device="cpu", score_threshold=0.0)
+    checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
+    predictor = GenericPredictor(checkpoint, device="cpu", score_threshold=0.0)
     with open_raster(path, 3) as reader:
         result = predictor.predict_tiled(
             reader, tile_size=TILE, overlap=0.2, source_label=str(path))
