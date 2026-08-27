@@ -569,3 +569,22 @@ def test_stage_proposals_refuses_a_reserved_stem_with_an_error_dict(tmp_path: Pa
     assert "error" in res
     assert "operating_point" in res["error"]
     assert not (Path(prediction_dir(root, "claude", date)) / "operating_point.json").exists()
+
+
+def test_stage_proposals_refuses_a_stem_at_the_flat_root_beside_a_dated_bucket(
+    tmp_path: Path,
+) -> None:
+    """A stem living at the flat images/ root while a dated bucket for the same date also
+    exists on disk is refused, naming the directory searched and a remedy, rather than
+    silently falling back to the flat root."""
+    root = tmp_path / "proj"
+    date = "2026-02-11"
+    _image(root, date, "IMG_0001", size=(640, 480))  # a real dated bucket exists
+    (root / "images" / "flat_only.jpg").write_bytes(b"\xff\xd8\xff")
+
+    boxes = [{"subject": "catkin", "conf": 0.8, "cx": 0.5, "cy": 0.5, "w": 0.1, "h": 0.1}]
+    res = stage_proposals(str(root), "claude", date, "flat_only", boxes)
+
+    assert "error" in res
+    assert str(Path(image_dir(root, date))) in res["error"]
+    assert "move it" in res["error"]

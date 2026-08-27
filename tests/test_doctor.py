@@ -89,6 +89,31 @@ def test_doctor_flags_the_field_session_bug_family(tmp_path):
     assert "IMG_A" not in out.replace("IMG_A.JPG is negative", "")  # confirmed negative is clean
 
 
+def test_doctor_admits_a_confirmed_negative_under_dated_labels_flat_images(tmp_path):
+    """A confirmed negative resolves the same way the draw admits it when labels are dated but
+    images were never split into date buckets, instead of reading as an unconfirmed empty."""
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    root = tmp_path / "proj"
+    (root / "images").mkdir(parents=True)
+    ann = root / "annotations" / "2026-02-11"
+    ann.mkdir(parents=True)
+    write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name="catkin"),)))
+    Image.new("RGB", (32, 32)).save(root / "images" / "IMG_A.JPG")
+    json_io.write_annotations(ann / "IMG_A.json", [], 32, 32, keep_empty=True)
+
+    ts.bind(FileBackend())
+    replace_image_status_store(root, {
+        status_bucket("catkin", "2026-02-11"): status_records(
+            {"IMG_A.JPG": "negative"}, recorded_by="user:breeder"),
+    })
+
+    res = _run(root, file_layout=True)
+
+    assert "not a confirmed negative" not in res.stdout
+
+
 def test_doctor_flags_a_trait_spec_that_failed_to_load(tmp_path):
     """A dropped trait spec reads identically to no trait at all from the registry alone;
     doctor.py is where the agent catches the difference at session start."""
