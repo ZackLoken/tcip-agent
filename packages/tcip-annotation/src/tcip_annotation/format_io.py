@@ -29,6 +29,7 @@ from tcip_store.file_backend import RootedFileLocator
 from tcip_annotation.json_io import (
     ANNOTATIONS_KEY,
     UnreadableLabelDocument,
+    geometry_extent_ok,
     read_annotations,
     write_annotations,
 )
@@ -288,6 +289,10 @@ def write_coco(
         coco["images"].append({"id": img_id, "file_name": file_name, "width": img_w, "height": img_h})
         for a in anns:
             if a.geometry is None or isinstance(a.geometry, Point) or a.subject not in id_map:
+                continue
+            if not geometry_extent_ok(a.geometry):
+                # The same drop the per-image export applies: a geometry the stored 2-decimal
+                # grid collapses would emit a bbox claiming an extent its own segmentation lacks.
                 continue
             box = bbox_of(a.geometry)
             bw, bh = box.x2 - box.x1, box.y2 - box.y1
