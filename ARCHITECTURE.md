@@ -805,7 +805,7 @@ registered at HEAD.
 | GET | `/tree` | `get_dataset_tree` | `routes/dataset.py:154` |  <!-- queued: P5-83 unify -->
 | GET | `/images` | `list_images` | `routes/dataset.py:200` |  <!-- queued: P5-84 delete -->
 | POST | `/select` | `select_dataset` | `routes/dataset.py:222` |
-| POST | `/nav` | `set_current_image` | `routes/dataset.py:311` |
+| POST | `/nav` | `set_current_image` | `routes/dataset.py:319` |
 
 ### routes/fs.py, prefix `/api/fs` (1 route)
 
