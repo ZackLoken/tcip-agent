@@ -137,6 +137,44 @@ def test_is_manifest_bound_split_only_true_for_a_manifest_binding():
     assert _is_manifest_bound_split(None) is False
 
 
+def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_path, monkeypatch):
+    """Only a manifest-bound run's resolved split block is mirrored into the durable experiment
+    record; a spatial run's own per-region member identities stay with its checkpoints."""
+    import tcip_store as ts
+
+    import tcip_mcp.tools.training_tools as ttools
+    from tcip_mcp.experiments import config_key, create_experiment
+    from tcip_mcp.pipelines.training import subprocess_worker as worker
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    out = tmp_path / "run"
+    out.mkdir()
+    config = {"model_source": {"builder": "x:y", "task": "detection"},
+              "data": {"images_dir": "img", "split": {"group_by": "spatial_strip"}}}
+    create_experiment("exp1", config)
+    ts.replace(ttools.launch_config_key(out), config)
+
+    def stub_auto_train_val(task, data_cfg, transforms):
+        data_cfg["split"].update({
+            "resolved_group_by": "spatial_strip",
+            "spatial_manifest": {"regions": {"r0": ["a"], "r1": ["b"]}},
+        })
+        return None, None
+
+    class StopAfterSplit(Exception):
+        pass
+
+    def stop(*args, **kwargs):
+        raise StopAfterSplit
+
+    monkeypatch.setattr(ttools, "_auto_train_val", stub_auto_train_val)
+    monkeypatch.setattr(worker, "_resolve_run_id_map", stop)
+    with pytest.raises(StopAfterSplit):
+        worker.run("run1", "exp1", str(out), "")
+
+    assert "spatial_manifest" not in ts.read(config_key("exp1"))["data"].get("split", {})
+
+
 # ── attach_run ──────────────────────────────────────────────────────────
 
 
