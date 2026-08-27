@@ -625,7 +625,10 @@ def focus(
     ``tab='annotate'`` lands the Annotate tab on the first frame annotated for ``subject`` in the
     right mode (emits ``annotate_focus``); ``tab='review'`` lands the Review tab on a model's
     predictions (emits ``review_focus``). Requires the GUI to be running; returns ``delivered:
-    false`` if not.
+    false`` if not. On both tabs, an image elsewhere on the date whose label or prediction
+    document will not read is named by file name in the result's ``unreadable`` rather than
+    aborting the call; only the landed-on or explicitly named frame's own unreadable document
+    refuses, naming that document's path.
 
     Args:
         tab: Which GUI surface to drive, 'annotate' or 'review'.
@@ -695,9 +698,10 @@ def _focus_annotate(
     """Drive the live Annotate tab to a (subject, date), in the right mode, on a frame labeled for
     the subject. Posts an ``annotate_focus`` event the GUI honors with local view setters.
 
-    Refuses only when the landed-on (or explicitly named) frame's own label will not read; every
-    other unreadable document on the date is named in the result's ``unreadable`` instead, so one
-    bad file elsewhere on the date never closes the agent's own navigation surface for it.
+    Refuses only when the landed-on (or explicitly named) frame's own label will not read, naming
+    that document's path in the error; every other image whose label will not read is named
+    instead (by image file name, not by document path) in the result's ``unreadable``, so one bad
+    file elsewhere on the date never closes the agent's own navigation surface for it.
 
     The ``mode`` vocabulary this validates against restates ``tcip_web.state.AnnotateMode``: this
     package cannot import ``tcip_web`` (the dependency runs the other way), so the check is
