@@ -136,4 +136,26 @@ describe("applyReviewFocus", () => {
 
     expect(useStore.getState().reviewStatus.byImage).toEqual({});
   });
+
+  it("toasts a label_problem the selection carries", async () => {
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: SELECTION,
+      label_problem: "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    await applyReviewFocus({
+      dataset_root: "/ws/proj",
+      subject: "subject_a",
+      date: "2026-02-11",
+      model_name: "baseline",
+    });
+
+    expect(pushToast).toHaveBeenCalledWith(
+      "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+    );
+  });
 });

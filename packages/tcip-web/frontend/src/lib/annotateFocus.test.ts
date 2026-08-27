@@ -122,4 +122,68 @@ describe("applyAnnotateFocus", () => {
     expect(g.mode).toBe("polygon");
     expect(g.active_tab).toBe("annotate");
   });
+
+  it("clears a prior dataset's reviewStatus when the focus switches identity", async () => {
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
+    useStore.setState({
+      reviewStatus: {
+        byImage: { "old.jpg": "completed" },
+        hasDetections: { "old.jpg": true },
+        unreadable: [],
+        activeFilter: "all",
+      },
+    });
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: {
+        project_root: "/ws/proj",
+        dataset_root: "/ws/proj",
+        subject: "subject_a",
+        date: "2026-02-11",
+        image_list: [],
+        current_image_index: 0,
+        annotations_dir: "/ws/proj/annotations/2026-02-11",
+        predictions_dir: null,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    await applyAnnotateFocus({
+      dataset_root: "/ws/proj",
+      subject: "subject_a",
+      date: "2026-02-11",
+    });
+
+    expect(useStore.getState().reviewStatus.byImage).toEqual({});
+  });
+
+  it("toasts a label_problem the selection carries", async () => {
+    seedDataset({ dataset_root: "/ws/proj", subject: "subject_a", date: "2026-01-01" });
+    const pushToast = vi.spyOn(useStore.getState(), "pushToast");
+    vi.mocked(api.dataset.select).mockResolvedValue({
+      status: "ok",
+      selection: {
+        project_root: "/ws/proj",
+        dataset_root: "/ws/proj",
+        subject: "subject_a",
+        date: "2026-02-11",
+        image_list: [],
+        current_image_index: 0,
+        annotations_dir: "/ws/proj/annotations/2026-02-11",
+        predictions_dir: null,
+      },
+      label_problem: "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    await applyAnnotateFocus({
+      dataset_root: "/ws/proj",
+      subject: "subject_a",
+      date: "2026-02-11",
+    });
+
+    expect(pushToast).toHaveBeenCalledWith(
+      "/ws/proj/annotations/2026-02-11/IMG_0000.json does not decode as JSON",
+    );
+  });
 });

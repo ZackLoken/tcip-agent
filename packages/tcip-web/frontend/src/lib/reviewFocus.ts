@@ -7,6 +7,7 @@
  */
 
 import { api } from "@/api/client";
+import { toastLabelProblem } from "@/lib/labelProblemToast";
 import { useStore } from "@/store";
 
 export interface ReviewFocusData {
@@ -45,6 +46,7 @@ export async function applyReviewFocus(d: ReviewFocusData): Promise<void> {
       model_name: d.model_name ?? null,
     });
     useStore.getState().applyRestoredDataset(res.selection);
+    toastLabelProblem(res.label_problem);
   }
 
   // Apply view + filter controls after any dataset switch resolved, so a same-identity snapshot
