@@ -573,7 +573,7 @@ def make_splits(
                          "or drop both output_path and materialize for a stats-only call."}
 
     from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, trainable_stems
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
     from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
 
     date_dirs = _split_date_dirs(folder_path)
@@ -657,7 +657,7 @@ def make_splits(
                                  "materializing, or scope this call to one capture date."}
 
             if materialize:
-                from tcip_mcp.pipelines.image_utils import list_logical_images
+                from tcip_mcp.pipelines.image_utils import list_logical_images, resolve_image_source
 
                 (only_date,) = distinct_dates
                 labels_dir_for_date = next(d for date, d, _ in date_dirs if date == only_date)
@@ -671,11 +671,16 @@ def make_splits(
                     split_name: sorted(member_identity_parts(identity)[1] for identity in identities)
                     for split_name, identities in parts.items() if split_name in kept_splits
                 }
+                # Resolved before anything is written: an incomplete band group answers an
+                # error naming the missing band, never a raise after the manifest is on disk.
+                for split_name in kept_splits:
+                    for stem in bare_parts[split_name]:
+                        resolve_image_source(images_dir_for_date, stem)
                 # Read every confirmed negative before anything (a stem list, the manifest, the
                 # split tree) is written: a refusal here must leave nothing persisted.
                 negative_carry = _compute_negative_carry(
                     label_map, bare_parts, image_map, subject, only_date)
-    except (UnreadableLabelDocument, AmbiguousImageStem) as exc:
+    except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete) as exc:
         return {"error": str(exc)}
 
     if not stems:
