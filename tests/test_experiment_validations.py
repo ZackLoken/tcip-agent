@@ -40,6 +40,8 @@ def _row(**overrides: Any) -> dict[str, Any]:
         "dataset_root": "/data/hazelnut_valley",
         "recorded_at": "2026-03-04T12:00:00+00:00",
         "train_disjointness": {"checked": True, "group_check": None},
+        "selection_disjointness": {"applicable": False, "reason": "no split manifest named",
+                                   "checked": False, "group_check": None},
     }
     body.update(overrides)
     return body

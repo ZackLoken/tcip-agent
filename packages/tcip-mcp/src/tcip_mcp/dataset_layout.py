@@ -231,6 +231,26 @@ def annotation_dir(dataset_root: str | Path, date: Optional[str]) -> Path:
     return annotation_root(dataset_root).joinpath(*_date_seg(date))
 
 
+def prediction_bucket_date(path: str | Path) -> Optional[str]:
+    """The ``<date>`` a prediction bucket lives under (``<root>/predictions/<model>/<date>/``),
+    or ``None`` for an undated bucket (``<root>/predictions/<model>/``): the same declared-inverse
+    contract :func:`annotation_date` states for the ``annotations/<date>/`` tree, mirrored for the
+    ``predictions/<model>/`` tree instead, one model segment further in.
+    """
+    p = Path(path)
+    parts = p.parts
+    if "predictions" not in parts:
+        return None
+    i = len(parts) - 1 - parts[::-1].index("predictions")
+    rest = parts[i + 1:]
+    if not rest:
+        return None
+    rest = rest[1:]  # drop <model>
+    if rest and rest[-1].endswith(".json"):
+        rest = rest[:-1]
+    return rest[0] if len(rest) == 1 else None
+
+
 def annotation_date(path: str | Path) -> Optional[str]:
     """The ``<date>`` an annotations dir/file lives under, or ``None`` (declared inverse of the
     ``annotations/<date>/`` layout; the only recoverable path fact, since subject/task live in the

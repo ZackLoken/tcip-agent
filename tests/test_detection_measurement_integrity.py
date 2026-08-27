@@ -991,8 +991,9 @@ def test_manifest_calibration_firewall_hashes_the_universe(
 
 def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_path, monkeypatch):
     """A manifest-restricted calibration answers how many present stems it left out of its
-    universe, the training side's and the unassigned ones, as counts beside the incomplete
-    attribute count, so the caller learns the exclusions without opening the persisted evidence."""
+    universe, the train side's, the val side's and the unassigned ones, as counts beside the
+    incomplete attribute count, so the caller learns the exclusions without opening the persisted
+    evidence."""
     import tcip_mcp.tools.inference_tools as itools
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     from tcip_mcp.pipelines.operating_point import resolve_operating_point
@@ -1010,7 +1011,8 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
             "stated_values": {"split_manifest_dir": str(tmp_path / "m")},
         },
         "calibration_stems": ["a"],
-        "excluded": {"excluded_training_stems": ["b", "c"], "excluded_unassigned_stems": ["d"]},
+        "excluded": {"excluded_training_stems": ["b", "c"], "excluded_validation_stems": ["e"],
+                    "excluded_unassigned_stems": ["d"]},
     }
     monkeypatch.setattr(itools, "_calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
@@ -1027,6 +1029,7 @@ def test_manifest_calibration_reports_its_exclusion_counts_on_the_response(tmp_p
         split_manifest_dir=str(tmp_path / "m"))
 
     assert r["n_excluded_training_stems"] == 2
+    assert r["n_excluded_validation_stems"] == 1
     assert r["n_excluded_unassigned_stems"] == 1
     assert r["n_excluded_incomplete_attribute"] == 0
 

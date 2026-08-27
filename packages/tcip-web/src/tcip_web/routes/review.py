@@ -943,6 +943,7 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
                    "and validated on its own.",
             buckets_stamped=[])
 
+    from tcip_mcp.dataset_layout import prediction_bucket_date
     from tcip_mcp.pipelines.feedback import (
         describe_review_validation,
         resolve_operating_point_from_review,
@@ -1049,6 +1050,9 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
         "tiled_source": review_tiled_source,
         # The root the verdict store was opened on, so the split lock travels with the verdicts.
         "scope_root": req.dataset_root,
+        # The reviewed bucket's own date, when it has one: a bound checkpoint's selection check
+        # scopes itself to this the same way the calibration door scopes to labels_dir's date.
+        "calibration_date": prediction_bucket_date(pred_dir),
         # True when the buckets named more than one producing run, false when none named one: both
         # collapse review_experiment_id to None above, but only the first is a real disagreement.
         "experiment_id_ambiguous": len(bucket_exp_ids) > 1,

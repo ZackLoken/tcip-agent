@@ -427,6 +427,7 @@ def resolve_block_calibration_records(
             stem=stem,
         )
 
+    from tcip_mcp.dataset_layout import annotation_date
     from tcip_mcp.pipelines.operating_point import (
         attach_spatial_split_kind_provenance, resolve_operating_point,
     )
@@ -441,6 +442,8 @@ def resolve_block_calibration_records(
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
         "cal_rects": cal_rects, "hold_rects": test_rects,
+        # No manifest on this route; not-applicable regardless via the record's spatial_strip.
+        "split_manifest_dir": None, "calibration_date": annotation_date(labels_dir),
     }
     bundle = resolve_operating_point(trait_name, experiment_id=experiment_id, **resolver_inputs)
     attach_spatial_split_kind_provenance(bundle, spatial)

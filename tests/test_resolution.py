@@ -555,3 +555,28 @@ def test_resolver_train_disjointness_reads_a_declared_documents_result():
     result = {"sweep_data": {"train_disjointness": {"checked": True, "group_check": None}}}
     assert resolver_train_disjointness(result, "classifier_operating_point") == (
         {"checked": True, "group_check": None})
+
+
+# --- resolver_selection_disjointness: the same shape, plus applicable/reason ---
+
+def test_resolver_selection_disjointness_refuses_an_undeclared_document():
+    from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
+
+    with pytest.raises(ValueError, match="not a document"):
+        resolver_selection_disjointness(
+            {"sweep_data": {"selection_disjointness": {"applicable": False}}}, "made_up_document")
+
+
+def test_resolver_selection_disjointness_reads_a_declared_documents_result():
+    from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
+
+    result = {"sweep_data": {"selection_disjointness": {
+        "applicable": True, "reason": None, "checked": True, "group_check": "performed"}}}
+    assert resolver_selection_disjointness(result, "classifier_operating_point") == {
+        "applicable": True, "reason": None, "checked": True, "group_check": "performed"}
+
+
+def test_resolver_selection_disjointness_is_none_for_resolve_scale():
+    from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
+
+    assert resolver_selection_disjointness({"sweep_data": {}}, "resolve_scale") is None

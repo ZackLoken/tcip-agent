@@ -1,5 +1,5 @@
-"""Inference-side binding to a named split manifest: the calibration universe becomes the
-manifest's held-out side for one capture date instead of every labelled stem with an image.
+"""Inference-side binding to a named split manifest: the calibration universe is the manifest's
+third, calibration side, for one capture date, instead of every labelled stem with an image.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 IMG = 32
 SUBJECT = "catkin"
 DATES = ("2-11-26", "2-12-01")
+_STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
 def _save_png(path: Path) -> None:
@@ -29,7 +30,10 @@ def _save_png(path: Path) -> None:
     Image.new("RGB", (IMG, IMG), color=(128, 128, 128)).save(path)
 
 
-def _two_date_dataset(root: Path, stems=("a", "b", "c")) -> Path:
+def _two_date_dataset(root: Path, stems=_STEMS) -> Path:
+    """Two capture dates, eight stems each, all foreground for ``SUBJECT``: enough groups that a
+    three-way draw still leaves the calibration side at least four present images across at
+    least two groups for either date, so the lock's own halving leaves two per half."""
     for date in DATES:
         images_dir, labels_dir = root / "images" / date, root / "annotations" / date
         for stem in stems:
@@ -41,35 +45,46 @@ def _two_date_dataset(root: Path, stems=("a", "b", "c")) -> Path:
     return root
 
 
-def _draw(root: Path, out: Path, *, seed: int = 1) -> dict:
+def _draw(root: Path, out: Path, *, seed: int = 2) -> dict:
     import tcip_store as ts
 
     from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
 
     result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=seed,
-                         train_ratio=0.5, val_ratio=0.5, test_ratio=0.0)
+                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
     assert "error" not in result, result
     return ts.read(split_manifest_key(out))
+
+
+def _calibration_this_date(manifest: dict, date: str = DATES[0]) -> list[str]:
+    return sorted(i.split("/", 1)[1] for i in manifest["splits"]["calibration"]
+                 if i.startswith(f"{date}/"))
+
+
+def _train_this_date(manifest: dict, date: str = DATES[0]) -> set[str]:
+    return {i.split("/", 1)[1] for i in manifest["splits"]["train"] if i.startswith(f"{date}/")}
+
+
+def _val_this_date(manifest: dict, date: str = DATES[0]) -> set[str]:
+    return {i.split("/", 1)[1] for i in manifest["splits"]["val"] if i.startswith(f"{date}/")}
 
 
 # -- calibration_universe_from_manifest ------------------------------------------
 
 
-def test_calibration_universe_from_manifest_holds_only_val_members_present(tmp_path: Path):
+def test_calibration_universe_from_manifest_holds_only_calibration_members_present(tmp_path: Path):
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
 
     root = _two_date_dataset(tmp_path / "ds")
     manifest = _draw(root, tmp_path / "m")
 
     stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
-        manifest, DATES[0], present=["a", "b", "c"])
+        manifest, DATES[0], present=list(_STEMS))
 
-    val_this_date = {i.split("/", 1)[1] for i in manifest["splits"]["val"]
-                     if i.startswith(f"{DATES[0]}/")}
-    train_this_date = {i.split("/", 1)[1] for i in manifest["splits"]["train"]
-                       if i.startswith(f"{DATES[0]}/")}
-    assert set(stems) == val_this_date
-    assert set(excluded["excluded_training_stems"]) == train_this_date
+    assert set(stems) == set(_calibration_this_date(manifest))
+    assert set(excluded["excluded_training_stems"]) == _train_this_date(manifest)
+    assert set(excluded["excluded_validation_stems"]) == _val_this_date(manifest)
+    assert excluded["excluded_unassigned_stems"] == []
     assert group_by == manifest["group_by"]
     assert group_key_map is None
 
@@ -77,30 +92,56 @@ def test_calibration_universe_from_manifest_holds_only_val_members_present(tmp_p
 def test_calibration_universe_from_manifest_excludes_a_stem_not_present(tmp_path: Path):
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
 
-    all_stems = ("a", "b", "c", "d", "e", "f")
-    root = _two_date_dataset(tmp_path / "ds", stems=all_stems)
-    manifest = _draw(root, tmp_path / "m", seed=0)
-    val_this_date = [i.split("/", 1)[1] for i in manifest["splits"]["val"]
-                     if i.startswith(f"{DATES[0]}/")]
-    assert len(val_this_date) >= 3, "fixture must leave room to drop one and still have >=2"
-    present_minus_one = [s for s in all_stems if s != val_this_date[0]]
+    root = _two_date_dataset(tmp_path / "ds")
+    manifest = _draw(root, tmp_path / "m")
+    calibration_this_date = _calibration_this_date(manifest)
+    assert len(calibration_this_date) >= 3, "fixture must leave room to drop one and still have >=2"
+    present_minus_one = [s for s in _STEMS if s != calibration_this_date[0]]
 
     stems, *_rest = calibration_universe_from_manifest(manifest, DATES[0], present=present_minus_one)
 
-    assert val_this_date[0] not in stems
+    assert calibration_this_date[0] not in stems
 
 
-def test_calibration_universe_from_manifest_refuses_fewer_than_two_groups(tmp_path: Path):
-    """The refusal names a remedy: a different draw, or the whole-directory calibration."""
+def test_calibration_universe_from_manifest_reports_an_unassigned_present_stem(tmp_path: Path):
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
 
     root = _two_date_dataset(tmp_path / "ds")
     manifest = _draw(root, tmp_path / "m")
-    val_this_date = [i.split("/", 1)[1] for i in manifest["splits"]["val"]
-                     if i.startswith(f"{DATES[0]}/")]
+
+    _stems, _gb, _gkm, excluded = calibration_universe_from_manifest(
+        manifest, DATES[0], present=list(_STEMS) + ["never_drawn"])
+
+    assert excluded["excluded_unassigned_stems"] == ["never_drawn"]
+
+
+def test_calibration_universe_from_manifest_refuses_fewer_than_two_groups(tmp_path: Path):
+    """The refusal names a remedy: a redraw on this date, or the whole-directory calibration."""
+    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
+
+    root = _two_date_dataset(tmp_path / "ds")
+    manifest = _draw(root, tmp_path / "m")
+    calibration_this_date = _calibration_this_date(manifest)
 
     with pytest.raises(ValueError, match="split_manifest_dir"):
-        calibration_universe_from_manifest(manifest, DATES[0], present=val_this_date[:1])
+        calibration_universe_from_manifest(manifest, DATES[0], present=calibration_this_date[:1])
+
+
+def test_calibration_universe_from_manifest_floor_is_foreground_aware(tmp_path: Path):
+    """A universe with enough raw groups but only one carrying real foreground still refuses:
+    the floor counts foreground groups, not bare group presence, when the caller states which
+    stems are foreground."""
+    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
+
+    root = _two_date_dataset(tmp_path / "ds")
+    manifest = _draw(root, tmp_path / "m")
+    calibration_this_date = _calibration_this_date(manifest)
+    assert len(calibration_this_date) >= 3
+
+    with pytest.raises(ValueError, match="foreground group"):
+        calibration_universe_from_manifest(
+            manifest, DATES[0], present=list(_STEMS),
+            foreground_stems={calibration_this_date[0]})
 
 
 # -- resolve_locked_cal_holdout_split's split_manifest_dir -----------------------
@@ -203,7 +244,7 @@ _CAL_KWARGS = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8, gl
                    postprocess="nms", cross_tile_nms=None, max_dets=None, seed=0, holdout_ratio=0.5)
 
 
-def test_calibrate_operating_point_binds_to_the_manifests_held_out_side(tmp_path: Path):
+def test_calibrate_operating_point_binds_to_the_manifests_calibration_side(tmp_path: Path):
     import tcip_mcp.tools.inference_tools as itools
 
     root = _two_date_dataset(tmp_path / "ds")
@@ -214,13 +255,13 @@ def test_calibrate_operating_point_binds_to_the_manifests_held_out_side(tmp_path
         _CalStub(), "catkin", str(root / "annotations" / DATES[0]),
         str(root / "images" / DATES[0]), split_manifest_dir=str(out), **_CAL_KWARGS)
 
-    val_this_date = {i.split("/", 1)[1] for i in manifest["splits"]["val"]
-                     if i.startswith(f"{DATES[0]}/")}
-    assert set(evidence["calibration_stems"]) == val_this_date
+    calibration_this_date = set(_calibration_this_date(manifest))
+    assert set(evidence["calibration_stems"]) == calibration_this_date
     assert "label_stems" in evidence["reference_inputs"]
     assert evidence["reference_inputs"]["stated_values"]["split_manifest_dir"] == str(out)
     from tcip_mcp.pipelines.resolution import dataset_hash
-    assert dh == dataset_hash(str(root / "annotations" / DATES[0]), stems=sorted(val_this_date))
+    assert dh == dataset_hash(
+        str(root / "annotations" / DATES[0]), stems=sorted(calibration_this_date))
 
 
 def test_calibrate_operating_point_manifest_refuses_a_subject_mismatch(tmp_path: Path):
@@ -301,6 +342,26 @@ def test_calibrate_operating_point_manifest_refuses_a_moved_images_root_by_name(
             split_manifest_dir=str(out), **_CAL_KWARGS)
 
 
+def test_calibrate_operating_point_refuses_a_checkpoint_bound_to_a_different_manifest(
+    tmp_path: Path,
+):
+    import tcip_mcp.tools.inference_tools as itools
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    _draw(root, out)
+    other_out = tmp_path / "m2"
+    _draw(root, other_out, seed=3)
+
+    bound = _CalStub()
+    bound.config["data"]["split"] = {"manifest_binding": {"manifest_dir": str(other_out)}}
+
+    with pytest.raises(ValueError, match="bound to split manifest"):
+        itools._calibrate_operating_point(
+            bound, "catkin", str(root / "annotations" / DATES[0]),
+            str(root / "images" / DATES[0]), split_manifest_dir=str(out), **_CAL_KWARGS)
+
+
 # -- run_inference's own split_manifest_dir refusal --------------------------------
 
 
@@ -336,13 +397,11 @@ def test_force_redraw_binds_to_the_manifest_and_records_its_dir(tmp_path: Path):
     )
 
     assert "error" not in result
-    val_this_date = {i.split("/", 1)[1] for i in manifest["splits"]["val"]
-                     if i.startswith(f"{DATES[0]}/")}
-    train_this_date = {i.split("/", 1)[1] for i in manifest["splits"]["train"]
-                       if i.startswith(f"{DATES[0]}/")}
+    calibration_this_date = set(_calibration_this_date(manifest))
+    train_this_date = _train_this_date(manifest)
     new_members = set(result["new_membership"]["calibration"]) | set(
         result["new_membership"]["holdout"])
-    assert new_members == val_this_date
+    assert new_members == calibration_this_date
     assert new_members.isdisjoint(train_this_date)
 
 
@@ -405,12 +464,11 @@ def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
 
-    root = _two_date_dataset(tmp_path / "ds", stems=("a", "b", "c", "d", "e", "f", "g", "h"))
+    root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     manifest = _draw(root, out)
-    val_this_date = [i.split("/", 1)[1] for i in manifest["splits"]["val"]
-                    if i.startswith(f"{DATES[0]}/")]
-    missing = val_this_date[0]
+    calibration_this_date = _calibration_this_date(manifest)
+    missing = calibration_this_date[0]
     (root / "images" / DATES[0] / f"{missing}.jpg").unlink()
 
     present, _ = label_image_stems(
@@ -516,3 +574,104 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
     identity = row["reference_identity"]
     assert identity["label_stems"]["calibration"]["count"] == len(universe)
     assert identity["stated_values"]["split_manifest_dir"] == str(out)
+    assert row["selection_disjointness"]["applicable"] is False
+
+
+def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, monkeypatch):
+    """``make_splits`` draws three sides; a real bound launch binds to the manifest's train/val;
+    ``export_predictions`` calibrates under the manifest with that run as producer; the sealed
+    row carries ``label_stems.calibration`` and a checked, leak-free ``selection_disjointness``;
+    and ``verify_stamp_binding`` verifies the delivered bucket."""
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.tools.inference_tools as itools
+    from tests._dense_op_fixtures import dense_records
+
+    from tcip_mcp.experiments import create_experiment, find_validation
+    from tcip_mcp.pipelines.operating_point import resolve_operating_point
+    from tcip_mcp.pipelines.resolution import (
+        dataset_hash, read_operating_point_sidecar, verify_stamp_binding,
+    )
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    root = _two_date_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+
+    data_cfg = {
+        "images_dir": str(root / "images" / DATES[0]),
+        "labels_dir": str(root / "annotations" / DATES[0]),
+        "subject": SUBJECT, "attribute": None,
+        "split": {"manifest_dir": str(out)},
+    }
+    experiment_id = "exp_round_trip_bound"
+    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    create_experiment(experiment_id, {})
+    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
+
+    universe = _calibration_this_date(manifest)
+    dh = dataset_hash(root / "annotations" / DATES[0], stems=universe)
+
+    n_images, objects_per_image = 20, 80
+    miss, fp = [0] * n_images, [1] * n_images
+    inputs = {
+        "dataset_hash": dh, "tiled": False, "staged_conf_floor": 0.01,
+        "calibration_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "holdout_records": dense_records(
+            n_images=n_images, objects_per_image=objects_per_image, id_prefix="h", shift=5.0,
+            miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05),
+        "split_manifest_dir": str(out), "calibration_date": DATES[0],
+    }
+    bundle = resolve_operating_point(SUBJECT, experiment_id=experiment_id, **inputs)
+    assert bundle.get("conf").sweep["selection_disjointness"]["checked"] is True
+    assert not bundle.get("conf").sweep["selection_disjointness"]["leaked_groups"]
+    assert not bundle.get("conf").sweep["selection_disjointness"]["leaked_stems"]
+    evidence = {
+        "resolver": "resolve_operating_point", "inputs": inputs,
+        "reference_inputs": {
+            "label_stems": {"calibration": {
+                "path": str(root / "annotations" / DATES[0]), "stems": universe}},
+            "stated_values": {"split_manifest_dir": str(out)},
+        },
+        "calibration_stems": universe,
+    }
+    monkeypatch.setattr(itools, "_calibrate_operating_point",
+                        lambda *a, **k: (bundle, dh, 0, evidence))
+
+    class _BucketStub:
+        def __init__(self) -> None:
+            self.model = SimpleNamespace(score_thresh=0.5, nms_thresh=0.5, detections_per_img=100)
+            self.device = "cpu"
+            self.score_threshold = 0.5
+            self.train_tile_size = None
+            self.train_overlap = None
+
+        def predict_batch(self, paths, **kw):
+            return [{"image": p, "width": IMG, "height": IMG,
+                     "boxes": [[2, 2, 10, 10]], "scores": [0.95], "labels": [1], "count": 1}
+                    for p in paths]
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _BucketStub())
+
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    result = itools.export_predictions(
+        str(ckpt), images_dir=str(root / "images" / DATES[0]),
+        output_dir=str(root / "predictions" / "bound" / DATES[0]),
+        device="cpu", tile=False, trait=SUBJECT,
+        calibration_labels_dir=str(root / "annotations" / DATES[0]),
+        split_manifest_dir=str(out), experiment_id=experiment_id)
+    assert "error" not in result, result
+    bucket = result["output_dir"]
+
+    stamp = read_operating_point_sidecar(bucket)
+    binding = verify_stamp_binding(stamp, bucket, document="operating_point", trait=SUBJECT)
+    assert binding.ok is True
+    assert binding.claimed is True
+
+    pointer = stamp["validated_by"]
+    row = find_validation(pointer["experiment_id"], pointer["record_digest"])
+    assert row["reference_identity"]["label_stems"]["calibration"]["count"] == len(universe)
+    assert row["selection_disjointness"]["applicable"] is True
+    assert row["selection_disjointness"]["checked"] is True

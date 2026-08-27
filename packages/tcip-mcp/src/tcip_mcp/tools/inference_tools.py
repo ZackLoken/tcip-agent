@@ -219,12 +219,14 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     edge (see ``predictor.explicit_edge_provenance``), forwarded unchanged; ``None`` for every
     other source.
 
-    ``split_manifest_dir`` restricts the calibration universe to one capture date's held-out side
-    of a ``split_manifest`` record (``data_tools.read_split_manifest_dir``) instead of every
-    labelled stem with an image: the manifest's ``subject``/``attribute`` must equal this run's
-    recorded training scope, the labels directory's date (``dataset_layout.annotation_date``) must
-    be one the manifest holds members under, and the manifest's ``images_root`` for that date must
-    be ``images_dir``, each refusing by name. ``group_by``/``group_key_map`` default to ``None``
+    ``split_manifest_dir`` restricts the calibration universe to one capture date's
+    ``calibration`` side of a ``split_manifest`` record (``data_tools.read_split_manifest_dir``)
+    instead of every labelled stem with an image: the manifest's ``subject``/``attribute`` must
+    equal this run's recorded training scope, the labels directory's date
+    (``dataset_layout.annotation_date``) must be one the manifest holds members under, and the
+    manifest's ``images_root`` for that date must be ``images_dir``, each refusing by name. A
+    checkpoint bound to a different manifest than the one named here is refused by name too.
+    ``group_by``/``group_key_map`` default to ``None``
     (resolved to ``"tile_prefix"`` when neither a manifest nor a value was given) so a value passed
     beside a manifest is detectable and refuses, naming both: the manifest's own grouping policy
     governs the locked draw instead. The identity (``dh``, the lock, the evidence's
@@ -250,8 +252,11 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     from tcip_mcp.pipelines.resolution import dataset_hash
     from tcip_mcp.pipelines.training.evaluation import build_coco_image_record
 
+    from tcip_mcp.dataset_layout import annotation_date
+
     labels_p = Path(labels_dir)
     require_reference_ground_truth(labels_p)
+    cal_date = annotation_date(labels_dir)
     if split_manifest_dir is not None and (group_by is not None or group_key_map is not None):
         raise ValueError(
             f"split_manifest_dir={split_manifest_dir!r} conflicts with group_by/group_key_map: "
@@ -261,6 +266,16 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # same loader-side reader the training targets use, so the swept count can't diverge from training.
     _data_cfg = (getattr(predictor, "config", {}) or {}).get("data") or {}
     _subject, _attribute = _data_cfg.get("subject"), _data_cfg.get("attribute")
+    _checkpoint_manifest_dir = (
+        (_data_cfg.get("split") or {}).get("manifest_binding") or {}).get("manifest_dir")
+    if (split_manifest_dir is not None and _checkpoint_manifest_dir is not None
+            and _checkpoint_manifest_dir != split_manifest_dir):
+        raise ValueError(
+            f"this checkpoint is bound to split manifest {_checkpoint_manifest_dir!r}, not the "
+            f"{split_manifest_dir!r} this calibration names: calibrating a bound checkpoint "
+            "under a different manifest would check its selection disjointness against a side "
+            "the checkpoint was never trained or chosen with."
+        )
     # Prefers the training run's own recorded map over a fresh registry read, the same preference
     # resolve_decode_id_map applies to decode: the model can only speak the vocabulary it was
     # trained on, so a classes.json whose declared attribute-value order was edited since training
@@ -378,6 +393,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         "cross_tile_nms": cross_tile_nms, "max_dets": max_dets,
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
+        "split_manifest_dir": split_manifest_dir, "calibration_date": cal_date,
     }
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
@@ -516,10 +532,10 @@ def force_redraw_cal_holdout_split(
         holdout_ratio: New calibration/holdout fraction.
         reason: Required, non-empty justification for this redraw, recorded in the audit log
             alongside the old and new split membership.
-        split_manifest_dir: Restrict the redraw's universe to one capture date's held-out side of
-            a split manifest (``data_tools.read_split_manifest_dir``), the same restriction
-            ``run_inference`` applies, instead of every labelled stem with an image. Requires
-            ``labels_dir`` and ``subject``: the manifest's own subject/attribute must equal
+        split_manifest_dir: Restrict the redraw's universe to one capture date's ``calibration``
+            side of a split manifest (``data_tools.read_split_manifest_dir``), the same
+            restriction ``run_inference`` applies, instead of every labelled stem with an image.
+            Requires ``labels_dir`` and ``subject``: the manifest's own subject/attribute must equal
             ``subject``/``attribute``, the date ``labels_dir`` is under must be one the manifest
             holds members under, and the manifest's ``images_root`` for that date must be
             ``images_dir``, each refusing by name. The identity is
@@ -749,17 +765,19 @@ def run_inference(
             silently ignored.
         split_holdout_ratio: Calibration/holdout fraction for the locked split, same
             first-call-only semantics as ``split_seed``.
-        split_manifest_dir: Restrict the calibration universe to one capture date's held-out side
-            of a split manifest (``data_tools.read_split_manifest_dir``) instead of every
-            labelled stem with an image, so the operating point is measured on exactly the set
-            the checkpoint was chosen against, not diluted with training stems. The manifest's
-            subject/attribute must equal the checkpoint's own recorded training scope, the
-            calibration labels' date must be one the manifest holds members under, and the
-            manifest's ``images_root`` for that date must be ``calibration_images_dir`` (or
-            ``images_dir``), each refusing by name. The response carries
-            ``n_excluded_training_stems`` and ``n_excluded_unassigned_stems``, the present stems
-            the manifest's universe left out (its training side, and stems the draw never
-            assigned), beside ``n_excluded_incomplete_attribute``.
+        split_manifest_dir: Restrict the calibration universe to one capture date's
+            ``calibration`` side of a split manifest (``data_tools.read_split_manifest_dir``)
+            instead of every labelled stem with an image, so the operating point is measured on
+            exactly the side the manifest held out for it, never the side the checkpoint was
+            chosen on. A checkpoint bound to a different manifest than the one named here is
+            refused by name. The manifest's subject/attribute must equal the checkpoint's own
+            recorded training scope, the calibration labels' date must be one the manifest holds
+            members under, and the manifest's ``images_root`` for that date must be
+            ``calibration_images_dir`` (or ``images_dir``), each refusing by name. The response
+            carries ``n_excluded_training_stems``, ``n_excluded_validation_stems`` and
+            ``n_excluded_unassigned_stems``, the present stems the manifest's universe left out
+            (its train side, its val side, and stems the draw never assigned), beside
+            ``n_excluded_incomplete_attribute``.
     """
     if not Path(checkpoint_path).is_file():
         return {"error": f"Checkpoint not found: {checkpoint_path}"}
@@ -989,6 +1007,8 @@ def run_inference(
         manifest_excluded = evidence.get("excluded")
         if manifest_excluded is not None:
             extra["n_excluded_training_stems"] = len(manifest_excluded["excluded_training_stems"])
+            extra["n_excluded_validation_stems"] = len(
+                manifest_excluded["excluded_validation_stems"])
             extra["n_excluded_unassigned_stems"] = len(manifest_excluded["excluded_unassigned_stems"])
         # The full sweep can be large, persist it and return the path (provenance emits has_sweep).
         # Keyed on cal_hash alone, a second checkpoint (or the same checkpoint under
@@ -1748,9 +1768,10 @@ def export_predictions(
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating
             point (``images_dir`` regime only; not accepted with ``raster_path``, see ``trait``).
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
-        split_manifest_dir: Restrict calibration to one capture date's held-out side of a split
-            manifest (forwarded to ``run_inference``; see its own doc), so a manifest-restricted
-            calibration's evidence can earn a validation record through this door.
+        split_manifest_dir: Restrict calibration to one capture date's ``calibration`` side of a
+            split manifest (forwarded to ``run_inference``; see its own doc), so a
+            manifest-restricted calibration's evidence can earn a validation record through this
+            door.
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
         overwrite: Write into ``output_dir`` even if it exists. Refused if the bucket has review
@@ -2011,9 +2032,10 @@ def tabulate_counts(
         postprocess: Cross-tile merge, "nms" or "nmm".
         calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
         calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
-        split_manifest_dir: Restrict calibration to one capture date's held-out side of a split
-            manifest (forwarded to ``run_inference``; see its own doc), so a manifest-restricted
-            calibration's evidence can earn a validation record through this door.
+        split_manifest_dir: Restrict calibration to one capture date's ``calibration`` side of a
+            split manifest (forwarded to ``run_inference``; see its own doc), so a
+            manifest-restricted calibration's evidence can earn a validation record through this
+            door.
         experiment_id: The run that produced the checkpoint, for provenance (forwarded to
             ``run_inference``; see its own doc for the best-effort resolution when omitted).
         acknowledge_unvalidated: Write the count CSV even when the operating point is unvalidated,

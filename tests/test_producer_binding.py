@@ -259,6 +259,62 @@ def test_same_length_replacement_with_restored_timestamp_floors(tmp_path):
     assert _count_validity(pred_dir)["validated"] == "false"
 
 
+def test_a_row_stating_split_manifest_dir_with_no_selection_disjointness_floors(tmp_path):
+    """A row a writer other than this platform produced, or one sealed before the field existed,
+    states a manifest but carries no selection_disjointness at all: the door floors it by name,
+    never reads a missing check as a passing one."""
+    root = tmp_path / "ds"
+    pred_dir = _bucket(root)
+    write_bound_sidecar(
+        pred_dir, _count_stamp(), dataset_root=root,
+        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        selection_disjointness=None,
+    )
+
+    validity = _count_validity(pred_dir)
+    assert validity["validated"] == "false"
+    note = validity["binding_notes"][str(pred_dir)]
+    assert "selection_disjointness" in note and "some/manifest" in note
+    assert not _delivers(validity)
+
+
+def test_a_row_stating_split_manifest_dir_with_an_unchecked_selection_disjointness_floors(
+    tmp_path,
+):
+    """A row that states a manifest with a selection_disjointness present but neither
+    not-applicable-with-a-reason nor checked (the unresolvable shape) still floors: the field
+    has to answer the question, not merely exist."""
+    root = tmp_path / "ds"
+    pred_dir = _bucket(root)
+    write_bound_sidecar(
+        pred_dir, _count_stamp(), dataset_root=root,
+        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        selection_disjointness={"applicable": True, "reason": "no record to check against",
+                                "checked": False, "group_check": None},
+    )
+
+    validity = _count_validity(pred_dir)
+    assert validity["validated"] == "false"
+    assert "selection_disjointness" in validity["binding_notes"][str(pred_dir)]
+
+
+def test_a_row_stating_split_manifest_dir_with_a_checked_no_leak_selection_disjointness_delivers(
+    tmp_path,
+):
+    """The admits-valid-work half: a row whose selection_disjointness is checked with no leak
+    delivers normally, the floor above never reaches a legitimate manifest-bound claim."""
+    root = tmp_path / "ds"
+    pred_dir = _bucket(root)
+    write_bound_sidecar(
+        pred_dir, _count_stamp(), dataset_root=root,
+        reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
+        selection_disjointness={"applicable": True, "reason": None, "checked": True,
+                                "group_check": "performed"},
+    )
+
+    assert _count_validity(pred_dir)["validated"] == "held_out_annotations"
+
+
 def test_classifier_trust_set_ignores_unbacked_ids(tmp_path):
     """The runs a classifier stamp is checked against come from verified records, not from what a
     count bucket declares for itself beside its own predictions."""

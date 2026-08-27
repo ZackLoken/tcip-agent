@@ -108,6 +108,13 @@ _FAILURE_MESSAGES: list[tuple[tuple[str, ...], str]] = [
      "Not yet. Some of the reviewed images (or images from the same source, e.g. tiles of one "
      "photo) were also used to train this model, so they can't function as an independent check. "
      "Review a different set of images this model never trained on."),
+    (("selection_disjointness_unresolvable",),
+     "Not yet. This model's record does not establish which images chose it, so the platform "
+     "can't confirm the reviewed images were held back from that choice. Retrain with the "
+     "current data (which records this), or use a model whose training record is known."),
+    (("selection_disjointness_leaked",),
+     "Not yet. The images used to choose this model's best weights cannot check it. Review "
+     "images the model neither trained on nor was chosen against."),
     (("content_shared_with_calibration",),
      "Not yet. One or more of the held-back images you reviewed share content with the calibration "
      "images, so they can't function as an independent check. Review a genuinely distinct set of "
@@ -439,6 +446,7 @@ def resolve_operating_point_from_review(
     staged_conf_floor: float | None = None,
     experiment_id_ambiguous: bool = False,
     subject: str | None = None,
+    calibration_date: str | None = None,
 ) -> ResolvedBundle:
     """Resolve the count operating point from review verdicts (the review-confirmation reference).
 
@@ -492,6 +500,12 @@ def resolve_operating_point_from_review(
 
     ``subject`` (default ``None``) is forwarded to :func:`review_to_records`, see there: the
     object identity a zero-verdict image's own coverage claim is judged against.
+
+    ``calibration_date`` is the caller's own fact, never derived here (the reviewed bucket's date,
+    when the caller can name one): forwarded to ``resolve_operating_point``'s selection-disjointness
+    check, which is applicable only when the checkpoint named by ``experiment_id`` carries a
+    ``manifest_binding``, since this function takes no split manifest of its own, the universe
+    here is the breeder's own confirmations.
     """
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.operating_point import (
@@ -520,6 +534,7 @@ def resolve_operating_point_from_review(
         validated_reference=VALIDATED_REVIEW_CONFIRMED,
         experiment_id=experiment_id, staged_conf_floor=staged_conf_floor,
         adjudication_covered=lambda r: bool(r.get("adjudication_covered")),
+        calibration_date=calibration_date,
     )
     attach_split_policy_provenance(bundle, locked)
     conf = bundle.params.get("conf")

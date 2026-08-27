@@ -180,8 +180,9 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
 - Small objects: opt-in SAHI-style sliding-window tiling at train and inference
   time (core-region reconstruction + global NMS), plus an FCOS/RetinaNet anchor-free
   detector option and an extra high-resolution (P2) pyramid level.
-- Honest splits: group-aware, annotation-stratified train/val/test splitting
-  (no source-image leakage) with automatic validation loaders.
+- Honest splits: group-aware, annotation-stratified train/val/calibration splitting
+  (no source-image leakage) with automatic validation loaders; the calibration side is
+  held out from both training and checkpoint selection.
 - Imbalance & augmentation: class-weighted / focal losses and a nadir-imagery
   augmentation preset (free rotation + flips; mosaic/copy-paste intentionally off).
 - HPO: Ray Tune search over the composite, with a pluggable searcher/scheduler
