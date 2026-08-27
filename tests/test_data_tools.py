@@ -233,6 +233,64 @@ def test_make_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(tmp_pa
     assert "plotA" in result["error"]
 
 
+def test_make_splits_materialize_refuses_an_incomplete_band_group_before_writing(tmp_path: Path):
+    """A band group whose manifest names a missing sibling is refused before any stem list, the
+    manifest or a split tree is written, never a raise through the tool after they land."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    (root / "annotations" / "2-11-26").mkdir(parents=True)
+
+    band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
+    np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
+    write_band_group_manifest(images_dir, "plotA", {"G": band_g, "R": band_r})  # R never created
+    json_io.write_annotations(
+        root / "annotations" / "2-11-26" / "plotA.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf")
+
+    assert "error" in result
+    assert "plotA" in result["error"] and "R" in result["error"]
+    assert not out.exists()
+
+
+def test_make_splits_materialize_places_a_complete_band_group(tmp_path: Path):
+    """A complete band group still materializes, copying or symlinking every sibling band plus
+    its manifest."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    for copy_files in (True, False):
+        root = tmp_path / f"ds_{copy_files}"
+        images_dir = root / "images" / "2-11-26"
+        images_dir.mkdir(parents=True)
+        (root / "annotations" / "2-11-26").mkdir(parents=True)
+        band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
+        np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
+        np.save(band_r, np.zeros((4, 4), dtype=np.uint8))
+        write_band_group_manifest(images_dir, "plotA", {"G": band_g, "R": band_r})
+        json_io.write_annotations(
+            root / "annotations" / "2-11-26" / "plotA.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+        out = tmp_path / f"m_{copy_files}"
+
+        result = make_splits(str(root), output_path=str(out), materialize=True, subject="leaf",
+                             copy_files=copy_files, train_ratio=1.0, val_ratio=0.0, test_ratio=0.0)
+
+        assert "error" not in result, result
+        placed = {p.name for p in (out / "train" / "images").iterdir()}
+        assert placed == {"plotA.bandgroup", "plotA_G.npy", "plotA_R.npy"}
+
+
 def test_make_splits_stats_only_carries_dataset_hash(data_dir: Path):
     """A stats-only call's answer identifies the labels it partitioned, the same as a manifest
     call's own per-date record."""
