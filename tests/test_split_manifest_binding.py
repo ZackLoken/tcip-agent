@@ -156,15 +156,16 @@ def test_bind_manifest_stems_refuses_a_manifest_member_the_run_does_not_admit(tm
 
 
 def test_bind_manifest_stems_refuses_an_empty_side_after_binding(tmp_path: Path):
-    from tcip_mcp.pipelines.data.splits import bind_manifest_stems
-    from tcip_mcp.tools.data_tools import read_split_manifest_dir
+    """No manifest write can draw an empty side any more (every ratio is refused at zero): an
+    empty side after binding is exercised on a real draw with its own val members for one date
+    moved onto train through the store, the shape a manifest predating that rail would read as."""
+    from tcip_mcp.pipelines.data.splits import bind_manifest_stems, member_identity_parts
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    result = make_splits(str(root), output_path=str(out), subject=SUBJECT, seed=1,
-                         train_ratio=0.99, val_ratio=0.0, calibration_ratio=0.01)
-    assert "error" not in result, result
-    manifest = read_split_manifest_dir(out)
+    manifest = _draw(root, tmp_path / "m")
+    moved = [i for i in manifest["splits"]["val"] if member_identity_parts(i)[0] == DATES[0]]
+    manifest["splits"]["val"] = [i for i in manifest["splits"]["val"] if i not in moved]
+    manifest["splits"]["train"] = sorted(manifest["splits"]["train"] + moved)
 
     with pytest.raises(ValueError, match="empty side"):
         bind_manifest_stems(manifest, DATES[0], SUBJECT, None,

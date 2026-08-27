@@ -177,7 +177,7 @@ def test_make_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Pat
     manifest write requires a non-zero one."""
     result = make_splits(str(data_dir), train_ratio=0.7, val_ratio=0.2, calibration_ratio=0.1)
     assert "error" not in result, result
-    assert result["splits"]["calibration"] >= 0
+    assert result["splits"]["calibration"] > 0
 
 
 def test_make_splits_reports_an_unreadable_label_by_name(data_dir: Path, tmp_path: Path):
@@ -335,9 +335,13 @@ def test_make_splits_materialize_places_a_complete_band_group(tmp_path: Path):
                              calibration_ratio=0.25)
 
         assert "error" not in result, result
-        placed = {p.name for split in ("train", "val", "calibration")
-                 for p in (out / split / "images").glob("plotA*")}
-        assert placed == {"plotA.bandgroup", "plotA_G.npy", "plotA_R.npy"}
+        by_split = {
+            split: {p.name for p in (out / split / "images").glob("plotA*")}
+            for split in ("train", "val", "calibration")
+        }
+        holding = [split for split, names in by_split.items() if names]
+        assert len(holding) == 1, by_split
+        assert by_split[holding[0]] == {"plotA.bandgroup", "plotA_G.npy", "plotA_R.npy"}
 
 
 def test_make_splits_stats_only_carries_dataset_hash(data_dir: Path):
@@ -453,6 +457,21 @@ def test_make_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
     assert not out.exists()
 
 
+def test_make_splits_manifest_write_refuses_a_zero_ratio_on_any_side_by_name(tmp_path: Path):
+    """A manifest write requires all three ratios non-zero, refused by name naming the zero one,
+    before the foreground floor is ever reached: no side can be dropped by zeroing its ratio."""
+    root = _multi_source_dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+
+    result = make_splits(str(root), output_path=str(out), subject="catkin", seed=1,
+                         train_ratio=0.75, val_ratio=0.0, calibration_ratio=0.25)
+
+    assert "error" in result
+    assert "val_ratio" in result["error"] and "must be non-zero" in result["error"]
+    assert "foreground group" not in result["error"]  # never reaches the floor
+    assert not out.exists()
+
+
 def test_make_splits_floor_ignores_a_groups_only_annotations_of_another_subject(tmp_path: Path):
     """A confirmed-negative-for-the-draws-subject group whose label file happens to carry
     another subject's annotation is not this draw's foreground: the subject-scoped counter
@@ -492,6 +511,79 @@ def test_make_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     assert "error" in result
     assert "foreground group" in result["error"]
     assert not out.exists()
+
+
+def _leaf_dataset_with_negatives(root: Path, date: str, n_foreground: int, n_negative: int) -> None:
+    """``n_foreground`` single-tile ``leaf`` groups plus ``n_negative`` confirmed-negative
+    images, all under one capture date."""
+    from PIL import Image
+
+    from tcip_mcp.dataset_layout import record_image_statuses, status_bucket
+
+    images_dir, labels_dir = root / "images" / date, root / "annotations" / date
+    images_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(n_foreground):
+        stem = f"{date}_fg{i}"
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(
+            labels_dir / f"{stem}.json",
+            [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+        )
+    negative_names = []
+    for i in range(n_negative):
+        stem = f"{date}_bg{i}"
+        Image.new("RGB", (100, 80), (128, 128, 128)).save(images_dir / f"{stem}.jpg")
+        json_io.write_annotations(labels_dir / f"{stem}.json", [], 100, 80, keep_empty=True)
+        negative_names.append(f"{stem}.jpg")
+    record_image_statuses(root, status_bucket("leaf", date),
+                          {n: "negative" for n in negative_names}, recorded_by="user:tester")
+
+
+def test_make_splits_calibration_side_holds_real_foreground_regardless_of_stratify_foreground(
+    tmp_path: Path,
+):
+    """The minimum-foreground pass sees the draw's subject-scoped foreground counts on every
+    manifest draw, not only when stratify_foreground also balances by them: the calibration
+    side's stated minimum of two foreground groups is met with real foreground even with
+    balancing off, across every seed."""
+    root = tmp_path / "ds"
+    date = "2-11-26"
+    _leaf_dataset_with_negatives(root, date, n_foreground=4, n_negative=6)
+
+    for seed in range(1, 21):
+        out = tmp_path / f"m{seed}"
+        result = make_splits(str(root), output_path=str(out), subject="leaf", seed=seed,
+                             train_ratio=0.8, val_ratio=0.1, calibration_ratio=0.1,
+                             stratify_foreground=False)
+        assert "error" not in result, (seed, result)
+        assert result["calibration_foreground_groups_by_date"].get(date, 0) >= 2, (seed, result)
+
+
+def test_make_splits_calibration_foreground_groups_by_date_reports_zero_for_a_short_date(
+    tmp_path: Path,
+):
+    """Every date the manifest holds members under carries a key in
+    calibration_foreground_groups_by_date, 0 for a date whose calibration slice drew no
+    foreground, so a caller can tell a short date from a date the draw never held without
+    cross-checking dataset_hashes_by_date."""
+    root = tmp_path / "ds"
+    date_a, date_b = "2-11-26", "2-12-01"
+    _leaf_dataset_with_negatives(root, date_a, n_foreground=3, n_negative=2)
+    _leaf_dataset_with_negatives(root, date_b, n_foreground=1, n_negative=4)
+
+    found_zero = False
+    for seed in range(1, 11):
+        out = tmp_path / f"m{seed}"
+        result = make_splits(str(root), output_path=str(out), subject="leaf", seed=seed,
+                             train_ratio=0.8, val_ratio=0.1, calibration_ratio=0.1)
+        assert "error" not in result, (seed, result)
+        by_date = result["calibration_foreground_groups_by_date"]
+        # Every held date reports a count, 0 included, matching dataset_hashes_by_date's own keys.
+        assert set(by_date) == set(result["dataset_hashes_by_date"]) == {date_a, date_b}
+        if any(count == 0 for count in by_date.values()):
+            found_zero = True
+    assert found_zero, "no seed among 1..10 drew a date's calibration slice with zero foreground"
 
 
 def _multi_source_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=3) -> Path:

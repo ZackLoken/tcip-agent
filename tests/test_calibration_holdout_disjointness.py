@@ -623,6 +623,41 @@ def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
         itools._calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
 
 
+def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(tmp_path, monkeypatch):
+    """The locked cal/holdout draw balances on the checkpoint's own subject's annotation count,
+    the same subject-aware scope the manifest draw itself applies: a stem carrying only another
+    subject's annotation counts zero foreground here, not the file's raw record count."""
+    import tcip_mcp.pipelines.data.splits as splits_mod
+    import tcip_mcp.tools.inference_tools as itools
+
+    stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
+    images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
+    # b_0_1 carries only a different subject's annotation: zero catkin foreground.
+    json_io.write_annotations(
+        str(labels_dir / "b_0_1.json"),
+        [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))], IMG, IMG, keep_empty=True,
+    )
+
+    captured: dict = {}
+    real_resolve = splits_mod.resolve_locked_cal_holdout_split
+
+    def _capture(stems, **kwargs):
+        captured["annotation_counts"] = dict(kwargs.get("annotation_counts") or {})
+        return real_resolve(stems, **kwargs)
+
+    monkeypatch.setattr(splits_mod, "resolve_locked_cal_holdout_split", _capture)
+
+    stub = _CalStub()
+    stub.config = {"data": {"subject": "catkin"}}
+    itools._calibrate_operating_point(
+        stub, "catkin", str(labels_dir), str(images_dir),
+        tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
+        global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
+        seed=1, holdout_ratio=0.5,
+    )
+    assert captured["annotation_counts"]["b_0_1"] == 0
+
+
 def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
     """force_redraw_cal_holdout_split(images_dir=...) must use the same labels-intersect-images
     scan _calibrate_operating_point uses, not a second independent labels-only glob: a stem

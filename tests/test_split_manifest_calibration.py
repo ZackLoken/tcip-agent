@@ -116,14 +116,15 @@ def test_calibration_universe_from_manifest_reports_an_unassigned_present_stem(t
 
 
 def test_calibration_universe_from_manifest_refuses_fewer_than_two_groups(tmp_path: Path):
-    """The refusal names a remedy: a redraw on this date, or the whole-directory calibration."""
+    """The refusal names a remedy: a redraw on this date with a larger calibration ratio or more
+    foreground groups."""
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
 
     root = _two_date_dataset(tmp_path / "ds")
     manifest = _draw(root, tmp_path / "m")
     calibration_this_date = _calibration_this_date(manifest)
 
-    with pytest.raises(ValueError, match="split_manifest_dir"):
+    with pytest.raises(ValueError, match="calibration_ratio"):
         calibration_universe_from_manifest(manifest, DATES[0], present=calibration_this_date[:1])
 
 

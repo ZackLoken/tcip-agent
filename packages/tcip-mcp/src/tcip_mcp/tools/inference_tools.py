@@ -311,7 +311,10 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     else:
         group_by = group_by or "tile_prefix"
     dh = dataset_hash(labels_dir, stems=(stems if split_manifest_dir is not None else None))
-    annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+    annotation_counts = {
+        s: count_label_lines(labels_dir, s, subject=_subject, attribute=_attribute)
+        for s in stems
+    }
     # Detector-cap censoring: a flat max_dets can still truncate a dense calibration image's raw
     # detections the same way a too-high conf floor censors them, so derive the collection-pass cap
     # from this labeled split's own density (same formula scripts/calibrate_operating_point.py uses)
@@ -623,7 +626,10 @@ def force_redraw_cal_holdout_split(
     if manifest_stems is not None:
         stems = manifest_stems
         try:
-            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+            annotation_counts = {
+                s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
+                for s in stems
+            }
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
     elif labels_dir:
@@ -631,7 +637,10 @@ def force_redraw_cal_holdout_split(
         # independent glob (images_dir omitted degrades to the prior labels-only scan).
         stems, _ = label_image_stems(labels_dir, images_dir)
         try:
-            annotation_counts = {s: count_label_lines(labels_dir, s) for s in stems}
+            annotation_counts = {
+                s: count_label_lines(labels_dir, s, subject=subject, attribute=attribute)
+                for s in stems
+            }
         except UnreadableLabelDocument as exc:
             return {"error": str(exc)}
     elif old_lock:

@@ -62,7 +62,7 @@ def test_script_and_mcp_path_share_the_same_cap_constant(monkeypatch, tmp_path):
         stems = ["a", "b"]
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
@@ -125,7 +125,7 @@ def test_script_threads_applied_floor_and_shared_cap(monkeypatch, tmp_path):
         stems = ["a", "b"]
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 1)
 
     def _resolve_locked(stems, **kw):
         return {"calibration": ["a"], "holdout": ["b"]}
@@ -193,7 +193,7 @@ def test_script_collection_cap_is_density_derived_not_the_flat_default(monkeypat
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
     # Sparse split: 2 objects/stem -> derive_max_dets_from_counts floors at 100, well under
     # DEFAULT_MAX_DETS (1000), a real, visible difference from the flat constant.
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 2)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 2)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)
@@ -241,7 +241,7 @@ def test_script_writes_nothing_into_the_experiment_record(monkeypatch, tmp_path,
         stems = ["a", "b"]
 
     monkeypatch.setattr("tcip_mcp.pipelines.data.datasets.build_dataset", lambda *a, **kw: _Probe())
-    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s: 1)
+    monkeypatch.setattr("tcip_mcp.pipelines.data.splits.count_label_lines", lambda labels_dir, s, **kw: 1)
     monkeypatch.setattr("tcip_mcp.pipelines.data.splits.resolve_locked_cal_holdout_split",
                         lambda stems, **kw: {"calibration": ["a"], "holdout": ["b"]})
     monkeypatch.setattr("torch.utils.data.DataLoader", lambda ds, **kw: ds)

@@ -116,6 +116,36 @@ def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall
     assert "2 foreground group" in message
 
 
+def test_refuse_insufficient_foreground_groups_remedy_names_no_ratio_escape():
+    """The remedy names annotating or confirming more foreground; a manifest write requires
+    every side's ratio non-zero, so no side can be dropped by zeroing its ratio."""
+    from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
+
+    with pytest.raises(ValueError) as exc_info:
+        refuse_insufficient_foreground_groups(2, {"train": 1, "val": 1, "calibration": 2})
+    message = str(exc_info.value)
+    assert "drop a side" not in message
+    assert "annotate or confirm more foreground groups" in message
+
+
+def test_calibration_universe_from_manifest_floor_remedy_names_ratio_and_date():
+    """The composed refusal ends with a redraw remedy naming a larger calibration ratio or more
+    foreground groups on the date, never the whole directory: a manifest write refuses a zero
+    calibration_ratio by name, so that fallback names an action no caller can take."""
+    from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest
+
+    manifest = {
+        "splits": {"train": ["d1/a"], "val": ["d1/b"], "calibration": ["d1/c"]},
+        "group_by": "stem",
+    }
+    with pytest.raises(ValueError) as exc_info:
+        calibration_universe_from_manifest(manifest, "d1", {"c"}, foreground_stems=set())
+    message = str(exc_info.value)
+    assert "whole directory" not in message
+    assert "calibration_ratio" in message
+    assert "'d1'" in message
+
+
 def test_group_split_no_foreground_fallback():
     stems = _grouped(4)
     counts = {s: 0 for s in stems}
