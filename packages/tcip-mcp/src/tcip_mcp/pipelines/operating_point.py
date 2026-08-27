@@ -16,7 +16,7 @@ import hashlib
 import json
 import math
 import statistics
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from tcip_store import non_finite_state, stored_number
 
@@ -468,7 +468,10 @@ def _train_disjointness(
     ``"partial"`` (some stems fell back to exact-stem), ``"not_performed"`` (no group policy
     resolved at all, wholly exact-stem), ``"spatial_strip"`` (a within-image split, checked
     by source stem underneath each region identity), or ``"spatial_strip_geometric"`` (see below).
-    A leak found by either mechanism blocks ``passed``.
+    A leak found by either mechanism blocks ``passed``. The group/stem resolution above (not the
+    spatial-strip branch) is :func:`_resolve_group_stem_disjointness`, shared verbatim with
+    :func:`_selection_disjointness`, which runs the identical check against a checkpoint's own
+    selection (val) side instead of its training side.
 
     ``cal_rects``/``hold_rects`` (keyed by source stem, one pixel rect ``(x0, y0, x1, y1)`` per
     stem) are optional and additive: every existing caller omits them and gets exactly the
@@ -490,14 +493,12 @@ def _train_disjointness(
         # anything to compare, so this is genuinely unresolvable, not merely ungrouped.
         return dict(_UNRESOLVABLE_TRAIN_DISJOINTNESS)
 
-    from tcip_mcp.pipelines.data.splits import (
-        GROUP_KEY_FNS, resolve_group_key_fn, stem_of_spatial_identity,
-    )
-
     cal_hold_stems = sorted(cal_ids | hold_ids)
     group_by = split.get("group_by")
 
     if group_by == "spatial_strip":
+        from tcip_mcp.pipelines.data.splits import stem_of_spatial_identity
+
         if cal_rects or hold_rects:
             return _spatial_strip_geometric_disjointness(
                 split.get("spatial") or {}, cal_rects, hold_rects)
@@ -511,35 +512,51 @@ def _train_disjointness(
         }
 
     persisted_map = split.get("group_key_map") if group_by == "explicit_map" else None
+    return _resolve_group_stem_disjointness(train_stems, cal_hold_stems, group_by, persisted_map)
 
-    covered_train: list[str] = []
+
+def _resolve_group_stem_disjointness(
+    named_side_stems: Sequence[str], cal_hold_stems: Sequence[str], group_by: str | None,
+    persisted_map: dict[str, str] | None,
+) -> dict:
+    """The group- and stem-level leak resolution :func:`_train_disjointness` and the selection
+    check share: a named, recognized strategy (``tile_prefix``/``stem``) resolves every stem; an
+    ``explicit_map`` policy resolves via ``persisted_map`` for whichever stems it covers; anything
+    else resolves nothing at the group level. Every stem the group check couldn't cover falls back
+    to the free, policy-independent check: exact stem-set overlap between ``named_side_stems`` and
+    ``cal_hold_stems``. Never called for a ``spatial_strip`` record, which each caller branches on
+    before reaching here.
+    """
+    from tcip_mcp.pipelines.data.splits import GROUP_KEY_FNS, resolve_group_key_fn
+
+    covered_side: list[str] = []
     covered_cal_hold: list[str] = []
     key_fn = None
     if persisted_map:
-        covered_train = [s for s in train_stems if s in persisted_map]
+        covered_side = [s for s in named_side_stems if s in persisted_map]
         covered_cal_hold = [s for s in cal_hold_stems if s in persisted_map]
-        if covered_train or covered_cal_hold:
+        if covered_side or covered_cal_hold:
             # The map, when present, always wins over group_by per resolve_group_key_fn's own
             # contract, the "tile_prefix" here is an inert placeholder, never consulted.
-            key_fn = resolve_group_key_fn("tile_prefix", covered_train + covered_cal_hold,
+            key_fn = resolve_group_key_fn("tile_prefix", covered_side + covered_cal_hold,
                                           group_key_map=persisted_map)
     elif group_by and group_by in GROUP_KEY_FNS:
         key_fn = GROUP_KEY_FNS[group_by]
-        covered_train, covered_cal_hold = list(train_stems), cal_hold_stems
+        covered_side, covered_cal_hold = list(named_side_stems), list(cal_hold_stems)
 
     leaked_groups: list[str] = []
     if key_fn is not None:
-        train_groups = {key_fn(s) for s in covered_train}
+        side_groups = {key_fn(s) for s in covered_side}
         cal_hold_groups = {key_fn(s) for s in covered_cal_hold}
-        leaked_groups = sorted(train_groups & cal_hold_groups)
+        leaked_groups = sorted(side_groups & cal_hold_groups)
 
-    uncovered_train = sorted(set(train_stems) - set(covered_train))
+    uncovered_side = sorted(set(named_side_stems) - set(covered_side))
     uncovered_cal_hold = sorted(set(cal_hold_stems) - set(covered_cal_hold))
-    leaked_stems = sorted(set(uncovered_train) & set(uncovered_cal_hold))
+    leaked_stems = sorted(set(uncovered_side) & set(uncovered_cal_hold))
 
     if key_fn is None:
         group_check = "not_performed"
-    elif uncovered_train or uncovered_cal_hold:
+    elif uncovered_side or uncovered_cal_hold:
         group_check = "partial"
     else:
         group_check = "performed"
@@ -551,6 +568,96 @@ def _train_disjointness(
         "leaked_stems": leaked_stems,
         "group_check": group_check,
     }
+
+
+_NOT_APPLICABLE_SELECTION_SHAPE = {
+    "checked": False, "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
+    "group_check": None,
+}
+_UNRESOLVABLE_SELECTION_SHAPE = {
+    "checked": False, "unresolvable": True, "leaked_groups": [], "leaked_stems": [],
+    "group_check": None,
+}
+
+
+def _selection_disjointness(
+    experiment_id: str | None, cal_ids: set, hold_ids: set, *,
+    split_manifest_dir: str | None = None, calibration_date: str | None = None,
+) -> dict:
+    """Whether the cal/holdout images were also on the checkpoint's own selection side (its
+    ``split.json``'s ``val``), the check the manifest family's own ruling exists for: a checkpoint
+    chosen on a side and then calibrated over that same side would clear every other gate while
+    measuring the operating point on exactly the data the shipped weights were picked to fit.
+
+    Unlike :func:`_train_disjointness` (date-blind, checked on every calibration), this check is
+    ``applicable`` only when a selection side could plausibly be touched: the calibration names a
+    split manifest (``split_manifest_dir``) or the checkpoint's own record carries a
+    ``manifest_binding``, whichever is true. Not-applicable, each with a breeder-legible reason
+    (``review_calibration.py`` renders it), for: no manifest named and no ``manifest_binding`` on
+    the record; a ``spatial_strip`` record (the within-image route's own ``calibration_region`` is
+    a different check, untouched here); an empty ``val``; ``resolved_group_by == "external"`` (the
+    ``val`` came from a directory the record's ``date`` says nothing about); or a
+    ``calibration_date`` other than the record's own ``date`` (a bare stem means the same image
+    only under one date). Unresolvable, rather than not-applicable, when the calibration names a
+    manifest but there is no experiment record to check it against
+    (``experiment_id is None``): the ruling forbids exactly the number whose provenance can't be
+    checked, and a foreign checkpoint's train check being merely skipped is not license to skip
+    this one silently too.
+
+    Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``.
+    """
+    if experiment_id is None:
+        if split_manifest_dir is not None:
+            return {"applicable": True,
+                    "reason": "the calibration names a split manifest but this checkpoint has no "
+                              "recorded experiment to check its selection side against",
+                    **_UNRESOLVABLE_SELECTION_SHAPE}
+        return {"applicable": False,
+                "reason": "no split manifest named and no recorded experiment to read a "
+                          "selection side from",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+
+    from tcip_mcp.experiments import read_split_manifest
+
+    split = read_split_manifest(experiment_id)
+    manifest_binding = split.get("manifest_binding")
+    if split_manifest_dir is None and not manifest_binding:
+        return {"applicable": False,
+                "reason": "no split manifest named and this checkpoint's own run was not bound "
+                          "to one",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+    if not split:
+        return {"applicable": True,
+                "reason": "the calibration names a split manifest but this checkpoint's run "
+                          "recorded no split.json to check its selection side against",
+                **_UNRESOLVABLE_SELECTION_SHAPE}
+    if split.get("group_by") == "spatial_strip":
+        return {"applicable": False,
+                "reason": "the run drew a within-image spatial split; its own calibration_region "
+                          "is the selection check for that route, not this one",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+    val_stems = split.get("val") or []
+    if not val_stems:
+        return {"applicable": False, "reason": "the run's split.json carries no val members",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+    if split.get("group_by") == "external":
+        return {"applicable": False,
+                "reason": "the run validated against an explicit val_images_dir; its date says "
+                          "nothing about that directory's own membership",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+    record_date = split.get("date")
+    if calibration_date != record_date:
+        return {"applicable": False,
+                "reason": f"the calibration is dated {calibration_date!r}, the run's own val is "
+                          f"dated {record_date!r}; a bare stem means the same image only under "
+                          "one date",
+                **_NOT_APPLICABLE_SELECTION_SHAPE}
+
+    cal_hold_stems = sorted(cal_ids | hold_ids)
+    persisted_map = split.get("group_key_map") if split.get("group_by") == "explicit_map" else None
+    resolved = _resolve_group_stem_disjointness(
+        val_stems, cal_hold_stems, split.get("group_by"), persisted_map)
+    return {"applicable": True, "reason": None, **resolved}
 
 
 def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None:
@@ -620,6 +727,8 @@ def resolve_operating_point(
     adjudication_covered: Callable[[dict], bool] | None = None,
     cal_rects: dict[str, tuple[int, int, int, int]] | None = None,
     hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
+    split_manifest_dir: str | None = None,
+    calibration_date: str | None = None,
 ) -> ResolvedBundle:
     """Resolve the operating point for (trait, dataset). Pure over records, callers pass the model
     pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
@@ -672,6 +781,13 @@ def resolve_operating_point(
     GT/calibration callers compose it through
     :func:`~tcip_mcp.pipelines.inference.predictor.explicit_edge_provenance`; the review path
     forwards the stored stamp's own text (it holds no predictor to compose one from).
+
+    ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness``, alongside
+    ``train_disjointness``: whether the cal/holdout images were also on the checkpoint's own
+    selection side (``split.json``'s ``val``), checked when either this calibration names a
+    manifest or the checkpoint's own record carries a ``manifest_binding``, not-applicable
+    otherwise (see :func:`_selection_disjointness`). A leak or an unresolvable check blocks
+    ``passed`` the same way a train-disjointness one does.
 
     ``adjudication_covered``: an optional per-record predicate, when given, it is a gate, not a
     filter: every calibration and holdout record must satisfy it, or the whole reference is refused
@@ -789,6 +905,9 @@ def resolve_operating_point(
             # data the model already trained on.
             td = _train_disjointness(
                 experiment_id, cal_ids, hold_ids, cal_rects=cal_rects, hold_rects=hold_rects)
+            sd = _selection_disjointness(
+                experiment_id, cal_ids, hold_ids, split_manifest_dir=split_manifest_dir,
+                calibration_date=calibration_date)
 
             # Positive-evidence, unconditional, stated per-side (not a union), an all-negative
             # reference on either side can't validate a count operating point.
@@ -924,6 +1043,10 @@ def resolve_operating_point(
                 failures.append("train_disjointness_unresolvable")
             if td["leaked_groups"] or td["leaked_stems"]:
                 failures.append("train_disjointness_leaked")
+            if sd["applicable"] and sd["unresolvable"]:
+                failures.append("selection_disjointness_unresolvable")
+            if sd["applicable"] and (sd["leaked_groups"] or sd["leaked_stems"]):
+                failures.append("selection_disjointness_leaked")
             if cal_gt_count == 0:
                 failures.append("insufficient_calibration_gt")
             if hold_gt_count == 0:
@@ -985,7 +1108,7 @@ def resolve_operating_point(
                           "passed_holdout": passed, "failures": failures,
                           "content_overlap_frac": content["content_overlap_frac"],
                           "content_shared_with_calibration": content["shared"],
-                          "train_disjointness": td,
+                          "train_disjointness": td, "selection_disjointness": sd,
                           "calibration_image_ids": sorted(cal_ids), "holdout_image_ids": sorted(hold_ids),
                           "calibration_observed_min_score": _min_dt_score(calibration_records),
                           "holdout_observed_min_score": _min_dt_score(holdout_records),
@@ -1099,6 +1222,8 @@ def resolve_classifier_operating_point(
     experiment_id: str | None = None,
     validated_reference: str = VALIDATED_HELD_OUT,
     adjudication_covered: Callable[[dict], bool] | None = None,
+    split_manifest_dir: str | None = None,
+    calibration_date: str | None = None,
 ) -> dict:
     """Classification-mode calibration gate for a trait's positive-class call.
 
@@ -1125,6 +1250,10 @@ def resolve_classifier_operating_point(
     rather than failing closed, the same owner decision :func:`resolve_operating_point` follows, the
     classifier-validity *stamp* is still reachable for a foreign checkpoint whose cal/holdout is
     otherwise disjoint and unbiased; it is not reachable at all when no calibration/holdout is given.
+
+    ``split_manifest_dir``/``calibration_date`` gate ``selection_disjointness`` the same way
+    :func:`resolve_operating_point` does; the classifier door draws no manifest today, so no
+    caller populates them and the check reads not-applicable, structurally present all the same.
     """
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
@@ -1165,6 +1294,9 @@ def resolve_classifier_operating_point(
         [_content_record(iid, its) for iid, its in cal_by_image.items()],
         [_content_record(iid, its) for iid, its in hold_by_image.items()])
     td = _train_disjointness(experiment_id, cal_ids, hold_ids)
+    sd = _selection_disjointness(
+        experiment_id, cal_ids, hold_ids, split_manifest_dir=split_manifest_dir,
+        calibration_date=calibration_date)
 
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
     hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])
@@ -1222,6 +1354,10 @@ def resolve_classifier_operating_point(
         failures.append("train_disjointness_unresolvable")
     if td["leaked_groups"] or td["leaked_stems"]:
         failures.append("train_disjointness_leaked")
+    if sd["applicable"] and sd["unresolvable"]:
+        failures.append("selection_disjointness_unresolvable")
+    if sd["applicable"] and (sd["leaked_groups"] or sd["leaked_stems"]):
+        failures.append("selection_disjointness_leaked")
     if cal_pos == 0:
         failures.append("insufficient_calibration_positive_evidence")
     if hold_pos == 0:
@@ -1244,7 +1380,8 @@ def resolve_classifier_operating_point(
     sweep_data = {
         "content_overlap_frac": content["content_overlap_frac"],
         "content_shared_with_calibration": content["shared"],
-        "train_disjointness": td, "disjoint": disjoint, "adjudication_covered": adjudication_ok,
+        "train_disjointness": td, "selection_disjointness": sd, "disjoint": disjoint,
+        "adjudication_covered": adjudication_ok,
         "count_bias": count_bias, "count_bias_std": count_bias_std, "count_bias_n_images": n_bias_images,
         "count_bias_tolerance_frac": count_bias_tolerance_frac,
         "count_bias_tolerance_frac_source": ("trait" if trait.count_bias_tolerance_frac is not None
@@ -1282,6 +1419,8 @@ def _resolve_scalar_operating_point(
     holdout_items: list[dict] | None,
     experiment_id: str | None,
     validated_reference: str,
+    split_manifest_dir: str | None = None,
+    calibration_date: str | None = None,
 ) -> dict:
     """Shared calibration-gate mechanics for :func:`resolve_ordinal_operating_point` and
     :func:`resolve_regression_operating_point`.
@@ -1317,6 +1456,9 @@ def _resolve_scalar_operating_point(
     # Reuses the shared train-disjointness primitive (stems/groups, no bbox). `_content_overlap`
     # fingerprints bbox content, which ordinal/regression items (one scalar each) carry none of.
     td = _train_disjointness(experiment_id, cal_ids, hold_ids)
+    sd = _selection_disjointness(
+        experiment_id, cal_ids, hold_ids, split_manifest_dir=split_manifest_dir,
+        calibration_date=calibration_date)
 
     import torch
 
@@ -1342,6 +1484,10 @@ def _resolve_scalar_operating_point(
         failures.append("train_disjointness_unresolvable")
     if td["leaked_groups"] or td["leaked_stems"]:
         failures.append("train_disjointness_leaked")
+    if sd["applicable"] and sd["unresolvable"]:
+        failures.append("selection_disjointness_unresolvable")
+    if sd["applicable"] and (sd["leaked_groups"] or sd["leaked_stems"]):
+        failures.append("selection_disjointness_leaked")
     if len(holdout_items) < 2:
         failures.append("insufficient_holdout_items")
     if score is None:
@@ -1355,7 +1501,7 @@ def _resolve_scalar_operating_point(
     sweep_data = {
         "criterion": criterion, **stored_number("score", score),
         "floor": floor, "floor_source": floor_source,
-        "disjoint": disjoint, "train_disjointness": td,
+        "disjoint": disjoint, "train_disjointness": td, "selection_disjointness": sd,
         "n_calibration": len(calibration_items), "n_holdout": len(holdout_items),
     }
     return {

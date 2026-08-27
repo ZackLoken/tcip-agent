@@ -982,40 +982,58 @@ def label_image_stems(
 
 def calibration_universe_from_manifest(
     manifest: dict, date: str | None, present: Iterable[str],
+    *, foreground_stems: Iterable[str] | None = None,
 ) -> tuple[list[str], str | None, dict[str, str] | None, dict[str, list[str]]]:
-    """The calibration universe a split manifest's held-out side gives a locked cal/holdout draw
-    for one capture date: the manifest's ``val`` members under ``date`` that are present in the
-    door's own stem listing, so a calibration measures the operating point on exactly the set the
-    shipped checkpoint was chosen to fit, not diluted with training stems (a disjointness check
-    catches those separately, against the checkpoint's own ``split.json``).
+    """The calibration universe a split manifest gives a locked cal/holdout draw for one capture
+    date: the manifest's ``calibration`` members under ``date`` that are present in the door's own
+    stem listing, so a calibration measures the operating point on exactly the side the manifest
+    held out for it, never the side the shipped checkpoint was chosen on (a disjointness check
+    catches a leak onto that side separately, against the checkpoint's own ``split.json``).
 
     ``present`` is the door's own stem listing (e.g. :func:`label_image_stems`' stems), checked
     against rather than assumed: a manifest member with no image left on disk is not a real
-    calibration candidate.
+    calibration candidate. ``foreground_stems``, when given, is the subset of the universe that
+    actually carries the draw's own subject's foreground (the caller's own subject-scoped read,
+    :func:`~tcip_mcp.pipelines.data.splits.count_label_lines`'s job, never re-derived here): the
+    floor below then counts only foreground groups, so a universe of background-only groups
+    cannot pass it. Omitted, the floor falls back to counting every group in the universe
+    (foreground or not), the weaker check every caller that has not wired foreground info still
+    gets; the doors this family ships all wire it, through
+    :func:`resolve_manifest_calibration_universe`.
 
-    Returns ``(stems, group_by, group_key_map, excluded)``: ``stems`` is the val-side identities
-    narrowed to bare stems; ``group_by``/``group_key_map`` are the manifest's own grouping policy
-    (``group_key_map`` narrowed to this date's bare stems, so a lookup by stem resolves the way
-    ``_train_disjointness`` already resolves one); ``excluded`` names what the manifest held that
-    never entered the universe: present train members (``excluded_training_stems``) and present
-    members neither side claimed (``excluded_unassigned_stems``).
+    Returns ``(stems, group_by, group_key_map, excluded)``: ``stems`` is the calibration-side
+    identities narrowed to bare stems; ``group_by``/``group_key_map`` are the manifest's own
+    grouping policy (``group_key_map`` narrowed to this date's bare stems, so a lookup by stem
+    resolves the way ``_train_disjointness`` already resolves one); ``excluded`` is the three-way
+    partition of the present stems the universe does not hold: present train members
+    (``excluded_training_stems``), present val members (``excluded_validation_stems``), and
+    present members none of the three sides claimed (``excluded_unassigned_stems``), the
+    universe itself in none of them.
 
-    Refuses, naming the count, when the resulting universe would hold fewer than two groups: the
-    held-out half would be empty and an operating point would stamp unvalidated silently.
+    Refuses, naming the count and the date, when the resulting universe would hold fewer than two
+    (foreground, when known) groups: the held-out half would be empty and an operating point
+    would stamp unvalidated silently. The remedy names a redraw on this date specifically, since
+    the floor at a manifest's own draw is over the whole tree and one date can still land short.
     """
     present_set = set(present)
     splits = manifest.get("splits") or {}
     train_ids = {i for i in (splits.get("train") or []) if member_identity_parts(i)[0] == date}
     val_ids = {i for i in (splits.get("val") or []) if member_identity_parts(i)[0] == date}
+    calibration_ids = {i for i in (splits.get("calibration") or [])
+                       if member_identity_parts(i)[0] == date}
+    all_ids = train_ids | val_ids | calibration_ids
 
-    stems = sorted(member_identity_parts(i)[1] for i in val_ids
+    stems = sorted(member_identity_parts(i)[1] for i in calibration_ids
                   if member_identity_parts(i)[1] in present_set)
     excluded = {
         "excluded_training_stems": sorted(
             member_identity_parts(i)[1] for i in train_ids
             if member_identity_parts(i)[1] in present_set),
+        "excluded_validation_stems": sorted(
+            member_identity_parts(i)[1] for i in val_ids
+            if member_identity_parts(i)[1] in present_set),
         "excluded_unassigned_stems": sorted(
-            s for s in present_set if member_identity(date, s) not in train_ids | val_ids),
+            s for s in present_set if member_identity(date, s) not in all_ids),
     }
 
     group_by = manifest.get("group_by")
@@ -1028,15 +1046,20 @@ def calibration_universe_from_manifest(
         }
 
     group_key_fn = resolve_group_key_fn(group_by or "tile_prefix", stems, group_key_map=group_key_map)
-    n_groups = len({group_key_fn(s) for s in stems})
+    if foreground_stems is None:
+        n_groups = len({group_key_fn(s) for s in stems})
+    else:
+        fg = set(foreground_stems)
+        n_groups = len({group_key_fn(s) for s in stems if s in fg})
     try:
         refuse_insufficient_foreground_groups(n_groups, {"calibration": 2})
     except ValueError as exc:
         raise ValueError(
-            f"the split manifest's held-out side for date {date!r} gives a calibration universe "
-            f"of {n_groups} group(s) ({len(stems)} stem(s)) after excluding what isn't present: "
-            f"{exc} Draw the manifest again with more groups or a different held-out ratio, or "
-            "calibrate over the whole directory without split_manifest_dir."
+            f"the split manifest's calibration side for date {date!r} gives a calibration "
+            f"universe of {n_groups} foreground group(s) ({len(stems)} stem(s) total) after "
+            f"excluding what isn't present: {exc} Redraw the manifest with more groups or more "
+            f"foreground on {date!r}, or calibrate over the whole directory without "
+            "split_manifest_dir."
         ) from exc
     return stems, group_by, group_key_map, excluded
 
@@ -1073,8 +1096,13 @@ def resolve_manifest_calibration_universe(
             f"it holds members under {sorted(manifest.get('members') or {})}."
         )
     refuse_if_images_root_moved("images_dir", images_dir, date_block.get("images_root"), date)
+    present_stems = list(present)
+    foreground_stems = {
+        s for s in present_stems
+        if count_label_lines(labels_dir, s, subject=subject, attribute=attribute) > 0
+    }
     stems, group_by, group_key_map, excluded = calibration_universe_from_manifest(
-        manifest, date, present)
+        manifest, date, present_stems, foreground_stems=foreground_stems)
     return stems, group_by, group_key_map, excluded, date
 
 

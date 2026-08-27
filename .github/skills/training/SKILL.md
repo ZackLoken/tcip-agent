@@ -154,16 +154,25 @@ run_hpo(base_config=config, n_trials=20, search_alg="optuna", scheduler="asha",
 
 ## Dataset Splits
 
-Use `make_splits` to create train/val splits: no launch path honours a held-out test list, so
-`test_ratio` is refused unless it is 0. Writing a manifest (`output_path` given, or
-`materialize=True`) requires `subject`: the members are drawn through the same admission a
-training run uses, over the given subject (and `attribute`, if the run is attribute-scoped).
-- Default: 80/20, leakage-free (sibling tiles of one source image stay in the same split)
+Use `make_splits` to create train/val/calibration splits: no launch path honours a held-out test
+list, so `test_ratio` is refused unless it is 0 (a separate, within-image mechanism,
+`reserve_calibration_fraction` on the spatial_strip route, not this one). Writing a manifest
+(`output_path` given, or `materialize=True`) requires `subject`: the members are drawn through
+the same admission a training run uses, over the given subject (and `attribute`, if the run is
+attribute-scoped). `calibration_ratio` is a third side, held out from both training and
+checkpoint selection: it draws no loader, so `evaluate_model` and delivery calibration read it as
+their reference universe instead of the run's own `val`, keeping the checkpoint's own selection
+side out of the number that later validates it.
+- Default: `train_ratio=0.8`, `val_ratio=0.2`, `calibration_ratio=0.0`; leakage-free (sibling tiles
+  of one source image stay in the same split)
+- The draw refuses, before any write, when the tree holds fewer foreground groups of `subject`
+  than the requested sides need at minimum
 - `stratify_foreground=True` (default) balances splits by each source's foreground annotation
   count, not per-class distribution
-- `materialize=True` also lays out a `{train,val}/{images,labels}/` tree; the labels inside
-  are the platform's own per-image JSON, not YOLO's `.txt` format; refused when the drawn
-  membership spans more than one capture date
+- `materialize=True` also lays out a `{train,val,calibration}/{images,labels}/` tree (a
+  `calibration/` directory only when `calibration_ratio > 0`); the labels inside are the
+  platform's own per-image JSON, not YOLO's `.txt` format; refused when the drawn membership spans
+  more than one capture date
 - Reproducible with random seed
 
 A run names the manifest it should train against with `data.split.manifest_dir` (the
@@ -171,8 +180,11 @@ A run names the manifest it should train against with `data.split.manifest_dir` 
 must match the manifest's, and it conflicts with `val_images_dir`, `coco_json`/
 `label_format='coco'`, and a drawn split's own parameters (`group_by`, `group_key_map`,
 `val_ratio`, `seed`, `stratify_foreground`, `test_ratio`, `reserve_calibration_fraction`). The
-run's `split.json` then records the bound membership plus a `manifest_binding` block (counts and
-two content hashes, never a second copy of the member lists).
+run's own admission binds only the manifest's `train`/`val` members; its `calibration` members are
+placed on neither loader whether or not the run currently admits them. The run's `split.json` then
+records the bound membership plus a `manifest_binding` block (counts, including
+`calibration_bound`/`calibration_unadmitted`, and two content hashes, never a second copy of the
+member lists).
 
 Feeding review-corrected labels back into training? `materialize_review_dataset` (see the
 `annotation` skill) builds the curated dataset from review verdicts before you split/train.

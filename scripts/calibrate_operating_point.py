@@ -66,10 +66,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="Scope the draw to instances already assessed for this attribute "
                              "of --subject.")
     parser.add_argument("--split-manifest-dir", default=None,
-                        help="Restrict the calibration universe to one capture date's held-out "
-                             "side of a split manifest (make_splits' output directory) instead of "
-                             "every labeled stem, the same restriction run_inference applies. "
-                             "Conflicts with --group-by/--group-key-map; requires --subject.")
+                        help="Restrict the calibration universe to one capture date's "
+                             "calibration side of a split manifest (make_splits' output "
+                             "directory) instead of every labeled stem, the same restriction "
+                             "run_inference applies. Conflicts with --group-by/--group-key-map; "
+                             "requires --subject.")
     args = parser.parse_args(argv)
     if args.split_manifest_dir and not args.subject:
         print("--split-manifest-dir requires --subject.", file=sys.stderr)
@@ -121,36 +122,19 @@ def main(argv: list[str] | None = None) -> int:
             group_key_map = json.load(f)
     group_by = args.group_by
 
+    from tcip_mcp.dataset_layout import annotation_date
+
+    cal_date = annotation_date(args.labels_dir)
     if args.split_manifest_dir:
-        from tcip_mcp.dataset_layout import annotation_date
-        from tcip_mcp.pipelines.data.splits import (
-            calibration_universe_from_manifest, manifest_date_key, refuse_if_images_root_moved,
-        )
+        from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(args.split_manifest_dir)
-        if (manifest.get("subject"), manifest.get("attribute")) != (args.subject, args.attribute):
-            print(f"split manifest at {args.split_manifest_dir!r} was drawn for subject="
-                  f"{manifest.get('subject')!r}, attribute={manifest.get('attribute')!r}, but "
-                  f"this run states subject={args.subject!r}, attribute={args.attribute!r}.",
-                  file=sys.stderr)
-            return 2
-        cal_date = annotation_date(args.labels_dir)
-        date_block = (manifest.get("members") or {}).get(manifest_date_key(cal_date))
-        if date_block is None:
-            print(f"split manifest at {args.split_manifest_dir!r} holds no members under date "
-                  f"{cal_date!r}; it holds members under {sorted(manifest.get('members') or {})}.",
-                  file=sys.stderr)
-            return 2
         try:
-            refuse_if_images_root_moved(
-                "images_dir", args.images_dir, date_block.get("images_root"), cal_date)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
-        try:
-            stems, group_by, group_key_map, _excluded = calibration_universe_from_manifest(
-                manifest, cal_date, stems)
+            stems, group_by, group_key_map, _excluded, cal_date = \
+                resolve_manifest_calibration_universe(
+                    manifest, args.split_manifest_dir, args.labels_dir, args.images_dir,
+                    args.subject, args.attribute, stems)
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             return 2
@@ -214,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         # tile_size dimension that was never actually operative for this untiled pass.
         tiled=False,
         experiment_id=args.experiment_id, staged_conf_floor=applied.get("score_thresh"),
+        split_manifest_dir=args.split_manifest_dir, calibration_date=cal_date,
     )
     attach_split_policy_provenance(bundle, locked)
 

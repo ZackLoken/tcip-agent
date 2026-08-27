@@ -600,7 +600,7 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `scan_dataset` | `data_tools.py:234` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
 | `validate_data_quality` | `data_tools.py:304` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:454` | yes | Compute a leakage-free, annotation-stratified train/val split. |
+| `make_splits` | `data_tools.py:454` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -622,10 +622,10 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:459` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:654` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1636` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1936` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `force_redraw_cal_holdout_split` | `inference_tools.py:475` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `run_inference` | `inference_tools.py:670` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1656` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1957` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### ingest_tools.py (1 tool)
 
@@ -876,11 +876,11 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:781` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:802` |
 | POST | `/validate_reference` | `validate_reference` | `routes/review.py:853` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1198` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1250` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1281` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1450` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1478` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1202` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1255` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1285` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1454` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1482` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1089,7 +1089,7 @@ Readers: `tcip_annotation.json_io.read_annotations`,
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:334`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:979`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:999`.
 
 A prediction record's `created_by` is one spelling, `resolution.prediction_producer`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:994`, so every checkpoint-backed writer
@@ -1190,7 +1190,7 @@ subject whose attribute schema is about to change so the confirmations under it 
 before the outgoing digest is gone.
 
 `IMAGE_STATUSES = ("complete", "partial", CONFIRMED_NEGATIVE, "unannotated")`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:672`, imported by the web route module.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:692`, imported by the web route module.
 
 The token a Complete stores here is subject-scoped before it ever reaches a writer: `mark_complete`,
 `packages/tcip-web/src/tcip_web/routes/review.py:720`, derives it from the GT file through
@@ -1222,7 +1222,7 @@ legitimately exist; the outgoing registry is the last moment their digest is rec
 sweep records it there and they read as predating the change instead of as made under the new
 vocabulary. Both writers reach the store through the one transactional writer
 `dataset_layout.stamp_image_status_digests`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:811`, whose `only_unstamped` argument keeps
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:831`, whose `only_unstamped` argument keeps
 the sweep from re-dating a stamp the confirmation-time writer already set.
 
 Reader: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`'s quarantine logic,
@@ -1244,7 +1244,7 @@ sidecar, `confirmed_negative_names` reads it) and in
 
 Path: `<dataset_root>/.tcip/state/view_coverage.json`.
 
-Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:401`,
+Path/shape definition: `tcip_mcp.dataset_layout.view_coverage_path`, `dataset_layout.py:421`,
 naming the stored record's own shape as `tcip_web.routes._coverage_models.CoverageRecord`.
 Writer and reader: `routes/coverage.py`'s `post_coverage` (`:187`) and `get_coverage` (`:143`),
 each validating the stored record against `CoverageRecord` before merging into or serving it.
@@ -1269,9 +1269,9 @@ Path: `<dataset_root>/.tcip/state/region_completeness.json` and
 `region_completeness_digest.json`, siblings of `image_status.json`.
 
 Path/shape definition: `tcip_mcp.dataset_layout.region_completeness_path`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:482`;
-`region_completeness_digest_path`, `dataset_layout.py:520`; shape guard
-`normalize_region_completeness_store`, `dataset_layout.py:560`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:502`;
+`region_completeness_digest_path`, `dataset_layout.py:540`; shape guard
+`normalize_region_completeness_store`, `dataset_layout.py:580`.
 
 Writer/reader named by phase0 but not independently opened this session:
 `pipelines/region_completeness.py` as the digest sidecar's writer.
@@ -1279,8 +1279,8 @@ Writer/reader named by phase0 but not independently opened this session:
 Seam S25 ("region_completeness.json attestation store"), verdict `both-sides-one-implementation`,
 `phase0_implementation: once, shared`: `tests/test_coverage_routes.py:449`,
 `tests/test_block_calibration.py:126,164,203`. The shared functions across the HTTP-route side and
-the calibration-gate side are `region_completeness_path` (`dataset_layout.py:482`),
-`normalize_region_completeness_store` (`dataset_layout.py:560`) and `status_bucket`
+the calibration-gate side are `region_completeness_path` (`dataset_layout.py:502`),
+`normalize_region_completeness_store` (`dataset_layout.py:580`) and `status_bucket`
 (`dataset_layout.py:584`). Gap: `test_block_calibration.py`'s
 `_attest_regions_complete` helper bypasses the HTTP route, writing the store via the same shared
 functions the route calls internally rather than via a POST to `/api/coverage/completeness`, so a
@@ -1340,8 +1340,8 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:30`
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 72
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
-  119 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1289`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1398`.
+  119 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1295`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1404`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
   `experiments.py:524` (`def update_status(`), `stamp_run_identity` (`experiments.py:628`),
   `_touch_heartbeat`, `experiments.py:824` (`def _touch_heartbeat(`). Read by `get_experiment`
@@ -1349,10 +1349,10 @@ are listed here with the rest rather than taking numbers of their own.
   `resolve_experiment_dir_for_run` (`experiments.py:652`). `state` is terminal-locked once
   `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (397) and
-  `update_lineage`, `experiments.py:1147`. Read by `get_experiment` (1288) and
-  `get_experiment_lineage`, `experiments.py:1485`.
+  `update_lineage`, `experiments.py:1153`. Read by `get_experiment` (1288) and
+  `get_experiment_lineage`, `experiments.py:1491`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397) and
-  `record_artifact`, `experiments.py:1113`. Read by `get_experiment` (1288).
+  `record_artifact`, `experiments.py:1119`. Read by `get_experiment` (1288).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
   `log_metrics`, `experiments.py:856`. Read by `read_metrics`, `experiments.py:843`, which
   `get_experiment` (1288, paginated) and `reconstruct_run_status` (770, last row only) go through.
@@ -1364,20 +1364,36 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:1706`
   (`def _persist_split_manifest(`). Read by `read_split_manifest`,
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
-  both take the manifest from. When the run named a split manifest (`data.split.manifest_dir`),
-  this record's `manifest_binding` carries the binding's counts and its two content hashes (never
-  the manifest's own member lists, which live in the `split_manifest` record itself, see §"split
-  manifest / split stem list, `.tcip/artifacts/split_manifest.json` / `split_stem_list.json`").
+  both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
+  directory's own capture date (`null` for a flat tree), so a later selection-disjointness check
+  can scope itself to one date without re-deriving it from the config. When the run named a split
+  manifest (`data.split.manifest_dir`), this record's `manifest_binding` carries the binding's
+  counts (`assigned`, `train_bound`, `val_bound`, `calibration_bound`, `calibration_unadmitted`,
+  `other_dates`, `splits.ManifestBinding`) and its two content hashes (never the manifest's own
+  member lists, which live in the `split_manifest` record itself, see §26); `calibration_bound`
+  counts stems the manifest's `calibration` side names for this date, placed on neither loader
+  whether or not the run currently admits them, and `calibration_unadmitted` counts the subset the
+  run no longer admits at all, so a review of this one record shows the manifest's held-out side
+  was honored rather than silently folded into training or selection.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:950`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:956`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
   residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:904`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
-  documents whose gate runs the check, `null` for `resolve_scale`. Read by `read_validations`,
-  `experiments.py:910`, `find_validation`, `experiments.py:1000` (matching rows by recomputed
-  `validation_digest`, `experiments.py:940`), and included whole by `get_experiment` (1201). The
-  one member appendable after a terminal state, because a validation is a statement made about a
-  run after it ended.
+  documents whose gate runs the check, `null` for `resolve_scale`. `selection_disjointness` is the
+  parallel field for whether the calibration used to validate a checkpoint's own reference was kept
+  disjoint from that checkpoint's own selection (val) side: `{"applicable": bool, "reason": str |
+  None, "checked": bool, "unresolvable": bool, "leaked_groups": list, "leaked_stems": list,
+  "group_check": str | None}` for the four documents `resolver_selection_disjointness` covers,
+  `null` for `resolve_scale`; `applicable` is `False` when no split manifest is in play (no
+  `split_manifest_dir` named and no `manifest_binding` on the checkpoint's own run, a within-image
+  `spatial_strip` split, an empty `val`, an `external` group_by, or a calibration dated differently
+  than the run's own `split.json`), each such case carrying its own `reason`; `unresolvable` marks
+  the one case the ruling refuses rather than skips, a named manifest with no experiment record to
+  read a selection side from. Read by `read_validations`, `experiments.py:991`,
+  `find_validation`, `experiments.py:1006` (matching rows by recomputed `validation_digest`,
+  `experiments.py:940`), and included whole by `get_experiment` (1201). The one member appendable
+  after a terminal state, because a validation is a statement made about a run after it ended.
 
 Seam S07 ("Experiment record .tcip/experiments/<id>/", covering config/status/lineage/artifacts),
 verdict `both-sides-one-implementation`, `phase0_implementation: mixed`:
@@ -1414,7 +1430,7 @@ transaction on the key `registry_index_key` mints, same file, line 36, so a conc
 entries are not clobbered. `register_model` takes `metrics_source` as a required keyword,
 `"trainer"` / `"training_source"` / `"caller"` / `None`, naming which path produced `metrics`
 without claiming anyone verified it; only the two production callers set it,
-`register_model_from_experiment` (`experiments.py:1203`, reading whether the run's config carries
+`register_model_from_experiment` (`experiments.py:1209`, reading whether the run's config carries
 `training_source`) and the `register_model` tool's explicit mode (`tools/model_tools.py:18`,
 `"caller"` when `metrics` is non-empty). `register_model_from_experiment` no longer falls back to
 the run's `metrics.jsonl` log for a checkpoint with no metrics dict; such a registration carries
@@ -1654,35 +1670,50 @@ No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: th
 
 ## 26. `split_manifest.json` / `split_stem_list.json`, a partition `make_splits` drew
 
-Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val}.json`, addressed by
-`split_manifest_key`, `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:58`, and
+Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val,calibration}.json`,
+addressed by `split_manifest_key`, `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:58`, and
 `split_stem_list_key`, `data_tools.py:35`, under whatever directory the caller asked the
 partition to be written to; no dataset resolver owns this layout.
 
 Writer: `make_splits`, `data_tools.py:454`, when `output_path` is given or `materialize=True`.
-The manifest records `seed`, `group_by` (the resolved policy), `group_key_map` when one was
-supplied, `dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
-`assign_class_ids` map the draw resolved), `members` (one block per capture date that admitted at
-least one stem, keyed through `splits.manifest_date_key` (the date, or `""` for a flat tree),
-holding `labels_root`, `images_root`, and that date's own `dataset_hash`; a date the draw searched
-but admitted nothing writes no block, so a reader that finds none under a date treats it as one
-the manifest never held, not one it holds empty), `splits` (`train`/`val` identities, `<date>/<stem>`,
+The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
+all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`), refusing a zero
+`calibration_ratio` by name, since the calibration side is the universe every calibration drawn
+under this manifest later draws from. The draw refuses, before any write, when the tree holds
+fewer foreground groups of `subject` (and `attribute`, when scoped) than the requested sides need
+at minimum (one each for `train`/`val`, two for `calibration`), counted through a subject-scoped
+`count_label_lines`, independent of `stratify_foreground`. The manifest records `seed`, `group_by`
+(the resolved policy), `group_key_map` when one was supplied, `dataset_fingerprint`, `subject`,
+`attribute` (`null` when none), `id_map` (the `assign_class_ids` map the draw resolved), `members`
+(one block per capture date that admitted at least one stem, keyed through
+`splits.manifest_date_key` (the date, or `""` for a flat tree), holding `labels_root`,
+`images_root`, and that date's own `dataset_hash`; a date the draw searched but admitted nothing
+writes no block, so a reader that finds none under a date treats it as one the manifest never
+held, not one it holds empty), `splits` (`train`/`val`/`calibration` identities, `<date>/<stem>`,
 the bare `<stem>` under a flat tree), and `admission_counts` (the summed `trainable_stems` counts
 across every date). Each `split_stem_list.json` document holds one side's identities, the same
-list `splits` already carries. A stats-only call (no `output_path`, no `materialize`) writes no
-manifest but answers `dataset_hashes_by_date` the same way, over whatever labels directories its
-plain image/label scan found, plus a single `dataset_hash` only when that scan found exactly one
-such directory; over more than one, `dataset_hash` is `null` rather than one directory's hash
-blind to the rest.
+list `splits` already carries. The answer also carries `calibration_foreground_groups_by_date`,
+since the floor above is over the whole draw and one date's own calibration slice can still land
+short of two foreground groups; the calibration door's own floor is where that absence bites. A
+stats-only call (no `output_path`, no `materialize`) writes no manifest, admits a zero or non-zero
+`calibration_ratio` either way, but answers `dataset_hashes_by_date` the same way, over whatever
+labels directories its plain image/label scan found, plus a single `dataset_hash` only when that
+scan found exactly one such directory; over more than one, `dataset_hash` is `null` rather than
+one directory's hash blind to the rest.
 
 Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:75`, the one reader a training or
-tuning run's `data.split.manifest_dir` resolves through (`training_tools._auto_train_val`), which
-refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
+tuning run's `data.split.manifest_dir` resolves through (`training_tools._auto_train_val`) and a
+manifest-restricted calibration resolves through (`splits.resolve_manifest_calibration_universe`),
+which refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
 `group_by`, `dataset_fingerprint`, `subject`, `attribute`, `id_map`, `members`, `splits`,
 `admission_counts` (the tuple `data_tools._SPLIT_MANIFEST_REQUIRED_KEYS`, kept beside the writer's
-dict so the two cannot drift), or carries a `splits` block missing `train` or `val`;
-`scripts/plant_aware_group_splits.py` reads no manifest back, it only writes one through
-`make_splits`.
+dict so the two cannot drift), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
+sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
+only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:384`) reads all three
+sides for one capture date: a `calibration` member is placed on neither loader, whether or not the
+run currently admits it, recorded as `calibration_bound`/`calibration_unadmitted` rather than
+refused on; the `train`/`val` refusals (an admitted stem assigned to no side, a member the run no
+longer admits, an empty side) are unchanged in shape.
 
 No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 `tests/test_split_manifest_binding.py` calls the real writer and the real consumer
@@ -1694,13 +1725,16 @@ Path: named for the identity hash it locks rather than a directory of its own, a
 `cal_holdout_lock_key`, `packages/tcip-mcp/src/tcip_mcp/pipelines/data/splits.py:897`, under the
 scope root the split was drawn over (`cal_holdout_scope_root`).
 
-Writer: `resolve_locked_cal_holdout_split`, `splits.py:1094`, locking on first draw for a given
+Writer: `resolve_locked_cal_holdout_split`, `splits.py:1122`, locking on first draw for a given
 identity hash; every later call for the same identity answers from the lock unchanged unless
 `force_redraw=True`. The record carries `identity_hash`, `calibration`, `holdout`, `group_by`,
 `group_key_map`, `seed`, `holdout_ratio`, `split_manifest_dir` (`null` for a whole-directory draw,
-the identity hash otherwise being `dataset_hash` over the manifest's held-out universe rather than
-the whole directory), and `redraw_history` (one entry per draw, each carrying its own declared
-policy, including `split_manifest_dir`, and the old/new content hashes).
+the identity hash otherwise being `dataset_hash` over the manifest's own `calibration` side rather
+than the whole directory), and `redraw_history` (one entry per draw, each carrying its own
+declared policy, including `split_manifest_dir`, and the old/new content hashes). `calibration`
+and `holdout` here are the two halves `cal_holdout_split` cuts from whatever universe it is
+given: the manifest's own `calibration` side under a manifest-restricted draw, the whole labelled
+directory otherwise; the lock's own field names do not change with the source.
 
 Readers: six callers draw a lock through this one function -
 `inference_tools._calibrate_operating_point`, `inference_tools.force_redraw_cal_holdout_split`,
@@ -1846,7 +1880,7 @@ and nothing ever read it back out: the dataset's real confirmed-negative store i
 `image_status.json`, addressed by `image_status_key`, the seam this entry once asked to agree
 with. The key stopped being written; a project's existing record still carrying it is conformed by
 `scripts/drop_annotation_stats_image_status.py`, a one-off operator script.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:704` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:724` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
 Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:321` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
 
@@ -1860,7 +1894,7 @@ Phase 3 verdict: single.
 ## S15. Per-image label filename convention
 
 Must agree: the browser's label path and the Python resolver's label path name the same file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:857` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:877` (`def label_filename(`, with `annotation_path`/`prediction_path` built on it).
 Side B: `packages/tcip-web/frontend/src/lib/paths.ts:45` (`labelPath`, the browser's one join site over the directories the backend resolves; a gate test pins the record extension against the resolver).
 Phase 3 verdict: single. The browser still joins directory plus filename client-side at that one site; handing fully resolved per-image paths across the API would add a backend round trip to image navigation, an open owner question in the batch report.
 
@@ -1909,14 +1943,14 @@ Phase 3 verdict: single.
 ## S22. image_status.json confirmed-negative store
 
 Must agree: a negative is empty labels plus an explicit human Complete, every consumer applies the same bucket keying and status vocabulary, and each stored status carries the actor who set it and when, so a person's Complete and a status a harvest wrote stay distinguishable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:681` (`def derive_status(`, with `IMAGE_STATUSES` at line 610 as the one vocabulary, `status_of` at line 542 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:701` (`def derive_status(`, with `IMAGE_STATUSES` at line 610 as the one vocabulary, `status_of` at line 542 as the one predicate for what the store holds, and `record_image_statuses`/`replace_image_status_store` as the two declared writers, both through the registered store).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` and `routes/review.py` call `derive_status`; the browser imports one `ImageStatus` type from `api/classes.ts`, pinned against the Python vocabulary by a gate test.
 Phase 3 verdict: single.
 
 ## S23. image_status_digest.json attribute-schema stamp
 
 Must agree: writer and reader compute the digest the same way for a stale stamp to be detectable.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:811` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:831` (`def stamp_image_status_digests(`, the one transactional read-merge writer, called by the web route, the materializer, the split tools and the schema-change sweep `class_registry._sweep_schema_change`, which passes `only_unstamped` so a confirmation-time stamp is never re-dated).
 Side B: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:162` (`attribute_schema_digest`, the one digest computation).
 Phase 3 verdict: single.
 
@@ -1930,7 +1964,7 @@ Phase 3 verdict: single.
 ## S25. region_completeness.json attestation store
 
 Must agree: an attestation written by the GUI is readable, and staleness-checkable, by the calibration path that relies on it.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:482` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:502` (`def region_completeness_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/region_completeness.py:123` (`def stale_cells(`).
 Phase 3 verdict: restated-in-test.
 Differs from phase0 record: phase0 cited a line inside the function's body rather than its header; the function itself is defined at `region_completeness.py:123` (`def stale_cells(`).
@@ -1938,7 +1972,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S26. dataset.json identity and fingerprint
 
 Must agree: the stored fingerprint and the recomputed one cover the same inputs.
-Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:308` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:328` (`def dataset_identity_path(dataset_root: str | Path) -> Path:`).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:731` (`def dataset_fingerprint(dataset_root: str | Path) -> str | None:`).
 Phase 3 verdict: single.
 
@@ -1965,9 +1999,10 @@ Phase 3 verdict: single.
 
 ## S30. split.json train/val manifest
 
-Must agree: the calibration holdout is disjoint from the split the run actually trained on.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1506` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (disjointness check reads through it).
+Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
+when a split manifest is in play, from the checkpoint's own selection (val) side too.
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1512` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
 ## S31. Checkpoint payload structural markers
@@ -1980,7 +2015,7 @@ Phase 3 verdict: single.
 ## S32. Single operating-point resolution for all consumers
 
 Must agree: the same model and images yield the same conf/NMS/max_dets/tile whichever entry door asks for them.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:602` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/operating_point.py:709` (`def resolve_operating_point(`, the calibrated regime; a caller-supplied `max_dets` earns a derivation label only by naming where it came from, and otherwise records itself as a caller override).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:372` and `:414` (`raw_operating_point` and `block_calibrated_export_operating_point`, the two uncalibrated regimes). Every door takes its bundle from one of the three: `tools/inference_tools.py:304,797,982,1001`, `packages/tcip-web/src/tcip_web/routes/inference.py:234`, `pipelines/training/envelope.py:213`.
 Phase 3 verdict: single.
 
@@ -1994,8 +2029,8 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2508` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:2142` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2567` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:270` and `pipelines/postprocessing/aggregation.py:531` (`gate.column_stamp("measurement")`, each delivery door stamping the column the gate hands it rather than re-deriving one), `tools/inference_tools.py:2164` (`gate.column_stamp("operating_point")`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:610` (`gate.column_stamp(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall

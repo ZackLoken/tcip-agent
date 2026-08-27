@@ -80,16 +80,24 @@ stays visible on review.
 
 `run_inference`, `export_predictions` and `tabulate_counts` (the latter two forward it to
 `run_inference`) and `force_redraw_cal_holdout_split` all take `split_manifest_dir`: draw the
-calibration universe from one capture date's held-out side of a named `split_manifest` record
-instead of every labelled stem with an image, the labelled stems that date's manifest admitted
-but held out of training. The manifest's own subject/attribute must match this call's
-(`force_redraw_cal_holdout_split` takes `subject`/`attribute` directly; `run_inference` resolves
-them from the run's own training scope), and `split_manifest_dir` conflicts with an explicit
-`group_by`/`group_key_map`, whose default becomes `None` for this reason (resolved to
-`tile_prefix` when neither was given). `force_redraw_cal_holdout_split` additionally requires
-`labels_dir`, `subject` and `images_dir` alongside `split_manifest_dir`: a labels-only universe
-can include a stem whose image is gone, a lock the redraw exists to fix, so it refuses by name
-without one.
+calibration universe from one capture date's `calibration` side of a named `split_manifest`
+record instead of every labelled stem with an image, a side `make_splits` drew held out from both
+training and checkpoint selection (see the `training` skill's Dataset Splits section). The
+manifest's own subject/attribute must match this call's (`force_redraw_cal_holdout_split` takes
+`subject`/`attribute` directly; `run_inference` resolves them from the run's own training scope),
+and `split_manifest_dir` conflicts with an explicit `group_by`/`group_key_map`, whose default
+becomes `None` for this reason (resolved to `tile_prefix` when neither was given).
+`force_redraw_cal_holdout_split` additionally requires `labels_dir`, `subject` and `images_dir`
+alongside `split_manifest_dir`: a labels-only universe can include a stem whose image is gone, a
+lock the redraw exists to fix, so it refuses by name without one.
+
+A calibration under a named manifest also earns a `selection_disjointness` check: whether the
+cal/holdout stems it drew also sit on the checkpoint being calibrated's own selection (`val`)
+side, the leak this whole family of checks exists to close (a checkpoint chosen on a side, then
+calibrated over that same side, would otherwise clear every other gate while measuring the
+operating point on exactly the data the shipped weights were picked to fit). It rides beside
+`train_disjointness` in the validation row and floors `verify_stamp_binding` when a manifest-scoped
+reference carries none.
 
 ## Failure Triage
 

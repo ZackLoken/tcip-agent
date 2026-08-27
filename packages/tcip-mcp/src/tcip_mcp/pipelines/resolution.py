@@ -1222,7 +1222,8 @@ hash for itself, except ``stated_values``, which holds what another primitive al
 split lock's identity, a review reference's hash and image count) and this one cannot recompute.
 ``label_stems`` is ``label_dirs``' narrower sibling: a directory hashed over a named subset of its
 stems (``{role: {"path": dir, "stems": [...]}}``) rather than whole, for a calibration restricted
-to a split manifest's held-out side, where the whole directory was never what the reference swept."""
+to a split manifest's calibration side, where the whole directory was never what the reference
+swept."""
 
 _UNCOMPARED = object()
 """A resolver result that publishes no value of its own for its parameter, so the claim's value has
@@ -1278,6 +1279,41 @@ def resolver_train_disjointness(result: Any, document: str) -> dict | None:
     if not isinstance(td, dict):
         return None
     return {"checked": bool(td.get("checked")), "group_check": td.get("group_check")}
+
+
+def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
+    """Whether and how a resolver's own live result checked selection-disjointness (the
+    checkpoint's own selection side, ``split.json``'s ``val``, disjoint from the reference): the
+    same two facts :func:`resolver_train_disjointness` records, ``checked`` and ``group_check``,
+    plus ``applicable``/``reason`` (this check runs only when a split manifest is in play, unlike
+    train-disjointness, which runs on every calibration). ``None`` for ``resolve_scale``, whose
+    gate has no training run to check against; the same declared-document guard
+    ``resolver_train_disjointness`` applies.
+    """
+    if document == "resolve_scale":
+        return None
+    if document not in (
+        "operating_point", "classifier_operating_point", "ordinal_operating_point",
+        "regression_operating_point",
+    ):
+        raise ValueError(
+            f"{document!r} is not a document resolver_selection_disjointness knows how to read a "
+            f"selection-disjointness check from; declared documents are {sorted(_DOCUMENT_PARAM)}"
+        )
+    param_key, _ = _DOCUMENT_PARAM[document]
+    if isinstance(result, ResolvedBundle):
+        sweep = result.get(param_key).sweep
+    elif isinstance(result, Mapping):
+        sweep = result.get("sweep_data")
+    else:
+        sweep = None
+    sd = (sweep or {}).get("selection_disjointness")
+    if not isinstance(sd, dict):
+        return None
+    return {
+        "applicable": bool(sd.get("applicable")), "reason": sd.get("reason"),
+        "checked": bool(sd.get("checked")), "group_check": sd.get("group_check"),
+    }
 
 
 def _relative_location(path: str | Path, dataset_root: Path) -> str:
@@ -1609,6 +1645,7 @@ def seal_validation(
         "dataset_root": str(root),
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "train_disjointness": resolver_train_disjointness(draft.result, draft.document),
+        "selection_disjointness": resolver_selection_disjointness(draft.result, draft.document),
     }
     appended = _append_validation(experiment_id, body)
     if "error" in appended:
@@ -1637,6 +1674,7 @@ class StampBinding:
     checkpoint_sha256: str | None = None
     record_digest: str | None = None
     train_disjointness: dict | None = None
+    selection_disjointness: dict | None = None
     note: str = ""
 
 
@@ -1658,6 +1696,10 @@ def verify_stamp_binding(
     for the count and scale documents, every bucket being read is in the covered set at its
     dataset-relative key with the content (or imagery) identity it was earned over, recomputed now.
     ``images_dir`` is required to reach that last check for ``resolve_scale`` and unused otherwise.
+    When the reference identity carries a ``split_manifest_dir``, the row must also carry a
+    ``selection_disjointness`` that is either not-applicable (with a reason) or checked with no
+    leak; a manifest-scoped reference earned before that field existed, or earned against a
+    checkpoint whose own run is unknown, floors here rather than reading as cleared.
 
     Verification is per stamp file, not per parameter. One failed check floors every dimension that
     stamp carries, so a count operating point, a tile geometry, a claim scope and a review upgrade
@@ -1713,7 +1755,8 @@ def verify_stamp_binding(
     known = {"experiment_id": experiment_id, "record_digest": record_digest,
              "producing_experiment_id": row.get("producing_experiment_id"),
              "checkpoint_sha256": row.get("checkpoint_sha256"),
-             "train_disjointness": row.get("train_disjointness")}
+             "train_disjointness": row.get("train_disjointness"),
+             "selection_disjointness": row.get("selection_disjointness")}
 
     if row.get("document") != document:
         return floored(
@@ -1744,6 +1787,22 @@ def verify_stamp_binding(
             f"{document}.json at {bucket!r} asserts a claim record {record_digest!r} was not earned "
             f"for: the stamp's {', '.join(_CLAIM_KEYS[document])} disagree with the values the gate "
             "was run over. Re-calibrate to earn a record for the values being delivered.", **known)
+
+    row_split_manifest_dir = (row.get("reference_identity") or {}).get(
+        "stated_values", {}).get("split_manifest_dir")
+    if row_split_manifest_dir is not None:
+        sd = row.get("selection_disjointness")
+        sd_ok = isinstance(sd, dict) and (
+            (sd.get("applicable") is False and sd.get("reason"))
+            or (sd.get("applicable") is True and sd.get("checked") is True)
+        )
+        if not sd_ok:
+            return floored(
+                f"{document}.json at {bucket!r} claims a validated reference under split "
+                f"manifest {row_split_manifest_dir!r}, and record {record_digest!r} carries no "
+                "selection_disjointness check that is either not-applicable (with a reason) or "
+                "checked with no leak. Calibrate again under the manifest's calibration side "
+                "with a checkpoint whose run is on record.", **known)
 
     if document in ("operating_point", "resolve_scale"):
         resolved = Path(bucket).resolve()
