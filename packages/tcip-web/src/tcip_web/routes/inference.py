@@ -137,11 +137,11 @@ def _register(job: InferenceJob) -> None:
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
-    """A job by id, from any root this process holds: a job id is unique per process and the
-    breeder that launched it holds the id, so a repin to another project must not make an
-    in-flight job unreachable for cancelling, previewing or streaming it."""
+    """A job by id, from any root this process holds: a repin to another project must not
+    make an in-flight job unreachable for cancelling, previewing or streaming it."""
+    from tcip_web import jobstore
     with _job_lock:
-        return _jobs.get(job_id)
+        return jobstore.find_job(_jobs, job_id)
 
 
 def _list_jobs() -> list[InferenceJob]:
@@ -158,7 +158,10 @@ def rehydrate_for_current_root() -> None:
     threads behind a persisted non-terminal job are gone, so it is surfaced as
     ``interrupted``. Only the fields the API exposes are restored (the per-image results list
     isn't persisted), so ``/preview`` comes back empty. Merges by job id rather than requiring
-    an empty registry first, so it never displaces a job still live from another root.
+    an empty registry first, so it never displaces a job still live from another root. Bounds
+    the dict afterwards the same way registering a job does, so adopting N roots without ever
+    registering a job here still keeps this process's memory bounded rather than growing by
+    ``MAX_JOBS`` for every root adopted.
     """
     from tcip_web import jobstore
 
@@ -188,6 +191,7 @@ def rehydrate_for_current_root() -> None:
                 error=s.get("error"),
                 warning=s.get("warning"),
             )
+        jobstore.evict_terminal(_jobs, root)
 
 
 # ── Worker ─────────────────────────────────────────────────────────────

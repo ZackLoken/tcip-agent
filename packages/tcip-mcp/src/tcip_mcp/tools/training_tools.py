@@ -1316,6 +1316,7 @@ def run_hpo(
     max_concurrent: int = 1,
     resources_per_trial: dict | None = None,
     study_name: str | None = None,
+    auto_tensorboard: bool = True,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
@@ -1366,6 +1367,10 @@ def run_hpo(
         study_name: The sweep's id, for a caller (the Tuning route's launch) that already
             minted one and must have its own registry entry, manifest and every sweep route
             agree on it; omitted mints one the way this always has.
+        auto_tensorboard: Launch a TensorBoard over the sweep root once it finishes. The
+            Tuning route's launch passes ``False``: it serves its own per-sweep TensorBoard
+            view on demand, so leaving this on there would run a second, unaddressable
+            TensorBoard process over the same trials.
     """
     from tcip_mcp.pipelines.training.hpo import tune_search, get_default_space
 
@@ -1461,7 +1466,7 @@ def run_hpo(
     # trial's own tensorboard dir both sit under it.
     tb_info: dict = {}
     tb_logdir = result.get("tensorboard_logdir")
-    if tb_logdir:
+    if tb_logdir and auto_tensorboard:
         try:
             from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
             tb_info = launch_tensorboard(tb_logdir, run_id=f"hpo_{study_name}")

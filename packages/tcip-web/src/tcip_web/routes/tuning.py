@@ -129,8 +129,9 @@ def _sweep_launch_root(sweep_id: str) -> Optional[str]:
     The one lookup shared by everywhere a sweep's own files (its trial directory, its
     TensorBoard link farm) must be addressed under the root the sweep actually belongs to.
     """
+    from tcip_web import jobstore
     with _lock:
-        job = _sweeps.get(sweep_id)
+        job = jobstore.find_job(_sweeps, sweep_id)
     return job.platform_root if job is not None else None
 
 
@@ -190,7 +191,9 @@ def rehydrate_for_current_root() -> None:
     behind a persisted non-terminal sweep are gone, so it is surfaced as ``interrupted``.
     Trial results aren't persisted, so a rehydrated sweep has no result. Merges by sweep id
     rather than requiring an empty registry first, so it never displaces a sweep still live
-    from another root.
+    from another root. Bounds the dict afterwards the same way launching a sweep does, so
+    adopting N roots without ever launching one here still keeps this process's memory
+    bounded rather than growing by ``MAX_JOBS`` for every root adopted.
     """
     from tcip_web import jobstore
 
@@ -207,6 +210,7 @@ def rehydrate_for_current_root() -> None:
                 sweep_id=sid, status=status, error=s.get("error"),
                 platform_root=s.get("platform_root") or root,
             )
+        jobstore.evict_terminal(_sweeps, root)
 
 
 class LaunchHPOPayload(BaseModel):
@@ -238,6 +242,7 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
             search_alg=payload.search_alg,
             scheduler=payload.scheduler,
             study_name=job.sweep_id,
+            auto_tensorboard=False,
         )
         job.result = res if isinstance(res, dict) else {"raw": res}
         job.status = "completed"
@@ -302,8 +307,9 @@ def list_sweeps() -> dict:
 def get_sweep(sweep_id: str) -> dict:
     """One sweep by id: a live entry (whichever root it launched under) wins, else its
     manifest under the current root."""
+    from tcip_web import jobstore
     with _lock:
-        j = _sweeps.get(sweep_id)
+        j = jobstore.find_job(_sweeps, sweep_id)
     if j is not None:
         return {
             "sweep_id": j.sweep_id,

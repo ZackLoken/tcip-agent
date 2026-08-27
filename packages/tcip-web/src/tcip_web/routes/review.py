@@ -1357,11 +1357,12 @@ def _pq_register(job: PriorityQueueJob) -> None:
 
 
 def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
+    """A job by id, from any root this process holds: a repin to another project must not
+    make an in-flight priority-queue job unreachable, the same contract inference and tuning
+    hold for their own by-id lookups."""
     from tcip_web import jobstore
-    root = jobstore.current_root()
     with _pq_lock:
-        job = _pq_jobs.get(job_id)
-    return job if job is not None and job.platform_root == root else None
+        return jobstore.find_job(_pq_jobs, job_id)
 
 
 def rehydrate_for_current_root() -> None:
@@ -1371,7 +1372,10 @@ def rehydrate_for_current_root() -> None:
     treatment ``routes.inference``/``routes.tuning`` give their own registries. The worker
     thread behind a persisted non-terminal job is gone, so it is surfaced as ``interrupted``;
     its ranked queue is restored from what :func:`_pq_summary` persisted, so a completed job
-    still answers its own ranked images after a restart or a repin.
+    still answers its own ranked images after a restart or a repin. Bounds the dict
+    afterwards the same way registering a job does, so adopting N roots without ever
+    registering one here still keeps this process's memory bounded rather than growing by
+    ``MAX_JOBS`` for every root adopted.
     """
     from tcip_web import jobstore
 
@@ -1396,6 +1400,7 @@ def rehydrate_for_current_root() -> None:
                 reviewed_skipped=s.get("reviewed_skipped", 0),
                 platform_root=s.get("platform_root") or root,
             )
+        jobstore.evict_terminal(_pq_jobs, root)
 
 
 def _pq_worker(job: PriorityQueueJob) -> None:
