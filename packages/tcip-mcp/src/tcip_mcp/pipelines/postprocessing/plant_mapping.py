@@ -1038,11 +1038,15 @@ def verify_mapping_inputs(
         present_stems = recorded_stems & enumerated_stems
         read_set = stems_delivery_reads(rows, pred_dir) & present_stems
         unread_stems = present_stems - read_set
+        mapped_stems = {s for s in recorded_stems if recorded_by_stem[s].plot_name}
+        full_mapped_coverage = not missing_stems and read_set == mapped_stems
 
-        for name, _stem in sorted(
-            (Path(recorded_by_stem[s].image_path).name, s) for s in (missing_stems | unread_stems)
-        ):
-            captures_unverified.append(f"{date}/{name}")
+        unverified_names: set[str] = set()
+        if not full_mapped_coverage:
+            # An unmapped capture (a raster, a band group) is never read through predictions, so
+            # it always lands here unless the whole-date digest below re-checks it instead.
+            unverified_names.update(
+                Path(recorded_by_stem[s].image_path).name for s in (missing_stems | unread_stems))
 
         read_logical = {s: logical[s] for s in read_set}
         stamps = _read_date_stamps(read_logical, date)
@@ -1050,10 +1054,6 @@ def verify_mapping_inputs(
         for s in stamps:
             row = recorded_by_stem[s.stem]
             if s.kind == "image":
-                if s.name in was_unreadable and s.readable:
-                    return {"refusal": (
-                        f"{s.name} (date {date}) was unreadable when this mapping was built and "
-                        "its EXIF is available now: rebuild, since its assignment would differ")}
                 if s.name not in was_unreadable and s.readable is False:
                     return {"refusal": (
                         f"{s.name} (date {date}) was readable when this mapping was built and "
@@ -1068,15 +1068,23 @@ def verify_mapping_inputs(
                     haversine_m(s.lat, s.lon, p.lat, p.lon)
                     for p in verified_plants if p.plot_name == row.plot_name
                 ]
-                # Empty means the plant's own CSV is among plant_csvs_unverified, already disclosed.
-                if distances and not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
+                if not distances:
+                    # The plant's own CSV is among plant_csvs_unverified: disclose this capture's
+                    # recorded position as unrechecked rather than comparing it against nothing.
+                    unverified_names.add(s.name)
+                    continue
+                if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
                     return {"refusal": (
                         f"{s.name} (date {date}) has moved since this mapping was built: no "
                         f"plant named {row.plot_name!r} is {row.distance_m} m away now; rebuild, "
                         "since its assignment would differ")}
 
-        if not missing_stems and read_set == recorded_stems:
-            new_identity = capture_identity(stamps)
+        for name in sorted(unverified_names):
+            captures_unverified.append(f"{date}/{name}")
+
+        if full_mapped_coverage:
+            whole_date_stamps = _read_date_stamps(logical, date)
+            new_identity = capture_identity(whole_date_stamps)
             if new_identity != build.capture_identity.get(date):
                 return {"refusal": (
                     f"the captures under date {date} changed since this mapping was built "
