@@ -741,13 +741,7 @@ export function AnnotateTab() {
         setSaveBlocked(false);
         setIoError(null);
         setConflict(false);
-        startImageSessionTracking(
-          currentImageName,
-          labels.boxes.length +
-            labels.polygons.length +
-            labels.points.length +
-            labels.imageAnnotations.length,
-        );
+        startImageSessionTracking(currentImageName);
       } catch {
         if (cancelled) return;
         // Show a blank canvas but block saving so a transient load failure can't let an
@@ -769,7 +763,7 @@ export function AnnotateTab() {
         setIoError(
           "Could not load this image's labels. Saving is disabled to avoid overwriting the labels on disk.",
         );
-        startImageSessionTracking(currentImageName, 0);
+        startImageSessionTracking(currentImageName);
       }
     })();
     return () => {
@@ -803,7 +797,6 @@ export function AnnotateTab() {
         session_seconds_delta: Number(elapsedSeconds.toFixed(2)),
         annotations_added_delta: tracking.annotationsAddedDelta,
         final_annotation_count: finalAnnotationCount,
-        loaded_annotation_count: tracking.loadedAnnotationCount,
         dataset_root: state.gui.dataset.dataset_root,
         subject: state.gui.dataset.subject,
         date: state.gui.dataset.date,

@@ -21,7 +21,6 @@ export interface SessionEntry {
     string,
     {
       session_seconds: number;
-      loaded_annotation_count: number;
       annotations_added: number;
       final_annotation_count: number;
       avg_seconds_per_annotation: number;
@@ -44,7 +43,6 @@ export const sessionsApi = {
     session_seconds_delta: number;
     annotations_added_delta: number;
     final_annotation_count: number;
-    loaded_annotation_count?: number | null;
     // Where this image's image_status.json entry lives, so a later read can classify this
     // time as review vs. negative-confirmation vs. new-annotation work.
     dataset_root?: string | null;

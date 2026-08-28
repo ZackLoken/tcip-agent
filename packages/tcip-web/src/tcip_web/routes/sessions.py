@@ -16,7 +16,6 @@ A per-image annotation timer + session aggregate at
                 "images": {
                     "IMG_0001.JPG": {
                         "session_seconds": 273.4,
-                        "loaded_annotation_count": 21,
                         "annotations_added": 8,
                         "final_annotation_count": 29,
                         "avg_seconds_per_annotation": 34.2
@@ -107,7 +106,6 @@ class ImageEventPayload(BaseModel):
     session_seconds_delta: float = 0.0       # incremental time added
     annotations_added_delta: int = 0         # new annotations created during this slice
     final_annotation_count: int              # boxes + polygons after the slice
-    loaded_annotation_count: Optional[int] = None  # only set on first load
     # Where this image's own image_status.json entry lives, so a read-time classification of
     # this session's time (new annotation / review / negative confirmation) can look it up later.
     # Optional: a caller with no dataset context in hand still gets recorded, just unclassifiable.
@@ -135,15 +133,11 @@ def image_event(payload: ImageEventPayload) -> dict:
             payload.image_name,
             {
                 "session_seconds": 0.0,
-                "loaded_annotation_count": payload.loaded_annotation_count or 0,
                 "annotations_added": 0,
                 "final_annotation_count": 0,
                 "avg_seconds_per_annotation": 0.0,
             },
         )
-
-        if payload.loaded_annotation_count is not None and "loaded_annotation_count" not in img:
-            img["loaded_annotation_count"] = int(payload.loaded_annotation_count)
 
         if dataset_root:
             img["dataset_root"] = dataset_root
