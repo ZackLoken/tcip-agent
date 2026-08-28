@@ -614,11 +614,10 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    from tcip_mcp.model_registry import _sha256_of_bytes
+    from tcip_mcp.model_registry import _compute_sha256
 
     try:
-        with open(final_weights, "rb") as f:
-            digest = _sha256_of_bytes(f.read())
+        digest = _compute_sha256(final_weights)
     except OSError as exc:
         return {"error": f"complete_run: final_weights {final_weights!r} could not be read "
                          f"({exc}); refusing to complete with an unrecorded digest.",
