@@ -22,6 +22,10 @@ from tests import _operationalization_fixtures as fx
 from tests._binding_fixtures import producer_checkpoint_sha256
 from tests.test_tcip_web_results_routes import _expected_validation_record, _phenology_fixture
 
+# A writer-level unit test's own placeholder disclosure: the three keys the writer's cells
+# and the delivery event actually read, with neither test here exercising a real mapping.
+_NO_MAPPING = {"record_sha256": "0" * 16, "captures_unverified": [], "plant_csvs_unverified": []}
+
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
@@ -351,20 +355,31 @@ def delivered_golden(body: dict) -> bytes:
     The one cell no constant can hold is ``validation_record``: a record's digest covers the buckets
     at their absolute dataset root, which is this run's own temporary directory. It is read from the
     buckets' own stamps, so the golden still compares the delivered cell against the records the
-    stamps name rather than against whatever the delivery put there.
+    stamps name rather than against whatever the delivery put there. ``plant_mapping_sha256`` and
+    ``captures_unverified`` are likewise read from the mapping itself, for the same reason: the
+    fixture's own dataset carries no ``images/`` tree, so every one of the mapping's dates is
+    unverified, in the mapping's own date order.
     """
+    from tcip_mcp.pipelines.postprocessing import plant_mapping as pm
+
+    build = pm.load_mapping(Path(body["project_root"]), body["mapping_name"])
+    assert build is not None
+    mapping_sha = build.record_sha256.encode()
+    captures_unverified = ";".join(build.dates).encode()
+
     record = _expected_validation_record(body).encode()
     sha = producer_checkpoint_sha256("exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,"
-           + sha + b",exp-1," + record + b"\r\n")
+           + sha + b",exp-1," + record + b"," + mapping_sha + b"," + captures_unverified + b",\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
         b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
         b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
         b"catkin_95per_date_bound,catkin_elongation_provisional,operating_point_conf,"
         b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
-        b"producer_experiment_id,validation_record\r\n"
+        b"producer_experiment_id,validation_record,plant_mapping_sha256,captures_unverified,"
+        b"plant_csvs_unverified\r\n"
         + b"PLANT_A,AccA" + row
         + b"PLANT_B,AccB" + row
     )
@@ -622,7 +637,7 @@ def test_write_phenology_csv_refuses_without_a_basis(tmp_path: Path):
         phenology.write_phenology_csv(
             "test", [], tmp_path / "out.csv", CATKIN, flags={}, acknowledge_unvalidated=False,
             basis=None, operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
-            project_root=tmp_path)
+            project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert "compute_phenology and export_csv produce one" in str(excinfo.value)
     assert not (tmp_path / "out.csv").exists()
@@ -683,7 +698,7 @@ def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: 
     phenology.write_phenology_csv(
         "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=check.basis, operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     header = (tmp_path / "out.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
     assert header == phenology.phenology_csv_columns(CATKIN)

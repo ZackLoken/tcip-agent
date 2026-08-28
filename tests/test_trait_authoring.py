@@ -447,14 +447,13 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
             d / "P1.json",
             [Annotation(subject=subject, geometry=BBox(1.0, 1.0, 3.0, 3.0), score=0.9)], 8, 8)
         _op_sidecar(d, id_map, dataset_root=root)
-    import tcip_store
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+    from tests._binding_fixtures import write_plant_mapping
 
     mapping_name = "valley"
-    tcip_store.replace(plant_mapping_key(tmp_path, mapping_name), {
+    write_plant_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
-    })
+    }, dataset_root=root)
     return mapping_name, d1, d2
 
 

@@ -21,7 +21,6 @@ from fastapi.testclient import TestClient
 
 import tcip_store as ts
 from tcip_mcp import traits
-from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_web.app import app
 from tcip_web.state import store
 
@@ -132,8 +131,10 @@ def _currant_bloom_fixture(
     from tcip_mcp.dataset_layout import classes_path
 
     copy_registry(classes_path(tmp_path), classes_path(root))
+    from tests._binding_fixtures import write_plant_mapping
+
     mapping_name = "valley"
-    ts.replace(plant_mapping_key(tmp_path, mapping_name), mapping)
+    write_plant_mapping(tmp_path, mapping_name, mapping, dataset_root=root)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_name": mapping_name,

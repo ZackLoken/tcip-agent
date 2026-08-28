@@ -79,6 +79,7 @@ export const ROUTES = {
   postResultsPerPlantCurves: "/api/results/per_plant_curves",
   postResultsPlantMappingBuild: "/api/results/plant_mapping/build",
   postResultsPlantMappingLoad: "/api/results/plant_mapping/load",
+  getResultsPlantMappingList: "/api/results/plant_mapping/list",
   postResultsTraitSpecStatementConfirm: "/api/results/trait-spec-statement/confirm",
   postReviewAction: "/api/review/action",
   postReviewBackupLabels: "/api/review/backup_labels",

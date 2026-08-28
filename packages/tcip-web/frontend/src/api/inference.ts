@@ -145,6 +145,10 @@ export interface PhenologyResponse<Row> {
   positive_class_assessed: boolean;
   n_plants?: number;
   positive_class_id?: number | null;
+  // What the mapping's own delivery-time check could not verify: a mapped date whose folder is
+  // absent, a plant CSV that moved. Empty when nothing was unverified.
+  captures_unverified: string[];
+  plant_csvs_unverified: string[];
 }
 
 /** One entry of what a trait delivers, in the crop vocabulary's own wording, never paraphrased. */
@@ -313,6 +317,9 @@ export interface DeliveryEventRecord {
   output_path: string | null;
   documents: Record<string, unknown>;
   produced_at: string;
+  // The plant mapping this delivery attributed detections through, door-conditional: the
+  // phenology doors carry it, every other delivery door carries null.
+  plant_mapping: Record<string, unknown> | null;
 }
 
 export const resultsApi = {
@@ -338,13 +345,17 @@ export const resultsApi = {
     dates?: string[];
     nn_tolerance_m?: number;
   }) =>
-    postJson<{ summary: PlantMappingSummary; mapping: unknown }>(
-      ROUTES.postResultsPlantMappingBuild,
-      body,
-    ),
+    postJson<{
+      summary: PlantMappingSummary;
+      mapping: unknown;
+      unreadable: Record<string, string[]>;
+    }>(ROUTES.postResultsPlantMappingBuild, body),
 
   loadPlantMapping: (name: string) =>
     postJson<{ mapping: unknown }>(ROUTES.postResultsPlantMappingLoad, { name }),
+
+  // Every mapping name persisted under the open project, for the Results tab's name picker.
+  listPlantMappings: () => getJson<{ names: string[] }>(ROUTES.getResultsPlantMappingList),
 
   perPlantCurves: (body: PhenologyRequest) =>
     postJson<PhenologyResponse<PerPlantRow>>(ROUTES.postResultsPerPlantCurves, body),

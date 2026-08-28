@@ -31,6 +31,10 @@ from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec  # noqa: E40
 from tests._operationalization_fixtures import schema_basis  # noqa: E402
 from tests._trait_fixtures import CATKIN  # noqa: E402
 
+# A writer-level unit test's own placeholder disclosure: the three keys the writer's cells
+# and the delivery event actually read, with none of these tests exercising a real mapping.
+_NO_MAPPING = {"record_sha256": "0" * 16, "captures_unverified": [], "plant_csvs_unverified": []}
+
 
 def _sidecar(dir_path: Path, id_map: dict | None) -> None:
     """Write a bucket's operating_point.json exactly the way export_predictions does: the only
@@ -403,7 +407,7 @@ def test_write_phenology_csv_refuses_and_writes_nothing_when_a_dimension_is_unva
             "test", [], tmp_path / "out.csv", CATKIN,
             flags={"classifier": None, "operating_point": None}, acknowledge_unvalidated=False,
             basis=schema_basis(), operating_point_conf=None, producer={}, bindings={}, pred_dirs=[],
-            project_root=tmp_path)
+            project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
 
@@ -419,13 +423,13 @@ def test_write_phenology_csv_refuses_when_flags_carry_no_classifier_dimension(tm
         phenology.write_phenology_csv(
             "test", [], tmp_path / "out.csv", CATKIN, flags=incomplete, acknowledge_unvalidated=False,
             basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-            pred_dirs=pred_dirs, project_root=tmp_path)
+            pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert not (tmp_path / "out.csv").exists()
 
     cells = phenology.write_phenology_csv(
         "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     assert cells["positive_state_classifier_validated"]
 
 
@@ -468,7 +472,7 @@ def test_write_phenology_csv_floors_operating_point_when_tile_size_is_operative_
     cells = phenology.write_phenology_csv(
         "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=True,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=recon["bindings"],
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     assert cells["operating_point_validated"] == VALIDATED_FALSE
 
@@ -485,7 +489,7 @@ def test_write_phenology_csv_records_the_delivery_event_without_a_door_calling_i
     phenology.write_phenology_csv(
         "test.direct_writer_call", [], out_csv, CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     scope = resolution.delivery_events_scope(tmp_path)
     keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
@@ -504,7 +508,7 @@ def test_write_phenology_csv_cells_are_exactly_the_schemas_provenance_columns(tm
     cells = phenology.write_phenology_csv(
         "test", [], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     expected = set(phenology.PROVENANCE_COLUMNS) | {phenology.majority_provisional_column(CATKIN)}
     assert set(cells) == expected
@@ -520,7 +524,7 @@ def test_write_phenology_curve_csv_writes_the_curve_schema(tmp_path):
     phenology.write_phenology_curve_csv(
         "test", [row], tmp_path / "curve.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
 
     header = (tmp_path / "curve.csv").read_text(encoding="utf-8").splitlines()[0].split(",")
     assert header == phenology.curve_csv_columns()
@@ -542,7 +546,7 @@ def test_write_phenology_csv_carries_every_milestone_bound(tmp_path):
     phenology.write_phenology_csv(
         "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     values = written.splitlines()[1].split(",")
@@ -715,7 +719,7 @@ def test_write_phenology_csv_carries_n_observed_dates(tmp_path):
     phenology.write_phenology_csv(
         "test", [row], tmp_path / "out.csv", CATKIN, flags=flags, acknowledge_unvalidated=False,
         basis=schema_basis(), operating_point_conf=0.4, producer={}, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=tmp_path)
+        pred_dirs=pred_dirs, project_root=tmp_path, plant_mapping=_NO_MAPPING)
     written = (tmp_path / "out.csv").read_text(encoding="utf-8")
     header = written.splitlines()[0].split(",")
     assert "n_observed_dates" in header

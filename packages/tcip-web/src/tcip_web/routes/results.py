@@ -179,35 +179,72 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     """Build the image-to-plant mapping from the open project's images and the breeder's plant files.
 
     The mapping is project state, so it always persists under the open project, by name, and is
-    audited there; the images must belong to that project (its tree or a dataset registered to
-    it), so a mapping cannot be built for one project from another project's captures. The
+    audited there; ``images_root`` must be a registered dataset's own ``images/`` directory (its
+    identity record minted by ``register_dataset``), so a mapping cannot be built for one project
+    from another project's captures, or over a directory that merely ends in ``images``. The
     plant-location files are the breeder's own reference data, picked from wherever they keep
     them: from this machine they are read from any path, like the picker that finds them; from a
-    routable connection they are confined to the allowed roots.
+    routable connection they are confined to the allowed roots. A receipt that cannot be written
+    answers 409: the record it would have named is left on disk, refused until a rebuild replaces
+    it.
     """
+    from tcip_store.layout_claims import NAME_SEGMENT
+
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.dataset_layout import dataset_root_of, image_root, require_dataset_identity
+    from tcip_mcp.pipelines.data.splits import same_directory
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
+
+    if not NAME_SEGMENT.fullmatch(payload.name):
+        raise HTTPException(
+            400,
+            f"name {payload.name!r} is not lowercase letters, digits and single hyphens "
+            f"({NAME_SEGMENT.pattern})")
+
     root = _open_project_root()
     (images_root,) = _belonging(root, payload.images_root)
     assert images_root is not None
     plant_csvs = [_reference_file(p, request) for p in payload.plant_csv_paths]
-    mapping = plant_mapping.build_mapping(
-        images_root,
-        plant_csvs,
-        dates=payload.dates,
-        nn_tolerance_m=payload.nn_tolerance_m,
-    )
-    plant_mapping.persist_mapping(mapping, root, payload.name)
+
+    candidate = dataset_root_of(images_root)
+    if candidate is None or not same_directory(image_root(candidate), images_root):
+        raise HTTPException(
+            400,
+            f"{payload.images_root} is not a dataset's own images/ root; build_plant_mapping "
+            "maps a registered dataset's image tree")
+    try:
+        identity = require_dataset_identity(candidate)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    try:
+        build = plant_mapping.build_mapping(
+            images_root, plant_csvs,
+            name=payload.name, dataset_root=candidate, dataset_id=identity["id"],
+            project_root=root, built_by="gui_build_plant_mapping",
+            dates=payload.dates, nn_tolerance_m=payload.nn_tolerance_m,
+        )
+    except AmbiguousImageStem as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    try:
+        plant_mapping.persist_mapping(build, root, payload.name)
+    except AuditEntryNotWritten as exc:
+        raise HTTPException(409, str(exc)) from exc
+
     _audit(
         str(root),
         "gui_build_plant_mapping",
         {
             "name": payload.name,
             "images_root": str(images_root),
-            "n_dates": len(mapping),
+            "dataset_root": str(candidate),
+            "n_dates": len(build.dates),
         },
     )
 
     summary = {}
-    for date, assignments in mapping.items():
+    for date, assignments in build.assignments.items():
         matched = sum(1 for a in assignments if a.plot_name)
         summary[date] = {
             "n_images": len(assignments),
@@ -219,10 +256,9 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
         }
 
     return {
-        "mapping": {
-            date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
-        },
+        "mapping": build.rows(),
         "summary": summary,
+        "unreadable": build.unreadable,
     }
 
 
@@ -233,12 +269,18 @@ class LoadMappingPayload(BaseModel):
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     root = _open_project_root()
-    mapping = plant_mapping.load_mapping(root, payload.name)
-    return {
-        "mapping": {
-            date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
-        }
-    }
+    try:
+        build = plant_mapping.load_mapping(root, payload.name)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"mapping": build.rows() if build is not None else {}}
+
+
+@router.get("/plant_mapping/list")
+def list_plant_mappings() -> dict:
+    """Every mapping name persisted under the open project, for the Results tab's picker."""
+    root = _open_project_root()
+    return {"names": plant_mapping.plant_mapping_names(root)}
 
 
 # ── Per-plant curves ───────────────────────────────────────────────────
@@ -276,6 +318,7 @@ class _PhenologyMeasurement:
     def __init__(
         self, spec, plants: dict, validity: dict, gate, positive_class_id, project_root: Path,
         basis, bindings: dict, predictions_by_date: dict[str, str], flags: dict[str, str | None],
+        plant_mapping_disclosure: dict,
     ) -> None:
         self.spec, self.plants, self.validity, self.gate = spec, plants, validity, gate
         self.positive_class_id = positive_class_id
@@ -290,6 +333,9 @@ class _PhenologyMeasurement:
         # The dimension flags the gate above was computed from; validity["tile_size"] is None for
         # an untiled delivery, not the same as the key being absent from the gate's own flags.
         self.flags = flags
+        # The mapping this delivery attributed detections through, plus what verify_mapping_inputs
+        # could not check: threaded to the delivery event and, on export, the CSV's own columns.
+        self.plant_mapping_disclosure = plant_mapping_disclosure
 
     @property
     def positive_class_assessed(self) -> bool:
@@ -388,9 +434,42 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     if not stated.ok:
         raise HTTPException(400, stated.as_detail())
 
-    mapping_raw = plant_mapping.load_mapping_rows(root, payload.mapping_name)
-    if not mapping_raw:
+    from tcip_mcp.class_registry import RegistryError, dataset_root_for_pred_dirs
+    from tcip_mcp.dataset_layout import require_dataset_identity
+
+    try:
+        mapping_build = plant_mapping.load_mapping(root, payload.mapping_name)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if mapping_build is None:
         raise HTTPException(404, f"no mapping named {payload.mapping_name!r}")
+
+    missing_dates = [d for d in predictions_by_date if d not in mapping_build.dates]
+    if missing_dates:
+        raise HTTPException(
+            400,
+            f"predictions_by_date names date(s) {missing_dates} the mapping "
+            f"{payload.mapping_name!r} does not cover; rebuild the mapping to cover them, or "
+            "drop the date(s)")
+    try:
+        delivered_root = dataset_root_for_pred_dirs(list(predictions_by_date.values()))
+    except RegistryError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        delivered_identity = require_dataset_identity(delivered_root)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if delivered_identity.get("id") != mapping_build.dataset_id:
+        raise HTTPException(
+            400,
+            f"the predictions under {delivered_root} belong to a different dataset than the "
+            f"mapping {payload.mapping_name!r} was built over (mapping dataset_root "
+            f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
+
+    verified = plant_mapping.verify_mapping_inputs(mapping_build, mapping_build.dataset_root)
+    if "refusal" in verified:
+        raise HTTPException(400, verified["refusal"])
+    mapping_raw = mapping_build.rows()
 
     pred_dirs = list(predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs, trait=payload.trait)
@@ -426,7 +505,8 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     positive_class_id, _msg = phenology.resolve_positive_class_id(spec, predictions_by_date)
     return _PhenologyMeasurement(
         spec, plants, validity, gate, positive_class_id, root, stated.basis,
-        recon["bindings"], predictions_by_date, flags)
+        recon["bindings"], predictions_by_date, flags,
+        mapping_build.delivery_disclosure(verified))
 
 
 def _still_stated(measurement: _PhenologyMeasurement, trait: str) -> None:
@@ -493,6 +573,8 @@ def _disclosure(measurement: _PhenologyMeasurement) -> dict:
         # Honest signal: was anything actually classified along the trait's axis? If false, the
         # ratios are not a valid phenology measurement: do not deliver curves from them.
         "positive_class_assessed": measurement.positive_class_assessed,
+        "captures_unverified": measurement.plant_mapping_disclosure["captures_unverified"],
+        "plant_csvs_unverified": measurement.plant_mapping_disclosure["plant_csvs_unverified"],
     }
 
 
@@ -517,7 +599,8 @@ def per_plant_curves(payload: PhenologyPayload) -> dict:
                                                          "classifier_operating_point"],
                                   scale_document=None,
                                   trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
-                                  project_root=measurement.project_root)
+                                  project_root=measurement.project_root,
+                                  plant_mapping=measurement.plant_mapping_disclosure)
     return {
         "rows": measurement.curve_rows(),
         "n_plants": len(measurement.plants["rows"]),
@@ -550,7 +633,8 @@ def onset_dates(payload: PhenologyPayload) -> dict:
                                                          "classifier_operating_point"],
                                   scale_document=None,
                                   trait=payload.trait, delivery_kind=STATE_CROSSING_DATES,
-                                  project_root=measurement.project_root)
+                                  project_root=measurement.project_root,
+                                  plant_mapping=measurement.plant_mapping_disclosure)
     return {"rows": measurement.milestone_rows(), **_disclosure(measurement)}
 
 
@@ -617,7 +701,8 @@ def export_csv(payload: ExportCsvPayload) -> Response:
         flags=measurement.flags, acknowledge_unvalidated=False, basis=measurement.basis,
         operating_point_conf=measurement.validity["operating_point_conf"], producer=producer,
         bindings=measurement.bindings, pred_dirs=measurement.pred_dirs,
-        project_root=measurement.project_root)
+        project_root=measurement.project_root,
+        plant_mapping=measurement.plant_mapping_disclosure)
     body = saved_path.read_bytes()
     _audit(str(measurement.project_root), "results.export_csv", {
         "trait": payload.trait, "payload": payload.payload, "saved_path": str(saved_path),

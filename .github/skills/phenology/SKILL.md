@@ -82,11 +82,11 @@ across dates: plant mapping (image → plant_id) ─► per (plant, date) elonga
 
 | Piece | Where | Role |
 |-------|-------|------|
-| `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images + plant CSVs → persisted `plant_mapping.json` |
-| `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): mapping.json + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
+| `build_plant_mapping` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 1): geolocated images (a registered dataset's own `images/` root) + plant CSVs → a named mapping persisted under the project |
+| `compute_phenology` (MCP tool) | `tools/phenology_tools.py` | agent entry point (step 2): a named mapping + classified preds → delivered `catkin_phenology.csv`; refuses to write when `positive_class_assessed` is false |
 | `phenology` module | `tcip-mcp .../pipelines/postprocessing/phenology.py` | the one canonical milestone implementation: `count_by_class`, `per_plant_phenology`, `crossing_date`, `positive_onset_date`, `plant_milestones`, and the gated delivery doors `write_phenology_csv` / `write_phenology_curve_csv` (both refuse without a passing operationalization basis) |
-| `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping` |
-| Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/per_plant_curves`, `/onset_dates`, `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (operationalization records, trait-spec statements, delivery events, registered models) not enumerated here |
+| `plant_mapping` module | `tcip-mcp .../pipelines/postprocessing/plant_mapping.py` | image → `plant_id` via sequence-anchored GPS matching; `build_mapping`, `persist_mapping`, `load_mapping`, `verify_mapping_inputs`, `plant_mapping_names`. A mapping is project state, named and bound to the dataset it was built over and to its own build receipt: `load_mapping` refuses a record no receipt names, and `verify_mapping_inputs` re-checks the record's dates and plant CSVs at delivery time |
+| Web Results routes (phenology-specific) | `tcip-web .../routes/results.py` | `/plant_mapping/build`, `/plant_mapping/load`, `/plant_mapping/list`, `/per_plant_curves`, `/onset_dates`, `/export_csv` (the door that writes): the human UI; delegates to the same shared modules. Lists only this router's phenology routes; it also carries trait-general routes (operationalization records, trait-spec statements, delivery events, registered models) not enumerated here |
 
 Milestone math lives once, in the `phenology` module; plant mapping lives once, in the
 `plant_mapping` module. The MCP tools and the web routes all call them, so a mapping and a

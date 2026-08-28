@@ -471,8 +471,9 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     assert built[-1]["arguments"]["name"] == payload["name"]
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
-    assert plant_mapping.load_mapping(tmp_path, payload["name"]).keys() == {
-        "2026-02-11", "2026-02-25"}
+    build = plant_mapping.load_mapping(tmp_path, payload["name"])
+    assert build is not None
+    assert set(build.assignments.keys()) == {"2026-02-11", "2026-02-25"}
 
 
 # ── the picker: unconfined from this machine, confined from the network ───

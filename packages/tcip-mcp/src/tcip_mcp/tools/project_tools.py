@@ -433,6 +433,10 @@ def inspect_project(project_path: str = "") -> dict:
         )
         status["dates"] = dataset_layout.list_dates(root)
 
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_names
+
+    status["plant_mappings"] = plant_mapping_names(root)
+
     status["recent_activity"] = _recent_activity(project_path)
     return status
 

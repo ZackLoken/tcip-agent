@@ -178,13 +178,12 @@ stage_b = launch_training(config={"model_source": {...}, "data": {...}})
 export_predictions(checkpoint_path=stage_b_best, images_dir=images_dir, output_dir="stage_b_preds")
 
 # aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
-# build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism; load its
-# persisted mapping and look each image up by stem.
+# build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism.
 from pathlib import Path
 from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
-mapping = load_mapping(Path(plant_mapping_json))  # from a prior build_plant_mapping call
-by_stem = {a.stem: a for assignments in mapping.values() for a in assignments}
+build = load_mapping(project_root, mapping_name)  # from a prior build_plant_mapping call
+by_stem = {a.stem: a for assignments in build.assignments.values() for a in assignments}
 
 def plant_id_fn(image_path: str) -> str | None:
     a = by_stem.get(Path(image_path).stem)

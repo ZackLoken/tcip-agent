@@ -42,10 +42,20 @@ def _plant_csv(path: Path) -> None:
     )
 
 
-def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
+def test_build_plant_mapping_wraps_build_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.tools.project_tools import init_project, register_dataset
+    from tcip_mcp.traits import registered_crops
+
+    # tmp_path sits directly under this test's workspace; point the workspace elsewhere so
+    # init_project's naming rail (which only holds under the workspace) doesn't apply here.
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    assert "error" not in init_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
     Image.new("RGB", (4, 4)).save(images_root / "2026-02-11" / "img1.jpg")
+    register_dataset(str(tmp_path), crop=sorted(registered_crops())[0])
     csv_path = tmp_path / "plants.csv"
     _plant_csv(csv_path)
     name = "valley"
@@ -56,20 +66,27 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         plant_csv_paths=[str(csv_path)],
     )
 
-    assert "error" not in res
+    assert "error" not in res, res
     assert res["name"] == name
     assert res["project_root"] == str(tmp_path)
+    assert res["dataset_root"] == str(tmp_path)
     assert res["n_dates"] == 1
     assert res["n_images"] == 1
     assert res["n_mapped"] + res["n_unmapped"] == 1
     assert "2026-02-11" in res["per_date"]
     persisted = ts.read(plant_mapping_key(tmp_path, name))
-    assert list(persisted.keys()) == ["2026-02-11"]
-    assert persisted["2026-02-11"][0]["stem"] == "img1"
-    assert "confidence" not in persisted["2026-02-11"][0]
+    assert list(persisted["assignments"].keys()) == ["2026-02-11"]
+    assert persisted["assignments"]["2026-02-11"][0]["stem"] == "img1"
+    assert "confidence" not in persisted["assignments"]["2026-02-11"][0]
 
 
-def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
+def test_build_plant_mapping_missing_images_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.tools.project_tools import init_project
+
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    assert "error" not in init_project(str(tmp_path), site="orchard block")
     res = build_plant_mapping(
         images_root=str(tmp_path / "nope"),
         plant_csv_paths=[str(tmp_path / "plants.csv")],
@@ -79,7 +96,13 @@ def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
     assert "images_root not found" in res["error"]
 
 
-def test_build_plant_mapping_missing_csv(tmp_path: Path) -> None:
+def test_build_plant_mapping_missing_csv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.tools.project_tools import init_project
+
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    assert "error" not in init_project(str(tmp_path), site="orchard block")
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
     res = build_plant_mapping(
@@ -92,7 +115,9 @@ def test_build_plant_mapping_missing_csv(tmp_path: Path) -> None:
 
 
 def _write_mapping(project_root: Path, name: str, mapping: dict) -> None:
-    ts.replace(plant_mapping_key(project_root, name), mapping)
+    from tests._binding_fixtures import write_plant_mapping
+
+    write_plant_mapping(project_root, name, mapping, dataset_root=_ds_root(project_root))
 
 
 def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
