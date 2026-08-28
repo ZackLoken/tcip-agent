@@ -128,6 +128,26 @@ def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_liv
     assert assert_path_allowed(str(external / "images")) == (external / "images").resolve()
 
 
+def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_root(
+    tmp_path: Path,
+) -> None:
+    """register_dataset stores "." for a project's own dataset; allowed_roots must resolve that
+    entry against the project root rather than pass the bare "." into the allow-set, where a
+    same-file comparison against an unresolved "." would silently admit whatever directory the
+    server process happens to be running from."""
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_web.paths import allowed_roots
+
+    project = _project(tmp_path)
+    registered = register_dataset(str(project), crop="hazelnut", project_root=str(project))
+    assert "error" not in registered
+
+    roots = allowed_roots()
+
+    assert all(root.is_absolute() for root in roots)
+    assert project.resolve() in roots
+
+
 def test_image_roots_stay_additive_on_top_of_the_derived_set(
     tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
