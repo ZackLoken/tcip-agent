@@ -212,6 +212,31 @@ def test_a_process_that_imported_one_owning_module_still_sees_another_stores_fil
     assert json.loads(result.stdout) == ["image_status.json"]
 
 
+def test_the_priority_queue_and_hpo_registries_are_claimed_beside_inference_jobs(tmp_path):
+    """``job_registry`` places three documents under ``.tcip/state``: ``inference_jobs.json``,
+    ``review_priority_jobs.json`` and ``hpo_sweeps.json``. A claim naming only the first left
+    the other two invisible to the conform rail and the adoption planner even though the same
+    store and locator write them; each has to be claimed once written through its own route."""
+    from tcip_store.layout_claims import ROOT, unconformed_files
+    from tcip_web.routes import review, tuning
+
+    with bound(FileBackend()):
+        review._pq_register(
+            review.PriorityQueueJob(job_id="pq1", checkpoint_path="c", images_dir="i",
+                                     dataset_root="d")
+        )
+        with tuning._lock:
+            tuning._sweeps["hpo1"] = tuning.HPOJob(sweep_id="hpo1")
+        tuning._persist()
+
+        names = {p.name for p in unconformed_files(str(tmp_path), ROOT)}
+    review._pq_jobs.clear()
+    tuning._sweeps.clear()
+
+    assert "review_priority_jobs.json" in names
+    assert "hpo_sweeps.json" in names
+
+
 # ── the blob write that would land on a record's own path ────────────────────
 
 
