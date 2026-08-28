@@ -15,7 +15,6 @@ from tcip_mcp.tools.data_tools import (
     validate_data_quality,
     make_splits,
     split_manifest_key,
-    split_stem_list_key,
 )
 
 
@@ -137,8 +136,9 @@ def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
     assert result["total_stems"] == 4
     assert sum(result["splits"].values()) == 4
     assert result["output_dir"] == str(out)
+    manifest = ts.read(split_manifest_key(out))
     for split in ("train", "val", "calibration"):
-        assert ts.exists(split_stem_list_key(out, split))
+        assert manifest["splits"][split]
         assert (out / split / "images").is_dir()
         assert (out / split / "labels").is_dir()
     assert not (out / "test").exists()
@@ -159,10 +159,10 @@ def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     assert result["groups"] == 4
     assert sum(result["splits"].values()) == 4
     assert result["stratified"] is True
-    for split in ("train", "val", "calibration"):
-        assert ts.exists(split_stem_list_key(out, split))
 
     manifest = ts.read(split_manifest_key(out))
+    for split in ("train", "val", "calibration"):
+        assert manifest["splits"][split]
     assert manifest["subject"] == "catkin"
     assert manifest["attribute"] is None
     date_block = manifest["members"]["2-11-26"]
@@ -424,7 +424,7 @@ def test_make_splits_manifest_write_refuses_a_zero_calibration_ratio(tmp_path: P
     assert not out.exists()
 
 
-def test_make_splits_writes_three_stem_lists(tmp_path: Path):
+def test_make_splits_manifest_carries_all_three_split_sides(tmp_path: Path):
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
 
@@ -432,10 +432,10 @@ def test_make_splits_writes_three_stem_lists(tmp_path: Path):
                          train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
 
     assert "error" not in result, result
-    for split in ("train", "val", "calibration"):
-        assert ts.exists(split_stem_list_key(out, split))
     manifest = ts.read(split_manifest_key(out))
     assert set(manifest["splits"]) == {"train", "val", "calibration"}
+    assert manifest["splits"]["train"]
+    assert manifest["splits"]["val"]
     assert manifest["splits"]["calibration"]
 
 
@@ -614,9 +614,10 @@ def test_make_splits_groups_tiles_together(tmp_path: Path):
     assert result["groups"] == 4  # 4 source prefixes, not 12 tiles
 
     # No source prefix may appear in more than one split.
+    manifest = ts.read(split_manifest_key(out))
     seen: dict[str, str] = {}
     for split in ("train", "val", "calibration"):
-        for stem in ts.read(split_stem_list_key(out, split)):
+        for stem in manifest["splits"][split]:
             g = default_group_key(stem)
             assert seen.get(g, split) == split, f"group {g} spans splits"
             seen[g] = split
@@ -637,12 +638,12 @@ def test_make_splits_group_key_map_never_straddles(tmp_path: Path):
     assert "error" not in result, result
     assert result["group_by"] == "explicit_map"
 
+    manifest = ts.read(split_manifest_key(out))
     membership: dict[str, str] = {}
     for split in ("train", "val", "calibration"):
-        for identity in ts.read(split_stem_list_key(out, split)):
+        for identity in manifest["splits"][split]:
             membership[identity] = split
     assert membership["2-11-26/x_0_0"] == membership["2-11-26/y_0_0"]  # gA never straddles
-    manifest = ts.read(split_manifest_key(out))
     assert manifest["group_by"] == "explicit_map"
     assert manifest["group_key_map"] == group_key_map
 

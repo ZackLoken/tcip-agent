@@ -8,7 +8,6 @@ reproduces the tree plus ``output_dir``/``structure``.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import tcip_store as ts
@@ -35,7 +34,7 @@ GOLDEN_REALIZED_RATIOS = {"train": 0.25, "val": 0.25, "calibration": 0.5}
 
 # split_dataset (seed=1) and make_splits (seed=1) assign the same groups per split.
 GOLDEN_TREE = sorted([
-    "train.json", "val.json", "calibration.json", "split_manifest.json",
+    "split_manifest.json",
     "train/images/srcD_0_0.jpg", "train/images/srcD_1_0.jpg", "train/images/srcD_2_0.jpg",
     "train/labels/srcD_0_0.json", "train/labels/srcD_1_0.json", "train/labels/srcD_2_0.json",
     "val/images/srcA_0_0.jpg", "val/images/srcA_1_0.jpg", "val/images/srcA_2_0.jpg",
@@ -94,12 +93,12 @@ def test_make_splits_stats_golden(tmp_path: Path):
 
 
 def test_make_splits_materialize_tree_golden(tmp_path: Path):
-    """Bound to the file backend on purpose: the golden lists the split's own record documents
-    (train.json, split_manifest.json, ...) as sibling files, a fact about the file layout a
-    database backend does not reproduce."""
+    """Bound to the file backend on purpose: the golden lists the split's own record document
+    (split_manifest.json) as a sibling file, a fact about the file layout a database backend
+    does not reproduce."""
     from tcip_store.file_backend import FileBackend
 
-    from tcip_mcp.tools.data_tools import make_splits
+    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
 
     ts.bind(FileBackend())
     root = _multi_source_dataset(tmp_path / "ds")
@@ -112,5 +111,6 @@ def test_make_splits_materialize_tree_golden(tmp_path: Path):
     assert result["output_dir"] == str(out)
     assert result["structure"] == f"{out}/{{train,val,calibration}}/{{images,labels}}/"
     assert _tree(out) == GOLDEN_TREE
+    manifest = ts.read(split_manifest_key(out))
     for split in ("train", "val", "calibration"):
-        assert json.loads((out / f"{split}.json").read_text())
+        assert manifest["splits"][split]

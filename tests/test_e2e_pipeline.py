@@ -162,19 +162,20 @@ class TestE2EPipeline:
 
         # ── Step 10: Split dataset ───────────────────────────────────
         import tcip_store as ts
-        from tcip_mcp.tools.data_tools import split_stem_list_key
+        from tcip_mcp.tools.data_tools import split_manifest_key
 
         split_dir = tmp_path / "splits"
         split_result = make_splits(root, output_path=str(split_dir), materialize=True,
                                    subject="catkin", train_ratio=0.5, val_ratio=0.25,
                                    calibration_ratio=0.25)
         assert split_result["total_stems"] == 5
-        assert ts.exists(split_stem_list_key(split_dir, "train"))
-        assert ts.exists(split_stem_list_key(split_dir, "val"))
+        manifest = ts.read(split_manifest_key(split_dir))
+        assert manifest["splits"]["train"]
+        assert manifest["splits"]["val"]
         assert sum(split_result["splits"].values()) == 5
 
-        # Verify split JSON content
-        train_data = ts.read(split_stem_list_key(split_dir, "train"))
+        # Verify split membership content
+        train_data = manifest["splits"]["train"]
         assert isinstance(train_data, list)
         assert len(train_data) > 0
 
