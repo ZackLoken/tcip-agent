@@ -108,6 +108,18 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
             f"the split manifest at {split_dir} carries no {missing}: a split_manifest record "
             "always carries every key make_splits writes."
         )
+    members = manifest.get("members")
+    dates_missing_label_digests = sorted(
+        date_key for date_key, block in (members if isinstance(members, dict) else {}).items()
+        if not isinstance(block, dict) or "label_digests" not in block
+    )
+    if dates_missing_label_digests:
+        raise ValueError(
+            f"the split manifest at {split_dir} carries members under "
+            f"{dates_missing_label_digests} with no label_digests: a manifest drawn before the "
+            "platform recorded per-stem digests binds nothing here; regenerate it with "
+            "make_splits over the current data."
+        )
     splits = manifest.get("splits")
     missing_sides = sorted(set(SPLIT_NAMES) - set(splits if isinstance(splits, dict) else {}))
     if not isinstance(splits, dict) or missing_sides:
@@ -661,6 +673,7 @@ def make_splits(
     from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, trainable_stems
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
     from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
+    from tcip_mcp.pipelines.resolution import label_digests as _label_digests
 
     date_dirs = _split_date_dirs(folder_path)
     if not date_dirs:
@@ -710,6 +723,7 @@ def make_splits(
                     "labels_root": str(labels_dir),
                     "images_root": str(images_dir),
                     "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
+                    "label_digests": _label_digests(labels_dir, sorted(admitted)),
                 }
 
         stems = sorted(identity_locations)

@@ -575,13 +575,16 @@ def test_resolver_selection_disjointness_reads_a_declared_documents_result():
         "leaked_groups": [], "leaked_stems": [], "group_check": "performed"}}}
     assert resolver_selection_disjointness(result, "classifier_operating_point") == {
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
-        "leaked_groups": [], "leaked_stems": [], "group_check": "performed"}
+        "leaked_groups": [], "leaked_stems": [], "group_check": "performed",
+        "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
+        "calibration_labels_moved": None, "manifest_redrawn": None,
+        "calibration_labels_dir": None}
 
 
 def test_resolver_selection_disjointness_carries_the_leak_fields():
-    """The row's field carries the same seven keys the live sweep does, unresolvable/
-    leaked_groups/leaked_stems included, not only the pass/fail booleans a caller cannot floor a
-    leaking row from."""
+    """The row's field carries the same twelve keys the live sweep does, unresolvable/
+    leaked_groups/leaked_stems and the label-movement keys included, not only the pass/fail
+    booleans a caller cannot floor a leaking or a moved-label row from."""
     from tcip_mcp.pipelines.resolution import resolver_selection_disjointness
 
     result = {"sweep_data": {"selection_disjointness": {
@@ -589,7 +592,10 @@ def test_resolver_selection_disjointness_carries_the_leak_fields():
         "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed"}}}
     assert resolver_selection_disjointness(result, "classifier_operating_point") == {
         "applicable": True, "reason": None, "checked": True, "unresolvable": False,
-        "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed"}
+        "leaked_groups": ["g1"], "leaked_stems": ["s1"], "group_check": "performed",
+        "labels_moved_draw_to_run": None, "labels_moved_run_to_now": None,
+        "calibration_labels_moved": None, "manifest_redrawn": None,
+        "calibration_labels_dir": None}
 
 
 def test_resolver_selection_disjointness_is_none_for_resolve_scale():

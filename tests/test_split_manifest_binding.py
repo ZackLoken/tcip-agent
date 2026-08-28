@@ -314,7 +314,7 @@ def test_auto_train_val_admits_a_confirmed_negative_with_data_date_unset(tmp_pat
         "split": {"manifest_dir": str(out)},
     }
 
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     assert "n" in train_ds.stems + val_ds.stems
 
@@ -327,7 +327,7 @@ def test_auto_train_val_binds_to_the_manifests_own_partition_for_its_date(tmp_pa
     manifest = _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     date_members = {s for identity in manifest["splits"]["train"] + manifest["splits"]["val"]
                    for d, s in [identity.split("/", 1)] if d == DATES[0]}
@@ -352,7 +352,7 @@ def test_auto_train_val_second_bind_on_the_same_config_binds_again(tmp_path: Pat
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
     _auto_train_val("detection", data_cfg, None)
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
 
@@ -377,7 +377,7 @@ def test_auto_train_val_binds_an_explicit_map_manifest_twice_and_persists_its_na
     data_cfg = _run_data_cfg(root, out, DATES[0])
 
     _auto_train_val("detection", data_cfg, None)
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
     assert data_cfg["split"]["resolved_group_key_map"] == dict(stem_groups)
@@ -423,7 +423,7 @@ def test_relaunch_from_the_durable_record_binds_again(tmp_path: Path):
     _patch_experiment_config_split("exp_relaunch_split_bind", data_cfg["split"])
     durable_data_cfg = ts.read(config_key("exp_relaunch_split_bind"))["data"]
 
-    train_ds, val_ds = _auto_train_val("detection", durable_data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", durable_data_cfg, None)
 
     assert train_ds.stems and val_ds.stems
 
@@ -436,7 +436,7 @@ def test_auto_train_val_binds_the_same_tree_for_the_other_subject(tmp_path: Path
     _draw(root, out, subject=OTHER_SUBJECT, seed=0)
     data_cfg = _run_data_cfg(root, out, DATES[0], subject=OTHER_SUBJECT)
 
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     # Only stems "c", "d", "e" and "f" carry the other subject on this date; the manifest's own
     # calibration side holds out some of them, so train+val is a subset, never the whole four.
@@ -454,7 +454,7 @@ def test_auto_train_val_binds_an_attribute_scoped_tree(tmp_path: Path):
     assert "error" not in result, result
     data_cfg = _run_data_cfg(root, out, DATES[0], attribute="condition")
 
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     all_assessed = {"assessed_a", "assessed_b", "assessed_c", "assessed_d"}
     assert set(train_ds.stems + val_ds.stems) <= all_assessed
@@ -643,7 +643,7 @@ def test_persist_split_manifest_carries_the_manifest_binding(tmp_path: Path):
     out = tmp_path / "m"
     manifest = _draw(root, out)
     data_cfg = _run_data_cfg(root, out, DATES[0])
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     create_experiment("exp_manifest_binding", {})
     _persist_split_manifest("exp_manifest_binding", train_ds, val_ds, data_cfg)
@@ -686,7 +686,7 @@ def test_persist_split_manifest_carries_no_stale_binding_when_this_run_did_not_b
         },
     }
 
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
 
     assert val_ds is not None
     assert "manifest_binding" not in data_cfg["split"]

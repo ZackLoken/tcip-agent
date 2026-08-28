@@ -545,6 +545,16 @@ def block_calibrated_export_operating_point(
 
 # --- dataset identity -----------------------------------------------------
 
+def _read_label_bytes(labels_dir: Path, stems: list[str]) -> dict[str, bytes]:
+    """Every stem's label bytes, read once, empty for a missing file: the pass both
+    :func:`dataset_hash` and :func:`label_digests` build their own digest from."""
+    out: dict[str, bytes] = {}
+    for stem in stems:
+        lp = labels_dir / f"{stem}.json"
+        out[stem] = lp.read_bytes() if lp.is_file() else b""
+    return out
+
+
 def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     """A content-addressed hash identifying a dataset's ground truth.
 
@@ -561,14 +571,27 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
         stems = sorted(p.stem for p in prediction_documents(labels_dir))
     else:
         stems = sorted(stems)
+    byts = _read_label_bytes(labels_dir, stems)
     h = hashlib.sha256()
     for stem in stems:
         h.update(stem.encode("utf-8"))
         h.update(b"\0")
-        lp = labels_dir / f"{stem}.json"
-        h.update(lp.read_bytes() if lp.is_file() else b"")
+        h.update(byts[stem])
         h.update(b"\0")
     return h.hexdigest()[:16]
+
+
+def label_digests(labels_dir: str | Path, stems: list[str]) -> dict[str, str]:
+    """Each stem's own content-addressed digest, ``sha256(label bytes)[:16]``, the same
+    empty-bytes-for-a-missing-file convention :func:`dataset_hash` folds into its one combined
+    hash, surfaced here per stem instead: a withdrawn label reads as the digest of empty bytes,
+    not as an absent key. Reads each label's bytes once, through the pass :func:`dataset_hash`
+    shares with this function.
+    """
+    labels_dir = Path(labels_dir)
+    stems = sorted(stems)
+    byts = _read_label_bytes(labels_dir, stems)
+    return {stem: hashlib.sha256(byts[stem]).hexdigest()[:16] for stem in stems}
 
 
 def csv_dataset_hash(csv_path: str | Path) -> str:
@@ -1113,6 +1136,14 @@ def _sidecar_reference(
     return cleared_reference(param.get("validated_against"), validation_kind=validation_kind)
 
 
+_LABEL_MOVEMENT_KEYS: tuple[str, ...] = (
+    "labels_moved_draw_to_run", "labels_moved_run_to_now", "calibration_labels_moved",
+    "manifest_redrawn", "calibration_labels_dir",
+)
+"""The five keys :func:`resolver_selection_disjointness` copies onto an applicable row beside
+the leak fields: presence is required there, their value is not gated on (a moved label is
+visible on the row, not a floor)."""
+
 # --- the claim a stamp asserts, and the record that has to answer for it -------------------
 
 _CLAIM_KEYS: dict[str, tuple[str, ...]] = {
@@ -1295,10 +1326,10 @@ def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
     """Whether and how a resolver's own live result checked selection-disjointness (the
     checkpoint's own selection side, ``split.json``'s ``val``, disjoint from the reference): the
     same shape a live sweep carries, ``applicable``, ``reason``, ``checked``, ``unresolvable``,
-    ``leaked_groups``, ``leaked_stems`` and ``group_check`` (``applicable``/``reason`` since this
-    check runs only when a split manifest is in play, unlike train-disjointness, which runs on
-    every calibration), so the row a delivery door reads carries the leak fields its floor gates
-    on, not only the pass/fail booleans.
+    ``leaked_groups``, ``leaked_stems``, ``group_check`` and, when the calibration read a label
+    directory, the four label-movement keys plus ``calibration_labels_dir`` beside them, so the
+    row a delivery door reads carries the leak fields and the movement facts its floor and its
+    breeder sentence read, not only the pass/fail booleans.
     """
     sweep = _disjointness_sweep(result, document, "resolver_selection_disjointness")
     sd = (sweep or {}).get("selection_disjointness")
@@ -1310,6 +1341,13 @@ def resolver_selection_disjointness(result: Any, document: str) -> dict | None:
         "leaked_groups": list(sd.get("leaked_groups") or []),
         "leaked_stems": list(sd.get("leaked_stems") or []),
         "group_check": sd.get("group_check"),
+        # Preserved as-is, never coerced: None means "not checked", an empty list means
+        # "checked, nothing moved", and the two must stay distinguishable on the row.
+        "labels_moved_draw_to_run": sd.get("labels_moved_draw_to_run"),
+        "labels_moved_run_to_now": sd.get("labels_moved_run_to_now"),
+        "calibration_labels_moved": sd.get("calibration_labels_moved"),
+        "manifest_redrawn": sd.get("manifest_redrawn"),
+        "calibration_labels_dir": sd.get("calibration_labels_dir"),
     }
 
 
@@ -1789,18 +1827,21 @@ def verify_stamp_binding(
         "stated_values", {}).get("split_manifest_dir")
     if row_split_manifest_dir is not None:
         sd = row.get("selection_disjointness")
+        sd_applicable = isinstance(sd, dict) and sd.get("applicable") is True
         sd_ok = isinstance(sd, dict) and (
             (sd.get("applicable") is False and sd.get("reason"))
-            or (sd.get("applicable") is True and sd.get("checked") is True
-                and not sd.get("leaked_groups") and not sd.get("leaked_stems"))
+            or (sd_applicable and sd.get("checked") is True
+                and not sd.get("leaked_groups") and not sd.get("leaked_stems")
+                and all(k in sd for k in _LABEL_MOVEMENT_KEYS))
         )
         if not sd_ok:
             return floored(
                 f"{document}.json at {bucket!r} claims a validated reference under split "
                 f"manifest {row_split_manifest_dir!r}, and record {record_digest!r} carries no "
                 "selection_disjointness check that is either not-applicable (with a reason) or "
-                "checked with no leak. Calibrate again under the manifest's calibration side "
-                "with a checkpoint whose run is on record.", **known)
+                "checked with no leak and the label-movement keys sealed. Calibrate again under "
+                "the manifest's calibration side with a checkpoint whose run is on record.",
+                **known)
 
     if document in ("operating_point", "resolve_scale"):
         resolved = Path(bucket).resolve()

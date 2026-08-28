@@ -1239,7 +1239,7 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             transforms = build_augmentation(aug_cfg)
 
         # Auto-val gives the val_loader that the composite objective / the scheduler need.
-        train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+        train_ds, val_ds, _label_digests = _auto_train_val(task, data_cfg, transforms)
         # Stamped before training so a pruned/failed trial's resolved-config snapshot still
         # records the geometry the trial actually trained on.
         stamp_effective_data_geometry(data_cfg, train_ds)
@@ -1705,8 +1705,15 @@ def _ensure_experiment(
 
 def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict, *,
                             dataset_id: str | None = None,
-                            dataset_fingerprint: str | None = None) -> None:
+                            dataset_fingerprint: str | None = None,
+                            label_digests: dict | None = None) -> None:
     """Persist which stems (+ seed + dataset_hash + dataset identity) produced this run's metrics.
+
+    ``label_digests`` (``_auto_train_val``'s own third return value for a manifest-bound run,
+    ``None`` otherwise) is written as ``split.json``'s own top-level ``label_digests`` key,
+    beside ``manifest_binding`` rather than inside it, so a selection-disjointness check can
+    name a calibration label that moved since the draw without the durable config, a checkpoint
+    or a trial's resolved config ever carrying a per-stem digest.
 
     The same seed yields a different split if the label set changes, so a metric is only reproducible
     with the exact train/val membership recorded beside it. The whole-dataset ``dataset_fingerprint``
@@ -1778,6 +1785,8 @@ def _persist_split_manifest(experiment_id: str, train_ds, val_ds, data_cfg: dict
         if split.get("manifest_binding"):
             # A run bound to a named split manifest: its counts and hashes ride here too.
             manifest["manifest_binding"] = split["manifest_binding"]
+        if label_digests:
+            manifest["label_digests"] = label_digests
         if experiment_exists(experiment_id):
             key, st_key = split_key(experiment_id), status_key(experiment_id)
             try:
@@ -2180,7 +2189,13 @@ def _build_full_admitted_dataset(
 
 
 def _auto_train_val(task: str, data_cfg: dict, transforms):
-    """Build ``(train_ds, val_ds)`` for a run, deriving a leakage-free val split.
+    """Build ``(train_ds, val_ds, label_digests)`` for a run, deriving a leakage-free val split.
+
+    ``label_digests`` is ``None`` on every path but the manifest-bound one (1.5 below), where it
+    carries the per-stem digests :func:`_persist_split_manifest` writes onto ``split.json``
+    beside, never inside, ``manifest_binding``: passed as its own value rather than through
+    ``data_cfg["split"]`` since that block is copied whole into the durable config and every
+    checkpoint, and per-stem digests must not multiply through every copy.
 
     Resolution order:
       1. ``data.val_images_dir`` set -> build val from it explicitly (a CSV-driven task -
@@ -2274,12 +2289,12 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                         "different val_images_dir."
                     )
                 val_src["csv_path"] = val_csv
-            return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling)
+            return train_ds, build_dataset(task, **val_src, transforms=None, tiling=tiling), None
         except UnreadableLabelDocument:
             raise
         except Exception as exc:
             logger.warning("Explicit val build failed (%s); training without validation.", exc)
-            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
+            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
     # 1.5. A named split manifest is an explicit partition auto_val does not govern; every
     # refusal here, and any build failure while binding to it, raises rather than degrading.
@@ -2297,12 +2312,15 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 f"through; task={task!r} cannot bind to one."
             )
 
+        import hashlib
+
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
             bind_manifest_stems, manifest_date_key, member_identity_parts,
             refuse_if_images_root_moved,
         )
         from tcip_mcp.pipelines.resolution import dataset_hash
+        from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(manifest_dir)
@@ -2361,16 +2379,24 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
             "calibration_unadmitted": binding.calibration_unadmitted,
             "other_dates": binding.other_dates,
         }
+        # Kept out of split_cfg/manifest_binding: that block is copied whole into the durable
+        # config and every checkpoint. Handed to _persist_split_manifest as its own parameter.
+        bound_stems = sorted(set(binding.train) | set(binding.val) | set(binding.calibration))
+        label_digests_block = {
+            "at_split": date_block.get("label_digests"),
+            "at_run": compute_label_digests(labels_dir, bound_stems),
+            "manifest_sha256": hashlib.sha256(RECORD_JSON.encode(manifest)).hexdigest(),
+        }
         # Only detection/instance_seg reach here (checked above), so the build is the plain
         # stems=-narrowed geometry path, never the classification CSV/folder branch below.
         train_ds = build_dataset(
             task, **build_src, transforms=transforms, stems=binding.train, tiling=tiling)
         val_ds = build_dataset(
             task, **build_src, transforms=None, stems=binding.val, tiling=tiling)
-        return train_ds, val_ds
+        return train_ds, val_ds, label_digests_block
 
     if not data_cfg.get("auto_val", True) or task not in STEM_TASKS:
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
     # 2. Auto group-aware train/val split. A dataset-level COCO here is a caller-fixable config
     # error, raised outside the handler below rather than degraded.
@@ -2380,7 +2406,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
             task, data_cfg, src, transforms, detected_label_format)
     except Exception as exc:
         logger.warning("Auto train/val split failed (%s); training without validation.", exc)
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
     if len(stems) < 2:
         # A single source can't hold out a whole stem, but a tiled detection source can still
@@ -2390,8 +2416,8 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
             spatial_ds = _spatial_single_source_split(
                 stems[0], data_cfg, tiling, full_ds, split_cfg, transforms)
             if spatial_ds is not None:
-                return spatial_ds
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
+                return (*spatial_ds, None)
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
     # setdefault (not get): the resolved grouping is written back so a later
     # _persist_split_manifest call can record what was actually used.
@@ -2439,7 +2465,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 "Auto train/val split for %s: no grouping policy could populate both sides; "
                 "training without validation.", task,
             )
-            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
+            return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
         if task == "classification":
             stem_to_label = dict(zip(getattr(full_ds, "_stems", []), getattr(full_ds, "_labels", [])))
@@ -2454,10 +2480,10 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
             val_ds = build_dataset(task, **build_src, transforms=None, stems=val_stems, tiling=tiling)
         logger.info("Auto train/val split for %s: %d train / %d val stems.",
                     task, len(train_stems), len(val_stems))
-        return train_ds, val_ds
+        return train_ds, val_ds, None
     except Exception as exc:
         logger.warning("Auto train/val split failed (%s); training without validation.", exc)
-        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None
+        return build_dataset(task, **src, transforms=transforms, tiling=tiling), None, None
 
 
 def get_worst_predictions(

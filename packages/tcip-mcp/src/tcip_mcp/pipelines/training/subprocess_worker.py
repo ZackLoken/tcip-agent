@@ -235,7 +235,7 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
         transforms = build_augmentation(aug_config)
 
-    train_ds, val_ds = _auto_train_val(task, data_cfg, transforms)
+    train_ds, val_ds, label_digests = _auto_train_val(task, data_cfg, transforms)
 
     split_cfg = data_cfg.get("split")
     if _is_manifest_bound_split(split_cfg):
@@ -302,7 +302,8 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     # result the parent's own copy (used for the lineage record) already produced.
     ds_id, ds_fp = _dataset_identity(data_cfg)
     _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg,
-                            dataset_id=ds_id, dataset_fingerprint=ds_fp)
+                            dataset_id=ds_id, dataset_fingerprint=ds_fp,
+                            label_digests=label_digests)
 
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
 

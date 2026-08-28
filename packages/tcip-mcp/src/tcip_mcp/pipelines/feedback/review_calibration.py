@@ -163,6 +163,23 @@ def _breeder_message(name: str) -> str:
     raise AssertionError(f"{name!r} is not a name in _FAILURE_MESSAGES")
 
 
+def _selection_movement_sentence(sweep: dict) -> str:
+    """One sentence naming a calibration label that moved since the split was drawn, read from
+    the sealed ``selection_disjointness``'s own ``calibration_labels_moved``; empty when that
+    list is empty or absent (a run with no ``label_digests`` block, or nothing moved).
+
+    Never a ``_FAILURE_MESSAGES`` entry: a moved label is disclosed, not a floor. This surface
+    names no manifest and holds no labels directory of its own, so ``manifest_redrawn`` and
+    ``labels_moved_run_to_now`` are always ``null`` here and earn no sentence of their own.
+    """
+    moved = (sweep.get("selection_disjointness") or {}).get("calibration_labels_moved")
+    if not moved:
+        return ""
+    names = ", ".join(sorted(moved))
+    return (f" The label(s) for {names} changed since this split was drawn, so this number was "
+            "calibrated on a universe that moved: redraw the split or re-confirm those labels.")
+
+
 def _to_xywh(box_norm: Sequence[float], img_w: float, img_h: float) -> list[float]:
     """Normalized center-form ``[cx, cy, w, h]`` -> top-left ``[x, y, w, h]`` scaled by image dims.
 
@@ -599,7 +616,7 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
                             "checked against that run's training split.")
         reason = (f"Validated. Your review of {reviewed_image_count} reviewed image(s) confirms this "
                   f"model's counts closely enough to use as a validation reference for "
-                  f"results.{miss_note}{run_note}")
+                  f"results.{miss_note}{run_note}{_selection_movement_sentence(sweep)}")
     elif "passed_holdout" not in sweep:
         # This branch must come before the _FAILURE_MESSAGES lookup. conf_censored is also present,
         # often truthy, in the no-holdout branch's sweep_data, which has no "failures" list at all,
@@ -618,5 +635,5 @@ def describe_review_validation(bundle: ResolvedBundle, *, reviewed_image_count: 
                 f"resolve_operating_point set an unvalidated result with a completed holdout gate "
                 f"but no recognized failure name (failures={failures!r}), "
                 "describe_review_validation cannot explain this refusal.")
-        reason = "\n\n".join(matched)
+        reason = "\n\n".join(matched) + _selection_movement_sentence(sweep)
     return {"validated": validated, "reference": reference, "conf": conf_value, "reason": reason}

@@ -156,7 +156,8 @@ def _patch_trial_machinery(monkeypatch, train_ds):
         run.status = "completed"
         return run
 
-    monkeypatch.setattr(tt, "_auto_train_val", lambda task, data_cfg, transforms: (train_ds, None))
+    monkeypatch.setattr(
+        tt, "_auto_train_val", lambda task, data_cfg, transforms: (train_ds, None, None))
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())

@@ -641,7 +641,7 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
         "split": {"manifest_dir": str(out)},
     }
     experiment_id = "exp_round_trip_bound"
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     create_experiment(experiment_id, {})
     _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
 

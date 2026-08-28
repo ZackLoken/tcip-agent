@@ -33,6 +33,7 @@ from tcip_mcp.pipelines.resolution import (
     accepted_references,
     default,
     derived,
+    label_digests,
     resolve_tile_size_param,
 )
 from tcip_mcp.pipelines.training.evaluation import (
@@ -580,9 +581,57 @@ _UNRESOLVABLE_SELECTION_SHAPE = {
 }
 
 
+def _resolve_label_movement(
+    label_digests_block: dict | None, cal_ids: set,
+    calibration_labels_dir: str | None, split_manifest_sha256: str | None,
+) -> dict:
+    """The four label-movement keys plus ``calibration_labels_dir``, from a bound run's own
+    ``split.json``'s ``label_digests`` block (``at_split``/``at_run``/``manifest_sha256``) and
+    the calibration's own labels directory, when it read one.
+
+    All four keys ``None`` when the run recorded no ``label_digests`` block: a run bound before
+    that block existed, or an unbound run calibrated under a caller-named manifest. Otherwise the
+    two digest dictionaries share one key set (the draw's), so a stem present only in ``at_run``
+    or added to the calibration universe after the draw is named by no key.
+    """
+    if not label_digests_block:
+        return {
+            "labels_moved_draw_to_run": None,
+            "labels_moved_run_to_now": None,
+            "calibration_labels_moved": None,
+            "manifest_redrawn": None,
+            "calibration_labels_dir": calibration_labels_dir,
+        }
+    at_split = label_digests_block.get("at_split") or {}
+    at_run = label_digests_block.get("at_run") or {}
+    manifest_sha256 = label_digests_block.get("manifest_sha256")
+
+    labels_moved_draw_to_run = sorted(
+        stem for stem, digest in at_split.items() if at_run.get(stem) != digest)
+    if calibration_labels_dir is not None:
+        now = label_digests(calibration_labels_dir, sorted(at_run))
+        labels_moved_run_to_now = sorted(
+            stem for stem, digest in at_run.items() if now.get(stem) != digest)
+    else:
+        labels_moved_run_to_now = None
+
+    moved = set(labels_moved_draw_to_run) | set(labels_moved_run_to_now or [])
+    return {
+        "labels_moved_draw_to_run": labels_moved_draw_to_run,
+        "labels_moved_run_to_now": labels_moved_run_to_now,
+        "calibration_labels_moved": sorted(moved & cal_ids),
+        "manifest_redrawn": (
+            split_manifest_sha256 != manifest_sha256 if split_manifest_sha256 is not None
+            else None
+        ),
+        "calibration_labels_dir": calibration_labels_dir,
+    }
+
+
 def _selection_disjointness(
     experiment_id: str | None, cal_ids: set, hold_ids: set, *,
     split_manifest_dir: str | None = None, calibration_date: str | None = None,
+    calibration_labels_dir: str | None = None, split_manifest_sha256: str | None = None,
 ) -> dict:
     """Whether the cal/holdout images were also on the checkpoint's own selection side (its
     ``split.json``'s ``val``), the check the manifest family's own ruling exists for: a checkpoint
@@ -606,7 +655,10 @@ def _selection_disjointness(
     checked, and a foreign checkpoint's train check being merely skipped is not license to skip
     this one silently too.
 
-    Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``.
+    Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and
+    on the applicable path the four label-movement keys plus ``calibration_labels_dir``
+    (:func:`_resolve_label_movement`): ``null`` for all five, and ``reason`` naming why, when the
+    run recorded no ``label_digests`` block on its ``split.json``.
     """
     if experiment_id is None:
         if split_manifest_dir is not None:
@@ -664,7 +716,17 @@ def _selection_disjointness(
     persisted_map = split.get("group_key_map") if split.get("group_by") == "explicit_map" else None
     resolved = _resolve_group_stem_disjointness(
         val_stems, cal_hold_stems, split.get("group_by"), persisted_map)
-    return {"applicable": True, "reason": None, **resolved}
+    label_digests_block = split.get("label_digests")
+    moved = _resolve_label_movement(
+        label_digests_block, cal_ids, calibration_labels_dir, split_manifest_sha256)
+    reason = None
+    if not label_digests_block:
+        reason = (
+            "this run's split.json recorded no label_digests block, so a calibration label "
+            "moved since the draw cannot be named: the run was bound before that block existed, "
+            "or was calibrated with no bound run under a caller-named manifest"
+        )
+    return {"applicable": True, "reason": reason, **resolved, **moved}
 
 
 def attach_split_policy_provenance(bundle: ResolvedBundle, locked: dict) -> None:
@@ -736,6 +798,8 @@ def resolve_operating_point(
     hold_rects: dict[str, tuple[int, int, int, int]] | None = None,
     split_manifest_dir: str | None = None,
     calibration_date: str | None = None,
+    calibration_labels_dir: str | None = None,
+    split_manifest_sha256: str | None = None,
 ) -> ResolvedBundle:
     """Resolve the operating point for (trait, dataset). Pure over records, callers pass the model
     pass output; ``records_over_loader`` produces it. ``tile_size`` may be model-derived (imgsz).
@@ -794,7 +858,12 @@ def resolve_operating_point(
     selection side (``split.json``'s ``val``), checked when either this calibration names a
     manifest or the checkpoint's own record carries a ``manifest_binding``, not-applicable
     otherwise (see :func:`_selection_disjointness`). A leak or an unresolvable check blocks
-    ``passed`` the same way a train-disjointness one does.
+    ``passed`` the same way a train-disjointness one does. ``calibration_labels_dir`` is the
+    directory this calibration read its own records from, so a label rewritten since the run
+    bound can be named against the calibration's own live copy; ``split_manifest_sha256`` is the
+    digest of the manifest record this calibration read, when it named one, so a manifest
+    redrawn since the run bound is visible. Both feed :func:`_selection_disjointness` unchanged
+    and open nothing themselves when omitted.
 
     ``adjudication_covered``: an optional per-record predicate, when given, it is a gate, not a
     filter: every calibration and holdout record must satisfy it, or the whole reference is refused
@@ -914,7 +983,9 @@ def resolve_operating_point(
                 experiment_id, cal_ids, hold_ids, cal_rects=cal_rects, hold_rects=hold_rects)
             sd = _selection_disjointness(
                 experiment_id, cal_ids, hold_ids, split_manifest_dir=split_manifest_dir,
-                calibration_date=calibration_date)
+                calibration_date=calibration_date,
+                calibration_labels_dir=calibration_labels_dir,
+                split_manifest_sha256=split_manifest_sha256)
 
             # Positive-evidence, unconditional, stated per-side (not a union), an all-negative
             # reference on either side can't validate a count operating point.
@@ -1231,6 +1302,8 @@ def resolve_classifier_operating_point(
     adjudication_covered: Callable[[dict], bool] | None = None,
     split_manifest_dir: str | None = None,
     calibration_date: str | None = None,
+    calibration_labels_dir: str | None = None,
+    split_manifest_sha256: str | None = None,
 ) -> dict:
     """Classification-mode calibration gate for a trait's positive-class call.
 
@@ -1265,6 +1338,9 @@ def resolve_classifier_operating_point(
     ``annotation_date`` result). ``calibration_date is None`` means the caller derived no date at
     all and the check reads not-applicable with that reason; it is never read as matching a flat
     run's own record, whose ``date`` is the same empty-string key, not ``None`` either.
+    ``calibration_labels_dir`` is its caller's ``calibration_gt_dir``, forwarded unchanged so a
+    label rewritten since the run bound can be named; ``split_manifest_sha256`` stays ``None``
+    here, the same way ``split_manifest_dir`` does, since this door reads no manifest.
     """
     if validated_reference not in accepted_references("annotations"):
         raise ValueError(f"validated_reference must be one of {accepted_references('annotations')}, "
@@ -1307,7 +1383,8 @@ def resolve_classifier_operating_point(
     td = _train_disjointness(experiment_id, cal_ids, hold_ids)
     sd = _selection_disjointness(
         experiment_id, cal_ids, hold_ids, split_manifest_dir=split_manifest_dir,
-        calibration_date=calibration_date)
+        calibration_date=calibration_date, calibration_labels_dir=calibration_labels_dir,
+        split_manifest_sha256=split_manifest_sha256)
 
     cal_pos = sum(1 for it in calibration_items if it["is_true_positive"])
     hold_pos = sum(1 for it in holdout_items if it["is_true_positive"])

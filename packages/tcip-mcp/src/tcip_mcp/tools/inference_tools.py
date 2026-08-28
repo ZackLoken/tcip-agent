@@ -314,6 +314,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
     # deleted/renamed never even enters the split universe here.
     stems, stem_to_image = label_image_stems(labels_dir, images_dir)
     excluded = None
+    split_manifest_sha256 = None
     if split_manifest_dir is not None:
         if not images_dir:
             raise ValueError(
@@ -325,6 +326,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(split_manifest_dir)
+        split_manifest_sha256 = hashlib.sha256(RECORD_JSON.encode(manifest)).hexdigest()
         stems, group_by, group_key_map, excluded, cal_date = resolve_manifest_calibration_universe(
             manifest, split_manifest_dir, labels_dir, images_dir, _subject, _attribute, stems)
         stem_to_image = {s: stem_to_image[s] for s in stems}
@@ -417,6 +419,7 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
         "staged_conf_floor": applied.get("score_thresh"),
         "staged_conf_floor_attribute_path": applied_attribute_path,
         "split_manifest_dir": split_manifest_dir, "calibration_date": manifest_date_key(cal_date),
+        "calibration_labels_dir": str(labels_p), "split_manifest_sha256": split_manifest_sha256,
     }
     bundle = resolve_operating_point(trait, experiment_id=experiment_id, **resolver_inputs)
     attach_split_policy_provenance(bundle, locked)
