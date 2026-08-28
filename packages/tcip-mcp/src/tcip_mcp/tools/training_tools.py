@@ -1113,12 +1113,18 @@ def sweep_manifest_key(
                (_sweep_name(study_name), "manifest"))
 
 
-def study_result_key(study_name: str, output_dir: str = "") -> Key:
+def study_result_key(
+    study_name: str, output_dir: str = "", *, root: Path | str | None = None
+) -> Key:
     """A finished sweep's result document, beside the sweep's own directory.
+
+    ``root`` mirrors :func:`sweep_manifest_key`'s: a caller that already knows which root a
+    sweep launched under resolves the record there rather than under whatever root this
+    process currently has pinned.
 
     ``last_writer_wins``: written once, when the sweep ends, from the result it returns.
     """
-    return Key(STUDY_RESULT_STORE, str(hpo_root(output_dir).resolve()),
+    return Key(STUDY_RESULT_STORE, str(hpo_root(output_dir, root=root).resolve()),
                (_sweep_name(study_name),))
 
 

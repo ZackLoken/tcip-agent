@@ -172,6 +172,51 @@ def test_get_sweep_reads_the_manifest_when_the_sweep_is_not_in_memory(client, hp
     assert body["manifest"]["study_name"] == "hpo_done0001"
 
 
+def _write_study_result(study: str, **fields) -> None:
+    import tcip_store
+    from tcip_mcp.tools.training_tools import study_result_key
+
+    tcip_store.replace(study_result_key(study), {"study_name": study, **fields})
+
+
+def test_get_sweep_carries_the_study_results_own_fields_for_a_completed_disk_sweep(
+    client, hpo_root
+) -> None:
+    """The manifest's own completion projection is only best_params/best_value/n_trials; the
+    study result record is the only place all_trials, the searcher and scheduler that ran, and
+    warm-start provenance live."""
+    _write_sweep(hpo_root, "hpo_study0001", status="completed",
+                 result={"best_params": {"lr": 0.01}, "best_value": 0.2})
+    _write_study_result(
+        "hpo_study0001",
+        best_params={"lr": 0.01}, best_value=0.2, n_trials=2,
+        all_trials=[{"params": {"lr": 0.01}, "value": 0.2, "iterations": 3, "state": "COMPLETE"}],
+        search_alg="bayesopt", scheduler="median", warm_start=True,
+        baseline_params={"lr": 0.02},
+    )
+
+    body = client.get("/api/tuning/sweeps/hpo_study0001").json()
+    assert body["result"]["all_trials"][0]["state"] == "COMPLETE"
+    assert body["result"]["search_alg"] == "bayesopt"
+    assert body["result"]["scheduler"] == "median"
+    assert body["result"]["warm_start"] is True
+    assert body["result"]["baseline_params"] == {"lr": 0.02}
+    assert body["result"]["best_params"] == {"lr": 0.01}  # the manifest's own fields still serve
+
+
+def test_get_sweep_serves_the_manifest_alone_when_the_study_result_is_absent(
+    client, hpo_root
+) -> None:
+    """An old or failed sweep never gets a study result record; the manifest's own result still
+    answers rather than the route failing or fabricating the missing fields."""
+    _write_sweep(hpo_root, "hpo_nostudy1", status="completed",
+                 result={"best_params": {"lr": 0.01}, "best_value": 0.2})
+
+    body = client.get("/api/tuning/sweeps/hpo_nostudy1").json()
+    assert body["result"] == {"best_params": {"lr": 0.01}, "best_value": 0.2}
+    assert "all_trials" not in body["result"]
+
+
 def test_list_trials_reports_platform_trial_dirs_only(client, hpo_root) -> None:
     sweep = _write_sweep(hpo_root, "hpo_trials01")
     _write_trial(sweep, "aaa_00000", metrics=[{"epoch": 1}], params={"lr": 0.01})
