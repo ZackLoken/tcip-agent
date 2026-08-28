@@ -121,6 +121,51 @@ def _read_manifest(sweep_id: str, *, root: Path | str | None = None) -> dict | N
     return manifest if isinstance(manifest, dict) else None
 
 
+_STUDY_RESULT_FIELDS = ("all_trials", "search_alg", "scheduler", "warm_start", "baseline_params")
+"""The study result's own fields, absent from the manifest's completion projection."""
+
+
+def _read_study_result(sweep_id: str, *, root: Path | str | None = None) -> dict | None:
+    """A finished sweep's full study-result record, or ``None`` when it has none: an old sweep
+    from before this record existed, a failed sweep (never written), or one whose record won't
+    decode. ``sweep_id`` is untrusted; a name that would address a record outside the HPO store
+    is answered the same way, absent rather than raised."""
+    from tcip_store import BadKey, DecodeError, store
+
+    from tcip_mcp.tools.training_tools import study_result_key
+
+    try:
+        key = study_result_key(sweep_id, root=root)
+    except BadKey:
+        return None
+    try:
+        result = store.read(key, default=None)
+    except DecodeError:
+        logger.warning("the study result for sweep %s does not decode", sweep_id, exc_info=True)
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def _enrich_with_study_result(response: dict, sweep_id: str, *, root: Optional[str]) -> dict:
+    """Layer the study result's own fields onto ``response["result"]`` for a completed sweep,
+    read through the store and never fabricated: a sweep whose study result is absent (or
+    already carries these fields, the common case for a sweep this process just ran) is served
+    exactly as it already was."""
+    if response.get("status") != "completed":
+        return response
+    result = response.get("result") or {}
+    if "all_trials" in result:
+        return response
+    study_result = _read_study_result(sweep_id, root=root)
+    if study_result is None:
+        return response
+    response["result"] = {
+        **result,
+        **{k: study_result[k] for k in _STUDY_RESULT_FIELDS if k in study_result},
+    }
+    return response
+
+
 def _sweep_launch_root(sweep_id: str) -> Optional[str]:
     """The root this sweep's own live registry entry says it launched under, or ``None`` when
     the registry has forgotten it (never launched here, or launched before a restart), the
@@ -311,16 +356,17 @@ def get_sweep(sweep_id: str) -> dict:
     with _lock:
         j = jobstore.find_job(_sweeps, sweep_id)
     if j is not None:
-        return {
+        response = {
             "sweep_id": j.sweep_id,
             "status": j.status,
             "error": j.error,
             "result": j.result,
         }
+        return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
     manifest = _read_manifest(sweep_id)
     if manifest is None:
         raise HTTPException(404, f"sweep not found: {sweep_id}")
-    return {
+    response = {
         "sweep_id": manifest.get("study_name", sweep_id),
         "status": manifest.get("status", "unknown"),
         "error": manifest.get("error"),
@@ -328,6 +374,7 @@ def get_sweep(sweep_id: str) -> dict:
         "manifest": manifest,
         "external": True,
     }
+    return _enrich_with_study_result(response, sweep_id, root=None)
 
 
 def _log_holds_anything(page) -> bool:
