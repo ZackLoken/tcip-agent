@@ -342,8 +342,8 @@ class _PhenologyMeasurement:
         # The dimension flags the gate above was computed from; validity["tile_size"] is None for
         # an untiled delivery, not the same as the key being absent from the gate's own flags.
         self.flags = flags
-        # The mapping this delivery attributed detections through, plus what it did not read or
-        # verify_mapping_inputs could not check: threaded to the event and the CSV's own columns.
+        # The mapping this delivery attributed detections through, plus what verify_mapping_inputs
+        # could not verify: threaded to the event and the CSV's own columns.
         self.plant_mapping_disclosure = plant_mapping_disclosure
 
     @property

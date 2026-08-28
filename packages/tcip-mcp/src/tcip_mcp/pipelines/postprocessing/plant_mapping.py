@@ -363,12 +363,14 @@ def stems_delivery_reads(rows: Iterable[object], pred_dir: Path | str) -> set[st
     """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain
     dict rows :meth:`MappingBuild.rows` produces) whose ``plot_name`` is truthy and whose stem
     carries a prediction document under ``pred_dir``: the one predicate for "which prediction
-    documents this delivery reads."
+    documents this delivery reads," never whether the underlying image still exists on disk.
 
-    Both :func:`verify_mapping_inputs` (what it may re-check a fresh stamp for) and
-    :func:`~tcip_mcp.pipelines.postprocessing.phenology.per_plant_series` (what it aggregates
-    rather than counts missing) call this rather than each inlining the same test, so the two can
-    never disagree about what a delivery actually reads.
+    Both :func:`verify_mapping_inputs` (which of those stems it may re-check a fresh stamp for)
+    and :func:`~tcip_mcp.pipelines.postprocessing.phenology.per_plant_series` (which of those
+    stems it aggregates rather than counts missing) call this rather than each inlining the same
+    test, so the two can never disagree about which predictions a delivery reads. Whether a read
+    prediction's own capture can still be verified is a further partition ``verify_mapping_inputs``
+    makes on its own, one this predicate does not speak to.
     """
     from tcip_mcp.prediction_buckets import bucket_stems
 
@@ -945,8 +947,15 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
 def verify_mapping_inputs(
     build: MappingBuild, dataset_root: Path | str, predictions_by_date: dict[str, str],
 ) -> dict:
-    """Check a mapping's recorded inputs against what is on disk now, for the captures this
-    delivery actually reads, at delivery time.
+    """Check what this delivery can verify about a mapping's recorded inputs against what is on
+    disk now, for the captures it actually reads, at delivery time.
+
+    The disclosures name what could not be verified, never merely what was not read: a delivered
+    date whose image folder is absent, or an archived date, still has every one of its stems'
+    predictions read and counted by the phenology aggregation (:func:`stems_delivery_reads` never
+    checks whether the underlying image still exists), while its captures cannot be checked here
+    and are disclosed unverified all the same; a date the delivery genuinely omits is unread in
+    the ordinary sense too, every stem the mapping names for it counted missing downstream.
 
     A mapped date not named in ``predictions_by_date`` is never walked (no enumeration, no EXIF):
     disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
@@ -960,19 +969,29 @@ def verify_mapping_inputs(
     delivery's own prediction bucket carries no document for (:func:`stems_delivery_reads`),
     never opened to check.
 
-    Only a capture this delivery reads gets its fresh stamp read. For each: a readability flip in
-    either direction refuses by name, as before; a row that recorded a plant position (a truthy
-    ``plot_name`` with a ``distance_m``) refuses by name when the capture's fresh GPS position no
-    longer sits ``distance_m`` from any plant of that name in the plant CSVs whose bytes this same
-    call just verified (or when the fresh capture carries no GPS position at all; this check runs
-    only when at least one plant CSV verified, since a mapping with none to check against has
-    nothing to compare a position to). When a date's read captures are its whole recorded and
-    enumerated set, every stamp needed is already in hand, so the whole date's identity
-    (:func:`capture_identity`) is recomputed and compared against the record, at no added cost,
-    the same strength as before. A capture read alongside others left unread on the same date is
-    not covered by that whole-date recompute, since one identity digest covers the date rather
-    than the capture; the per-capture readability and moved-position checks above are what still
-    catches it changing in place.
+    Only a capture this delivery reads gets its fresh stamp read. For each: a capture readable
+    when this mapping was built and unreadable now refuses by name (the reverse cannot occur: an
+    unreadable capture carries no GPS, so ``assign_plants`` never mapped it, and an unmapped
+    capture is never among what a delivery reads through predictions). A row that recorded a
+    plant position (a truthy ``plot_name`` with a ``distance_m``) refuses by name when the
+    capture's fresh GPS position no longer sits ``distance_m`` from any plant of that name in the
+    plant CSVs whose bytes this same call just verified, or when the fresh capture carries no GPS
+    position at all. When no verified plant CSV can answer for this capture's own recorded plant
+    (that plant's own CSV is itself among ``plant_csvs_unverified``), the position is disclosed
+    rather than compared against nothing: the recorded fact stands unrechecked, not confirmed
+    unchanged.
+
+    When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal
+    to the recorded stems whose row carries a truthy ``plot_name``), the whole date's identity
+    (:func:`capture_identity`) is recomputed over every capture the date enumerates, the unmapped
+    ones (a raster, a band group) included, and compared against the record, refusing by name on a
+    mismatch; a capture verified only this way is not also listed in ``captures_unverified``, since
+    the digest just re-checked it. Under a partial read, that digest does not run, so an in-place
+    EXIF timestamp or band-group manifest change on a read capture goes undetected whenever some
+    other mapped capture of the same date was not read: the position and readability checks above
+    catch a moved plant or a capture gone unreadable, never a same-position, same-readability
+    change in place. Catching that finer, per-capture identity change is deferred to the
+    version-field family.
 
     Never raises: returns ``{"refusal": str}`` for any of the above; otherwise
     ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``

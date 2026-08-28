@@ -1101,7 +1101,7 @@ export function ResultsTab() {
                 )}
                 {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
                   <div className="text-[11px] text-tcip-muted border border-tcip-border rounded p-2">
-                    Not read or checked at delivery time:
+                    Not verified at delivery time:
                     {capturesUnverified.length > 0 && ` ${capturesUnverified.join(", ")}`}
                     {capturesUnverified.length > 0 && plantCsvsUnverified.length > 0 && ";"}
                     {plantCsvsUnverified.length > 0 &&
