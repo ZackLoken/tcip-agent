@@ -135,6 +135,27 @@ def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:
     ]
 
 
+def test_author_and_update_persist_through_the_same_shared_write(tmp_path: Path) -> None:
+    """``author_trait_spec`` (create) and ``write_trait_spec_fields`` (update) both delegate
+    their validate-encode-write step to one shared entry now; this drives both in sequence and
+    reads the persisted record back through ``load_trait_specs`` rather than comparing in-memory
+    encodes, proving neither caller's own discipline (the carried-forward restriction, the cas
+    retry loop) was lost when the write itself became shared. Coverage for the unification, not
+    a regression guard: each writer already persisted correctly on its own before the two shared
+    this entry.
+    """
+    _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
+
+    updated = traits.write_trait_spec_fields(
+        "leaf", {"holdout_match_quality_floor": 0.6}, project_root=tmp_path,
+    )
+    assert updated.holdout_match_quality_floor == 0.6
+
+    reloaded = traits.get_trait_for("leaf", str(tmp_path))
+    assert reloaded.holdout_match_quality_floor == 0.6
+    assert reloaded.delivers == ("leaf_length",)
+
+
 def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end(
     tmp_path: Path,
 ) -> None:
