@@ -797,7 +797,7 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> C
     """
     from tcip_mcp.class_registry import read_registry
     from tcip_mcp.dataset_layout import classes_path
-    from tcip_mcp.tools.project_tools import read_datasets
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
     if dataset_root:
         try:
@@ -809,10 +809,11 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> C
             ) from exc
 
     registered = read_datasets(project_root)
-    paths = [d.get("path") for d in registered]
+    # The resolved root, never the registry's own stored spelling ("." for the project's own tree).
+    roots = [str(dataset_entry_path(project_root, d)) for d in registered if d.get("path")]
     if len(registered) > 1:
         raise ValueError(
-            f"project {project_root!r} registers {len(registered)} datasets {paths}, so which one "
+            f"project {project_root!r} registers {len(registered)} datasets {roots}, so which one "
             "this statement's classes belong to cannot be guessed. Pass dataset_root naming it."
         )
     try:
@@ -820,7 +821,7 @@ def resolve_statement_registry(project_root: str | Path, dataset_root: str) -> C
     except FileNotFoundError as exc:
         raise ValueError(
             f"project root {project_root!r} carries no class registry of its own (registered "
-            f"datasets: {paths}). Pass dataset_root naming the dataset this statement's classes "
+            f"datasets: {roots}). Pass dataset_root naming the dataset this statement's classes "
             "belong to."
         ) from exc
 
