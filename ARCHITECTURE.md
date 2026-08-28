@@ -1447,9 +1447,9 @@ explicit mode (`tools/model_tools.py:18`, `"caller"` when `metrics` is non-empty
 `register_model_from_experiment` no longer falls back to the run's `metrics.jsonl` log for a
 checkpoint with no metrics dict; such a registration carries `metrics={}` and
 `metrics_source=None`, and the load failure that produced it is logged rather than swallowed.
-An entry that predates the `metrics_source` key is conformed by re-registering it through
-`register_model`; `scripts/conform_registry_experiment_id.py` conforms one that predates
-`experiment_id`.
+An entry that predates the `metrics_source` key also predates `experiment_id`: conform it with
+`scripts/conform_registry_experiment_id.py` first (the eviction rail refuses a pre-`experiment_id`
+entry's replace by name), then re-register it through `register_model` to add `metrics_source`.
 
 Readers: `read_registry_index`, `model_registry.py:53`, the read path for anything outside the
 module (`scripts/doctor.py:125`, `"metrics_source"`), and the entry-by-entry accessors built on

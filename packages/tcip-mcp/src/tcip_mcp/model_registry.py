@@ -511,17 +511,21 @@ class ModelRegistry:
         ``metrics_source`` is ``"trainer"``, the one path the platform itself measured, is
         ranked; ``include_unverified=True`` also ranks ``"training_source"`` and ``"caller"``
         entries, whose numbers nothing here verified. An entry carrying no ``metrics_source`` key
-        at all is a malformed record predating the field, refused by name rather than silently
-        treated as just another unverified entry: re-register it through ``register_model`` (its
-        checkpoint on disk is unchanged; the call re-hashes and rewrites the entry with the field
-        present). A present ``metrics_source`` of ``None`` is not malformed, it is the honest
-        pairing for an entry with no metrics.
+        at all is a malformed record predating the field (and, for the same reason, predating
+        ``experiment_id``), refused by name rather than silently treated as just another
+        unverified entry: conform it with ``scripts/conform_registry_experiment_id.py`` first (the
+        eviction rail refuses a pre-``experiment_id`` entry's replace by name), then re-register it
+        through ``register_model`` to add ``metrics_source`` (its checkpoint on disk is unchanged;
+        the call re-hashes and rewrites the entry with both fields present). A present
+        ``metrics_source`` of ``None`` is not malformed, it is the honest pairing for an entry with
+        no metrics.
         """
         malformed = [m.get("name") for m in self._index if "metrics_source" not in m]
         if malformed:
             raise ValueError(
                 f"registry entries {malformed} carry no metrics_source key (they predate the "
-                "field); re-register each through register_model before ranking this registry."
+                "field); conform each with scripts/conform_registry_experiment_id.py, then "
+                "re-register each through register_model, before ranking this registry."
             )
         best = None
         best_val: float | None = None
