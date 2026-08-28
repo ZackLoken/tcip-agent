@@ -100,7 +100,7 @@ def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, diges
     """The one producer ``entries`` (already matched by ``sha256``) agree on.
 
     The producer is the entry's own ``experiment_id`` field, written only by a run's own
-    completion through the experiment-mode binding (:func:`register_entry`) and ``None`` for an
+    completion through the experiment-mode binding (:func:`_register_entry`) and ``None`` for an
     explicit-mode entry: a verified fact, not a caller assertion (``tags`` carries no producer
     claim any more). Every matched entry must carry the key at all, or the load refuses by name,
     as ``best_model`` refuses a pre-``metrics_source`` entry: conform the registry with
@@ -312,7 +312,7 @@ def _audit_refused(op: str, detail: dict) -> None:
     record_event_or_raise("model_registry_write_refused", {"op": op, **detail}, status="refused")
 
 
-def register_entry(
+def _register_entry(
     project_path: str,
     *,
     name: str,
@@ -345,12 +345,12 @@ def register_entry(
     has_metrics = bool(metrics)
     if has_metrics and metrics_source is None:
         raise ValueError(
-            "register_entry: metrics is non-empty but metrics_source is None; name the path "
+            "_register_entry: metrics is non-empty but metrics_source is None; name the path "
             "that produced these numbers ('trainer', 'training_source', or 'caller')."
         )
     if not has_metrics and metrics_source is not None:
         raise ValueError(
-            f"register_entry: metrics_source={metrics_source!r} but metrics is empty; a "
+            f"_register_entry: metrics_source={metrics_source!r} but metrics is empty; a "
             "source with nothing to source is not a real pairing."
         )
     ckpt = Path(checkpoint_path)
@@ -384,7 +384,7 @@ def register_entry(
         with tcip_store.transaction(key) as txn:
             superseded = _write_registry_entry(txn, key, entry)
     except EntryOwnedByRun as exc:
-        _audit_refused("register_entry", {
+        _audit_refused("_register_entry", {
             "name": name, "attempted_experiment_id": experiment_id, "reason": str(exc),
         })
         raise
@@ -418,10 +418,10 @@ class ModelRegistry:
     ) -> dict:
         """Register a trained model with SHA-256 integrity checksum, in explicit mode.
 
-        Explicit mode's own entry point: wraps :func:`register_entry` with ``experiment_id=None``
+        Explicit mode's own entry point: wraps :func:`_register_entry` with ``experiment_id=None``
         (no run bound this weights file, whatever ``tags`` the caller passes) and no ``sha256``
         (this call's own hash of ``checkpoint_path`` is the only production hash explicit mode
-        takes). Experiment mode (``register_model_from_experiment``) calls :func:`register_entry`
+        takes). Experiment mode (``register_model_from_experiment``) calls :func:`_register_entry`
         directly, with the digest completion already recorded in hand.
 
         Args:
@@ -450,7 +450,7 @@ class ModelRegistry:
             EntryOwnedByRun: ``name`` already names an entry a run's completion bound to a
                 different (or, for a pre-field entry, an unrecorded) run.
         """
-        entry = register_entry(
+        entry = _register_entry(
             self._project_path, name=name, checkpoint_path=checkpoint_path, config=config,
             metrics=metrics, tags=tags, kind=kind, metrics_source=metrics_source,
             experiment_id=None,
