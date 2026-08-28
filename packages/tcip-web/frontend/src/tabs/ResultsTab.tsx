@@ -1101,9 +1101,8 @@ export function ResultsTab() {
                 )}
                 {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
                   <div className="text-[11px] text-tcip-muted border border-tcip-border rounded p-2">
-                    Not checked at delivery time:
-                    {capturesUnverified.length > 0 &&
-                      ` captures for ${capturesUnverified.join(", ")} (folder not found)`}
+                    Not read or checked at delivery time:
+                    {capturesUnverified.length > 0 && ` ${capturesUnverified.join(", ")}`}
                     {capturesUnverified.length > 0 && plantCsvsUnverified.length > 0 && ";"}
                     {plantCsvsUnverified.length > 0 &&
                       ` plant CSV(s) ${plantCsvsUnverified.join(", ")} (path not found)`}
