@@ -31,11 +31,14 @@ def register_model(
         ``metrics_source`` becomes ``"caller"`` when ``metrics`` is non-empty, ``None`` otherwise.
         Nothing here verifies a caller-asserted metric.
       - From experiment: pass ``experiment_id`` alone to pull that experiment's config + the
-        checkpoint's own metrics, register with an ``experiment:<id>`` back-reference, and
-        record the checkpoint in the experiment's lineage. ``name`` then defaults to the
-        experiment id. (Training already does this on completion; use it for manual /
-        re-registration.) ``metrics``/``config``/``tags`` are refused alongside
-        ``experiment_id``, since which path produced the numbers is what decides
+        checkpoint's own metrics, and bind the entry to the run through its ``experiment_id``
+        field, over the digest the run's own ``complete_run`` recorded at completion (no tag, no
+        lineage write here). Refuses by name: a run not completed with a recorded digest;
+        ``checkpoint_path`` bytes that are not the recorded ones (the recorded path or a
+        byte-identical copy only); a ``project_path`` other than the experiment's own root.
+        ``name`` then defaults to the experiment id. (Training already does this on completion;
+        use it for manual / re-registration.) ``metrics``/``config``/``tags`` are refused
+        alongside ``experiment_id``, since which path produced the numbers is what decides
         ``metrics_source``, and this mode always decides it from the experiment itself.
 
     Args:

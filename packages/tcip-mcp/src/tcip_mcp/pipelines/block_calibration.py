@@ -218,7 +218,8 @@ def resolve_block_calibration_records(
     if experiment_id is None:
         raise BlockCalibrationRefused(
             "block calibration refused: this checkpoint's training experiment_id could not be "
-            "resolved (no stamped experiment_id, no registry match); block calibration validates "
+            "resolved (no stamped experiment_id, and the registry entries naming this checkpoint "
+            "bind no run: register it in experiment mode to bind one); block calibration validates "
             "against one specific mosaic's own reserved regions and has no meaning without "
             "knowing which training run's split produced them."
         )

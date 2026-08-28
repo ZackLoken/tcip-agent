@@ -1,5 +1,6 @@
-"""Training↔experiment↔registry lifecycle wiring (registration from an
-experiment links a back-reference + lineage, and never fabricates metrics)."""
+"""Training↔experiment↔registry lifecycle wiring (registration from an experiment binds the
+registry entry to the run through experiment_id, over the digest completion recorded, and never
+fabricates metrics)."""
 
 import logging
 
@@ -35,14 +36,15 @@ def test_register_model_from_experiment_links_lineage_with_no_checkpoint_metrics
     assert result["metrics"] == {}
     assert str(ckpt) in caplog.text  # the load failure is logged, naming the file
 
-    # The registry entry carries the experiment back-reference and an honest empty/null pairing.
+    # The registry entry's experiment_id binds it to the run, with an honest empty/null pairing.
     m = ModelRegistry(str(tmp_path)).get_model("exp1")
     assert m is not None
     assert m["experiment_id"] == "exp1"
     assert m["metrics"] == {}
     assert m["metrics_source"] is None
 
-    # The experiment's lineage records the model weights regardless.
+    # complete_run's own assert above wrote the lineage pointer and its digest; registration
+    # writes nothing there.
     lineage = ts.read(lineage_key("exp1"))
     assert lineage["model_weights"] == str(ckpt)
 

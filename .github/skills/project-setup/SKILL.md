@@ -167,7 +167,10 @@ everything; `import_project` restores that ZIP into a destination dir, round-tri
 `inspect_project`-visible project). After adoption, `inspect_project`, `select_best_model`, `list_registered_models`,
 and `register_model` all default (`project_path=""`) to that project, and a
 training run auto-registers there, so the model you trained is the one you retrieve. Pass an
-explicit `project_path` only to reach a *different* project's registry. The repin is a
+explicit `project_path` only to reach a *different* project's registry: that holds for
+`inspect_project`, `select_best_model`, `list_registered_models`, and `register_model`'s explicit
+mode. `register_model`'s experiment mode binds only in the experiment's own root; a
+`project_path` there must name that same root or the call refuses by name. The repin is a
 deliberate action and reaches only the calling process, so a training run in flight keeps
 writing to the project it started under even if you (or the human, in the GUI) adopt another
 one meanwhile. The web backend converges on your adopt as soon as it delivers; an MCP server
