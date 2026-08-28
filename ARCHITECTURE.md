@@ -1077,7 +1077,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:641`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:642`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1086,11 +1086,11 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:455`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:456`;
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:334`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
-`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:1046`.
+`packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:984`.
 
 A prediction record's `created_by` is one spelling, `resolution.prediction_producer`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1048`, so every checkpoint-backed writer
@@ -1490,7 +1490,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:641` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:642` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:223`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:191`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -1516,7 +1516,7 @@ bucket.
 
 Path: `<prediction_bucket_dir>/operating_point.json`, sibling of the bucket's per-image files,
 one of the stamp filenames `tcip_annotation.json_io.SIDECAR_FILENAMES`
-(`packages/tcip-annotation/src/tcip_annotation/json_io.py:180`) names and every bucket
+(`packages/tcip-annotation/src/tcip_annotation/json_io.py:181`) names and every bucket
 enumeration excludes (format 17).
 
 Writer: `write_sidecar`, `resolution.py:951`, the one write, under the stamp's own lock;
@@ -1943,7 +1943,7 @@ Phase 3 verdict: single.
 ## S17. Canonical per-image annotation JSON schema
 
 Must agree: every writer produces, and every reader accepts, the same name-based record shape.
-Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:347` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
+Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:348` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:191`, `packages/tcip-web/src/tcip_web/routes/review.py:667` and `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:179` (every save door converts through it rather than assembling records of its own).
 Phase 3 verdict: single.
 
@@ -1951,7 +1951,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:41` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:560` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:561` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
