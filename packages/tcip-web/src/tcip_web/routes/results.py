@@ -171,7 +171,7 @@ class BuildMappingPayload(BaseModel):
     images_root: str
     plant_csv_paths: list[str]
     dates: Optional[list[str]] = None
-    nn_tolerance_m: float = 10.0
+    nn_tolerance_m: Optional[float] = None
 
 
 @router.post("/plant_mapping/build")
@@ -268,10 +268,19 @@ class LoadMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
+    from tcip_store import StoreError
+    from tcip_store.layout_claims import NAME_SEGMENT
+
+    if not NAME_SEGMENT.fullmatch(payload.name):
+        raise HTTPException(
+            400,
+            f"name {payload.name!r} is not lowercase letters, digits and single hyphens "
+            f"({NAME_SEGMENT.pattern})")
+
     root = _open_project_root()
     try:
         build = plant_mapping.load_mapping(root, payload.name)
-    except ValueError as exc:
+    except (StoreError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"mapping": build.rows() if build is not None else {}}
 
@@ -434,41 +443,11 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     if not stated.ok:
         raise HTTPException(400, stated.as_detail())
 
-    from tcip_mcp.class_registry import RegistryError, dataset_root_for_pred_dirs
-    from tcip_mcp.dataset_layout import require_dataset_identity
-
     try:
-        mapping_build = plant_mapping.load_mapping(root, payload.mapping_name)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    if mapping_build is None:
-        raise HTTPException(404, f"no mapping named {payload.mapping_name!r}")
-
-    missing_dates = [d for d in predictions_by_date if d not in mapping_build.dates]
-    if missing_dates:
-        raise HTTPException(
-            400,
-            f"predictions_by_date names date(s) {missing_dates} the mapping "
-            f"{payload.mapping_name!r} does not cover; rebuild the mapping to cover them, or "
-            "drop the date(s)")
-    try:
-        delivered_root = dataset_root_for_pred_dirs(list(predictions_by_date.values()))
-    except RegistryError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    try:
-        delivered_identity = require_dataset_identity(delivered_root)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if delivered_identity.get("id") != mapping_build.dataset_id:
-        raise HTTPException(
-            400,
-            f"the predictions under {delivered_root} belong to a different dataset than the "
-            f"mapping {payload.mapping_name!r} was built over (mapping dataset_root "
-            f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
-
-    verified = plant_mapping.verify_mapping_inputs(mapping_build, mapping_build.dataset_root)
-    if "refusal" in verified:
-        raise HTTPException(400, verified["refusal"])
+        mapping_build, verified = plant_mapping.resolve_delivery_mapping(
+            root, payload.mapping_name, predictions_by_date)
+    except plant_mapping.MappingDeliveryRefusal as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
     mapping_raw = mapping_build.rows()
 
     pred_dirs = list(predictions_by_date.values())
