@@ -251,6 +251,13 @@ def _crops_vocab() -> set[str]:
     return {t["name"] for t in _crops_traits()}
 
 
+def registered_crops() -> set[str]:
+    """The crop names crops.yml's traits declare (each trait's own ``crops`` list), or an empty
+    set if it can't be read. The one place a caller reads a real crop word instead of spelling
+    one of its own: a fixture or a smoke script seeding ``register_dataset`` picks from here."""
+    return {c for t in _crops_traits() for c in t.get("crops", []) if isinstance(c, str)}
+
+
 def crops_units() -> dict[str, str]:
     """trait name -> crops.yml's declared physical unit (``mm``/``g``/``kg``/``m``/``cm``/…), for
     every trait that declares one. crops.yml is the trait-unit authority; a count/

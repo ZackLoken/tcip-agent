@@ -34,12 +34,12 @@ def test_a_completed_crossing_delivery_writes_a_delivery_events_record_with_the_
     tmp_path: Path,
 ) -> None:
     sha = record_producing_run(tmp_path, "exp-producer")
-    mapping_path, d1, d2 = _delivery_setup(
+    mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
-        trait="catkin", mapping_path=str(mapping_path),
+        trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",
@@ -79,14 +79,14 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
     tmp_path: Path,
 ) -> None:
     sha = record_producing_run(tmp_path, "exp-producer")
-    mapping_path, d1, d2 = _delivery_setup(
+    mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
 
     first_csv = tmp_path / "out" / "first.csv"
     second_csv = tmp_path / "out" / "second.csv"
     for out_csv in (first_csv, second_csv):
         res = compute_phenology(
-            trait="catkin", mapping_path=str(mapping_path),
+            trait="catkin", mapping_name=mapping_name,
             predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
             output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
             operating_point_conf=0.4, operating_point_validated="held_out_annotations",

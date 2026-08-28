@@ -392,7 +392,7 @@ def _compute(body: dict, out_csv: Path, **kwargs) -> dict:
 
     return compute_phenology(
         trait=body["trait"],
-        mapping_path=body["mapping_path"],
+        mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"],
         output_csv_path=str(out_csv),
         **kwargs,

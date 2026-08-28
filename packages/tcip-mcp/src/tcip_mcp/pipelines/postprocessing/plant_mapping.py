@@ -488,12 +488,12 @@ def build_mapping(
 
 
 PLANT_MAPPING_STORE = "plant_mapping"
-_MAPPING_DOC = RootedFileLocator(suffix=".json")
+_MAPPING_DOC = RootedFileLocator(prefix=("plant_mappings",), suffix=".json")
 register_store(
     StoreDescriptor(
         name=PLANT_MAPPING_STORE,
         kind="record",
-        key_fields=("document",),
+        key_fields=("name",),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_MAPPING_DOC,
@@ -501,45 +501,50 @@ register_store(
 )
 
 
-def plant_mapping_key(path: Path | str) -> Key:
-    """One build's per-date plant assignments, addressed by the document the caller named.
+def plant_mapping_key(project_root: Path | str, name: str) -> Key:
+    """One project's named plant-mapping build, addressed by the project that owns it.
 
-    The generic placement, because the caller chooses where a mapping lands (a project's state
-    directory, an export bucket) and this module resolves no layout of its own.
+    A mapping is project state: a dataset can be read by more than one project, and each
+    project's mapping is its own. The key root is ``<project_root>/.tcip/state``; the document
+    lives at ``plant_mappings/<name>.json`` under it (the same ``STATE``-scoped shape
+    ``delivery_events`` uses).
 
     ``last_writer_wins``: a mapping is assigned whole in memory and written in one call, and a
-    later build over the same document is a fresh assignment replacing that one rather than a
+    later build under the same name is a fresh assignment replacing that one rather than a
     merge into it. No writer reads the record first.
     """
-    document = Path(path).absolute()
-    return Key(PLANT_MAPPING_STORE, str(document.parent), (document.stem,))
+    root = Path(project_root).absolute() / ".tcip" / "state"
+    return Key(PLANT_MAPPING_STORE, str(root), (name,))
 
 
-def persist_mapping(mapping: dict[str, list[Assignment]], out_path: Path) -> None:
+def persist_mapping(
+    mapping: dict[str, list[Assignment]], project_root: Path | str, name: str
+) -> None:
     serialisable = {
         date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
     }
-    tcip_store.replace(plant_mapping_key(out_path), serialisable)
+    tcip_store.replace(plant_mapping_key(project_root, name), serialisable)
 
 
-def load_mapping_rows(path: Path) -> dict[str, list[dict]]:
+def load_mapping_rows(project_root: Path | str, name: str) -> dict[str, list[dict]]:
     """The persisted mapping as plain per-date rows, for a consumer that works in dicts.
 
     Reads through :func:`load_mapping`, so a caller handing the rows to the phenology pipeline
     gets the fields that reader fills in and the types it coerces, rather than whatever a
-    particular writer happened to leave out. ``{}`` when no mapping is stored under ``path``.
+    particular writer happened to leave out. ``{}`` when no mapping is stored under ``name``.
     """
     return {date: [a.__dict__ for a in assignments]
-            for date, assignments in load_mapping(path).items()}
+            for date, assignments in load_mapping(project_root, name).items()}
 
 
-def load_mapping(path: Path) -> dict[str, list[Assignment]]:
-    """One build's persisted per-date plant assignments, or ``{}`` when nothing is stored there.
+def load_mapping(project_root: Path | str, name: str) -> dict[str, list[Assignment]]:
+    """One project's named, persisted per-date plant assignments, or ``{}`` when nothing is
+    stored under that name.
 
     Read through the store the mapping was written to, so a build persisted under one backend is
     found by the delivery that consumes it rather than reported missing.
     """
-    raw = tcip_store.read(plant_mapping_key(path), default=None)
+    raw = tcip_store.read(plant_mapping_key(project_root, name), default=None)
     if raw is None:
         return {}
     out: dict[str, list[Assignment]] = {}

@@ -132,11 +132,11 @@ def _currant_bloom_fixture(
     from tcip_mcp.dataset_layout import classes_path
 
     copy_registry(classes_path(tmp_path), classes_path(root))
-    mapping_path = tmp_path / "mapping.json"
-    ts.replace(plant_mapping_key(mapping_path), mapping)
+    mapping_name = "valley"
+    ts.replace(plant_mapping_key(tmp_path, mapping_name), mapping)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
-    return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
+    return {"project_root": str(tmp_path), "mapping_name": mapping_name,
             "predictions_by_date": preds, "trait": "currant_bloom"}
 
 

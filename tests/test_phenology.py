@@ -382,7 +382,7 @@ def _real_delivery_flags(tmp_path: Path):
     )
     from tests.test_phenology_tools import _delivery_setup
 
-    _mapping_path, d1, d2 = _delivery_setup(
+    _mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
     pred_dirs = [str(d1), str(d2)]
     recon = reconcile_operating_point_validity(pred_dirs, trait="catkin")

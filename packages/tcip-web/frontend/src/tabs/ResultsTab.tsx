@@ -297,9 +297,7 @@ export function ResultsTab() {
   const projectRoot = dataset.project_root;
   const datasetRoot = dataset.dataset_root;
 
-  const [mappingPath, setMappingPath] = useState(
-    projectRoot ? `${projectRoot}/.tcip/state/plant_mapping.json` : "",
-  );
+  const [mappingName, setMappingName] = useState("");
   // True unless a computed run reported that its predictions carried no positive-state class.
   const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
 
@@ -594,6 +592,10 @@ export function ResultsTab() {
 
   async function buildMapping() {
     if (!datasetRoot) return;
+    if (!mappingName) {
+      setBuildMsg("Name the mapping before building.");
+      return;
+    }
     const paths = plantCsvText
       .split(/[\n,]/)
       .map((s) => s.trim())
@@ -607,13 +609,13 @@ export function ResultsTab() {
     setBuildSummary(null);
     try {
       const res = await resultsApi.buildPlantMapping({
+        name: mappingName,
         images_root: `${datasetRoot}/images`,
         plant_csv_paths: paths,
         nn_tolerance_m: nnTolerance,
-        persist_path: mappingPath || undefined,
       });
       setBuildSummary(res.summary);
-      setBuildMsg(`Mapping built + saved to ${mappingPath}`);
+      setBuildMsg(`Mapping built + saved as ${mappingName}`);
     } catch (e) {
       useStore
         .getState()
@@ -641,7 +643,7 @@ export function ResultsTab() {
       }
       const request = {
         project_root: projectRoot,
-        mapping_path: mappingPath,
+        mapping_name: mappingName,
         predictions_by_date: predsMap,
         trait,
         acknowledge_unvalidated: acknowledgeUnvalidated,
@@ -853,13 +855,13 @@ export function ResultsTab() {
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-1">
             <label className="tcip-label">
-              Mapping file (built here, or an existing one to load)
+              Mapping name (built here, or an existing one under this project to use)
             </label>
             <input
               className="tcip-input"
-              value={mappingPath}
-              onChange={(e) => setMappingPath(e.target.value)}
-              placeholder="…/.tcip/state/plant_mapping.json"
+              value={mappingName}
+              onChange={(e) => setMappingName(e.target.value)}
+              placeholder="valley-2026"
             />
             <label className="tcip-label mt-1">Plant CSV path(s), one per line</label>
             <textarea

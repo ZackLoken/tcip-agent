@@ -5,7 +5,7 @@ resolved to a plant, and how far the GPS matches sat from the plant they resolve
 stands in for another, and a date's numbers are its own. The mapping a build persists is audited
 into the project the GUI has open, the same project the persist path itself must sit under.
 
-The mapping path a phenology door is handed is the door's own input to validate: a path naming no
+The mapping name a phenology door is handed is the door's own input to validate: a name naming no
 mapping is refused by name, never carried forward into a phenology computed over nothing.
 """
 
@@ -80,7 +80,7 @@ def _capture_fixture(root: Path) -> dict:
     _write_image(images / "2026-02-25" / "d.jpg", "2026:02:25 09:00:00", 43.20000, -90.00030)
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
     store.open_project(root.resolve())
-    return {"images_root": str(images), "plant_csv_paths": [str(csv_path)]}
+    return {"name": "valley", "images_root": str(images), "plant_csv_paths": [str(csv_path)]}
 
 
 def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answers(
@@ -113,69 +113,51 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
 def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_project(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """The audit row lands in the project that owns the state directory the mapping was written
-    into, found from the ``.tcip`` marker itself, so a mapping stored deeper under state is still
-    attributed to the project rather than to some directory a fixed number of levels up."""
+    """A mapping is project state: the build always lands under the open project's own
+    ``.tcip/state/plant_mappings/<name>.json``, by the name the payload names, and the audit
+    row for it lands in that same project's log. There is no caller-chosen path left to anchor
+    it elsewhere: the payload carries a name, never a location."""
     import tcip_store
 
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
-    persist_path = tmp_path / ".tcip" / "state" / "mappings" / "valley" / "plant_mapping.json"
-    resp = client.post(
-        "/api/results/plant_mapping/build", json={**payload, "persist_path": str(persist_path)})
+    resp = client.post("/api/results/plant_mapping/build", json=payload)
     assert resp.status_code == 200
-    assert plant_mapping.load_mapping(persist_path).keys() == {"2026-02-11", "2026-02-25"}
+    assert plant_mapping.load_mapping(tmp_path, payload["name"]).keys() == {
+        "2026-02-11", "2026-02-25"}
 
     page = tcip_store.read_log(audit_log_key(tmp_path))
     built = [r for r in page.records if r["tool"] == "gui_build_plant_mapping"]
     assert len(built) == 1
-    assert built[0]["arguments"]["persist_path"] == str(persist_path)
+    assert built[0]["arguments"]["name"] == payload["name"]
     assert built[0]["arguments"]["n_dates"] == 2
     assert not (tmp_path / ".tcip" / ".tcip").exists()
 
 
-def test_a_mapping_persisted_outside_the_open_project_is_refused(
+def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """A mapping is project state, written under the project itself. A persist path outside the
-    open project's own tree is refused before anything is written, and no audit row lands."""
-    import tcip_store
-
-    from tcip_mcp.audit import audit_log_key
-
-    payload = _capture_fixture(tmp_path)
-    persist_path = tmp_path.parent / "exports" / "plant_mapping.json"
-    resp = client.post(
-        "/api/results/plant_mapping/build", json={**payload, "persist_path": str(persist_path)})
-    assert resp.status_code == 403
-    assert "is outside the open project" in resp.json()["detail"]
-    assert not persist_path.exists()
-    page = tcip_store.read_log(audit_log_key(tmp_path))
-    assert not any(r["tool"] == "gui_build_plant_mapping" for r in page.records)
-
-
-def test_every_phenology_door_refuses_a_mapping_path_that_names_no_mapping(
-    client: TestClient, tmp_path: Path,
-) -> None:
-    """With prediction buckets whose evidence is fully in order, a mapping path holding no
+    """With prediction buckets whose evidence is fully in order, a mapping name holding no
     assignments is refused by name at every door. Without that the doors would answer with a
     phenology computed over no plants at all, which reads like a project with nothing to show."""
+    import tcip_store
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+
     body = _phenology_fixture(tmp_path, validated=True, detections=4)
     assert client.post("/api/results/onset_dates", json=body).status_code == 200
 
-    empty = tmp_path / "empty_mapping.json"
-    empty.write_text("{}", encoding="utf-8")
-    absent = tmp_path / "not_written_yet.json"
-    for mapping_path in (empty, absent):
-        broken = {**body, "mapping_path": str(mapping_path)}
+    tcip_store.replace(plant_mapping_key(tmp_path, "empty"), {})
+    for mapping_name in ("empty", "not_written_yet"):
+        broken = {**body, "mapping_name": mapping_name}
         for route in ("per_plant_curves", "onset_dates"):
             resp = client.post(f"/api/results/{route}", json=broken)
-            assert resp.status_code == 404, (route, mapping_path.name)
-            assert str(mapping_path) in resp.json()["detail"], route
+            assert resp.status_code == 404, (route, mapping_name)
+            assert mapping_name in resp.json()["detail"], route
         resp = client.post(
             "/api/results/export_csv",
             json={**broken, "payload": "milestones", "filename": "x.csv"})
         assert resp.status_code == 404
-        assert str(mapping_path) in resp.json()["detail"]
+        assert mapping_name in resp.json()["detail"]

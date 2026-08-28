@@ -3,7 +3,7 @@
 Builds a synthetic scene: geolocated JPEGs (real EXIF GPS + capture time) across three
 dates plus a plant-locations CSV, then runs the exact two tools the agent composes:
 
-    build_plant_mapping   images + CSV                 → plant_mapping.json
+    build_plant_mapping   images + CSV                 → a named mapping under the project
     compute_phenology     mapping + classified preds   → <trait>_phenology.csv
 
 and asserts the delivered CSV has the canonical columns and plausible, correctly-ordered
@@ -145,9 +145,10 @@ def main() -> int:
     print("Phenology e2e smoke: build_plant_mapping -> compute_phenology\n")
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        images_root = root / "images"
-        preds_root = root / "preds"           # class-carrying predictions (valid)
-        mapping_path = root / ".tcip" / "state" / "plant_mapping.json"
+        dataset_root = root / "dataset"        # a registered dataset the mapping is built over
+        images_root = dataset_root / "images"
+        preds_root = dataset_root / "predictions" / "live"  # class-carrying predictions (valid)
+        mapping_name = "smoke-valley"
         csv_out = root / "delivery" / "catkin_phenology.csv"
 
         # Trait registration is per-project state resolved via $TCIP_PROJECT_ROOT
@@ -157,6 +158,10 @@ def main() -> int:
         _saved_project_root = os.environ.get("TCIP_PROJECT_ROOT")
         os.environ["TCIP_PROJECT_ROOT"] = str(root)
         try:
+            from tcip_mcp.traits import registered_crops
+            from tcip_mcp.tools.project_tools import init_project, register_dataset
+
+            init_project(str(root), site="smoke test orchard")
             _author_catkin_trait_spec(root)
 
             # 1. Scene: geolocated images + per-image classified predictions.
@@ -186,21 +191,25 @@ def main() -> int:
                 for p in PLANTS:
                     w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
 
+            crop = sorted(registered_crops())[0]
+            register_dataset(str(dataset_root), crop=crop, project_root=str(root))
+
             preds_by_date = {d: str(preds_root / d) for d in DATES}
 
             # 2. build_plant_mapping: real EXIF GPS → plant assignments.
             print("Step 1: build_plant_mapping")
             m = build_plant_mapping(
+                name=mapping_name,
                 images_root=str(images_root),
                 plant_csv_paths=[str(plant_csv)],
-                output_mapping_path=str(mapping_path),
             )
             check("no error", "error" not in m, m.get("error", ""))
             check("3 dates mapped", m.get("n_dates") == 3, str(m.get("n_dates")))
             check("6 images seen", m.get("n_images") == 6, str(m.get("n_images")))
             check("all 6 images mapped to a plant", m.get("n_mapped") == 6,
                   f"n_mapped={m.get('n_mapped')} n_unmapped={m.get('n_unmapped')}")
-            check("mapping.json persisted", mapping_path.is_file())
+            from tcip_mcp.pipelines.postprocessing import plant_mapping as _plant_mapping
+            check("mapping persisted", bool(_plant_mapping.load_mapping(root, mapping_name)))
 
             # 3. compute_phenology: the real coverage rule and classifier gate are both live. The
             # positive class is resolved from each bucket's own recorded id_map (never a pinned
@@ -211,7 +220,7 @@ def main() -> int:
             print("\nStep 2: compute_phenology delivers a real bloom curve + milestones")
             r = compute_phenology(
                 trait="catkin",
-                mapping_path=str(mapping_path),
+                mapping_name=mapping_name,
                 predictions_by_date=preds_by_date,
                 output_csv_path=str(csv_out),
                 acknowledge_unvalidated=True,

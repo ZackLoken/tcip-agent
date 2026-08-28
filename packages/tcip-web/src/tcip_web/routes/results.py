@@ -167,46 +167,44 @@ def _audit(project_root: str, tool: str, arguments: dict, **extra: object) -> No
 
 
 class BuildMappingPayload(BaseModel):
+    name: str
     images_root: str
     plant_csv_paths: list[str]
     dates: Optional[list[str]] = None
     nn_tolerance_m: float = 10.0
-    persist_path: Optional[str] = None
 
 
 @router.post("/plant_mapping/build")
 def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
     """Build the image-to-plant mapping from the open project's images and the breeder's plant files.
 
-    The mapping is project state, so it persists under the open project and is audited there, and
-    the images must belong to that project (its tree or a dataset registered to it), so a mapping
-    cannot be built for one project from another project's captures. The plant-location files are
-    the breeder's own reference data, picked from wherever they keep them: from this machine they
-    are read from any path, like the picker that finds them; from a routable connection they are
-    confined to the allowed roots.
+    The mapping is project state, so it always persists under the open project, by name, and is
+    audited there; the images must belong to that project (its tree or a dataset registered to
+    it), so a mapping cannot be built for one project from another project's captures. The
+    plant-location files are the breeder's own reference data, picked from wherever they keep
+    them: from this machine they are read from any path, like the picker that finds them; from a
+    routable connection they are confined to the allowed roots.
     """
     root = _open_project_root()
     (images_root,) = _belonging(root, payload.images_root)
     assert images_root is not None
     plant_csvs = [_reference_file(p, request) for p in payload.plant_csv_paths]
-    persist = _under_project(root, payload.persist_path) if payload.persist_path else None
     mapping = plant_mapping.build_mapping(
         images_root,
         plant_csvs,
         dates=payload.dates,
         nn_tolerance_m=payload.nn_tolerance_m,
     )
-    if persist is not None:
-        plant_mapping.persist_mapping(mapping, persist)
-        _audit(
-            str(root),
-            "gui_build_plant_mapping",
-            {
-                "persist_path": str(persist),
-                "images_root": str(images_root),
-                "n_dates": len(mapping),
-            },
-        )
+    plant_mapping.persist_mapping(mapping, root, payload.name)
+    _audit(
+        str(root),
+        "gui_build_plant_mapping",
+        {
+            "name": payload.name,
+            "images_root": str(images_root),
+            "n_dates": len(mapping),
+        },
+    )
 
     summary = {}
     for date, assignments in mapping.items():
@@ -229,14 +227,13 @@ def build_plant_mapping(payload: BuildMappingPayload, request: Request) -> dict:
 
 
 class LoadMappingPayload(BaseModel):
-    persist_path: str
+    name: str
 
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
-    (persist,) = _belonging(_open_project_root(), payload.persist_path)
-    assert persist is not None
-    mapping = plant_mapping.load_mapping(persist)
+    root = _open_project_root()
+    mapping = plant_mapping.load_mapping(root, payload.name)
     return {
         "mapping": {
             date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
@@ -261,7 +258,7 @@ class PhenologyPayload(BaseModel):
     """
 
     project_root: str
-    mapping_path: str  # .tcip/state/plant_mapping.json or equivalent
+    mapping_name: str  # a name persisted under the open project's own plant-mapping store
     # map date → predictions directory for that date. A trait's positive class id is resolved
     # server-side from each bucket's own recorded id_map: a client-supplied
     # class id is never honored, closing the bypass a caller-chosen id would otherwise open.
@@ -380,9 +377,7 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     except TraitUnknownError as e:
         raise HTTPException(400, str(e)) from e
 
-    mapping_path, *resolved_dirs = _belonging(
-        root, payload.mapping_path, *payload.predictions_by_date.values())
-    assert mapping_path is not None
+    resolved_dirs = _belonging(root, *payload.predictions_by_date.values())
     predictions_by_date = {
         date: str(p) for date, p in zip(payload.predictions_by_date, resolved_dirs) if p is not None
     }
@@ -393,9 +388,9 @@ def _measure_phenology(payload: PhenologyPayload) -> _PhenologyMeasurement:
     if not stated.ok:
         raise HTTPException(400, stated.as_detail())
 
-    mapping_raw = plant_mapping.load_mapping_rows(mapping_path)
+    mapping_raw = plant_mapping.load_mapping_rows(root, payload.mapping_name)
     if not mapping_raw:
-        raise HTTPException(404, f"no mapping at {payload.mapping_path}")
+        raise HTTPException(404, f"no mapping named {payload.mapping_name!r}")
 
     pred_dirs = list(predictions_by_date.values())
     recon = reconcile_operating_point_validity(pred_dirs, trait=payload.trait)

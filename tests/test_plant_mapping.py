@@ -214,10 +214,9 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
             )
         ]
     }
-    out = tmp_path / "mapping.json"
-    persist_mapping(mapping, out)
-    assert tcip_store.exists(plant_mapping_key(out))
-    loaded = load_mapping(out)
+    persist_mapping(mapping, tmp_path, "mapping")
+    assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
+    loaded = load_mapping(tmp_path, "mapping")
     assert list(loaded.keys()) == ["2-11-26"]
     assert loaded["2-11-26"][0].plot_name == "PLOT1"
     assert loaded["2-11-26"][0].source == "sequence"
@@ -253,11 +252,10 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
     The state directory of a fresh project has nothing in it, so a persist that required the
     location to exist already would refuse the very first build.
     """
-    out = tmp_path / "state" / "runs" / "mapping.json"
-    persist_mapping(_one_assignment(), out)
+    persist_mapping(_one_assignment(), tmp_path, "mapping")
 
-    assert tcip_store.exists(plant_mapping_key(out))
-    assert load_mapping(out)["2-11-26"][0].plot_name == "PLOT1"
+    assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
+    assert load_mapping(tmp_path, "mapping")["2-11-26"][0].plot_name == "PLOT1"
 
 
 def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
@@ -278,7 +276,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     from tcip_store import StoreBusy
     from tcip_store.file_backend import FileBackend, path_lock
 
-    out = tmp_path / "mapping.json"
+    out = tmp_path / ".tcip" / "state" / "plant_mappings" / "mapping.json"
     tcip_store.bind(FileBackend(lock_timeout_s=0.2))
 
     holding, release = threading.Event(), threading.Event()
@@ -293,7 +291,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     try:
         assert holding.wait(30)
         with pytest.raises(StoreBusy):
-            persist_mapping(_one_assignment(), out)
+            persist_mapping(_one_assignment(), tmp_path, "mapping")
         assert not out.exists()
     finally:
         release.set()

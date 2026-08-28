@@ -590,22 +590,22 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
         # own validity isn't the thing under test: a bucket with no sidecar at all is the
         # "no operating_point.json" case, tested separately.
         pass
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    ts.replace(plant_mapping_key(mapping_path), {
+    mapping_name = "valley"
+    ts.replace(plant_mapping_key(tmp_path, mapping_name), {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    return mapping_path, d1, d2
+    return mapping_name, d1, d2
 
 
 def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=False, op_validated=True)  # bare detector
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=False, op_validated=True)  # bare detector
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -616,11 +616,11 @@ def test_golden_compute_phenology_refuses_without_elongation_class(tmp_path: Pat
 def test_golden_compute_phenology_requires_both_validated_flags(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no operating_point.json sidecars
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True)  # no operating_point.json sidecars
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -634,11 +634,11 @@ def test_golden_compute_phenology_asserted_op_validity_floored_by_missing_sideca
     # own conf.validated_against is "false"; a caller asserting "held_out_annotations" cannot override it.
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=False)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         operating_point_conf=0.4,
@@ -654,12 +654,12 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
 
     # The positive-state fraction is now produced, so a fully-validated call (classifier + count
     # operating point both validated on disk) delivers a real phenology CSV.
-    mapping_path, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
+    mapping_name, d1, d2 = _pheno_setup(tmp_path, elongated=True, op_validated=True)
     _write_classifier_sidecar(d1, dataset_root=tmp_path / "ds", validated=True)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],

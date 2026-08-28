@@ -322,17 +322,17 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys
             cr.Attribute(name="state", type="categorical", values=("closed", "open")),
         )),
     )))
-    mapping_path = tmp_path / "mapping.json"
+    mapping_name = "valley"
     import tcip_store as ts
     from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 
-    ts.replace(plant_mapping_key(mapping_path), {
+    ts.replace(plant_mapping_key(tmp_path, mapping_name), {
         "2026-02-11": [{"stem": "PLANT_A_2026-02-11", "plot_name": "P1", "accession_name": "acc-9"}],
     })
 
     res = compute_phenology(
         trait=fx.CROSSING_TRAIT,
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(bucket)},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -352,7 +352,7 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys
     )))
     refused = compute_phenology(
         trait=fx.CROSSING_TRAIT,
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(bucket)},
         output_csv_path=str(tmp_path / "out2.csv"),
     )

@@ -39,7 +39,7 @@ describe("results api error handling (asJson)", () => {
 describe("exportCsv refusal decoding", () => {
   const REQUEST = {
     project_root: "C:/proj",
-    mapping_path: "C:/proj/.tcip/state/plant_mapping.json",
+    mapping_name: "valley",
     predictions_by_date: {},
     trait: "catkin_50per_date",
   };
