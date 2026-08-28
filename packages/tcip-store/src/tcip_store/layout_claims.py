@@ -275,7 +275,14 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     ),
     "ray_dashboard": Claim(ROOT, (_named(".tcip", "state", name="ray_dashboard", suffix=".json"),)),
     "backend_port": Claim(WORKSPACE, (_named(".tcip", "state", name="web_port", suffix=".txt"),)),
-    "job_registry": Claim(ROOT, (_named(".tcip", "state", name="inference_jobs", suffix=".json"),)),
+    "job_registry": Claim(
+        ROOT,
+        (
+            _named(".tcip", "state", name="inference_jobs", suffix=".json"),
+            _named(".tcip", "state", name="review_priority_jobs", suffix=".json"),
+            _named(".tcip", "state", name="hpo_sweeps", suffix=".json"),
+        ),
+    ),
     "proposal_staging": Claim(
         ROOT,
         (
