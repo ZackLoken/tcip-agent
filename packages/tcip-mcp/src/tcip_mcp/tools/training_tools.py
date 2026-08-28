@@ -1474,10 +1474,14 @@ def run_hpo(
             pass
 
     result["tensorboard"] = tb_info
+    # best_value_state (stored_number's sibling for a non-finite best_value) rides along whenever the search produced one.
+    manifest_result = {k: result.get(k) for k in ("best_params", "best_value", "n_trials")}
+    if "best_value_state" in result:
+        manifest_result["best_value_state"] = result["best_value_state"]
     manifest.update(
         status="completed",
         finished_at=datetime.now(timezone.utc).isoformat(),
-        result={k: result.get(k) for k in ("best_params", "best_value", "n_trials")},
+        result=manifest_result,
     )
     # Durable result records (best-effort, a write hiccup must not sink a completed sweep).
     try:

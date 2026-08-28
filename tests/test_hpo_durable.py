@@ -268,6 +268,26 @@ def test_run_hpo_admits_a_swept_axis_whose_every_choice_resolves(
     assert "error" not in result
 
 
+def test_run_hpo_carries_best_value_state_into_the_completed_manifest(
+    tmp_path, real_hpo_base_config, monkeypatch
+):
+    """A non-finite best_value still names why in the manifest, rather than a bare null with
+    no reason a served sweep can show."""
+    import tcip_mcp.tools.training_tools as tt
+    from tcip_store import stored_number
+
+    def fake_search(**kw):
+        return {"best_params": {"lr": 0.01}, "n_trials": 1, "study_name": kw["study_name"],
+                **stored_number("best_value", float("nan"))}
+
+    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    result = tt.run_hpo(base_config=real_hpo_base_config, n_trials=1, output_dir=str(tmp_path))
+
+    manifest = ts.read(tt.sweep_manifest_key(result["study_name"], str(tmp_path)))
+    assert manifest["result"]["best_value"] is None
+    assert manifest["result"]["best_value_state"] == "nan"
+
+
 def test_run_hpo_passes_agent_search_and_scheduler_choices(
     tmp_path, real_hpo_base_config, monkeypatch
 ):
