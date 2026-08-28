@@ -182,6 +182,36 @@ def test_compute_phenology_refuses_predictions_from_a_different_dataset(
     assert "different dataset" in res["error"]
 
 
+def test_compute_phenology_refuses_predictions_under_no_dataset_root_naming_the_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rail 4's missing clause: a delivery whose prediction buckets resolve to no dataset root at
+    all (a caller-chosen directory ``export_predictions`` may legitimately write to, carrying no
+    ``images``/``annotations``/``predictions``/``labels`` path segment) refuses naming the remedy,
+    since this dataset-bound mapping delivery, not ``export_predictions`` itself, is what needs
+    one dataset root to attribute detections to."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, _ = _write_scene(dataset_root)
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    orphan_preds = {}
+    for date in DATES:
+        bucket = tmp_path / "loose_exports" / date
+        bucket.mkdir(parents=True, exist_ok=True)
+        orphan_preds[date] = str(bucket)
+
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=orphan_preds,
+        output_csv_path=str(tmp_path / "out.csv"), acknowledge_unvalidated=True)
+    assert "error" in res
+    assert "register_dataset" in res["error"]
+    assert not (tmp_path / "out.csv").exists()
+
+
 # ── rail 5: an extra predictions_by_date date the mapping does not name ─────────────────
 
 
@@ -245,15 +275,17 @@ def test_compute_phenology_refuses_a_record_with_provenance_and_no_receipt(
     _, _, preds_by_date = _write_scene(dataset_root)
     _seed_currant_bloom_trait(tmp_path)
 
-    build = plant_mapping.MappingBuild(
-        name="forged", project_root=str(tmp_path), dataset_root=str(dataset_root),
-        dataset_id="whatever-id", built_by="build_plant_mapping",
-        built_at="2026-02-11T00:00:00+00:00", dates_requested=None, dates=list(DATES),
-        nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
-        capture_identity={d: "0" * 16 for d in DATES}, unreadable={d: [] for d in DATES},
-        assignments={d: [] for d in DATES},
-    )
-    ts.replace(plant_mapping.plant_mapping_key(tmp_path, "forged"), build.to_record())
+    # A literal dict, not a MappingBuild().to_record(): this shape is the record's own contract
+    # (_REQUIRED_TOP_KEYS), independent of whatever the dataclass's constructor happens to take.
+    record = {
+        "name": "forged", "project_root": str(tmp_path), "dataset_root": str(dataset_root),
+        "dataset_id": "whatever-id", "built_by": "build_plant_mapping",
+        "built_at": "2026-02-11T00:00:00+00:00", "dates_requested": None, "dates": list(DATES),
+        "nn_tolerance_m": {"value": 10.0, "source": "fallback"}, "plant_csvs": [],
+        "capture_identity": {d: "0" * 16 for d in DATES}, "unreadable": {d: [] for d in DATES},
+        "assignments": {d: [] for d in DATES},
+    }
+    ts.replace(plant_mapping.plant_mapping_key(tmp_path, "forged"), record)
     out_csv = tmp_path / "out.csv"
     res = compute_phenology(
         trait="currant_bloom", mapping_name="forged", predictions_by_date=preds_by_date,
@@ -305,7 +337,7 @@ def test_a_capture_unreadable_at_build_and_readable_at_verify_refuses(
     build_res = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
     assert "error" not in build_res, build_res
-    assert "bad.jpg" in build_res["unreadable"][DATES[0]]
+    assert "bad.jpg" in build_res.get("unreadable", {}).get(DATES[0], [])
     _seed_currant_bloom_trait(tmp_path)
 
     _write_geo_image(bad, 43.1968, -90.0581, datetime(2026, 2, 11, 9, 5))
@@ -350,7 +382,12 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
 ) -> None:
     """At the pipeline level: ``persist_mapping``'s own contract, not the MCP tool's ``@audited``
     wrapper (which writes its own, separate audit line for the call and would otherwise also
-    contend for the same lock this test holds for the whole body)."""
+    contend for the same lock this test holds for the whole body). This calls
+    ``plant_mapping.build_mapping`` directly rather than through ``build_plant_mapping``,
+    deliberately: fail-before for this rail is proven at the commit that added the receipt
+    mechanism itself, not at the bare door-renames commit, since ``build_mapping`` gained
+    ``dataset_id``/``project_root``/``built_by`` there too and a baseline before it dies on a
+    ``TypeError`` from this call's own arrangement, not from the assertion this test names."""
     from tcip_mcp.audit import AuditEntryNotWritten
     from tcip_store.file_backend import FileBackend, path_lock
 
@@ -570,6 +607,75 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
     ts.replace(plant_mapping.plant_mapping_key(tmp_path, "Not A Legal Name"), {})
 
     assert plant_mapping.plant_mapping_names(tmp_path) == ["valley-a", "valley-b"]
+
+
+def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_through_their_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rail 13's delivery half: two projects mapping one registered dataset under the same
+    mapping name each build and deliver through their own record, never the other's."""
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    proj_a, proj_b = tmp_path / "proj_a", tmp_path / "proj_b"
+    for proj in (proj_a, proj_b):
+        res = init_project(str(proj), site=f"orchard {proj.name}")
+        assert "error" not in res, res
+
+    dataset_root = tmp_path / "shared_ds"
+    dataset_root.mkdir()
+    for proj in (proj_a, proj_b):
+        reg = register_dataset(
+            str(dataset_root), crop=sorted(registered_crops())[0], project_root=str(proj))
+        assert "error" not in reg, reg
+
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_a))
+    build_a = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)],
+        dates=[DATES[0]])
+    assert "error" not in build_a, build_a
+    _seed_currant_bloom_trait(proj_a)
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_b))
+    build_b = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)],
+        dates=list(DATES))
+    assert "error" not in build_b, build_b
+    _seed_currant_bloom_trait(proj_b)
+
+    # Each project's own record: build_a saw one date, build_b saw both.
+    assert plant_mapping.load_mapping(proj_a, "valley").dates == [DATES[0]]
+    assert set(plant_mapping.load_mapping(proj_b, "valley").dates) == set(DATES)
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_a))
+    out_csv_a = proj_a / "out.csv"
+    res_a = compute_phenology(
+        trait="currant_bloom", mapping_name="valley",
+        predictions_by_date={DATES[0]: preds_by_date[DATES[0]]},
+        output_csv_path=str(out_csv_a), acknowledge_unvalidated=True)
+    assert "error" not in res_a, res_a
+    assert out_csv_a.exists()
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_b))
+    out_csv_b = proj_b / "out.csv"
+    res_b = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv_b), acknowledge_unvalidated=True)
+    assert "error" not in res_b, res_b
+    assert out_csv_b.exists()
+
+    # A date proj_a's own (narrower) mapping does not cover refuses through proj_a's own
+    # record, unaffected by proj_b's wider mapping under the identical name.
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(proj_a))
+    out_csv_a2 = proj_a / "out2.csv"
+    res_a2 = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv_a2), acknowledge_unvalidated=True)
+    assert "error" in res_a2
+    assert DATES[1] in res_a2["error"]
+
+    assert plant_mapping.plant_mapping_names(proj_a) == ["valley"]
+    assert plant_mapping.plant_mapping_names(proj_b) == ["valley"]
 
 
 # ── rail 2: a capture added under a mapped date, through the platform's own writers ─────

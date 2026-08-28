@@ -498,7 +498,7 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
     )
 
     assert resp.status_code == 404
-    assert "no mapping" in resp.json()["detail"]
+    assert "mapping not found" in resp.json()["detail"]
 
 
 # ── the seal between the two writers ─────────────────────────────────────────
