@@ -1953,6 +1953,33 @@ def test_a_streamed_blob_write_refuses_a_stale_token_before_the_producer_writes(
         assert handle.read() == b"third"
 
 
+def test_put_blob_from_path_streams_a_source_files_bytes_and_returns_their_version(store):
+    key = store.key(BLOB, "from-path")
+    source = store.root / "source.bin"
+    source.write_bytes(b"capture bytes" * 10000)
+
+    version = ts.put_blob_from_path(key, source, expect=ts.Version.ABSENT)
+
+    with ts.open_blob(key) as handle:
+        assert handle.read() == source.read_bytes()
+    assert ts.read_blob_versioned(key).version == version
+    comparison = store.key(BLOB, "put-blob-comparison")
+    assert ts.put_blob(comparison, source.read_bytes()) == version
+
+
+def test_put_blob_from_path_refuses_a_stale_expect_and_leaves_the_previous_bytes(store):
+    key = store.key(BLOB, "from-path-conflict")
+    held = ts.put_blob(key, b"first", expect=ts.Version.ABSENT)
+    ts.put_blob(key, b"second", expect=held)
+    source = store.root / "never-written.bin"
+    source.write_bytes(b"third attempt")
+
+    with pytest.raises(ts.VersionConflict):
+        ts.put_blob_from_path(key, source, expect=held)
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"second"
+
+
 def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(store):
     key = store.key(BLOB, "contested")
     ts.put_blob(key, b"seed", expect=ts.Version.ABSENT)
