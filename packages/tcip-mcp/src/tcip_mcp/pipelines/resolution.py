@@ -1977,10 +1977,10 @@ def delivered_provenance(
 
     ``validation_record`` names the experiment and row every bucket's claim was answered for by,
     and is empty unless every bucket read is bound, since one cell cannot name a record for buckets
-    that have none. ``producer_model_sha256`` and ``experiment_id`` are corroborated through
-    :func:`corroborated_producer`, preferring the identity the verified records carry over the
-    identity the stamps assert. ``measurement_validated`` is the delivery gate's own stamp and is
-    left to the door that ran it.
+    that have none. ``producer_model_sha256`` and ``producing_experiment_id`` are corroborated
+    through :func:`corroborated_producer`, preferring the identity the verified records carry over
+    the identity the stamps assert. ``measurement_validated`` is the delivery gate's own stamp and
+    is left to the door that ran it.
     """
     values = dict(asserted or {})
     bound = bool(bindings) and all(b.ok and b.claimed for b in bindings.values())
@@ -1989,13 +1989,56 @@ def delivered_provenance(
 
     identities = {(b.checkpoint_sha256, b.producing_experiment_id) for b in bindings.values()}
     if bound and len(identities) == 1:
-        checkpoint, experiment_id = next(iter(identities))
+        checkpoint, producing_experiment_id = next(iter(identities))
     else:
         checkpoint = values.get("producer_model_sha256")
-        experiment_id = values.get("experiment_id")
-    values["producer_model_sha256"], values["experiment_id"] = corroborated_producer(
-        checkpoint, experiment_id)
+        producing_experiment_id = values.get("producing_experiment_id")
+    values["producer_model_sha256"], values["producing_experiment_id"] = corroborated_producer(
+        checkpoint, producing_experiment_id)
     return {c: values.get(c) for c in columns}
+
+
+_DIMENSION_TO_COLUMN: dict[str, str] = {
+    "operating_point": "operating_point_validated",
+    "classifier": "positive_state_classifier_validated",
+    "measurement": "measurement_validated",
+}
+"""Which delivery-gate dimension owns which CSV validity column, wherever a delivered tail carries
+one. :func:`delivered_tail` reads this to derive a door's own ``own_column`` set structurally from
+its own column list, rather than a second list stating the same fact and free to drift from it."""
+
+
+def delivered_tail(
+    asserted: Mapping[str, Any] | None,
+    bindings: Mapping[str, StampBinding],
+    gate: DeliveryGateResult,
+    *,
+    columns: Sequence[str],
+) -> dict[str, Any]:
+    """One delivered CSV row's full producer-plus-validity tail, for one door's own column list.
+
+    The one composition behind every delivered tail: producer identity and ``validation_record``
+    come from :func:`delivered_provenance`; ``produced_at`` is this call's own write time, computed
+    once here rather than accepted from ``asserted``, which is refused when it carries one of its
+    own rather than silently overridden, since the column is this composition's own fact and a
+    second source pretending to it is exactly the drift this removes; and every validity column
+    ``columns`` actually carries (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``)
+    is stamped through ``gate.column_stamp``, with ``own_column`` derived from that same membership
+    check, so a dimension without a column of its own floors every column that does exist and no
+    door can drift into disagreeing about what a validated column means.
+    """
+    if asserted and "produced_at" in asserted:
+        raise ValueError(
+            "delivered_tail: asserted carries its own produced_at; produced_at is this "
+            "composition's own write-time fact, never a caller-supplied one."
+        )
+    values = delivered_provenance(asserted, bindings, columns=columns)
+    if "produced_at" in columns:
+        values["produced_at"] = datetime.now(timezone.utc).isoformat()
+    owned = tuple(dim for dim, col in _DIMENSION_TO_COLUMN.items() if col in columns)
+    for dim in owned:
+        values[_DIMENSION_TO_COLUMN[dim]] = gate.column_stamp(dim, own_column=owned)
+    return values
 
 
 DELIVERY_EVENTS_STORE = "delivery_events"
