@@ -827,11 +827,11 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_inference` | `routes/inference.py:448` |  <!-- queued: P5-105 delete -->
+| POST | `/launch` | `launch_inference` | `routes/inference.py:449` |  <!-- queued: P5-105 delete -->
 | GET | `/jobs` | `list_jobs` | `routes/inference.py:548` |
-| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:552` |
-| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:566` |
-| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:576` |
+| GET | `/jobs/{job_id}/preview` | `get_preview` | `routes/inference.py:553` |
+| POST | `/jobs/{job_id}/cancel` | `cancel_job` | `routes/inference.py:567` |
+| WS | `/jobs/{job_id}/stream` | `stream_job` | `routes/inference.py:577` |
 
 ### routes/meta.py, prefix `/api/meta` (2 routes)
 
@@ -2179,7 +2179,7 @@ Phase 3 verdict: duplicated.
 ## S50. Inference job stream WebSocket  <!-- queued: P5-304 unify -->
 
 Must agree: the browser recognizes the terminal frame and the status vocabulary the backend uses.
-Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:575` (`@router.websocket("/jobs/{job_id}/stream")`).
+Side A: `packages/tcip-web/src/tcip_web/routes/inference.py:576` (`@router.websocket("/jobs/{job_id}/stream")`).
 Side B: `packages/tcip-web/src/tcip_web/jobstore.py:80` (`TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})`).
 Phase 3 verdict: duplicated.
 
