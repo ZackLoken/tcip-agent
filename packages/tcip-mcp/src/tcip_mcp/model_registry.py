@@ -73,21 +73,6 @@ def _compute_sha256(filepath: str | Path) -> str:
         return _sha256_of_bytes(f.read())
 
 
-def checkpoint_sha256(filepath: str | Path) -> str | None:
-    """SHA-256 of a checkpoint file (``None`` if missing), read fresh on every call.
-
-    Uncached: a caller needing the digest of bytes it is about to unpickle uses
-    :func:`load_registered_checkpoint`, which reads and hashes one byte string and never a
-    second, possibly-replaced, read of the same path. This function's one remaining production
-    caller reads a recorded lineage path that may no longer exist and wants ``None`` for that,
-    never an exception, on a fact outside the verified-load rail.
-    """
-    p = Path(filepath)
-    if not p.is_file():
-        return None
-    return _compute_sha256(p)
-
-
 _PERIODIC_RESUME_PREFIX = "checkpoint_epoch_"
 """The trainer's own periodic-checkpoint naming convention (``generic_trainer.py``): a resume
 artifact the trainer's own resume path reads, never a deliverable to register."""

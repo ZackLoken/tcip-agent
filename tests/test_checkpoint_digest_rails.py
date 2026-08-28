@@ -433,12 +433,13 @@ def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_f
     assert "error" not in reg, reg
     images_dir, _ = _images(tmp_path)
 
-    from tcip_mcp.model_registry import checkpoint_sha256
+    import hashlib
+
     from tcip_mcp.tools.inference_tools import run_inference
 
     r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
     assert "error" not in r, r
-    assert r["checkpoint_sha256"] == checkpoint_sha256(ckpt)
+    assert r["checkpoint_sha256"] == hashlib.sha256(ckpt.read_bytes()).hexdigest()
 
 
 # Rail 11: a registration that fails after completion appends model_registration_failed.

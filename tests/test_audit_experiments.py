@@ -418,11 +418,11 @@ class TestExperiments:
 
         exp.create_experiment("exp-l", {"data": {"images_dir": "/data/images", "task": "detection"}},
                              data_source="/data/images")
-        exp.update_lineage("exp-l", model_weights="/models/best.pt")
+        exp.update_lineage("exp-l", predictions="/preds/best")
 
         result = exp.get_experiment_lineage("exp-l")
         assert result["lineage"]["data_source"] == "/data/images"
-        assert result["lineage"]["model_weights"] == "/models/best.pt"
+        assert result["lineage"]["predictions"] == "/preds/best"
         assert result["lineage"]["data_config"]["task"] == "detection"
 
         exp.EXPERIMENTS_DIR = original

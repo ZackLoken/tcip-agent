@@ -1481,9 +1481,10 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
     assert sidecar["operating_point"]["ordinal"]["validated_against"] == result["validated_against"]
     assert sidecar["validated"] == result["passed"]
     assert "sweep_data" in sidecar and sidecar["sweep_data"]["criterion"] == "quadratic_weighted_kappa"
-    from tcip_mcp.model_registry import checkpoint_sha256
+    import hashlib
 
-    assert sidecar["checkpoint_sha256"] == checkpoint_sha256(tmp_path / "out" / "model_best.pt")
+    assert sidecar["checkpoint_sha256"] == hashlib.sha256(
+        (tmp_path / "out" / "model_best.pt").read_bytes()).hexdigest()
 
 
 def test_calibrate_ordinal_regression_operating_point_regression_e2e(
@@ -1571,7 +1572,6 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import find_validation
-    from tcip_mcp.model_registry import checkpoint_sha256
     from tcip_mcp.pipelines.resolution import (
         VALIDATED_HELD_OUT,
         read_ordinal_operating_point_sidecar,
@@ -1623,7 +1623,9 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
         [str(out)], trait="catkin")["validated"] == VALIDATED_HELD_OUT
 
     # The door ran this checkpoint, so stamp and record both name it and the equality check holds.
-    sha = checkpoint_sha256(checkpoint)
+    import hashlib
+
+    sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     assert stamp["checkpoint_sha256"] == sha
     row = find_validation(res["validated_by"]["experiment_id"], res["validated_by"]["record_digest"])
     assert row["checkpoint_sha256"] == sha

@@ -438,6 +438,7 @@ def create_experiment(
         "dataset_fingerprint": dataset_fingerprint,
         "parent_experiment": parent_experiment,
         "model_weights": None,
+        "model_weights_sha256": None,
         "predictions": None,
     }
     store.replace(lineage_key(experiment_id), lineage, expect=Version.ABSENT)
@@ -589,31 +590,60 @@ def update_status(
 
 
 def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
-    """Mark a run completed and record its final weights pointer, as one transaction.
+    """Mark a run completed and record its final weights pointer and their digest, as one
+    transaction.
 
-    Names the artifacts key before the status key: a file-backend transaction applies its writes
-    in named-key order and is not crash-atomic across keys, so a crash between the two leaves the
-    pointer on a record still ``running`` (a detectably stale state), never ``completed`` with no
-    pointer. Refuses (and audits, once the transaction has closed) a run already terminal, naming
-    the weights file that exists on disk so an operator can find it; the refusal's ``state``
-    carries the state the record actually holds, so a caller can reconcile to it.
+    Hashes ``final_weights`` before opening the transaction: the store's locks cover records, not
+    a checkpoint read, and holding three record locks through that read against the file backend's
+    lock timeout would buy nothing. A declared deliverable this run cannot read is refused, not
+    completed with a phantom pointer: a missing or unreadable file returns an error naming the
+    path and the read failure, and writes nothing (no transaction is even opened).
+
+    Names the artifacts key before the lineage key, and the lineage key before the status key: a
+    file-backend transaction applies its writes in named-key order and is not crash-atomic across
+    keys, so a crash mid-apply leaves a detectably stale record (a pointer with no digest, or a
+    digest recorded on a record still ``running``), never a ``completed`` record carrying a
+    mismatched or absent digest. Refuses (and audits, once the transaction has closed) a run
+    already terminal, naming the weights file that exists on disk so an operator can find it; the
+    refusal's ``state`` carries the state the record actually holds, so a caller can reconcile to
+    it. The digest is what this call observed of the file, sealed into the transaction that makes
+    the run terminal, so nothing a caller does to the path afterwards changes what the run
+    recorded.
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
-    art_key, st_key = artifacts_key(experiment_id), status_key(experiment_id)
+    from tcip_mcp.model_registry import _sha256_of_bytes
+
+    try:
+        with open(final_weights, "rb") as f:
+            digest = _sha256_of_bytes(f.read())
+    except OSError as exc:
+        return {"error": f"complete_run: final_weights {final_weights!r} could not be read "
+                         f"({exc}); refusing to complete with an unrecorded digest.",
+                "final_weights": final_weights}
+
+    art_key, lin_key, st_key = (
+        artifacts_key(experiment_id), lineage_key(experiment_id), status_key(experiment_id),
+    )
     current: str | None = None
     try:
-        with store.transaction(art_key, st_key) as txn:
+        with store.transaction(art_key, lin_key, st_key) as txn:
             status = txn.read(st_key, default={})
             current = status.get("state") if isinstance(status, dict) else None
             refuse_if_terminal(experiment_id, "complete_run", current)
 
+            recorded_at = datetime.now(timezone.utc).isoformat()
             artifacts = txn.read(art_key, default={})
             artifacts["model_weights"] = {
-                "path": final_weights, "recorded": datetime.now(timezone.utc).isoformat(),
+                "path": final_weights, "sha256": digest, "recorded": recorded_at,
             }
             txn.write(art_key, artifacts)
+
+            lineage = txn.read(lin_key, default={})
+            lineage["model_weights"] = final_weights
+            lineage["model_weights_sha256"] = digest
+            txn.write(lin_key, lineage)
 
             _mark_completed(status)
             txn.write(st_key, status)
@@ -622,7 +652,8 @@ def complete_run(experiment_id: str, final_weights: str) -> dict[str, Any]:
         return {"error": f"{exc} Final weights at {final_weights!r} were not recorded.",
                 "final_weights": final_weights, "state": current}
 
-    return {"experiment_id": experiment_id, "state": "completed", "model_weights": final_weights}
+    return {"experiment_id": experiment_id, "state": "completed", "model_weights": final_weights,
+            "model_weights_sha256": digest}
 
 
 def stamp_run_identity(experiment_id: str, run_id: str, output_dir: str) -> None:
@@ -1150,14 +1181,23 @@ def record_artifact(
     return {"experiment_id": experiment_id, "artifact": name, "path": path}
 
 
+_COMPLETION_ONLY_LINEAGE_FIELDS = ("model_weights", "model_weights_sha256")
+"""The two lineage fields only ``complete_run`` writes: the digest completion recorded, and the
+path it was taken over. Unlike the identity fields below, naming either here is a caller error,
+not a state a still-empty field could legitimately take later, so the whole call refuses before
+any field lands, never merged in and never silently dropped."""
+
+
 def update_lineage(
     experiment_id: str,
     **updates: Any,
 ) -> dict[str, Any]:
-    """Update lineage fields (model_weights, predictions, etc.).
+    """Update lineage fields (predictions, data_source, review_session, etc.).
 
     The updates are the caller's own kwargs, merged whole into the stored document, so they
-    are checked against what JSON can hold before any of them lands.
+    are checked against what JSON can hold before any of them lands. ``model_weights`` and
+    ``model_weights_sha256`` are ``complete_run``'s alone: naming either raises ``ValueError``
+    before any field, including a legitimate companion in the same call, lands.
 
     A dropped identity update is audited before the transaction below (it never reaches the
     transaction at all, see the comment on ``identity_updates``); when that append itself fails,
@@ -1167,6 +1207,12 @@ def update_lineage(
     away, and never at the cost of a write that should have gone through.
     """
     check_json_value(updates, path="updates")
+    completion_fields = sorted(f for f in _COMPLETION_ONLY_LINEAGE_FIELDS if f in updates)
+    if completion_fields:
+        raise ValueError(
+            f"update_lineage: {', '.join(completion_fields)} is complete_run's alone to write; "
+            "no other caller populates the run's recorded digest."
+        )
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
 
@@ -1217,12 +1263,13 @@ def register_model_from_experiment(
 
     Pulls the experiment's config and the checkpoint's own metrics, the epoch that produced
     this checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training
-    epoch. Registers with an ``experiment:<id>`` back-reference tag and records it in the
-    experiment's lineage (``model_weights``). Metrics are read, never fabricated: a checkpoint
-    that carries no metrics dict, or that will not load at all, registers with an empty
-    ``metrics`` and a ``metrics_source`` of ``None`` rather than substituting a different
-    epoch's numbers (the run's own metrics log describes a different model state than the
-    checkpoint being registered).
+    epoch. Registers with an ``experiment:<id>`` back-reference tag; the run's own lineage
+    pointer (``model_weights``, ``model_weights_sha256``) is ``complete_run``'s alone to record,
+    not this call's. Metrics are read, never fabricated: a checkpoint that carries no metrics
+    dict, or that will not load at all, registers with an empty ``metrics`` and a
+    ``metrics_source`` of ``None`` rather than substituting a different epoch's numbers (the
+    run's own metrics log describes a different model state than the checkpoint being
+    registered).
 
     ``metrics_source`` records which path produced the numbers, not that anyone verified them:
     ``"trainer"`` when the run's config carries no ``training_source`` (the platform's own
@@ -1274,7 +1321,6 @@ def register_model_from_experiment(
         metrics=final_metrics, tags=[f"experiment:{experiment_id}"], kind=kind,
         metrics_source=metrics_source,
     )
-    update_lineage(experiment_id, model_weights=checkpoint_path)
     return {
         "experiment_id": experiment_id,
         "registered": entry["name"],

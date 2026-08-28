@@ -1850,22 +1850,20 @@ def _dataset_root_of(path: Path) -> Path | None:
 def experiment_recorded_checkpoint(experiment_id: str) -> str | None:
     """The checkpoint identity this experiment record answers for, or ``None`` when it records none.
 
-    Read from what the run itself filed rather than from anything a prediction bucket says: the
-    registry entry that back-references the experiment carries the hash it was registered under, and
-    the run's lineage carries the weights path that hash was taken over. Both are written together
-    by ``register_model_from_experiment``, so the second answers when the registry index sits under a
-    root this process is not reading.
+    Read from the run's own lineage, and only for a record whose status is ``completed``: a
+    file-backend crash between the lineage apply and the status apply could otherwise leave a
+    still-``running`` record carrying a digest, and a run that never completed vouches for
+    nothing. ``complete_run`` writes the digest and the terminal status together in one
+    transaction, so this is the one fact the run itself recorded of its own output.
     """
-    from tcip_mcp.experiments import lineage_key, read_member
-    from tcip_mcp.model_registry import checkpoint_sha256, read_registry_index
-    from tcip_mcp.project_paths import project_root
+    from tcip_mcp.experiments import lineage_key, read_member, status_key
 
-    tag = f"experiment:{experiment_id}"
-    for entry in read_registry_index(project_root()):
-        if tag in (entry.get("tags") or []) and entry.get("sha256"):
-            return str(entry["sha256"])
-    weights = (read_member(lineage_key(experiment_id), {}) or {}).get("model_weights")
-    return checkpoint_sha256(weights) if weights else None
+    status = read_member(status_key(experiment_id), {})
+    if not isinstance(status, dict) or status.get("state") != "completed":
+        return None
+    lineage = read_member(lineage_key(experiment_id), {})
+    weights_sha256 = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
+    return str(weights_sha256) if weights_sha256 else None
 
 
 def corroborated_producer(
