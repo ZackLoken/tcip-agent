@@ -338,6 +338,7 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
         region_completeness_digest_key,
         region_completeness_key,
         status_bucket,
+        unreadable_completeness_entries,
     )
     from tcip_mcp.pipelines.reference_grid import reference_cells
     from tcip_mcp.pipelines.region_completeness import cell_annotation_digest
@@ -366,7 +367,16 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
     # Digest key named first, so it is applied first: stale_cells fails closed on a missing
     # digest, so a stamp must never land after the attestation that points at it.
     with tcip_store.transaction(digest_key, completeness_key) as txn:
-        store = normalize_region_completeness_store(txn.read(completeness_key, default={}))
+        raw_store = txn.read(completeness_key, default={})
+        unreadable = unreadable_completeness_entries(raw_store)
+        if unreadable:
+            raise HTTPException(
+                400,
+                f"the region-completeness store under {root} holds {len(unreadable)} entries in a "
+                f"shape this reader does not recognize, starting with {unreadable[:3]}; merging a "
+                f"write into it would drop them. Conform the store to the recognized record shape "
+                f"first")
+        store = normalize_region_completeness_store(raw_store)
         existing = store.get(bucket)
         grid_matches = existing is not None and existing.get("grid") == grid
         cells_complete = set(existing.get("cells_complete") or []) if grid_matches else set()

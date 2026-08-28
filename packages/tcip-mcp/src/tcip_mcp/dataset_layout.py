@@ -602,6 +602,20 @@ def region_completeness_digest_key(dataset_root: str | Path) -> Key:
                _REGION_COMPLETENESS_DIGEST_PARTS)
 
 
+def _is_completeness_record(value: object) -> bool:
+    """Whether ``value`` is a region-completeness bucket record: a dict with a dict ``grid`` and a
+    ``cells_complete`` list of strings.
+
+    The one recognizer :func:`normalize_region_completeness_store` and
+    :func:`unreadable_completeness_entries` both call, so an entry is never kept by one and
+    reported unreadable by the other.
+    """
+    if not isinstance(value, dict) or not isinstance(value.get("grid"), dict):
+        return False
+    cells = value.get("cells_complete")
+    return isinstance(cells, list) and all(isinstance(c, str) for c in cells)
+
+
 def normalize_region_completeness_store(raw: object) -> dict[str, dict]:
     """``{bucket: {grid, cells_complete, attested_by, attested_at, stem, date, subject}}``: a
     shape guard, shared by every reader.
@@ -609,21 +623,29 @@ def normalize_region_completeness_store(raw: object) -> dict[str, dict]:
     A bucket is ``status_bucket(subject, stem)``: the raster's own stem stands in for
     ``image_status.json``'s ``date`` slot, since one raster's completeness is one record, not one
     per image name (contrast :func:`normalize_status_store`, which nests by image name because a
-    date bucket can hold many images). An entry missing a dict ``grid`` or a ``cells_complete``
-    list of strings is not a completeness record and is dropped, so a malformed store yields no
-    attestations rather than a wrong one.
+    date bucket can hold many images). An entry :func:`_is_completeness_record` does not recognize
+    is not a completeness record and is dropped, so a malformed store yields no attestations rather
+    than a wrong one. A caller about to merge a write into this store asks
+    :func:`unreadable_completeness_entries` first, so an entry this drops is never one a merge
+    silently deletes.
     """
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, dict] = {}
-    for key, value in raw.items():
-        if not isinstance(value, dict) or not isinstance(value.get("grid"), dict):
-            continue
-        cells = value.get("cells_complete")
-        if not isinstance(cells, list) or not all(isinstance(c, str) for c in cells):
-            continue
-        out[key] = value
-    return out
+    return {key: value for key, value in raw.items() if _is_completeness_record(value)}
+
+
+def unreadable_completeness_entries(raw: object) -> list[str]:
+    """Bucket names in ``raw`` whose value :func:`normalize_region_completeness_store` does not
+    recognize as a completeness record.
+
+    What a read drops and a merging write would therefore delete. Mirrors
+    :func:`unreadable_status_entries` for this store; unlike that one, a region-completeness store
+    is flat (one record per bucket, not nested by image name), so the entries reported here are
+    bare bucket names rather than ``bucket/name`` pairs.
+    """
+    if not isinstance(raw, dict):
+        return []
+    return sorted(key for key, value in raw.items() if not _is_completeness_record(value))
 
 
 def status_bucket(subject: str, date: Optional[str]) -> str:
