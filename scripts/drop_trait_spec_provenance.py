@@ -35,7 +35,6 @@ Exit codes: 0 conformed (or nothing to conform) for every root named; 2 if any r
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import sys
 from pathlib import Path
 
@@ -83,10 +82,7 @@ def drop_provenance_from_records(root: Path, *, plan: bool) -> list[str]:
         if plan:
             outcomes.append(f"{trait}: would drop provenance")
             continue
-        written = {
-            k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
-        }
-        ts.replace(key, written, expect=stored.version)
+        traits._write_spec_record(key, spec, expect=stored.version)
         outcomes.append(f"{trait}: dropped provenance")
     return outcomes
 
