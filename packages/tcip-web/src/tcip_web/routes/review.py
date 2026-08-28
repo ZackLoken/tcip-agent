@@ -257,6 +257,7 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
     pristine original without a copy no matter which of the two ran first. New GT files a verdict
     is creating have no original to preserve, so they are skipped, and an already-held baseline is
     kept rather than replaced by this call's read of a file the platform may already have edited.
+    Called from both ``/action`` and ``/save_gt``, the two routes that can rewrite a GT file.
     """
     if not label_path:
         return
