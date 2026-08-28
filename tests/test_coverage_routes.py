@@ -635,6 +635,26 @@ class TestCompletenessRoute:
             "/api/coverage/completeness", params={"path": path}).json()["by_subject"]["catkin"]
         assert record["grid"]["tile_size"] == 100
 
+    def test_toggle_refuses_when_the_store_holds_an_unrecognized_entry(self, client, dated_dataset):
+        """An entry the normalizer cannot read (a legacy or corrupt shape) must not be silently
+        dropped by a write into an unrelated bucket; the write refuses, naming it, and the entry
+        is still in the store afterwards."""
+        import tcip_store as ts
+        from tcip_mcp.dataset_layout import region_completeness_key
+
+        root, path = dated_dataset
+        stray_bucket = "orchard/2026-02-01"
+        ts.replace(region_completeness_key(root), {stray_bucket: {"cells_complete": ["A1"]}},
+                  expect=ts.Version.ABSENT)
+
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1")
+        assert resp.status_code == 400
+        assert stray_bucket in resp.json()["detail"]
+
+        store = ts.read(region_completeness_key(root))
+        assert store[stray_bucket] == {"cells_complete": ["A1"]}
+
     def test_a_stale_attestation_is_detected_on_read(self, client, dated_dataset):
         """A cell is attested complete, then an annotation is added inside it: the stamped
         digest no longer matches, so the attestation reads back as stale (see
