@@ -17,10 +17,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from tcip_store import Version, read_versioned, replace
+from tcip_store import Version, read_versioned
 
 from tcip_mcp import class_registry as cr
 from tcip_mcp import operationalization as op
+from tcip_mcp import traits
 from tcip_mcp.traits import CENTER_MATCH, COUNT_UNBIASED, TraitSpec, trait_spec_key, trait_specs_dir
 
 CROSSING_TRAIT = "bloom"
@@ -91,6 +92,8 @@ DELIVERY_TRAIT_BY_PHENOTYPE = {
 def write_spec(project_root: Path, spec: TraitSpec) -> None:
     """Author a spec record into a project's own registry, the way an authoring tool would.
 
+    Routes through the platform's shared validate-encode-write entry, so a fixture spec is
+    proven to clear the same crops.yml cross-check every authored spec goes through.
     Compare-and-set against whatever is on file, so a test re-registering the same trait to
     simulate a spec that moved since it was read overwrites it rather than being refused.
     """
@@ -100,7 +103,9 @@ def write_spec(project_root: Path, spec: TraitSpec) -> None:
     }
     key = trait_spec_key(trait_specs_dir(str(project_root)), spec.name)
     current = read_versioned(key, default=None)
-    replace(key, data, expect=current.version)
+    validated, reason = traits._validate_and_write_spec(key, data, expect=current.version)
+    if validated is None:
+        raise ValueError(f"fixture spec {spec.name!r} does not clear crops.yml: {reason}")
 
 
 def seed_positive_class(project_root: Path, subject_name: str, positive_class_name: str) -> cr.ClassRegistry:
