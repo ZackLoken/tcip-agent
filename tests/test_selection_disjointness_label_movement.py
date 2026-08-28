@@ -257,6 +257,53 @@ def test_a_label_rewritten_after_the_run_names_the_run_to_now_window(
     assert shippable is True
 
 
+# -- rail: the second window scopes to the calibration's own universe --------------------------
+
+
+def test_the_second_window_never_names_a_train_or_val_stem_absent_from_a_subset_directory(
+    tmp_path: Path,
+) -> None:
+    """``calibration_labels_dir`` may be one of several already-split per-image directories (a
+    classifier calibration's own GT dir), holding only the calibration side's own files. The
+    second window must not read a train- or val-side stem's mere absence from that directory as
+    a move: it is out of scope for that directory, not moved."""
+    from tcip_mcp.pipelines.operating_point import _resolve_label_movement
+    from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
+
+    cal_dir = tmp_path / "cal_only"
+    cal_dir.mkdir()
+    (cal_dir / "c1.json").write_bytes(b'{"a": 1}')
+
+    at_run = {
+        "t1": "0" * 16, "v1": "1" * 16,
+        "c1": compute_label_digests(cal_dir, ["c1"])["c1"],
+    }
+    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "manifest_sha256": "m"}
+
+    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None)
+
+    assert moved["labels_moved_run_to_now"] == []
+    assert moved["calibration_labels_moved"] == []
+
+
+def test_the_second_window_still_names_a_moved_calibration_side_stem(tmp_path: Path) -> None:
+    """The scoping in the test above does not blind the window to a genuine move on the
+    calibration's own side."""
+    from tcip_mcp.pipelines.operating_point import _resolve_label_movement
+
+    cal_dir = tmp_path / "cal_only"
+    cal_dir.mkdir()
+    (cal_dir / "c1.json").write_bytes(b'{"a": 1}')
+
+    at_run = {"t1": "0" * 16, "c1": "stale-digest-not-matching-the-file-on-disk"}
+    label_digests_block = {"at_split": dict(at_run), "at_run": dict(at_run), "manifest_sha256": "m"}
+
+    moved = _resolve_label_movement(label_digests_block, {"c1"}, str(cal_dir), None)
+
+    assert moved["labels_moved_run_to_now"] == ["c1"]
+    assert moved["calibration_labels_moved"] == ["c1"]
+
+
 # -- rail: nothing touched delivers with every list empty, on both surfaces --------------------
 
 
@@ -480,6 +527,28 @@ def test_read_split_manifest_dir_refuses_a_members_block_without_label_digests(
     manifest["members"][DATES[0]] = {
         k: v for k, v in manifest["members"][DATES[0]].items() if k != "label_digests"
     }
+    ts.replace(split_manifest_key(out), manifest)
+
+    with pytest.raises(ValueError, match="label_digests"):
+        read_split_manifest_dir(out)
+
+
+def test_read_split_manifest_dir_refuses_a_members_block_with_an_empty_label_digests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty (or null) ``label_digests`` is not merely absent, and admitting it would let
+    ``_resolve_label_movement`` read an empty ``at_split`` as "checked, nothing moved" rather
+    than "not checked": ``make_splits`` never writes a members block for a date with no admitted
+    stems, so a legitimate block's ``label_digests`` is never empty either."""
+    import tcip_store as ts
+
+    from tcip_mcp.tools.data_tools import read_split_manifest_dir, split_manifest_key
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    root = _dataset(tmp_path / "ds")
+    out = tmp_path / "m"
+    manifest = _draw(root, out)
+    manifest["members"][DATES[0]]["label_digests"] = {}
     ts.replace(split_manifest_key(out), manifest)
 
     with pytest.raises(ValueError, match="label_digests"):
