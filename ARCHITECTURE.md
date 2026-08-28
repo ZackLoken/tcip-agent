@@ -1337,11 +1337,12 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:399` (`def create_experiment(`), `overwrite_config_if_pristine`,
   `experiments.py:474` (rewrites only while the record is still pristine, no metrics logged), and
   three best-effort merges the subprocess worker patches into the durable record after a run's
-  own resolution is known: `_patch_experiment_config_tiling`,
-  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:30`
-  (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 72
+  own resolution is known, each a thin mutator over the one shared terminal-refusing procedure
+  `_patch_experiment_config`, same file line 31: `_patch_experiment_config_tiling`,
+  `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:72`
+  (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 90
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
-  119 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1399`
+  113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1399`
   (`def get_experiment(`), and `compare_experiments`, `experiments.py:1582`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
   `experiments.py:526` (`def update_status(`), `stamp_run_identity` (`experiments.py:659`),
