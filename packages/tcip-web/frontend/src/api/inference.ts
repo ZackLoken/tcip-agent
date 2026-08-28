@@ -145,9 +145,10 @@ export interface PhenologyResponse<Row> {
   positive_class_assessed: boolean;
   n_plants?: number;
   positive_class_id?: number | null;
-  // What the mapping's own delivery-time check could not verify: a mapped date whose folder is
-  // absent, a plant CSV that moved. Empty when nothing was unverified.
+  // What this delivery did not read: a bare date it omitted or whose folder is absent, or
+  // "date/name" for one capture of a delivered date. Empty when nothing was unverified.
   captures_unverified: string[];
+  // A plant CSV the mapping was built from that moved since. Empty when nothing was unverified.
   plant_csvs_unverified: string[];
 }
 
