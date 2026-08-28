@@ -871,17 +871,17 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/matches` | `compute_image_matches` | `routes/review.py:449` |
-| POST | `/action` | `record_action` | `routes/review.py:575` |
+| POST | `/matches` | `compute_image_matches` | `routes/review.py:450` |
+| POST | `/action` | `record_action` | `routes/review.py:576` |
 | POST | `/mark_complete` | `mark_complete` | `routes/review.py:711` |
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:773` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:794` |
-| POST | `/validate_reference` | `validate_reference` | `routes/review.py:845` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1194` |
-| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1246` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1277` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1447` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1475` |
+| POST | `/validate_reference` | `validate_reference` | `routes/review.py:846` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1195` |
+| GET | `/image_statuses` | `image_statuses` | `routes/review.py:1247` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1278` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1448` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1476` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
@@ -1343,7 +1343,7 @@ are listed here with the rest rather than taking numbers of their own.
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 90
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
   113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1399`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1582`.
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1510`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
   `experiments.py:526` (`def update_status(`), `stamp_run_identity` (`experiments.py:659`),
   `_touch_heartbeat`, `experiments.py:855` (`def _touch_heartbeat(`). Read by `get_experiment`
@@ -1355,7 +1355,7 @@ are listed here with the rest rather than taking numbers of their own.
   digest, sealed into the transaction that completes the run) and `update_lineage`,
   `experiments.py:1191` (every other field; refuses `model_weights`/`model_weights_sha256` as
   `complete_run`'s alone). Read by `get_experiment` (1288) and `get_experiment_lineage`,
-  `experiments.py:1491`.
+  `experiments.py:1597`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397),
   `complete_run` (592, the `model_weights` entry: `path`, `sha256`, `recorded`) and
   `record_artifact`, `experiments.py:1150`. Read by `get_experiment` (1288).
@@ -2038,7 +2038,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1694` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1618` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
@@ -2229,7 +2229,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the TP/FP/FN classification the browser draws is the one the matching library computed.
 Side A: `packages/tcip-annotation/src/tcip_annotation/matching.py` (`compute_matches` / `compute_classified_trait_matches`).
-Side B: `packages/tcip-web/src/tcip_web/routes/review.py:376` (`class MatchesResponse(BaseModel):`).
+Side B: `packages/tcip-web/src/tcip_web/routes/review.py:377` (`class MatchesResponse(BaseModel):`).
 Phase 3 verdict: restated-in-test.
 
 ## S58. Reference-grid geometry

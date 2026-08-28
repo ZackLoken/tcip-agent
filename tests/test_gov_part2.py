@@ -51,8 +51,8 @@ def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     distill = _load_distill()
     _seed_report(tmp_path, "r", {"category": "needs_human_judgment",
                                  "detail": "the EXIF orientation thing"})
-    # The capture backstop is a log the worksheet now reads through the store, the same seam the
-    # SessionEnd hook appends through, so it is visible under whichever backend this test binds.
+    # This bites on the database leg (nothing lands at the old literal .tcip/learning_capture.jsonl
+    # path there); the file leg is coverage only, since its own locator resolves to that same path.
     _seed_capture(tmp_path, "s1")
 
     ws = distill.build_worksheet(tmp_path)
