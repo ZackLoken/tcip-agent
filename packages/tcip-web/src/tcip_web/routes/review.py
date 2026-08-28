@@ -25,10 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import tcip_store
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from tcip_store import Version
 
 from tcip_annotation import (
     BBox,
@@ -44,7 +42,7 @@ from tcip_annotation.json_io import (
     UnreadableLabelDocument, annotation_from_payload, bbox_from_corners, check_box_extent,
     prediction_documents, read_annotations,
 )
-from tcip_annotation.review_engine import label_baseline_key
+from tcip_annotation.review_engine import capture_label_baseline
 from tcip_annotation.state import Annotation
 from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
@@ -262,16 +260,9 @@ def _ensure_original_backup(label_path: Optional[str]) -> None:
     """
     if not label_path:
         return
-    src = Path(label_path)
-    if not src.is_file():
+    if not Path(label_path).is_file():
         return
-    try:
-        tcip_store.put_blob(
-            label_baseline_key(src.parent, src.stem), src.read_bytes(),
-            expect=Version.ABSENT,
-        )
-    except tcip_store.VersionConflict:
-        pass
+    capture_label_baseline(label_path)
 
 
 def _ann_dict(a: Annotation) -> dict:

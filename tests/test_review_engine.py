@@ -18,7 +18,7 @@ from tcip_annotation import (
     compute_classified_trait_matches,
     compute_matches,
 )
-from tcip_annotation.review_engine import bucket_dirname
+from tcip_annotation.review_engine import bucket_dirname, capture_label_baseline
 
 # The prediction bucket these verdicts are recorded against, spelled the way
 # prediction_buckets.bucket_key_of spells one: relative to the dataset root.
@@ -452,6 +452,27 @@ def test_backup_original_labels_per_file(engine: ReviewEngine, tmp_path: Path) -
     assert engine.backup_original_labels(labels_dir) == 1
     assert (labels_dir / ".original" / "IMG_0002.json").read_text() == second
     assert backup.read_text() == orig
+
+
+def test_backup_sweep_and_per_file_capture_share_one_baseline(
+    engine: ReviewEngine, tmp_path: Path
+) -> None:
+    """The directory sweep (``backup_original_labels``) and the per-file capture the review
+    routes call (``capture_label_baseline``) both go through the identical create-only
+    implementation, so whichever one reaches a file first is the baseline that survives, no
+    matter which entry point runs second."""
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    label = labels_dir / "IMG_0001.json"
+    first_writer_bytes = '{"annotations": [{"subject": "catkin", "bbox": [1, 1, 8, 8]}]}'
+    label.write_text(first_writer_bytes)
+
+    assert capture_label_baseline(label) is True
+    label.write_text('{"annotations": []}')
+    assert engine.backup_original_labels(labels_dir) == 0
+
+    backup = labels_dir / ".original" / "IMG_0001.json"
+    assert backup.read_text() == first_writer_bytes
 
 
 def test_plain_compute_matches_can_never_produce_a_tp_for_a_classified_trait() -> None:
