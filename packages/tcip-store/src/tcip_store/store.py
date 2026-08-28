@@ -9,6 +9,8 @@ storage itself to the bound backend, so each operation has exactly one implement
 
 from __future__ import annotations
 
+import hashlib
+import shutil
 import threading
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -379,6 +381,25 @@ def write_blob(key: Key, *, expect: Version | None = None) -> AbstractContextMan
     return backend.write_blob(key, expect=expect)
 
 
+def put_blob_from_path(key: Key, source: Path | str, *, expect: Version | None = None) -> Version:
+    """Write a blob whose bytes already sit in a file on disk, streamed through rather than
+    read whole into memory first, for a producer whose source can be a large raster.
+
+    A facade over ``write_blob``, not a new backend operation: ``expect`` is checked under the
+    key's lock before any byte moves, the destination is fsynced before the replace, and a
+    failure partway through the copy leaves the previous bytes untouched, exactly as
+    ``write_blob`` already guarantees. The version returned hashes the bytes as they stream
+    through, matching the content-hash every backend derives a blob's version from, rather than
+    a second read taken once the lock has released.
+    """
+    hasher = hashlib.sha256()
+    with write_blob(key, expect=expect) as dst, open(source, "rb") as src:
+        while chunk := src.read(shutil.COPY_BUFSIZE):
+            dst.write(chunk)
+            hasher.update(chunk)
+    return Version(hasher.hexdigest())
+
+
 def open_blob(key: Key) -> AbstractContextManager[BinaryIO]:
     """A readable binary stream for the blob."""
     backend = _backend()
@@ -422,6 +443,7 @@ __all__ = [
     "keys",
     "open_blob",
     "put_blob",
+    "put_blob_from_path",
     "read",
     "read_blob_versioned",
     "read_log",
