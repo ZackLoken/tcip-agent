@@ -97,25 +97,31 @@ def test_doctor_reports_nothing_for_a_project_with_no_registered_models(tmp_path
     assert findings == []
 
 
-def test_identity_resolution_matches_a_registered_checkpoint_by_content(tmp_path: Path) -> None:
+def test_identity_resolution_matches_a_registered_checkpoint_by_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A checkpoint copied to a path the registry never saw still resolves to the run that
-    produced it, matched on the content hash the registry stored. Resolution scans the whole
-    index, so the entry whose hash matches wins over an earlier entry that does not."""
+    produced it, matched on the content hash the registry stored: the binding a run's own
+    completion recorded, not a caller-asserted tag."""
     torch = pytest.importorskip("torch")
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+
     root = tmp_path / "proj"
     root.mkdir()
-    reg = ModelRegistry(str(root))
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
 
     other = tmp_path / "other_run.pt"
     torch.save({"model_state_dict": {}, "note": "a different run entirely"}, other)
-    reg.register_model("chestnut_leaf_area_seg_v2", str(other), {},
-                       tags=["segmenter", "experiment:leaf_run"], metrics_source=None)
+    create_experiment("leaf_run", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("leaf_run", str(other))
+    assert "error" not in register_model_from_experiment("leaf_run", str(other))
 
     trained = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": {}, "note": "the checkpoint that produced the phenotype"},
               trained)
-    reg.register_model("hazelnut_catkin_detector_v1", str(trained), {},
-                       tags=["detector", "experiment:catkin_run3"], metrics_source=None)
+    create_experiment("catkin_run3", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("catkin_run3", str(trained))
+    assert "error" not in register_model_from_experiment("catkin_run3", str(trained))
 
     delivered = tmp_path / "delivery" / "model_copy.pt"
     delivered.parent.mkdir()

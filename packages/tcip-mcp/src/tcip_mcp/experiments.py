@@ -1259,25 +1259,70 @@ def register_model_from_experiment(
     project_path: str = "",
     name: str | None = None,
 ) -> dict[str, Any]:
-    """Register a completed experiment's model in the project registry.
+    """Bind the registry's own entry to the run that produced it: the digest completion recorded.
 
-    Pulls the experiment's config and the checkpoint's own metrics, the epoch that produced
-    this checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training
-    epoch. Registers with an ``experiment:<id>`` back-reference tag; the run's own lineage
-    pointer (``model_weights``, ``model_weights_sha256``) is ``complete_run``'s alone to record,
-    not this call's. Metrics are read, never fabricated: a checkpoint that carries no metrics
-    dict, or that will not load at all, registers with an empty ``metrics`` and a
-    ``metrics_source`` of ``None`` rather than substituting a different epoch's numbers (the
-    run's own metrics log describes a different model state than the checkpoint being
-    registered).
+    Requires a completed run whose completion recorded a digest (``complete_run``'s own write): a
+    run in ``created`` or ``running``, or one that ended ``failed``/``cancelled``, has not said
+    what it produced and refuses by name. Hashes the caller's ``checkpoint_path`` through the same
+    function completion hashed with and refuses when the two digests differ, naming both and the
+    path completion recorded: the caller's path may be the recorded path or any byte-identical
+    copy, never a different file. ``project_path``, when given, must be the directory the
+    experiment's own keys hang off (compared through ``splits.same_directory``, tolerant of a
+    different spelling of the same directory); any other directory refuses by name, naming the
+    root this call would otherwise have searched.
+
+    Pulls the experiment's config and the checkpoint's own metrics, the epoch that produced this
+    checkpoint (e.g. ``model_best.pt``'s best epoch), not necessarily the last training epoch.
+    Registers with no tags (the retired ``experiment:<id>`` convention named no verified fact) and
+    writes only the registry's own entry, with ``experiment_id`` set to this run: the run's own
+    lineage pointer (``model_weights``, ``model_weights_sha256``) is ``complete_run``'s alone, not
+    this call's. Metrics are read, never fabricated: a checkpoint that carries no metrics dict, or
+    that will not load at all, registers with an empty ``metrics`` and a ``metrics_source`` of
+    ``None`` rather than substituting a different epoch's numbers (the run's own metrics log
+    describes a different model state than the checkpoint being registered).
 
     ``metrics_source`` records which path produced the numbers, not that anyone verified them:
     ``"trainer"`` when the run's config carries no ``training_source`` (the platform's own
     ``default_train`` computed them), ``"training_source"`` when it does (a bespoke loop's own
     saved state), and ``None`` when the checkpoint carries no metrics.
+
+    A name a prior run bound is not evicted by this call unless ``experiment_id`` is that same
+    run: the registry's own eviction rail refuses, returned here as an error naming the run that
+    holds the name (see ``model_registry.EntryOwnedByRun``).
     """
     if not experiment_exists(experiment_id):
         return {"error": f"Experiment not found: {experiment_id}"}
+
+    from tcip_mcp.pipelines.data.splits import same_directory
+
+    root = str(project_root())
+    if project_path and not same_directory(project_path, root):
+        return {"error": f"register_model_from_experiment: project_path {project_path!r} is not "
+                         f"the root experiment {experiment_id!r}'s own keys hang off ({root!r})."}
+    registry_root = project_path or root
+
+    status = read_member(status_key(experiment_id), {})
+    state = status.get("state") if isinstance(status, dict) else None
+    lineage = read_member(lineage_key(experiment_id), {})
+    recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
+    if state != "completed" or not recorded_digest:
+        return {"error": f"experiment {experiment_id!r} has not completed with a recorded "
+                         f"digest (state={state!r}): its run has not said what it produced. "
+                         "complete_run records the digest when the run finishes."}
+
+    from tcip_mcp.model_registry import _compute_sha256
+
+    ckpt = Path(checkpoint_path)
+    if not ckpt.is_file():
+        return {"error": f"register_model_from_experiment: checkpoint_path {checkpoint_path!r} "
+                         "does not exist."}
+    digest = _compute_sha256(ckpt)
+    recorded_path = lineage.get("model_weights")
+    if digest != recorded_digest:
+        return {"error": f"{checkpoint_path} (sha256 {digest}) is not the bytes experiment "
+                         f"{experiment_id!r}'s completion recorded (sha256 {recorded_digest}, at "
+                         f"{recorded_path!r}): the caller's path must be the recorded path or a "
+                         "byte-identical copy of it."}
 
     config = read_member(config_key(experiment_id), {})
 
@@ -1311,20 +1356,21 @@ def register_model_from_experiment(
 
         metrics_source = "training_source" if config.get(TRAINING_SOURCE_KEY) else "trainer"
 
-    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.model_registry import EntryOwnedByRun, register_entry
 
-    # Registry co-locates with the experiment store under the platform root (the adopted
-    # project after set_active_project) unless an explicit path overrides.
-    registry_root = project_path or str(project_root())
-    entry = ModelRegistry(registry_root).register_model(
-        name or experiment_id, checkpoint_path, config,
-        metrics=final_metrics, tags=[f"experiment:{experiment_id}"], kind=kind,
-        metrics_source=metrics_source,
-    )
+    try:
+        entry = register_entry(
+            registry_root, name=name or experiment_id, checkpoint_path=checkpoint_path,
+            config=config, metrics=final_metrics, tags=[], kind=kind,
+            metrics_source=metrics_source, experiment_id=experiment_id, sha256=digest,
+        )
+    except EntryOwnedByRun as exc:
+        return {"error": str(exc)}
     return {
         "experiment_id": experiment_id,
         "registered": entry["name"],
         "checkpoint": checkpoint_path,
+        "sha256": digest,
         "metrics": final_metrics,
         "metrics_source": metrics_source,
     }

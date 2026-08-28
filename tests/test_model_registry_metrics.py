@@ -166,6 +166,7 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
     import torch
 
     from tcip_mcp.experiments import (
+        complete_run,
         create_experiment,
         log_metrics,
         register_model_from_experiment,
@@ -178,6 +179,7 @@ def test_register_model_sources_metrics_from_checkpoint(tmp_path, monkeypatch):
     # model_best.pt carries the best epoch's metrics (epoch 1), not the last row (epoch 2).
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_state_dict": {}, "epoch": 1, "metrics": {"val_map50": 0.60}}, ckpt)
+    assert "error" not in complete_run("exp", str(ckpt))
 
     result = register_model_from_experiment("exp", str(ckpt))
     assert result["metrics"]["val_map50"] == 0.60  # from checkpoint, not 0.40 (last jsonl row)

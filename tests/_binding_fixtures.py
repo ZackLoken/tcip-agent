@@ -10,7 +10,6 @@ merged in.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -143,41 +142,48 @@ def write_bound_sidecar(
 
 
 PRODUCER_WEIGHTS = b"the weights a producing run filed under the experiment its predictions name"
-PRODUCER_CHECKPOINT_SHA256 = hashlib.sha256(PRODUCER_WEIGHTS).hexdigest()
-"""The content hash of those weights, so a fixture's stamp and a byte golden name one identity."""
+
+
+def producer_checkpoint_sha256(experiment_id: str) -> str:
+    """The digest :func:`record_producing_run` files for ``experiment_id``: per-experiment bytes
+    (``PRODUCER_WEIGHTS`` plus the id), so two producing runs never share one digest by
+    construction and a golden asserting the delivered cell can compute its own expectation without
+    re-running the fixture."""
+    from tcip_mcp.model_registry import _sha256_of_bytes
+
+    return _sha256_of_bytes(PRODUCER_WEIGHTS + experiment_id.encode("utf-8"))
 
 
 def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
-    """File the run a bucket's stamp names as its producer, and return the checkpoint hash it filed.
+    """File the run a bucket's stamp names as its producer, bound through the platform's own
+    registration, and return the registered entry's checkpoint hash.
 
     A delivered producer column is emitted only where something outside the prediction bucket
-    corroborates the identity the stamp asserts: the experiment has to exist, and the checkpoint it
-    recorded has to be the one the stamp names. A fixture that wants the populated case has to leave
-    both behind, which is what a completed training run leaves behind for itself: completion is
-    what records the digest now, so this fixture completes the run rather than writing the lineage
-    edge itself. Idempotent under a repeat call for the same ``experiment_id`` (some callers file
-    more than one bucket behind one producing run): a run completion cannot be repeated once
-    terminal, so a second call reads back the digest the first one already recorded rather than
-    completing a second time.
+    corroborates the identity the stamp asserts: the experiment has to exist, be completed with a
+    recorded digest, and be bound to a registry entry naming that digest. A fixture that wants the
+    populated case has to leave all of that behind, which is what a completed, registered training
+    run leaves behind for itself. Idempotent under a repeat call for the same ``experiment_id``
+    (some callers file more than one bucket behind one producing run): a run completion cannot be
+    repeated once terminal, so a second call skips straight to registration, itself idempotent for
+    the recorded bytes.
     """
     from tcip_mcp.experiments import (
-        complete_run, create_experiment, experiment_exists, lineage_key, read_member, status_key,
+        complete_run, create_experiment, experiment_exists, read_member,
+        register_model_from_experiment, status_key,
     )
 
     ckpt = Path(weights_dir) / "model_best.pt"
     ckpt.parent.mkdir(parents=True, exist_ok=True)
-    ckpt.write_bytes(PRODUCER_WEIGHTS)
+    ckpt.write_bytes(PRODUCER_WEIGHTS + experiment_id.encode("utf-8"))
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
     status = read_member(status_key(experiment_id), {})
-    if isinstance(status, dict) and status.get("state") == "completed":
-        lineage = read_member(lineage_key(experiment_id), {})
-        digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
-        if digest:
-            return digest
-    completed = complete_run(experiment_id, str(ckpt))
-    assert "error" not in completed, completed
-    return completed["model_weights_sha256"]
+    if not (isinstance(status, dict) and status.get("state") == "completed"):
+        completed = complete_run(experiment_id, str(ckpt))
+        assert "error" not in completed, completed
+    registered = register_model_from_experiment(experiment_id, str(ckpt))
+    assert "error" not in registered, registered
+    return registered["sha256"]
 
 
 # --- the export doors: a stand-in run whose validated count they can actually earn a record for ---

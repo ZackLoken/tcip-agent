@@ -99,17 +99,23 @@ def _unregistered_checkpoint_error(checkpoint_path: Path, digest: str, root: str
 def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, digest: str) -> str | None:
     """The one producer ``entries`` (already matched by ``sha256``) agree on.
 
-    Today's producer is the ``experiment:`` tag; ``tags`` is caller-asserted until the model
-    registry's own tag-binding family lands, so this is bounded to what the entries assert, not a
-    verified fact. An entry naming none is ignored (not a vote for ``None``); every entry that
-    does name one must name the same value, or the load refuses rather than guess a first match.
+    The producer is the entry's own ``experiment_id`` field, written only by a run's own
+    completion through the experiment-mode binding (:func:`register_entry`) and ``None`` for an
+    explicit-mode entry: a verified fact, not a caller assertion (``tags`` carries no producer
+    claim any more). Every matched entry must carry the key at all, or the load refuses by name,
+    the precedent ``best_model`` sets for a pre-``metrics_source`` entry: conform the registry
+    first. An entry naming ``None`` is ignored (not a vote for ``None``); every entry that does
+    name a producer must name the same one, or the load refuses rather than guess a first match.
     """
-    producers = {
-        tag.split(":", 1)[1]
-        for e in entries
-        for tag in (e.get("tags") or [])
-        if isinstance(tag, str) and tag.startswith("experiment:")
-    }
+    missing = [str(e.get("name")) for e in entries if "experiment_id" not in e]
+    if missing:
+        raise UnregisteredCheckpoint(
+            f"{checkpoint_path} (sha256 {digest}) is named by registry entries {sorted(missing)!r} "
+            "that carry no experiment_id key (they predate the producer-binding field): conform "
+            "this registry with scripts/conform_registry_experiment_id.py before this checkpoint "
+            "can be loaded."
+        )
+    producers = {e["experiment_id"] for e in entries if e["experiment_id"] is not None}
     if len(producers) > 1:
         raise UnregisteredCheckpoint(
             f"{checkpoint_path} (sha256 {digest}) is named by registry entries naming different "
@@ -223,9 +229,10 @@ def resolve_model_identity(checkpoint: VerifiedCheckpoint, *, experiment_id: str
     file and hashes nothing itself. ``experiment_id`` resolves, in order: the caller's explicit
     value; the checkpoint payload's own stamped ``experiment_id`` (every checkpoint saved through
     the audited envelope carries one via ``stamp_model_ref``); then the checkpoint's own resolved
-    ``producer`` (the registry's ``experiment:`` tag on the entries that matched its digest). A
-    raw/foreign but registered checkpoint legitimately has none of the three, and the identity
-    records the sha with ``experiment_id`` left ``None`` rather than failing.
+    ``producer`` (the entries that matched its digest, agreeing on their own ``experiment_id``
+    field, the binding a run's completion writes). A raw/foreign but registered checkpoint
+    legitimately has none of the three, and the identity records the sha with ``experiment_id``
+    left ``None`` rather than failing.
     """
     exp = experiment_id
     if exp is None:
@@ -235,6 +242,153 @@ def resolve_model_identity(checkpoint: VerifiedCheckpoint, *, experiment_id: str
     if exp is None:
         exp = checkpoint.producer
     return {"checkpoint": Path(checkpoint.path).stem, "sha256": checkpoint.sha256, "experiment_id": exp}
+
+
+class EntryOwnedByRun(ValueError):
+    """A registry entry a run's completion bound cannot be superseded by anything but that run."""
+
+
+def _refuse_if_owned_by_another_run(superseded: dict, *, name: str, new_experiment_id: str | None) -> None:
+    """The eviction rail: a name a run bound is that run's for good.
+
+    Reads ``experiment_id`` directly, never through ``.get()``, so a pre-field entry (predating
+    the producer-binding field) is not silently evictable: the key's absence itself refuses,
+    naming the conform script, exactly as a present-but-different owner does.
+    """
+    try:
+        owner = superseded["experiment_id"]
+    except KeyError:
+        raise EntryOwnedByRun(
+            f"registry entry {name!r} carries no experiment_id key (it predates the "
+            "producer-binding field): conform this registry with "
+            "scripts/conform_registry_experiment_id.py before replacing it."
+        ) from None
+    if owner is not None and owner != new_experiment_id:
+        raise EntryOwnedByRun(
+            f"registry entry {name!r} is bound to experiment {owner!r} (its recorded producer); "
+            "only that run may replace it. To give its weights a second name, register them "
+            "again in experiment mode with a new name and the recorded bytes."
+        )
+
+
+def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | None:
+    """Replace-by-name inside ``txn``'s already-open transaction over the index key.
+
+    Returns the superseded entry (``None`` for a first registration under this name), for the
+    caller to audit once the transaction has closed. Refuses (:class:`EntryOwnedByRun`) a replace
+    whose superseded entry names a run other than this write's own.
+    """
+    index = txn.read(key, default=[])
+    superseded = next((e for e in index if e["name"] == entry["name"]), None)
+    if superseded is not None:
+        _refuse_if_owned_by_another_run(
+            superseded, name=entry["name"], new_experiment_id=entry.get("experiment_id"))
+    index = [e for e in index if e["name"] != entry["name"]]
+    index.append(entry)
+    txn.write(key, index)
+    return superseded
+
+
+def _audit_entry_replace(name: str, superseded: dict | None, entry: dict) -> None:
+    """Emit ``model_registry_replace`` once the transaction that changed ``name`` has closed, and
+    only when the replace actually changed content (not an idempotent same-digest re-registration).
+    """
+    if superseded is None or superseded.get("sha256") == entry["sha256"]:
+        return
+    from tcip_mcp.audit import record_event
+
+    record_event("model_registry_replace", {
+        "name": name, "superseded_sha256": superseded.get("sha256"),
+        "superseded_tags": superseded.get("tags"),
+        "superseded_experiment_id": superseded.get("experiment_id"),
+        "new_sha256": entry["sha256"],
+    })
+
+
+def _audit_refused(op: str, detail: dict) -> None:
+    from tcip_mcp.audit import record_event_or_raise
+
+    record_event_or_raise("model_registry_write_refused", {"op": op, **detail}, status="refused")
+
+
+def register_entry(
+    project_path: str,
+    *,
+    name: str,
+    checkpoint_path: str,
+    config: dict,
+    metrics: dict | None,
+    tags: list[str] | None,
+    kind: str | None,
+    metrics_source: str | None,
+    experiment_id: str | None,
+    sha256: str | None = None,
+) -> dict:
+    """The one write behind both registration modes: replace-by-name inside one transaction over
+    the project's index key, then audit the replacement (or the refusal) once it has closed.
+
+    ``sha256``, when given (experiment mode: the digest a run's completion already recorded, and
+    the caller's own file already verified against it), is written as-is, no second hash of the
+    path; ``None`` (explicit mode) hashes ``checkpoint_path`` here, the one production hash
+    explicit-mode registration takes. ``experiment_id`` is the entry's own producer-binding field:
+    the run that bound it in experiment mode, ``None`` in explicit mode.
+
+    Raises ``FileNotFoundError`` for a missing ``checkpoint_path`` (explicit mode only; experiment
+    mode's caller has already confirmed the file), ``ValueError``/``TypeError`` for a
+    ``config``/``metrics`` JSON cannot hold or a ``metrics_source`` pairing that disagrees with
+    whether ``metrics`` is empty, and :class:`EntryOwnedByRun` for a replace the eviction rail
+    refuses.
+    """
+    check_json_value(config, path="config")
+    check_json_value(metrics or {}, path="metrics")
+    has_metrics = bool(metrics)
+    if has_metrics and metrics_source is None:
+        raise ValueError(
+            "register_entry: metrics is non-empty but metrics_source is None; name the path "
+            "that produced these numbers ('trainer', 'training_source', or 'caller')."
+        )
+    if not has_metrics and metrics_source is not None:
+        raise ValueError(
+            f"register_entry: metrics_source={metrics_source!r} but metrics is empty; a "
+            "source with nothing to source is not a real pairing."
+        )
+    ckpt = Path(checkpoint_path)
+    file_size: int | None
+    if sha256 is None:
+        if not ckpt.is_file():
+            raise FileNotFoundError(
+                f"register_model: checkpoint_path {checkpoint_path!r} does not exist, "
+                "refusing to register a phantom registry entry."
+            )
+        sha256 = _compute_sha256(ckpt)
+        file_size = ckpt.stat().st_size
+    else:
+        file_size = ckpt.stat().st_size if ckpt.is_file() else None
+
+    entry = {
+        "name": name,
+        "checkpoint_path": checkpoint_path,
+        "kind": kind,
+        "sha256": sha256,
+        "file_size_bytes": file_size,
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "config": config,
+        "metrics": metrics or {},
+        "metrics_source": metrics_source,
+        "tags": tags or [],
+        "experiment_id": experiment_id,
+    }
+    key = registry_index_key(project_path)
+    try:
+        with tcip_store.transaction(key) as txn:
+            superseded = _write_registry_entry(txn, key, entry)
+    except EntryOwnedByRun as exc:
+        _audit_refused("register_entry", {
+            "name": name, "attempted_experiment_id": experiment_id, "reason": str(exc),
+        })
+        raise
+    _audit_entry_replace(name, superseded, entry)
+    return entry
 
 
 class ModelRegistry:
@@ -261,7 +415,13 @@ class ModelRegistry:
         *,
         metrics_source: str | None,
     ) -> dict:
-        """Register a trained model with SHA-256 integrity checksum.
+        """Register a trained model with SHA-256 integrity checksum, in explicit mode.
+
+        Explicit mode's own entry point: wraps :func:`register_entry` with ``experiment_id=None``
+        (no run bound this weights file, whatever ``tags`` the caller passes) and no ``sha256``
+        (this call's own hash of ``checkpoint_path`` is the only production hash explicit mode
+        takes). Experiment mode (``register_model_from_experiment``) calls :func:`register_entry`
+        directly, with the digest completion already recorded in hand.
 
         Args:
             name: Model name (e.g. '<crop>_<trait>_detector_v1').
@@ -286,61 +446,15 @@ class ModelRegistry:
                 stamped metrics), so the offending field is named before anything is stored.
                 ``ValueError`` also covers ``metrics_source`` disagreeing with whether
                 ``metrics`` is empty.
+            EntryOwnedByRun: ``name`` already names an entry a run's completion bound to a
+                different (or, for a pre-field entry, an unrecorded) run.
         """
-        check_json_value(config, path="config")
-        check_json_value(metrics or {}, path="metrics")
-        has_metrics = bool(metrics)
-        if has_metrics and metrics_source is None:
-            raise ValueError(
-                "register_model: metrics is non-empty but metrics_source is None; name the path "
-                "that produced these numbers ('trainer', 'training_source', or 'caller')."
-            )
-        if not has_metrics and metrics_source is not None:
-            raise ValueError(
-                f"register_model: metrics_source={metrics_source!r} but metrics is empty; a "
-                "source with nothing to source is not a real pairing."
-            )
-        ckpt = Path(checkpoint_path)
-        if not ckpt.is_file():
-            raise FileNotFoundError(
-                f"register_model: checkpoint_path {checkpoint_path!r} does not exist, "
-                "refusing to register a phantom registry entry."
-            )
-        sha256 = _compute_sha256(ckpt)
-        file_size = ckpt.stat().st_size
-
-        entry = {
-            "name": name,
-            "checkpoint_path": checkpoint_path,
-            "kind": kind,
-            "sha256": sha256,
-            "file_size_bytes": file_size,
-            "registered_at": datetime.now(timezone.utc).isoformat(),
-            "config": config,
-            "metrics": metrics or {},
-            "metrics_source": metrics_source,
-            "tags": tags or [],
-        }
-        # Lock-guarded read-modify-write: re-read the stored index under the lock so a
-        # concurrent writer's entries aren't clobbered, then replace by name.
-        with tcip_store.transaction(self._key) as txn:
-            index = txn.read(self._key, default=[])
-            superseded = next((e for e in index if e["name"] == name), None)
-            index = [e for e in index if e["name"] != name]
-            index.append(entry)
-            txn.write(self._key, index)
-        self._index = index
-        # A replace-by-name that actually changes content (a resumed or re-registered run under the
-        # same name) needs a record, or the prior sha256/config/metrics are destroyed silently.
-        # Purely additive: nothing here changes what get_model/best_model/
-        # list_registered_models return, only whether the supersession is durably auditable.
-        if superseded is not None and superseded.get("sha256") != sha256:
-            from tcip_mcp.audit import record_event
-
-            record_event("model_registry_replace", {
-                "name": name, "superseded_sha256": superseded.get("sha256"),
-                "superseded_tags": superseded.get("tags"), "new_sha256": sha256,
-            })
+        entry = register_entry(
+            self._project_path, name=name, checkpoint_path=checkpoint_path, config=config,
+            metrics=metrics, tags=tags, kind=kind, metrics_source=metrics_source,
+            experiment_id=None,
+        )
+        self._index = self._load_index()
         return entry
 
     def verify_model(self, name: str) -> dict:

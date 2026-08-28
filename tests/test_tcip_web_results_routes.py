@@ -17,7 +17,7 @@ from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_si
 from tcip_web.app import app
 from tcip_web.state import store
 
-from tests._binding_fixtures import PRODUCER_CHECKPOINT_SHA256
+from tests._binding_fixtures import producer_checkpoint_sha256
 
 # seed_catkin_operationalization writes the spec plus the confirmed crossing record this root needs.
 pytestmark = pytest.mark.usefixtures("seed_catkin_operationalization")
@@ -521,7 +521,7 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["positive_state_classifier_validated"] == "held_out_annotations"
     assert cells["operating_point_conf"] == "0.4"
     assert cells["producer_experiment_id"] == "exp-1"
-    assert cells["producer_model_sha256"] == PRODUCER_CHECKPOINT_SHA256
+    assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
     assert [c for c, v in cells.items() if v == ""] == []
 

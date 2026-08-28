@@ -38,7 +38,7 @@ def test_register_model_from_experiment_links_lineage_with_no_checkpoint_metrics
     # The registry entry carries the experiment back-reference and an honest empty/null pairing.
     m = ModelRegistry(str(tmp_path)).get_model("exp1")
     assert m is not None
-    assert "experiment:exp1" in m["tags"]
+    assert m["experiment_id"] == "exp1"
     assert m["metrics"] == {}
     assert m["metrics_source"] is None
 

@@ -39,7 +39,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     sweep_operating_point,
 )
 from tests._binding_fixtures import (  # noqa: E402
-    PRODUCER_CHECKPOINT_SHA256,
+    producer_checkpoint_sha256,
     record_producing_run,
     write_bound_sidecar,
 )
@@ -675,7 +675,7 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
     with out_csv.open(newline="", encoding="utf-8") as f:
         rows = list(_csv.DictReader(f))
     assert rows
-    assert all(row["producer_model_sha256"] == PRODUCER_CHECKPOINT_SHA256 for row in rows)
+    assert all(row["producer_model_sha256"] == producer_checkpoint_sha256("exp-golden") for row in rows)
     assert all(row["producer_experiment_id"] == "exp-golden" for row in rows)
     # And the record that answered for the claim, so a reader can reach the evidence from the CSV.
     assert all(row["validation_record"] for row in rows)
