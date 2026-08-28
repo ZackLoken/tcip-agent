@@ -26,11 +26,12 @@ reaching for again versus one built narrowly for a specific past investigation.
 - `check_dataset_identity.py` - recomputes a dataset's on-disk fingerprint and compares it
   against the fingerprint recorded in `dataset.json` and the project's `.tcip/datasets.json`,
   to catch data that changed or moved since it was registered.
-- `conform_registry_metrics_source.py` - conforms a project's registry entries to carry
-  `metrics_source` (which path produced an entry's metrics: `trainer`/`training_source`/`caller`/
-  `null`), for an entry registered before the field existed. `--plan` previews; an
-  experiment-tagged entry is refused until the operator states its source with
-  `--source NAME=VALUE`, since the tag alone can't be trusted to say which path produced it.
+- `conform_registry_experiment_id.py` - conforms a project's registry entries to carry
+  `experiment_id` (the run whose completion bound an entry, `null` for one no run bound), for an
+  entry registered before the producer-binding field existed. `--plan` previews; an entry
+  carrying a leftover `experiment:<id>` tag is refused, since the tag was never verified and no
+  run record exists to check it against; re-register it through `register_model_from_experiment`
+  instead.
 - `drop_annotation_stats_image_status.py` - drops the dead `image_status` key from a project's
   `annotation_stats` record, which every writer put there empty and nothing read. `--plan`
   previews; a record whose `image_status` is not empty is refused, since that would mean a writer

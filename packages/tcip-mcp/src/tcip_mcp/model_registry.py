@@ -103,9 +103,10 @@ def _resolve_producer(entries: tuple[dict, ...], *, checkpoint_path: Path, diges
     completion through the experiment-mode binding (:func:`register_entry`) and ``None`` for an
     explicit-mode entry: a verified fact, not a caller assertion (``tags`` carries no producer
     claim any more). Every matched entry must carry the key at all, or the load refuses by name,
-    the precedent ``best_model`` sets for a pre-``metrics_source`` entry: conform the registry
-    first. An entry naming ``None`` is ignored (not a vote for ``None``); every entry that does
-    name a producer must name the same one, or the load refuses rather than guess a first match.
+    as ``best_model`` refuses a pre-``metrics_source`` entry: conform the registry with
+    ``scripts/conform_registry_experiment_id.py`` first. An entry naming ``None`` is ignored (not
+    a vote for ``None``); every entry that does name a producer must name the same one, or the
+    load refuses rather than guess a first match.
     """
     missing = [str(e.get("name")) for e in entries if "experiment_id" not in e]
     if missing:
@@ -511,16 +512,16 @@ class ModelRegistry:
         ranked; ``include_unverified=True`` also ranks ``"training_source"`` and ``"caller"``
         entries, whose numbers nothing here verified. An entry carrying no ``metrics_source`` key
         at all is a malformed record predating the field, refused by name rather than silently
-        treated as just another unverified entry: conform the registry first with
-        ``scripts/conform_registry_metrics_source.py``. A present ``metrics_source`` of ``None``
-        is not malformed, it is the honest pairing for an entry with no metrics.
+        treated as just another unverified entry: re-register it through ``register_model`` (its
+        checkpoint on disk is unchanged; the call re-hashes and rewrites the entry with the field
+        present). A present ``metrics_source`` of ``None`` is not malformed, it is the honest
+        pairing for an entry with no metrics.
         """
         malformed = [m.get("name") for m in self._index if "metrics_source" not in m]
         if malformed:
             raise ValueError(
                 f"registry entries {malformed} carry no metrics_source key (they predate the "
-                "field); conform this registry with scripts/conform_registry_metrics_source.py "
-                "before ranking it."
+                "field); re-register each through register_model before ranking this registry."
             )
         best = None
         best_val: float | None = None

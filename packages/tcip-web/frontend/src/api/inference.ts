@@ -17,6 +17,7 @@ export interface RegisteredModel {
   name: string;
   checkpoint_path: string;
   tags?: string[];
+  experiment_id?: string | null;
 }
 
 // "interrupted" (one of JobStatus's members) is a job rehydrated after a restart: its worker

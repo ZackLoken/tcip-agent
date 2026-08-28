@@ -382,7 +382,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 1 | 0 |
 | scripts/conform_project_site.py | Write or correct one project's authored site: the record ``init_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 1 | 0 |
-| scripts/conform_registry_metrics_source.py | Conform a project's registry entries to carry ``metrics_source``, for an entry registered before the field existed. | 2 | 0 |
+| scripts/conform_registry_experiment_id.py | Conform a project's registry entries to carry ``experiment_id``, for an entry registered before the producer-binding field existed. | 2 | 0 |
 | scripts/conform_view_coverage_viewing.py | Conform a dataset's stored `view_coverage` records to the current `CoverageViewing` shape. | 2 | 0 |
 | scripts/cross_family_ask.py | Pose one identical question to several agent harnesses and record comparable answers. | 0 | 0 |
 | scripts/distill_learnings.py | Distill worksheet: gather one project's learning record in one place. | 2 | 0 |
@@ -533,7 +533,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/conform_cal_holdout_locks.py |
 | scripts | scripts/conform_metrics_marker.py |
 | scripts | scripts/conform_project_site.py |
-| scripts | scripts/conform_registry_metrics_source.py |
+| scripts | scripts/conform_registry_experiment_id.py |
 | scripts | scripts/conform_view_coverage_viewing.py |
 | scripts | scripts/cross_family_ask.py |
 | scripts | scripts/distill_learnings.py |
@@ -1447,8 +1447,9 @@ explicit mode (`tools/model_tools.py:18`, `"caller"` when `metrics` is non-empty
 `register_model_from_experiment` no longer falls back to the run's `metrics.jsonl` log for a
 checkpoint with no metrics dict; such a registration carries `metrics={}` and
 `metrics_source=None`, and the load failure that produced it is logged rather than swallowed.
-`scripts/conform_registry_metrics_source.py` conforms an entry that predates the `metrics_source`
-key.
+An entry that predates the `metrics_source` key is conformed by re-registering it through
+`register_model`; `scripts/conform_registry_experiment_id.py` conforms one that predates
+`experiment_id`.
 
 Readers: `read_registry_index`, `model_registry.py:53`, the read path for anything outside the
 module (`scripts/doctor.py:125`, `"metrics_source"`), and the entry-by-entry accessors built on
