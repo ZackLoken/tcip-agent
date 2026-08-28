@@ -132,7 +132,9 @@ def _author_catkin_trait_spec(root: Path) -> None:
     data = {k: (list(v) if isinstance(v, tuple) else v)
             for k, v in dataclasses.asdict(CATKIN).items()}
     key = traits.trait_spec_key(traits.trait_specs_dir(root), data["name"])
-    ts.replace(key, data, expect=ts.Version.ABSENT)
+    spec, reason = traits._validate_and_write_spec(key, data, expect=ts.Version.ABSENT)
+    if spec is None:
+        raise ValueError(f"the fixture trait spec does not clear crops.yml: {reason}")
     seed_confirmed_crossing(root, data["name"])
 
 
