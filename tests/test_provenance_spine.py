@@ -44,17 +44,21 @@ def test_stamp_model_ref_stamps_experiment_id():
 
 # ── R2: identity resolved off a verified, registry-matched checkpoint ───────
 
-def test_resolve_model_identity_from_registry(tmp_path):
+def test_resolve_model_identity_from_registry(tmp_path, monkeypatch):
+    """A registered checkpoint that carries no stamped experiment_id still resolves one, through
+    the binding a run's own completion recorded (``checkpoint.producer``), not a caller-asserted
+    tag."""
     torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import (
-        ModelRegistry, load_registered_checkpoint, resolve_model_identity,
-    )
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+    from tcip_mcp.model_registry import load_registered_checkpoint, resolve_model_identity
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = tmp_path / "best.pt"
     torch.save({"model_state_dict": {}}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model(
-        "m1", str(ckpt), {"model_source": {"builder": "x:y"}}, tags=["experiment:expR"],
-        metrics_source=None)
+    create_experiment("expR", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("expR", str(ckpt))
+    reg = register_model_from_experiment("expR", str(ckpt), name="m1")
+    assert "error" not in reg, reg
 
     checkpoint = load_registered_checkpoint(ckpt, project_path=str(tmp_path))
     ident = resolve_model_identity(checkpoint)
@@ -64,8 +68,8 @@ def test_resolve_model_identity_from_registry(tmp_path):
 
 
 def test_resolve_model_identity_foreign_checkpoint(tmp_path):
-    """A registered checkpoint with no producing experiment (no ``experiment:`` tag, no stamp)
-    resolves the sha and leaves ``experiment_id`` null rather than failing."""
+    """A registered checkpoint with no producing experiment (explicit-mode registration, no
+    stamp) resolves the sha and leaves ``experiment_id`` null rather than failing."""
     torch = pytest.importorskip("torch")
     from tcip_mcp.model_registry import (
         ModelRegistry, load_registered_checkpoint, resolve_model_identity,

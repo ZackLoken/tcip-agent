@@ -19,7 +19,7 @@ from tcip_mcp import operationalization as op
 from tcip_mcp.traits import TraitUnknownError
 from tcip_web.app import app
 from tests import _operationalization_fixtures as fx
-from tests._binding_fixtures import PRODUCER_CHECKPOINT_SHA256
+from tests._binding_fixtures import producer_checkpoint_sha256
 from tests.test_tcip_web_results_routes import _expected_validation_record, _phenology_fixture
 
 
@@ -354,7 +354,7 @@ def delivered_golden(body: dict) -> bytes:
     stamps name rather than against whatever the delivery put there.
     """
     record = _expected_validation_record(body).encode()
-    sha = PRODUCER_CHECKPOINT_SHA256.encode()
+    sha = producer_checkpoint_sha256("exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,"
            + sha + b",exp-1," + record + b"\r\n")

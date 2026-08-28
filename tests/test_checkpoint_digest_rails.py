@@ -269,10 +269,18 @@ def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_pa
 
 def test_two_entries_naming_one_digest_with_disagreeing_producers_refuse(tmp_path, monkeypatch):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
-    _register(tmp_path, str(ckpt), name="entry-a", tags=["experiment:expA"])
-    _register(tmp_path, str(ckpt), name="entry-b", tags=["experiment:expB"])
+    data = ckpt.read_bytes()
+    for exp_id, name in (("expA", "entry-a"), ("expB", "entry-b")):
+        run_ckpt = tmp_path / f"{name}.pt"
+        run_ckpt.write_bytes(data)
+        create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
+        assert "error" not in complete_run(exp_id, str(run_ckpt))
+        reg = register_model_from_experiment(exp_id, str(run_ckpt), name=name)
+        assert "error" not in reg, reg
     images_dir, _ = _images(tmp_path)
 
     from tcip_mcp.tools.inference_tools import run_inference
@@ -283,12 +291,17 @@ def test_two_entries_naming_one_digest_with_disagreeing_producers_refuse(tmp_pat
 
 
 def test_two_entries_naming_one_digest_with_agreeing_producers_admit_it(tmp_path, monkeypatch):
-    """Coverage: the admitting half of rail 4."""
+    """Coverage: the admitting half of rail 4. The same run's weights registered under two
+    distinct names both name the run's own experiment_id, agreeing by construction."""
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
-    _register(tmp_path, str(ckpt), name="entry-a", tags=["experiment:expA"])
-    _register(tmp_path, str(ckpt), name="entry-b", tags=["experiment:expA"])
+    create_experiment("expA", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("expA", str(ckpt))
+    assert "error" not in register_model_from_experiment("expA", str(ckpt), name="entry-a")
+    assert "error" not in register_model_from_experiment("expA", str(ckpt), name="entry-b")
     images_dir, _ = _images(tmp_path)
 
     from tcip_mcp.tools.inference_tools import run_inference
@@ -299,12 +312,17 @@ def test_two_entries_naming_one_digest_with_agreeing_producers_admit_it(tmp_path
 
 
 def test_one_entry_naming_none_beside_one_that_does_admits_the_named_producer(tmp_path, monkeypatch):
-    """Coverage: an untagged entry is not a vote for producer=None; it is simply ignored."""
+    """Coverage: an explicit-mode entry (experiment_id null) is not a vote for producer=None;
+    it is simply ignored."""
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+
     ckpt = tmp_path / "m.pt"
     _bespoke_checkpoint(ckpt)
     _register(tmp_path, str(ckpt), name="entry-untagged")
-    _register(tmp_path, str(ckpt), name="entry-tagged", tags=["experiment:expA"])
+    create_experiment("expA", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("expA", str(ckpt))
+    assert "error" not in register_model_from_experiment("expA", str(ckpt), name="entry-tagged")
     images_dir, _ = _images(tmp_path)
 
     from tcip_mcp.tools.inference_tools import run_inference
@@ -420,15 +438,17 @@ def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_di
 def test_a_completed_runs_registered_weights_run_through_run_inference_with_no_further_step(
     tmp_path, monkeypatch,
 ):
-    from tcip_mcp.experiments import create_experiment, register_model_from_experiment, update_status
+    from tcip_mcp.experiments import (
+        complete_run, create_experiment, register_model_from_experiment, update_status,
+    )
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     exp_id = "exp-rail7"
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
-    update_status(exp_id, "completed")
     ckpt = tmp_path / "model_best.pt"
     _bespoke_checkpoint(ckpt)
+    assert "error" not in complete_run(exp_id, str(ckpt))
     reg = register_model_from_experiment(exp_id, str(ckpt))
     assert "error" not in reg, reg
     images_dir, _ = _images(tmp_path)

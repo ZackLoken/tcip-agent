@@ -49,6 +49,7 @@ def test_experiment_and_registry_co_locate_under_adopted_project(tmp_path, monke
 
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"fake checkpoint")
+    assert "error" not in experiments.complete_run("exp_unify", str(ckpt))
     # Auto-register path uses the experiments-module default (empty project_path) → platform root.
     result = experiments.register_model_from_experiment("exp_unify", str(ckpt))
     assert "error" not in result

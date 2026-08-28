@@ -86,6 +86,13 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     # The digest completion recorded is the same fact in both members: complete_run's one
     # transaction takes one hash of the one file and writes it into both.
     assert lineage["model_weights_sha256"] == artifacts["model_weights"]["sha256"]
+    # The entry's own experiment_id is the run's, the binding registration wrote.
+    assert entry["sha256"] == lineage["model_weights_sha256"]
+    assert entry["experiment_id"] == "expE"
+
+    from tcip_mcp.pipelines.resolution import corroborated_producer
+
+    assert corroborated_producer(entry["sha256"], "expE") == (entry["sha256"], "expE")
 
 
 # --------------------------------------------------------------------------

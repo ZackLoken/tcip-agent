@@ -266,7 +266,7 @@ def test_predictor_loads_at_two_channels_when_in_chans_is_declared_only_in_build
 # --------------------------------------------------------------------------
 
 def test_register_round_trips_bespoke_kind(tmp_path):
-    from tcip_mcp.experiments import create_experiment, register_model_from_experiment
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
     from tcip_mcp.model_registry import ModelRegistry
 
     src = _model_source()
@@ -278,6 +278,7 @@ def test_register_round_trips_bespoke_kind(tmp_path):
     torch.save(payload, ckpt)
 
     create_experiment("expB", {"model_source": src}, data_source="imgs")
+    assert "error" not in complete_run("expB", str(ckpt))
     result = register_model_from_experiment("expB", str(ckpt))
     assert result["metrics"]["val_loss"] == pytest.approx(0.3)
 
@@ -285,3 +286,4 @@ def test_register_round_trips_bespoke_kind(tmp_path):
     assert entry is not None
     assert entry["kind"] == KIND_TCIP_MODULE   # round-tripped from the stamped checkpoint
     assert entry["sha256"] and len(entry["sha256"]) == 64
+    assert entry["experiment_id"] == "expB"

@@ -1431,18 +1431,23 @@ to a named `split_manifest` record (format 26) carries here, is exercised by
 
 Path: `<project_path>/.tcip/models/registry.json`.
 
-Writer: `ModelRegistry.register_model`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py:182`,
-which re-reads the index, replaces one entry by name and writes it back inside one storage-seam
-transaction on the key `registry_index_key` mints, same file, line 36, so a concurrent registrar's
-entries are not clobbered. `register_model` takes `metrics_source` as a required keyword,
-`"trainer"` / `"training_source"` / `"caller"` / `None`, naming which path produced `metrics`
-without claiming anyone verified it; only the two production callers set it,
-`register_model_from_experiment` (`experiments.py:1209`, reading whether the run's config carries
-`training_source`) and the `register_model` tool's explicit mode (`tools/model_tools.py:18`,
-`"caller"` when `metrics` is non-empty). `register_model_from_experiment` no longer falls back to
-the run's `metrics.jsonl` log for a checkpoint with no metrics dict; such a registration carries
-`metrics={}` and `metrics_source=None`, and the load failure that produced it is logged rather
-than swallowed. `scripts/conform_registry_metrics_source.py` conforms an entry that predates the
+Writer: `register_entry`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py`, the one write both
+registration modes share, replacing one entry by name inside one storage-seam transaction on the
+key `registry_index_key` mints so a concurrent registrar's entries are not clobbered.
+`ModelRegistry.register_model` wraps it for explicit mode (`experiment_id=None`, its own hash of
+`checkpoint_path`); `register_model_from_experiment` (`experiments.py`) calls it directly with the
+digest a completed run's own `complete_run` already recorded, and `experiment_id` set to that run.
+An entry a run bound this way (`experiment_id` non-null) refuses a replace by anything but that
+run (`EntryOwnedByRun`); the retired `experiment:<id>` tag convention is written by nothing any
+more. `register_model`/`register_entry` take `metrics_source` as a required keyword, `"trainer"` /
+`"training_source"` / `"caller"` / `None`, naming which path produced `metrics` without claiming
+anyone verified it; only the two production callers set it, `register_model_from_experiment`
+(reading whether the run's config carries `training_source`) and the `register_model` tool's
+explicit mode (`tools/model_tools.py:18`, `"caller"` when `metrics` is non-empty).
+`register_model_from_experiment` no longer falls back to the run's `metrics.jsonl` log for a
+checkpoint with no metrics dict; such a registration carries `metrics={}` and
+`metrics_source=None`, and the load failure that produced it is logged rather than swallowed.
+`scripts/conform_registry_metrics_source.py` conforms an entry that predates the `metrics_source`
 key.
 
 Readers: `read_registry_index`, `model_registry.py:53`, the read path for anything outside the
