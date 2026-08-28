@@ -231,7 +231,9 @@ export function InferenceTab() {
             <option value="">Select a registered model…</option>
             {models.map((m) => (
               <option key={m.checkpoint_path} value={m.checkpoint_path}>
-                {m.name} {m.tags?.length ? `(${m.tags.join(", ")})` : ""} -{" "}
+                {m.name}
+                {m.experiment_id ? ` [${m.experiment_id}]` : ""}{" "}
+                {m.tags?.length ? `(${m.tags.join(", ")})` : ""} -{" "}
                 {m.checkpoint_path.split(/[/\\]/).slice(-3).join("/")}
               </option>
             ))}

@@ -122,8 +122,8 @@ def test_best_model_lower_is_better_for_loss(tmp_path):
 
 def test_best_model_refuses_an_entry_with_no_metrics_source_key(tmp_path):
     """An entry predating the field is malformed, not just unverified: best_model refuses by
-    name and points at the operator script, rather than silently skipping it like a legitimate
-    metrics-less entry."""
+    name and names the remedy (re-register through register_model), rather than silently
+    skipping it like a legitimate metrics-less entry."""
     import pytest as _pytest
 
     import tcip_store as ts
@@ -142,7 +142,7 @@ def test_best_model_refuses_an_entry_with_no_metrics_source_key(tmp_path):
         del index[0]["metrics_source"]
         txn.write(key, index)
 
-    with _pytest.raises(ValueError, match="conform_registry_metrics_source"):
+    with _pytest.raises(ValueError, match="re-register"):
         ModelRegistry(str(tmp_path)).best_model("val_loss", higher_is_better=False)
 
 

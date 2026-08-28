@@ -211,8 +211,12 @@ def check_registry(root: Path, findings: list) -> None:
         ckpt = m.get("checkpoint_path", "")
         if "metrics_source" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
-                            "metrics_source (predates the field); conform it with "
-                            "scripts/conform_registry_metrics_source.py"))
+                            "metrics_source (predates the field); re-register it through "
+                            "register_model"))
+        if "experiment_id" not in m:
+            findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
+                            "experiment_id (predates the producer-binding field); conform it "
+                            "with scripts/conform_registry_experiment_id.py"))
         if any(marker in ckpt for marker in TEMP_TREE_MARKERS):
             findings.append(("error", f"registry entry {m.get('name')!r} points at a test/temp "
                             f"checkpoint: {ckpt}"))
