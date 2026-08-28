@@ -145,8 +145,8 @@ export interface PhenologyResponse<Row> {
   positive_class_assessed: boolean;
   n_plants?: number;
   positive_class_id?: number | null;
-  // What this delivery did not read: a bare date it omitted or whose folder is absent, or
-  // "date/name" for one capture of a delivered date. Empty when nothing was unverified.
+  // What this delivery could not verify, not merely what it did not read: a bare date omitted,
+  // absent, or archived (predictions still counted), or "date/name" for one uncheckable capture.
   captures_unverified: string[];
   // A plant CSV the mapping was built from that moved since. Empty when nothing was unverified.
   plant_csvs_unverified: string[];
