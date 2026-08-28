@@ -504,22 +504,54 @@ def write_trait_spec_fields(
         merged = dict(data)
         merged.update(fields_)
 
-        spec, reason = _spec_from_config(merged, _crops_vocab())
+        try:
+            spec, reason = _validate_and_write_spec(key, merged, expect=stored.version)
+        except VersionConflict:
+            continue
         if spec is None:
             raise ValueError(
                 f"update to trait spec {trait_name!r} would produce an invalid spec: {reason}. "
                 "Refusing to write."
             )
-
-        written = {
-            k: (list(v) if isinstance(v, tuple) else v)
-            for k, v in dataclasses.asdict(spec).items()
-        }
-        try:
-            ts.replace(key, written, expect=stored.version)
-        except VersionConflict:
-            continue
         return spec
+
+
+def _encode_spec(spec: TraitSpec) -> dict[str, Any]:
+    """An already-valid ``TraitSpec`` as the JSON-safe mapping the store's codec accepts: every
+    tuple field becomes a list. The one encoding every trait-spec writer and reader shares."""
+    return {
+        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
+    }
+
+
+def _write_spec_record(key: Key, spec: TraitSpec, *, expect: ts.Version | None) -> None:
+    """Encode an already-valid ``TraitSpec`` and write it to ``key`` under compare-and-set at
+    ``expect``. Never validates: the caller either built ``spec`` through ``_spec_from_config``
+    already or otherwise guarantees it is legal."""
+    ts.replace(key, _encode_spec(spec), expect=expect)
+
+
+def _validate_and_write_spec(
+    key: Key, data: dict, *, expect: ts.Version | None,
+) -> tuple[TraitSpec | None, str | None]:
+    """Validate ``data`` as a trait spec against the crops.yml vocabulary and, if legal, encode
+    and write it to ``key`` under compare-and-set at ``expect``.
+
+    Returns ``(spec, None)`` on success or ``(None, reason)`` when ``data`` fails validation, so
+    each caller states the refusal in its own words around the same failure rather than this
+    function picking one wording for all of them. Raises ``VersionConflict`` if another writer
+    landed at ``key`` since ``expect`` was read.
+
+    The one write every trait-spec writer shares: ``write_trait_spec_fields``'s retry loop,
+    ``author_trait_spec``'s single cas attempt, the phenology smoke script's seed and the
+    provenance-drop operator script all call this rather than repeating the
+    validate-encode-write shape.
+    """
+    spec, reason = _spec_from_config(data, _crops_vocab())
+    if spec is None:
+        return None, reason
+    _write_spec_record(key, spec, expect=expect)
+    return spec, None
 
 
 def _no_spec_error(trait_name: str, directory: Path) -> ValueError:
@@ -730,14 +762,11 @@ def author_trait_spec(
             if field in existing_spec.value
         })
 
-    spec, reason = _spec_from_config(authored, _crops_vocab())
+    spec, reason = _validate_and_write_spec(spec_key, authored, expect=existing_spec.version)
     if spec is None:
         raise ValueError(f"author_trait_spec cannot register trait {trait!r}: {reason}")
 
-    written = {
-        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
-    }
-    ts.replace(spec_key, written, expect=existing_spec.version)
+    written = _encode_spec(spec)
 
     statement = {
         "trait": trait,
