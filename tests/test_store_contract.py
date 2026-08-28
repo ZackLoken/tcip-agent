@@ -1650,9 +1650,8 @@ REGISTERED = {
         {"2026-03-04": [{"image_path": "images/2026-03-04/a_1.JPG", "stem": "a_1",
                          "date_folder": "2026-03-04", "plot_name": "plot_ü",
                          "accession_name": "ü", "source": "sequence", "distance_m": 1.25}]},
-        lambda root: plant_mapping.plant_mapping_key(
-            _plant_mapping_dir(root) / "plant_mapping.json"),
-        ".tcip/state/plant_mapping.json", root_of=_plant_mapping_dir),
+        lambda root: plant_mapping.plant_mapping_key(root, "valley"),
+        ".tcip/state/plant_mappings/valley.json", root_of=_plant_mapping_dir),
     # the experiment record's validation member
     "experiment_validations": Registered(
         {"document": "operating_point", "trait": "catkin_50per_date",

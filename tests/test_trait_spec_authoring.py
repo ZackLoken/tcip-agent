@@ -169,11 +169,11 @@ def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end
 
     seed_confirmed_crossing(tmp_path, "catkin")
 
-    mapping_path, d1, d2 = _delivery_setup(tmp_path, experiment_id=None, checkpoint_sha256=None)
+    mapping_name, d1, d2 = _delivery_setup(tmp_path, experiment_id=None, checkpoint_sha256=None)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
-        trait="catkin", mapping_path=str(mapping_path),
+        trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",

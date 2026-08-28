@@ -63,7 +63,9 @@ def _write_specs(project_root: Path) -> None:
         seed_confirmed_crossing(project_root, spec["name"])
 
 
-def _predictions(root: Path, positive_class: str, id_map: dict, *, trait: str) -> tuple[Path, dict]:
+def _predictions(
+    project_root: Path, root: Path, positive_class: str, id_map: dict, *, trait: str,
+) -> tuple[str, dict]:
     """Two dates of classified predictions for one plant, plus the plant mapping that names it.
 
     The count operating point always claims validated (only the classifier stamp varies with the
@@ -92,11 +94,10 @@ def _predictions(root: Path, positive_class: str, id_map: dict, *, trait: str) -
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
                             producing_experiment_id="exp-1", trait=trait)
         dirs[date] = str(d)
-    mapping_path = root / "plant_mapping.json"
-    ts.replace(plant_mapping_key(mapping_path), {
+    ts.replace(plant_mapping_key(project_root, trait), {
         date: [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}] for date in dirs
     })
-    return mapping_path, dirs
+    return trait, dirs
 
 
 def _stamp_classifier(pred_dir: str, trait: str, positive_class: str, *, dataset_root: Path) -> None:
@@ -116,8 +117,8 @@ def _stamp_classifier(pred_dir: str, trait: str, positive_class: str, *, dataset
 def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     """Run one trait's phenology delivery, either through the gate or by acknowledging it."""
     root = tmp_path / spec["name"]
-    mapping_path, dirs = _predictions(
-        root, spec["positive_class_name"],
+    mapping_name, dirs = _predictions(
+        tmp_path, root, spec["positive_class_name"],
         {"other": 0, spec["positive_class_name"]: 1}, trait=spec["name"])
     classifier_dirs = None
     if validated:
@@ -127,7 +128,7 @@ def _deliver(tmp_path: Path, spec: dict, *, validated: bool) -> dict:
     out_csv = root / f"{spec['phenology_prefix']}_phenology.csv"
     res = compute_phenology(
         trait=spec["name"],
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date=dirs,
         output_csv_path=str(out_csv),
         classifier_pred_dirs=classifier_dirs,

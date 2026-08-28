@@ -25,42 +25,43 @@ from tcip_mcp.server import mcp
 @mcp.tool()
 @audited
 def build_plant_mapping(
+    name: str,
     images_root: str,
     plant_csv_paths: list[str],
-    output_mapping_path: str,
     dates: list[str] | None = None,
     nn_tolerance_m: float | None = None,
 ) -> dict:
-    """Assign each geolocated image to a plant, then persist the mapping for phenology.
+    """Assign each geolocated image to a plant, then persist the mapping under this project.
 
     Image GPS (handheld EXIF) carries ~5 m error while the plant grid is ~2.8 m between
     adjacent plots, so nearest-neighbour GPS alone is ambiguous. This orders each date's
     images by EXIF capture time (the walker's sequence), splits into row runs on large GPS
     jumps, and assigns along the row, falling back to nearest-neighbour when the sequence
     signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no
-    fabricated "confidence"). The persisted ``plant_mapping.json`` is what ``compute_phenology``
-    consumes. See the ``phenology`` skill.
+    fabricated "confidence"). The mapping is project state, persisted under the resolved
+    project root by ``name``; ``compute_phenology`` reads it back the same way. See the
+    ``phenology`` skill.
 
     Args:
+        name: The mapping's name within this project (``plant_mapping_key``'s own naming
+            rule). A rebuild under the same name replaces this project's own mapping of that
+            name.
         images_root: Directory whose immediate subfolders are ``<YYYY-MM-DD>/`` image buckets
             (the ingest layout).
         plant_csv_paths: One or more plant-locations CSVs (columns ``plot_name``,
             ``accession_name``, ``WGS84_centroid_x/y``, …).
-        output_mapping_path: Where to persist the mapping JSON (e.g.
-            ``<project>/.tcip/state/plant_mapping.json``). A relative path resolves against
-            the project root, never the server process's cwd.
         dates: Optional subset of date folders to map (default: all under ``images_root``).
         nn_tolerance_m: Nearest-neighbour tolerance (m). ``None`` (default) derives it from the
             plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
             explicit value is honored but still capped at that pitch-derived ceiling.
 
-    Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals
-    and the persisted path, not the full per-image mapping (that lives in the JSON).
+    Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals,
+    the mapping's ``name`` and the resolved ``project_root``, not the full per-image mapping
+    (that lives in the persisted record).
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
-    from tcip_mcp.project_paths import resolve_output_path
+    from tcip_mcp.project_paths import project_root as platform_project_root
 
-    output_mapping_path = str(resolve_output_path(output_mapping_path))
     root = Path(images_root)
     if not root.is_dir():
         return {"error": f"images_root not found: {images_root}"}
@@ -77,7 +78,8 @@ def build_plant_mapping(
     if not mapping:
         return {"error": f"no date folders with images under {images_root}"}
 
-    plant_mapping.persist_mapping(mapping, Path(output_mapping_path))
+    project_root = platform_project_root()
+    plant_mapping.persist_mapping(mapping, project_root, name)
 
     per_date: dict[str, dict] = {}
     total_images = 0
@@ -95,7 +97,8 @@ def build_plant_mapping(
         total_mapped += n_mapped
 
     return {
-        "mapping_path": str(output_mapping_path),
+        "name": name,
+        "project_root": str(project_root),
         "n_dates": len(mapping),
         "n_images": total_images,
         "n_mapped": total_mapped,
@@ -759,7 +762,7 @@ def calibrate_ordinal_regression_operating_point(
 @audited
 def compute_phenology(
     trait: str,
-    mapping_path: str,
+    mapping_name: str,
     predictions_by_date: dict[str, str],
     output_csv_path: str,
     classifier_pred_dirs: list[str] | None = None,
@@ -788,9 +791,9 @@ def compute_phenology(
             this trait's ``positive_class_name`` (a mapping fact read from the labels the run
             actually decoded through, never a pinned default or a separate registry re-derivation
             that could disagree with it).
-        mapping_path: Path to a persisted plant-mapping JSON (``{date: [assignment, ...]}``
-            with ``stem`` / ``plot_name`` / ``accession_name`` per assignment), produced by
-            the web plant-mapping step or ``build_plant_mapping``.
+        mapping_name: Name of a plant mapping persisted under this project (``{date:
+            [assignment, ...]}`` with ``stem`` / ``plot_name`` / ``accession_name`` per
+            assignment), produced by the web plant-mapping step or ``build_plant_mapping``.
         predictions_by_date: ``{date: predictions_dir}``, each dir holds per-image COCO/JSON
             prediction files (``<stem>.json``) from the state classifier.
         output_csv_path: Where to write the delivered per-plant CSV (e.g.
@@ -858,13 +861,15 @@ def compute_phenology(
     from tcip_store import StoreError
 
     from tcip_mcp.pipelines.postprocessing import plant_mapping
+    from tcip_mcp.project_paths import project_root as platform_project_root
 
+    project_root = platform_project_root()
     try:
-        mapping = plant_mapping.load_mapping_rows(Path(mapping_path))
+        mapping = plant_mapping.load_mapping_rows(project_root, mapping_name)
     except StoreError as e:
-        return {"error": f"could not read mapping {mapping_path}: {e}"}
+        return {"error": f"could not read mapping {mapping_name!r}: {e}"}
     if not mapping:
-        return {"error": f"mapping not found: {mapping_path}; build one with "
+        return {"error": f"mapping not found: {mapping_name!r}; build one with "
                          f"build_plant_mapping before computing phenology"}
 
     positive_class_id, msg = _resolve_positive_class_id(trait, predictions_by_date)

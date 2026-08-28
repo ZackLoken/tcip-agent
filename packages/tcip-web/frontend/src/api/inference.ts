@@ -122,7 +122,7 @@ export interface OnsetRow {
 // accepts rows, so no caller-composed table can be mistaken for (or declared to be) a delivery.
 export interface PhenologyRequest {
   project_root: string;
-  mapping_path: string;
+  mapping_name: string;
   predictions_by_date: Record<string, string>;
   trait: string;
   // Show provisional numbers instead of refusing. The server still marks them provisional, and it
@@ -332,19 +332,19 @@ export const resultsApi = {
     }>(`${ROUTES.getResultsTraits}?project_root=${encodeURIComponent(project_root)}`),
 
   buildPlantMapping: (body: {
+    name: string;
     images_root: string;
     plant_csv_paths: string[];
     dates?: string[];
     nn_tolerance_m?: number;
-    persist_path?: string;
   }) =>
     postJson<{ summary: PlantMappingSummary; mapping: unknown }>(
       ROUTES.postResultsPlantMappingBuild,
       body,
     ),
 
-  loadPlantMapping: (persist_path: string) =>
-    postJson<{ mapping: unknown }>(ROUTES.postResultsPlantMappingLoad, { persist_path }),
+  loadPlantMapping: (name: string) =>
+    postJson<{ mapping: unknown }>(ROUTES.postResultsPlantMappingLoad, { name }),
 
   perPlantCurves: (body: PhenologyRequest) =>
     postJson<PhenologyResponse<PerPlantRow>>(ROUTES.postResultsPerPlantCurves, body),

@@ -67,9 +67,9 @@ def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Pat
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={
+            "name": "valley",
             "images_root": str(tmp_path / "nope"),
             "plant_csv_paths": [],
-            "persist_path": str(tmp_path / "mapping.json"),
         },
     )
     body = resp.json()
@@ -81,7 +81,7 @@ def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: 
     store.open_project(tmp_path.resolve())
     resp = client.post(
         "/api/results/plant_mapping/load",
-        json={"persist_path": str(tmp_path / "missing.json")},
+        json={"name": "missing"},
     )
     body = resp.json()
     assert body["mapping"] == {}
@@ -180,11 +180,11 @@ def _phenology_fixture(
     from tcip_mcp.dataset_layout import classes_path
 
     copy_registry(classes_path(tmp_path), classes_path(root))
-    mapping_path = tmp_path / "mapping.json"
-    tcip_store.replace(plant_mapping_key(mapping_path), mapping)
+    mapping_name = "valley"
+    tcip_store.replace(plant_mapping_key(tmp_path, mapping_name), mapping)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
-    return {"project_root": str(tmp_path), "mapping_path": str(mapping_path),
+    return {"project_root": str(tmp_path), "mapping_name": mapping_name,
             "predictions_by_date": preds, "trait": "catkin"}
 
 
@@ -259,8 +259,7 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
     # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel. It must
     # not crash interpolation or leak '0000-00-00' into a delivered date.
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
-    mapping_path = Path(body["mapping_path"])
-    key = plant_mapping_key(mapping_path)
+    key = plant_mapping_key(Path(body["project_root"]), body["mapping_name"])
     mapping = tcip_store.read(key)
     mapping["undated"] = mapping["2026-02-11"]
     tcip_store.replace(key, mapping)
@@ -555,7 +554,7 @@ def test_web_and_mcp_phenology_doors_agree_on_validity(client: TestClient, tmp_p
     web_validated = client.post("/api/results/onset_dates", json=body).json()["validated"]
 
     mcp_result = compute_phenology(
-        trait=body["trait"], mapping_path=body["mapping_path"],
+        trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(tmp_path / "out.csv"),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )
@@ -829,11 +828,10 @@ def test_per_plant_curves_refuses_when_the_delivered_dataset_carries_no_registry
     silently checking the project root's own, unrelated registry."""
     bucket = tmp_path / "ds" / "predictions" / "live" / "2026-02-11"
     bucket.mkdir(parents=True)
-    mapping_path = tmp_path / "mapping.json"
     store.open_project(tmp_path.resolve())
 
     resp = client.post("/api/results/per_plant_curves", json={
-        "project_root": str(tmp_path), "mapping_path": str(mapping_path),
+        "project_root": str(tmp_path), "mapping_name": "valley",
         "predictions_by_date": {"2026-02-11": str(bucket)}, "trait": "catkin",
     })
 

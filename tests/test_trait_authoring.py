@@ -450,12 +450,12 @@ def _pheno_fixture(tmp_path: Path, *, classified: bool):
     import tcip_store
     from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 
-    mapping_path = tmp_path / "plant_mapping.json"
-    tcip_store.replace(plant_mapping_key(mapping_path), {
+    mapping_name = "valley"
+    tcip_store.replace(plant_mapping_key(tmp_path, mapping_name), {
         "2026-02-11": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    return mapping_path, d1, d2
+    return mapping_name, d1, d2
 
 
 @pytest.mark.usefixtures("seed_catkin_operationalization")
@@ -463,7 +463,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_fixture(tmp_path, classified=True)
+    mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=True)
     out_csv = tmp_path / "out.csv"
     classifier_stamp = {
         "validated": True,
@@ -477,7 +477,7 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -495,10 +495,10 @@ def test_compute_phenology_derives_class_id_and_delivers(tmp_path: Path):
 def test_compute_phenology_refuses_when_class_id_unresolvable(tmp_path: Path):
     from tcip_mcp.tools.phenology_tools import compute_phenology
 
-    mapping_path, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'elongated' anywhere
+    mapping_name, d1, d2 = _pheno_fixture(tmp_path, classified=False)  # no 'elongated' anywhere
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(tmp_path / "out.csv"),
         operating_point_validated="held_out_annotations",

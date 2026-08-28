@@ -276,8 +276,8 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
         _write_preds(bucket, f"P1_{d}", _states(pos, neg))
         _write_sidecar(bucket, SPARSE_ID_MAP, dataset_root=root)
     _write_classifier_sidecar(buckets["2026-03-01"], dataset_root=root, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    ts.replace(plant_mapping_key(mapping_path), {
+    mapping_name = "valley"
+    ts.replace(plant_mapping_key(tmp_path, mapping_name), {
         d: [{"stem": f"P1_{d}", "plot_name": "P1", "accession_name": "acc-noisy"}]
         for d in counts
     })
@@ -285,7 +285,7 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path)
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={d: str(buckets[d]) for d in counts},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(buckets["2026-03-01"])],

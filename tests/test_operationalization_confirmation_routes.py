@@ -457,7 +457,7 @@ def test_a_project_root_outside_the_allowed_roots_is_refused_at_every_results_do
 
     phenology_body = {
         "project_root": str(outside),
-        "mapping_path": str(outside / "mapping.json"),
+        "mapping_name": "mapping",
         "predictions_by_date": {},
         "trait": fx.CROSSING_TRAIT,
     }
@@ -491,7 +491,7 @@ def test_a_delivery_door_still_runs_for_a_project_root_the_guard_admits(
         "/api/results/onset_dates",
         json={
             "project_root": str(tmp_path),
-            "mapping_path": str(tmp_path / "mapping.json"),
+            "mapping_name": "mapping",
             "predictions_by_date": {},
             "trait": fx.CROSSING_TRAIT,
         },

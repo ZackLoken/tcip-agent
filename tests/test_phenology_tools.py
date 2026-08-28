@@ -48,21 +48,22 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     Image.new("RGB", (4, 4)).save(images_root / "2026-02-11" / "img1.jpg")
     csv_path = tmp_path / "plants.csv"
     _plant_csv(csv_path)
-    out = tmp_path / "state" / "plant_mapping.json"
+    name = "valley"
 
     res = build_plant_mapping(
+        name=name,
         images_root=str(images_root),
         plant_csv_paths=[str(csv_path)],
-        output_mapping_path=str(out),
     )
 
     assert "error" not in res
-    assert res["mapping_path"] == str(out)
+    assert res["name"] == name
+    assert res["project_root"] == str(tmp_path)
     assert res["n_dates"] == 1
     assert res["n_images"] == 1
     assert res["n_mapped"] + res["n_unmapped"] == 1
     assert "2026-02-11" in res["per_date"]
-    persisted = ts.read(plant_mapping_key(out))
+    persisted = ts.read(plant_mapping_key(tmp_path, name))
     assert list(persisted.keys()) == ["2026-02-11"]
     assert persisted["2026-02-11"][0]["stem"] == "img1"
     assert "confidence" not in persisted["2026-02-11"][0]
@@ -72,7 +73,7 @@ def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
     res = build_plant_mapping(
         images_root=str(tmp_path / "nope"),
         plant_csv_paths=[str(tmp_path / "plants.csv")],
-        output_mapping_path=str(tmp_path / "m.json"),
+        name="m",
     )
     assert "error" in res
     assert "images_root not found" in res["error"]
@@ -84,14 +85,14 @@ def test_build_plant_mapping_missing_csv(tmp_path: Path) -> None:
     res = build_plant_mapping(
         images_root=str(images_root),
         plant_csv_paths=[str(tmp_path / "missing.csv")],
-        output_mapping_path=str(tmp_path / "m.json"),
+        name="m",
     )
     assert "error" in res
     assert "plant CSV" in res["error"]
 
 
-def _write_mapping(path: Path, mapping: dict) -> None:
-    ts.replace(plant_mapping_key(path), mapping)
+def _write_mapping(project_root: Path, name: str, mapping: dict) -> None:
+    ts.replace(plant_mapping_key(project_root, name), mapping)
 
 
 def _write_preds(dir_path: Path, stem: str, subjects: list[str]) -> None:
@@ -193,8 +194,8 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
@@ -202,7 +203,7 @@ def test_compute_phenology_delivers_when_both_validated(tmp_path: Path) -> None:
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -227,8 +228,8 @@ def test_compute_phenology_reports_an_unreadable_prediction_by_name(tmp_path: Pa
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
@@ -236,7 +237,7 @@ def test_compute_phenology_reports_an_unreadable_prediction_by_name(tmp_path: Pa
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -262,8 +263,8 @@ def test_compute_phenology_re_reads_the_registry_at_the_second_check(
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
@@ -289,7 +290,7 @@ def test_compute_phenology_re_reads_the_registry_at_the_second_check(
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -313,8 +314,8 @@ def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, trait="second_trait")
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, trait="second_trait")
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
@@ -322,7 +323,7 @@ def test_compute_phenology_floors_a_count_stamp_earned_for_a_different_trait(tmp
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -347,8 +348,8 @@ def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_pat
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     # No P1_a.json written under d1 -- the mapping names it but nothing was ever inferred for it,
     # so the only date on record is missing, never classified.
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [
             {"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"},
             {"stem": "P1_b", "accession_name": "acc-9"},  # no plot_name -> unmapped
@@ -358,7 +359,7 @@ def test_compute_phenology_reports_n_images_unmapped_when_never_assessed(tmp_pat
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
     )
@@ -385,8 +386,8 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
     other_trait_dir = tmp_path / "unrelated_calibration"
     _write_classifier_sidecar(other_trait_dir, dataset_root=root, validated=True,
                               trait="some_other_trait", experiment_id="run-A-different-model")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
@@ -394,7 +395,7 @@ def test_compute_phenology_rejects_classifier_stamp_from_unrelated_run(tmp_path:
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(other_trait_dir)],
@@ -422,8 +423,8 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
     # Genuinely "validated", but with neither trait nor experiment_id recorded -- the shape a
     # hand-edited/foreign sidecar could carry, never one calibrate_classifier_operating_point writes.
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait=None, experiment_id=None)
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
@@ -431,7 +432,7 @@ def test_compute_phenology_rejects_classifier_stamp_with_no_trait_recorded(tmp_p
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -452,15 +453,15 @@ def test_compute_phenology_refuses_unvalidated_classifier(tmp_path: Path) -> Non
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # No classifier_operating_point.json anywhere -> classifier dimension floors to unvalidated.
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
     )
@@ -476,15 +477,15 @@ def test_compute_phenology_acknowledge_unvalidated_stamps_false(tmp_path: Path) 
     _write_preds(d2, "P1_b", ["elongated"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         acknowledge_unvalidated=True,  # provisional delivery, clearly flagged
@@ -503,15 +504,15 @@ def test_compute_phenology_refuses_asymmetric_validation(tmp_path: Path) -> None
     _write_op_sidecar(d1, dataset_root=root, validated=False, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=False, id_map=ID_MAP)
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         classifier_pred_dirs=[str(d1)],
@@ -528,15 +529,15 @@ def test_compute_phenology_acknowledge_stamps_each_dimension_independently(tmp_p
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP)
     # Classifier not validated; op point IS validated on disk.
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv),
         operating_point_validated="held_out_annotations",
@@ -557,14 +558,14 @@ def _tile_gate_fixture(tmp_path: Path, tile_size_prov: dict | None) -> dict:
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
     _write_op_sidecar(d2, dataset_root=root, validated=True, id_map=ID_MAP, tile_size_prov=tile_size_prov)
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin")
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     return {
         "trait": "catkin",
-        "mapping_path": str(mapping_path),
+        "mapping_name": mapping_name,
         "predictions_by_date": {"2026-02-11": str(d1), "2026-03-09": str(d2)},
         "output_csv_path": str(tmp_path / "out" / "catkin_phenology.csv"),
         "classifier_pred_dirs": [str(d1)],
@@ -628,15 +629,15 @@ def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> N
     d1 = _bucket(tmp_path, "2026-02-11")
     _write_preds(d1, "P1_a", ["catkin"])
     _write_op_sidecar(d1, dataset_root=root, validated=True, id_map={"catkin": 0})
-    mapping_path = tmp_path / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
     })
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(mapping_path),
+        mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1)},
         output_csv_path=str(out_csv),
     )
@@ -648,7 +649,7 @@ def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> N
 def test_compute_phenology_missing_mapping(tmp_path: Path) -> None:
     res = compute_phenology(
         trait="catkin",
-        mapping_path=str(tmp_path / "nope.json"),
+        mapping_name="nope",
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -659,7 +660,7 @@ def test_compute_phenology_missing_mapping(tmp_path: Path) -> None:
 def test_compute_phenology_unknown_trait_refuses(tmp_path: Path) -> None:
     res = compute_phenology(
         trait="not-a-real-trait",
-        mapping_path=str(tmp_path / "nope.json"),
+        mapping_name="nope",
         predictions_by_date={},
         output_csv_path=str(tmp_path / "out.csv"),
     )
@@ -1660,7 +1661,7 @@ def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its
 # The delivered producer tail: what a phenology CSV may name, and what the delivery records.
 
 def _delivery_setup(tmp_path: Path, *, experiment_id: str | None,
-                    checkpoint_sha256: str | None) -> tuple[Path, Path, Path]:
+                    checkpoint_sha256: str | None) -> tuple[str, Path, Path]:
     """Two classified, count-validated buckets plus a mapping, ready for a phenology delivery."""
     root = _ds_root(tmp_path)
     d1, d2 = _bucket(tmp_path, "2026-02-11"), _bucket(tmp_path, "2026-03-09")
@@ -1671,12 +1672,12 @@ def _delivery_setup(tmp_path: Path, *, experiment_id: str | None,
                           experiment_id=experiment_id, checkpoint_sha256=checkpoint_sha256)
     _write_classifier_sidecar(d1, dataset_root=root, validated=True, trait="catkin",
                               experiment_id=experiment_id)
-    mapping_path = tmp_path / "state" / "plant_mapping.json"
-    _write_mapping(mapping_path, {
+    mapping_name = "valley"
+    _write_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
     })
-    return mapping_path, d1, d2
+    return mapping_name, d1, d2
 
 
 def _named_records(*pred_dirs: Path) -> str:
@@ -1703,12 +1704,12 @@ def test_compute_phenology_names_the_record_and_producer_a_bound_bucket_earned(t
     from tests._binding_fixtures import record_producing_run
 
     sha = record_producing_run(tmp_path, "exp-producer")
-    mapping_path, d1, d2 = _delivery_setup(
+    mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
-        trait="catkin", mapping_path=str(mapping_path),
+        trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",
@@ -1733,7 +1734,7 @@ def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_produce
     for itself."""
     from tcip_mcp.pipelines.resolution import update_sidecar
 
-    mapping_path, d1, d2 = _delivery_setup(
+    mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256="a" * 64)
 
     def _forge(stamp: dict) -> dict:
@@ -1745,7 +1746,7 @@ def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_produce
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
-        trait="catkin", mapping_path=str(mapping_path),
+        trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, acknowledge_unvalidated=True,
@@ -1769,12 +1770,12 @@ def test_compute_phenology_records_what_verification_found_in_the_datasets_own_l
     from tests._binding_fixtures import record_producing_run
 
     sha = record_producing_run(tmp_path, "exp-producer")
-    mapping_path, d1, d2 = _delivery_setup(
+    mapping_name, d1, d2 = _delivery_setup(
         tmp_path, experiment_id="exp-producer", checkpoint_sha256=sha)
     out_csv = tmp_path / "out" / "catkin_phenology.csv"
 
     res = compute_phenology(
-        trait="catkin", mapping_path=str(mapping_path),
+        trait="catkin", mapping_name=mapping_name,
         predictions_by_date={"2026-02-11": str(d1), "2026-03-09": str(d2)},
         output_csv_path=str(out_csv), classifier_pred_dirs=[str(d1)],
         operating_point_conf=0.4, operating_point_validated="held_out_annotations",

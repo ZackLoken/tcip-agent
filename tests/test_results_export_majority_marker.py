@@ -80,7 +80,7 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_marker(
 
     out_csv = tmp_path / "mcp_delivery.csv"
     result = compute_phenology(
-        trait=body["trait"], mapping_path=body["mapping_path"],
+        trait=body["trait"], mapping_name=body["mapping_name"],
         predictions_by_date=body["predictions_by_date"], output_csv_path=str(out_csv),
         classifier_pred_dirs=list(body["predictions_by_date"].values()),
     )

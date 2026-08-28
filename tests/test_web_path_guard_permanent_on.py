@@ -444,17 +444,13 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     payload = _capture_fixture(tmp_path)
     _open(client, tmp_path, tmp_path / "images")
 
+    # The payload carries no path: a persist_path pointed outside the project names nothing
+    # this door reads, so the build still lands under the open project, addressed by name.
     elsewhere = outside / "plant_mapping.json"
     resp = client.post("/api/results/plant_mapping/build",
                        json={**payload, "persist_path": str(elsewhere)})
-    assert resp.status_code == 403
-    assert "outside the open project" in resp.json()["detail"]
+    assert resp.status_code == 200, resp.text
     assert not elsewhere.exists()
-    beside = tmp_path.parent / "plant_mapping.json"
-    resp = client.post("/api/results/plant_mapping/build",
-                       json={**payload, "persist_path": str(beside)})
-    assert resp.status_code == 403, "inside the workspace but outside the project is still refused"
-    assert not beside.exists()
 
     foreign_images = _image(outside / "images" / "2026-02-11" / "z.jpg").parent.parent
     resp = client.post("/api/results/plant_mapping/build",
@@ -466,15 +462,17 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     moved_csv = outside / "plots.csv"
     moved_csv.write_text(Path(payload["plant_csv_paths"][0]).read_text(encoding="utf-8"),
                          encoding="utf-8")
-    persist = tmp_path / ".tcip" / "state" / "plant_mapping.json"
     ok = client.post("/api/results/plant_mapping/build",
-                     json={**payload, "plant_csv_paths": [str(moved_csv)],
-                           "persist_path": str(persist)})
+                     json={**payload, "plant_csv_paths": [str(moved_csv)]})
     assert ok.status_code == 200, ok.text
     built = [r for r in tcip_store.read_log(audit_log_key(tmp_path)).records
              if r["tool"] == "gui_build_plant_mapping"]
-    assert len(built) == 1
-    assert built[0]["arguments"]["persist_path"] == str(persist.resolve())
+    assert len(built) == 2
+    assert built[-1]["arguments"]["name"] == payload["name"]
+    from tcip_mcp.pipelines.postprocessing import plant_mapping
+
+    assert plant_mapping.load_mapping(tmp_path, payload["name"]).keys() == {
+        "2026-02-11", "2026-02-25"}
 
 
 # ── the picker: unconfined from this machine, confined from the network ───
