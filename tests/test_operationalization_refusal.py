@@ -825,10 +825,10 @@ def test_the_count_tool_refuses_before_it_has_any_counts_to_return(
     """
     import tcip_mcp.tools.inference_tools as itools
 
-    def _never_runs(**kwargs):
+    def _never_runs(*args, **kwargs):
         raise AssertionError("run_inference must not run: the precondition refuses ahead of it")
 
-    monkeypatch.setattr(itools, "run_inference", _never_runs)
+    monkeypatch.setattr(itools, "_run_inference_verified", _never_runs)
 
     # An existing but unregistered checkpoint: the refusal under test is the operationalization
     # gate, which sits ahead of the registry check, so this must never reach that check either.
@@ -1005,7 +1005,7 @@ def test_the_count_tool_no_longer_tabulates_under_no_trait_at_all(
     """The same permissive delivery at the tool, which used to hand back the counts as well."""
     import tcip_mcp.tools.inference_tools as itools
 
-    monkeypatch.setattr(itools, "run_inference", lambda **kwargs: {
+    monkeypatch.setattr(itools, "_run_inference_verified", lambda *args, **kwargs: {
         "results": [{"image": "a.png", "count": 3}], "image_count": 1, "total_detections": 3,
         "operating_point": {"conf": {"value": 0.5}}, "validated": False, "conf_source": "default"})
     out_csv = tmp_path / "o.csv"

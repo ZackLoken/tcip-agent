@@ -129,7 +129,7 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path, monke
     _worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
-    assert not (out_dir / "img0.json").exists()
+    assert not out_dir.exists()
     assert job.done == 0
 
 
@@ -146,16 +146,42 @@ def test_prioritize_review_queue_refuses_an_unregistered_checkpoint(tmp_path, mo
 
 
 def test_prioritize_review_queue_refuses_by_the_stated_project_path(tmp_path):
-    """Coverage: project_path, not just the process root, is where the load looks."""
+    """project_path, not just the process root, is where the load looks: registered under a
+    root the call does not name, the checkpoint still refuses, naming the root it did name."""
+    registered_root = tmp_path / "registered"
+    registered_root.mkdir()
+    other_root = tmp_path / "elsewhere"
+    other_root.mkdir()
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    _register(registered_root, ckpt)
     images_dir, _ = _images(tmp_path)
 
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
     r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage",
-                                project_path=str(tmp_path))
+                                project_path=str(other_root))
     assert "error" in r
     assert "register_model" in r["error"]
+    assert repr(str(other_root)) in r["error"]
+    assert str(registered_root) not in r["error"]
+
+
+def test_prioritize_review_queue_admits_a_checkpoint_registered_under_the_stated_project_path(
+    tmp_path,
+):
+    """The admitting direction, roles reversed: project_path naming the root the checkpoint
+    really is registered under lets the same call through."""
+    registered_root = tmp_path / "registered"
+    registered_root.mkdir()
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    _register(registered_root, ckpt)
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+
+    r = prioritize_review_queue(ckpt, str(images_dir), strategy="confidence_triage",
+                                project_path=str(registered_root))
+    assert "error" not in r, r
 
 
 def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp_path):
@@ -187,6 +213,10 @@ def test_calibrate_operating_point_script_refuses_an_unregistered_checkpoint(tmp
 def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_checkpoint(
     tmp_path, monkeypatch,
 ):
+    """The checkpoint load runs before the cal/holdout split is locked, so a refused calibration
+    leaves no lock record for the CSV's identity behind."""
+    import tcip_store as ts
+
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
     images_dir, _ = _images(tmp_path, n=4)
@@ -195,6 +225,8 @@ def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_ch
         "stem,rank\n" + "".join(f"img{i},{i % 3}\n" for i in range(4)), encoding="utf-8")
     out = tmp_path / "calib"
 
+    from tcip_mcp.pipelines.data.splits import cal_holdout_lock_key, cal_holdout_scope_root
+    from tcip_mcp.pipelines.resolution import csv_dataset_hash
     from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
 
     r = calibrate_ordinal_regression_operating_point(
@@ -206,6 +238,10 @@ def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_ch
     assert "error" in r
     assert "register_model" in r["error"]
     assert not (out / "ordinal_operating_point.json").exists()
+
+    lock_key = cal_holdout_lock_key(
+        csv_dataset_hash(str(csv_path)), scope_root=cal_holdout_scope_root(str(tmp_path)))
+    assert not ts.exists(lock_key)
 
 
 def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoint(tmp_path):
@@ -222,6 +258,33 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     _pq_worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
+    assert job.queue == []
+
+
+def test_review_priority_route_worker_completes_the_job_with_a_registered_checkpoint(
+    tmp_path, monkeypatch,
+):
+    """The admitting half: a checkpoint registered against the job's own platform_root runs
+    _pq_worker to a completed job rather than a failed one."""
+    pytest.importorskip("fastapi")
+    from types import SimpleNamespace
+
+    import tcip_mcp.pipelines.active_learning.helpers as al_helpers
+    from tcip_web.routes.review import PriorityQueueJob, _pq_worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    images_dir, _ = _images(tmp_path)
+
+    monkeypatch.setattr(
+        al_helpers, "build_scorer",
+        lambda method, task: SimpleNamespace(score=lambda sources, model, device: []))
+
+    job = PriorityQueueJob(job_id="rail7-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
+                          dataset_root=str(tmp_path), method="combined", budget=10,
+                          platform_root=str(tmp_path))
+    _pq_worker(job)
+    assert job.status == "completed", job.error
     assert job.queue == []
 
 
@@ -539,6 +602,10 @@ def _stand_in_calibration(monkeypatch, itools, labels_dir):
 
 
 def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path, monkeypatch):
+    """Coverage, not a fail-before guard: the spy stubs _run_inference_verified, a symbol the
+    family's baseline (f4413a14) does not carry, so a run against that baseline dies in setup
+    rather than on the assertion this test names. See the driven-through-real-doors version
+    below for the guard."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -581,6 +648,101 @@ def test_export_predictions_refuses_a_sweep_record_edited_after_the_run(tmp_path
     assert not out2.exists()
 
 
+def test_export_predictions_refuses_a_sweep_record_edited_after_the_run_through_real_doors(
+    tmp_path, monkeypatch,
+):
+    """The fail-before guard for rail 3, driven through real doors with no stub of
+    _run_inference_verified (a symbol the family's baseline, f4413a14, does not carry): the
+    calibration itself is the same deterministic stand-in the coverage test above uses (a real
+    model pass is not reproducible byte for byte across two separate calls, see
+    _stand_in_calibration), so a real run_inference and a real export_predictions over it agree
+    on one identity. store.replace (a baseline-old primitive) is patched to skip only the
+    confidence-sweep write on the second call, so the first call's tampered record is the one
+    export_predictions reads back and refuses on."""
+    import tcip_store.store as store_mod
+
+    import tcip_mcp.tools.inference_tools as itools
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt)
+    _register(tmp_path, str(ckpt))
+    images_dir, _ = _images(tmp_path)
+    _stand_in_calibration(monkeypatch, itools, tmp_path)
+
+    r1 = itools.run_inference(str(ckpt), images_dir=str(images_dir), trait="catkin",
+                              calibration_labels_dir=str(tmp_path))
+    assert "error" not in r1, r1
+    identity = r1["calibration_evidence_key"]
+
+    from tcip_store import store
+
+    key = itools.confidence_sweep_key(identity)
+    body = store.read(key)
+    body["calibration_evidence"]["inputs"]["dataset_hash"] = "tampered"
+    store.replace(key, body)
+
+    real_replace = store_mod.replace
+
+    def _skip_the_sweep_write(k, value, **kw):
+        if k.store == itools.CONFIDENCE_SWEEP_STORE:
+            return None
+        return real_replace(k, value, **kw)
+
+    monkeypatch.setattr(store_mod, "replace", _skip_the_sweep_write)
+
+    out = tmp_path / "preds"
+    refused = itools.export_predictions(str(ckpt), str(images_dir), str(out), trait="catkin",
+                                        calibration_labels_dir=str(tmp_path))
+    assert "error" in refused
+    assert identity in refused["error"]
+    assert not out.exists()
+
+
+def test_export_predictions_refuses_a_sweep_whose_evidence_the_codec_cannot_carry(
+    tmp_path, monkeypatch,
+):
+    """A body the codec refuses (RECORD_JSON's allow_nan=False; a NaN in the resolver's inputs
+    is the natural one) makes the door return its own error and write no bucket, rather than
+    the swallowed warning the pre-family code left behind. The admitting half of this branch is
+    already covered: test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point in
+    test_detector_operating_point_holder.py is an ordinary calibrated run surviving it."""
+    import tcip_mcp.tools.inference_tools as itools
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = _bespoke_checkpoint(tmp_path / "m.pt")
+    _register(tmp_path, ckpt)
+
+    images_dir = tmp_path / "images"
+    labels_dir = tmp_path / "labels"
+    images_dir.mkdir()
+    labels_dir.mkdir()
+    for i, size in enumerate((32, 40, 48, 56, 64, 72)):
+        Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
+        box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
+        json_io.write_annotations(str(labels_dir / f"img{i}.json"),
+                                  [Annotation(subject="catkin", geometry=box)], size, size)
+
+    real_calibrate = itools._calibrate_operating_point
+
+    def _nan_evidence(*a, **kw):
+        bundle, dh, n_excluded, evidence = real_calibrate(*a, **kw)
+        evidence["inputs"]["staged_conf_floor"] = float("nan")
+        return bundle, dh, n_excluded, evidence
+
+    monkeypatch.setattr(itools, "_calibrate_operating_point", _nan_evidence)
+
+    out = tmp_path / "preds"
+    refused = itools.export_predictions(ckpt, str(images_dir), str(out), trait="catkin",
+                                        calibration_labels_dir=str(labels_dir))
+    assert "error" in refused
+    assert "could not be kept" in refused["error"]
+    assert not out.exists()
+
+
 # Rail 8: the doctor lists a prediction bucket whose stamp digest no entry names, and stays
 # silent on one whose digest an entry names.
 
@@ -595,6 +757,7 @@ def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_
     _register(tmp_path, str(stale_ckpt), name="stale-model")
 
     images_dir, _ = _images(tmp_path)
+    from tcip_mcp.dataset_layout import prediction_dir
     from tcip_mcp.tools.inference_tools import export_predictions
 
     good_dir = tmp_path / "predictions" / "baseline" / "2026-01-01"
@@ -606,11 +769,24 @@ def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_
     r_stale = export_predictions(str(stale_ckpt), str(images_dir), str(stale_dir), tile=False)
     assert "error" not in r_stale, r_stale
 
-    # Supersede stale-model's entry under the same name: its digest no longer names any entry,
-    # the same pre-rail state a bucket already on disk can be in.
+    # An undated bucket (prediction_dir(root, model, None), no date segment) is a real platform
+    # shape (a bare-path export, the web tab's default), not only the dated ones above.
+    undated_ckpt = tmp_path / "undated.pt"
+    _bespoke_checkpoint(undated_ckpt, tile_size=112)
+    _register(tmp_path, str(undated_ckpt), name="undated-model")
+    undated_dir = prediction_dir(tmp_path, "undated-model", None)
+    r_undated = export_predictions(str(undated_ckpt), str(images_dir), str(undated_dir), tile=False)
+    assert "error" not in r_undated, r_undated
+
+    # Supersede stale-model's and undated-model's entries under the same name: their digests no
+    # longer name any entry, the same pre-rail state a bucket already on disk can be in.
     replacement = tmp_path / "replacement.pt"
     _bespoke_checkpoint(replacement, tile_size=128)
     _register(tmp_path, str(replacement), name="stale-model")
+
+    undated_replacement = tmp_path / "undated_replacement.pt"
+    _bespoke_checkpoint(undated_replacement, tile_size=144)
+    _register(tmp_path, str(undated_replacement), name="undated-model")
 
     import importlib.util
 
@@ -624,4 +800,7 @@ def test_doctor_lists_a_prerail_bucket_and_stays_silent_on_a_registered_one(tmp_
     messages = [m for _, m in findings]
     stale_findings = [m for m in messages if r_stale["checkpoint_sha256"] in m]
     assert len(stale_findings) == 1, messages
+    undated_findings = [m for m in messages if r_undated["checkpoint_sha256"] in m]
+    assert len(undated_findings) == 1, messages
+    assert str(undated_dir.relative_to(tmp_path)) in undated_findings[0]
     assert not any(r_good["checkpoint_sha256"] in m for m in messages)

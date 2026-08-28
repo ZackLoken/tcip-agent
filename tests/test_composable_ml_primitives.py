@@ -143,11 +143,12 @@ class TestTrainConfig:
 # Generic Predictor
 # ====================================================================
 
-class TestGenericPredictor:
-    def test_predictor_missing_checkpoint(self, tmp_path):
-        from tcip_mcp.model_registry import load_registered_checkpoint
-        with pytest.raises(FileNotFoundError):
-            load_registered_checkpoint(str(tmp_path / "nonexistent.pt"), project_path=str(tmp_path))
+# GenericPredictor no longer opens a path itself; a missing file is load_registered_checkpoint's
+# own contract now, the one load every predictor construction goes through.
+def test_load_registered_checkpoint_raises_filenotfounderror_on_a_missing_file(tmp_path):
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    with pytest.raises(FileNotFoundError):
+        load_registered_checkpoint(str(tmp_path / "nonexistent.pt"), project_path=str(tmp_path))
 
 
 # ====================================================================
