@@ -53,7 +53,10 @@ a tile-trained checkpoint, `evaluate_model` reports in one of two regimes: the d
 run is a diagnostic only (matches training-time val mAP, not the shipped full-frame count);
 `use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
 to report for gating. An untiled checkpoint has no regime split; its one run already is the
-delivery metric (see `evaluate_model`'s own docstring for the full precedence).
+delivery metric (see `evaluate_model`'s own docstring for the full precedence). Either a run id or
+a bare checkpoint path resolves to a file that must be registered under the process's project root
+(`register_model`, explicit mode for a foreign or bespoke checkpoint); `evaluate_model` refuses
+before loading an unregistered one.
 
 `select_best_model` requires a `metric` (no default) and resolves its ranking direction from
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (keyed by the metric with any `val_` prefix stripped);

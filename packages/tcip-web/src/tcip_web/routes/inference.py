@@ -446,9 +446,8 @@ class LaunchInferencePayload(BaseModel):
 
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> dict:
-    # Confine client-supplied paths to the allowed roots when the server is locked down
-    # (TCIP_IMAGE_ROOTS): the checkpoint is fed to torch.load(weights_only=False), an
-    # arbitrary-pickle sink, so an unconfined path is the sharpest edge here. No-op when unset.
+    # Confine client-supplied paths to the allowed roots (TCIP_IMAGE_ROOTS): a caller must not
+    # name a file outside them, registered checkpoint or not. No-op when unset.
     try:
         for p in (payload.checkpoint_path, payload.dataset_root):
             assert_path_allowed(p)

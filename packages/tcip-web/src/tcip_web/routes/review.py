@@ -1453,8 +1453,8 @@ class LaunchPriorityQueuePayload(BaseModel):
 
 @router.post("/queue/launch")
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
-    # checkpoint_path reaches torch.load via build_predictor (the same arbitrary-pickle sink the
-    # Inference tab's own launch route confines): same guard, same treatment.
+    # checkpoint_path is confined to the allowed roots, same as the Inference tab's own launch
+    # route: a caller must not name a file outside them, registered checkpoint or not.
     dataset_root = _guarded(payload.dataset_root)
     checkpoint_path = _guarded(payload.checkpoint_path)
     images_dir = _guarded(payload.images_dir)

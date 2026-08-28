@@ -151,7 +151,7 @@ def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_r
                      tile=False)
     bucket = Path(result["output_dir"])
 
-    assert (bucket / "capture_a.json").is_file()  # the predictions themselves, never refused
+    assert (bucket / "capture_a.json").is_file()  # written once the registered checkpoint admits
     pointer = read_operating_point_sidecar(bucket)["validated_by"]
     assert experiment_exists(pointer["experiment_id"])
     row = find_validation(pointer["experiment_id"], pointer["record_digest"])
