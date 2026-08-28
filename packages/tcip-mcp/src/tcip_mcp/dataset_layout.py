@@ -199,8 +199,8 @@ def image_key(dataset_root: str | Path, date: str, stem: str, ext: str) -> Key:
     read-modify-writes it. Path-readable because the readers open it through libraries that
     take a path (rasterio, PIL) rather than a file object.
 
-    ``date`` is required, on the same terms as :func:`label_key`: an undated layout has labels
-    and predictions this key shape cannot address either.
+    ``date`` is required: an undated layout has imagery this key shape cannot address, on the
+    same terms as the undated annotation and prediction trees.
     """
     if not date:
         raise ValueError(
@@ -940,38 +940,6 @@ def annotation_path(
     return annotation_dir(dataset_root, date) / label_filename(stem, fmt)
 
 
-LABELS_STORE = "labels"
-register_store(
-    StoreDescriptor(
-        name=LABELS_STORE,
-        kind="blob",
-        key_fields=("date", "stem"),
-        enumerable=True,
-        path_readable=True,
-        locator=_LABEL_TREE,
-    )
-)
-
-
-def label_key(dataset_root: str | Path, date: str, stem: str) -> Key:
-    """One image's ground-truth labels, every subject's records in one document.
-
-    A blob: the labels are the breeder's own data and travel with the image set under any
-    backend, and their version is the hash of the document ``json_io`` encodes, which is what
-    lets the GUI's load-edit-save pair compare and set instead of checking and hoping.
-
-    ``date`` is required. A dataset whose images are not date-nested has labels this key
-    cannot address, and which layout segment stands in for the date there is a question the
-    storage design does not answer.
-    """
-    if not date:
-        raise ValueError(
-            f"label_key needs a capture date for {stem!r}: the undated dataset layout "
-            f"({annotation_dir(dataset_root, None)}) has no key shape yet"
-        )
-    return Key(LABELS_STORE, str(dataset_root), (date, stem))
-
-
 def annotation_path_for_image(
     image_path: str | Path,
     fmt: str = "json",
@@ -991,36 +959,6 @@ def prediction_path(
     fmt: str = "json",
 ) -> Path:
     return prediction_dir(dataset_root, model, date) / label_filename(stem, fmt)
-
-
-PREDICTIONS_STORE = "predictions"
-register_store(
-    StoreDescriptor(
-        name=PREDICTIONS_STORE,
-        kind="blob",
-        key_fields=("model", "date", "stem"),
-        enumerable=True,
-        path_readable=True,
-        locator=_PREDICTION_TREE,
-    )
-)
-
-
-def prediction_key(dataset_root: str | Path, model: Optional[str], date: str, stem: str) -> Key:
-    """One image's predictions inside one model bucket.
-
-    A blob, on the same terms as :func:`label_key`: it is written whole from a run's own output
-    and travels with the dataset. A bucket a human has reviewed is protected by
-    ``prediction_buckets``, which redirects the run rather than replacing the file.
-
-    ``date`` is required, on the same terms as :func:`label_key`.
-    """
-    if not date:
-        raise ValueError(
-            f"prediction_key needs a capture date for {stem!r}: the undated dataset layout "
-            f"({prediction_dir(dataset_root, model, None)}) has no key shape yet"
-        )
-    return Key(PREDICTIONS_STORE, str(dataset_root), (model or DEFAULT_MODEL, date, stem))
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
