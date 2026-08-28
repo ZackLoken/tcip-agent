@@ -15,7 +15,6 @@ copied image's dimensions (the canonical JSON is pixel-space), no inference re-r
 from __future__ import annotations
 
 import os
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -234,13 +233,19 @@ def materialize_dataset(
     images_out.mkdir(parents=True, exist_ok=True)
     labels_out.mkdir(parents=True, exist_ok=True)
 
-    place = shutil.copy2 if copy_files else os.symlink
     counts = {"positive": 0, "hard_negative": 0, "skipped": 0, "total_boxes": 0,
               "missing_images": 0, "unconfirmed_negative": 0, "boundary_refused": 0}
     subjects: set[str] = set()
     manifest_images: list[dict] = []
     negative_verdicts: dict[str, dict] = {}
     boundary_refused: list[dict] = []
+
+    from tcip_mcp.pipelines.image_utils import (
+        flat_image_key, image_dimensions, place_logical_image, stem_of,
+    )
+
+    def _dest_key(filename: str) -> Key:
+        return flat_image_key(images_out, filename)
 
     for img_name, info in partition.items():
         status = info["status"]
@@ -252,9 +257,9 @@ def materialize_dataset(
             counts["missing_images"] += 1
             continue
 
-        from tcip_mcp.pipelines.image_utils import image_dimensions, place_logical_image, stem_of
-
-        record_name = place_logical_image(src, images_out, place)
+        record_name = place_logical_image(
+            src, images_out, copy_files=copy_files, dest_key=_dest_key
+        )
         stem = stem_of(src)
         label_path = labels_out / label_filename(stem)
         img_w, img_h = image_dimensions(src)

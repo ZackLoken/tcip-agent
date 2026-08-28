@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -9,11 +10,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PIL import Image
 
+import tcip_store
+from tcip_store import Key, StoreDescriptor, Version, VersionConflict, register_store
+from tcip_store.file_backend import RootedFileLocator
+
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
     BandGroupIncomplete,
     BandGroupRef,
     MANIFEST_EXT,
+    band_group_manifest_key,
     read_band_group_manifest,
 )
 from tcip_mcp.pipelines.raster_source import Rect
@@ -23,8 +29,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
-    "capture_kind", "crop_pad_tile", "image_dimensions", "list_logical_images", "load_image",
-    "load_multiband", "logical_image_name", "pad_tile", "pil_to_tensor",
+    "capture_kind", "crop_pad_tile", "flat_image_key", "image_dimensions", "list_logical_images",
+    "load_image", "load_multiband", "logical_image_name", "pad_tile", "pil_to_tensor",
     "place_logical_image", "resolve_image_source", "stem_of", "to_pil_if_faithful",
 ]
 
@@ -139,32 +145,94 @@ def logical_image_name(source: "Path | BandGroupRef") -> str:
     return source.manifest_path.name if isinstance(source, BandGroupRef) else source.name
 
 
+FLAT_IMAGE_STORE = "flat_image"
+_FLAT_IMAGE_LOCATOR = RootedFileLocator()
+register_store(
+    StoreDescriptor(
+        name=FLAT_IMAGE_STORE,
+        kind="blob",
+        key_fields=("filename",),
+        locator=_FLAT_IMAGE_LOCATOR,
+    )
+)
+
+
+def flat_image_key(images_dir: str | Path, filename: str) -> Key:
+    """One placed image's bytes, addressed by the flat directory it was materialized into.
+
+    A directory-rooted, one-part blob key sibling to ``annotation_record_key`` and
+    ``band_group_manifest_key``'s own shape, for a curated dataset's or a materialized split's
+    ``images/`` tree, which holds every placed band and plain image directly with no further
+    layout claim. This is a different tree from ``image_key``'s dated ingest layout, not a
+    second address for the same one: an ingested capture and a placed copy of it are two
+    distinct stores that may legally coexist over one file, since the file backend locks the
+    canonical path, not the store name.
+    """
+    return Key(FLAT_IMAGE_STORE, str(Path(images_dir).absolute()), (filename,))
+
+
 def place_logical_image(
-    source: "Path | BandGroupRef", dest_dir: str | Path, place_fn: "Callable[[str, str], None]",
+    source: "Path | BandGroupRef",
+    dest_dir: str | Path,
+    *,
+    copy_files: bool,
+    dest_key: "Callable[[str], Key]",
 ) -> str:
-    """Copies (or symlinks, via ``place_fn``) one logical image into ``dest_dir`` and returns the
-    name :func:`logical_image_name` gives it there.
+    """Copies (or symlinks) one logical image into ``dest_dir`` and returns the name
+    :func:`logical_image_name` gives it there.
 
     A :class:`BandGroupRef` places every sibling band it names plus its own ``.bandgroup``
     manifest: the manifest alone resolves to nothing once its siblings are absent, so a caller
-    materializing a band-grouped capture (a curated review tree, a train/val split) must place the
-    whole group, never the manifest by itself. A plain path places just that one file. A
-    destination already present is left alone, so calling this once per split member for a group
-    shared across members does no redundant work.
+    materializing a band-grouped capture (a curated review tree, a train/val split) must place
+    the whole group, never the manifest by itself. A plain path places just that one file.
+
+    ``copy_files=True`` routes each band and plain image through the store under
+    ``dest_key(filename)`` -- the caller's own key, since deriving one from ``dest_dir`` here
+    would nest ``images/images/`` -- and the destination manifest through its own
+    ``band_group_manifest_key(dest_dir, stem)``, so that store earns its row rather than
+    borrowing the imagery one. Each write is create-only (``expect=Version.ABSENT``); a caught
+    ``VersionConflict`` is the leave-alone answer, atomic under the key's lock, so calling this
+    once per split member for a group shared across members, or a re-run over an existing tree,
+    does no redundant work.
+
+    ``copy_files=False`` symlinks instead, a filesystem operation the store takes no part in: a
+    destination is checked for presence with ``os.path.lexists`` (a dangling link reads as
+    present here, where the store-routed copy above would overwrite one) before ``os.symlink``,
+    whose ``FileExistsError`` is also caught, for idempotency against a concurrent placement of
+    the same link.
     """
     dest_dir = Path(dest_dir)
+
+    def _place_copy(src_path: Path, key: Key) -> None:
+        try:
+            tcip_store.put_blob_from_path(key, src_path, expect=Version.ABSENT)
+        except VersionConflict:
+            pass  # already placed: a shared band group or a re-run over an existing tree
+
+    def _place_symlink(src_path: Path, dst: Path) -> None:
+        if os.path.lexists(dst):
+            return
+        try:
+            os.symlink(str(src_path), str(dst))
+        except FileExistsError:
+            pass  # a concurrent placement won the race; the link is there either way
+
     if isinstance(source, BandGroupRef):
         for band_path in source.bands.values():
-            dst_band = dest_dir / band_path.name
-            if not dst_band.exists():
-                place_fn(str(band_path), str(dst_band))
-        dst_manifest = dest_dir / source.manifest_path.name
-        if not dst_manifest.exists():
-            place_fn(str(source.manifest_path), str(dst_manifest))
+            if copy_files:
+                _place_copy(band_path, dest_key(band_path.name))
+            else:
+                _place_symlink(band_path, dest_dir / band_path.name)
+        if copy_files:
+            _place_copy(source.manifest_path, band_group_manifest_key(dest_dir, source.stem))
+        else:
+            _place_symlink(source.manifest_path, dest_dir / source.manifest_path.name)
         return source.manifest_path.name
-    dst = dest_dir / source.name
-    if not dst.exists():
-        place_fn(str(source), str(dst))
+
+    if copy_files:
+        _place_copy(source, dest_key(source.name))
+    else:
+        _place_symlink(source, dest_dir / source.name)
     return source.name
 
 

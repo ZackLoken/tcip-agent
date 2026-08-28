@@ -878,8 +878,9 @@ def make_splits(
     }
 
     if materialize:
-        from tcip_mcp.pipelines.image_utils import place_logical_image
+        from tcip_mcp.pipelines.image_utils import flat_image_key, place_logical_image
 
+        # Labels stay a raw file copy here; only the image placement below routes through the store.
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name in kept_splits:
             split_stems = bare_parts[split_name]
@@ -887,8 +888,14 @@ def make_splits(
             lbl_dir = out_dir / split_name / "labels"
             img_dir.mkdir(parents=True, exist_ok=True)
             lbl_dir.mkdir(parents=True, exist_ok=True)
+
+            def _dest_key(filename: str, _images_dir: Path = img_dir) -> Key:
+                return flat_image_key(_images_dir, filename)
+
             for stem in split_stems:
-                place_logical_image(image_map[stem], img_dir, place_fn)
+                place_logical_image(
+                    image_map[stem], img_dir, copy_files=copy_files, dest_key=_dest_key
+                )
                 if stem in label_map:
                     src_lbl = Path(label_map[stem])
                     dst_lbl = lbl_dir / src_lbl.name

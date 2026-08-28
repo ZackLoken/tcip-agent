@@ -42,7 +42,7 @@ from tcip_mcp import (
     web_client,
     workspace,
 )
-from tcip_mcp.pipelines import model_build, resolution
+from tcip_mcp.pipelines import image_utils, model_build, resolution
 from tcip_mcp.pipelines.data import band_groups, splits
 from tcip_mcp.pipelines.feedback import materialize
 from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -1553,6 +1553,10 @@ REGISTERED = {
         BAND_GROUP_MANIFEST_BYTES,
         lambda root: band_groups.band_group_manifest_key(_band_group_dir(root), "cap_ü"),
         f"images/cap_ü{band_groups.MANIFEST_EXT}", root_of=_band_group_dir),
+    "flat_image": Registered(
+        IMAGE_BYTES,
+        lambda root: image_utils.flat_image_key(_band_group_dir(root), "cap_ü.jpg"),
+        "images/cap_ü.jpg", root_of=_band_group_dir),
     "run_checkpoint": Registered(
         CHECKPOINT_BYTES, lambda root: generic_trainer.checkpoint_key(root, "model_best"),
         "model_best.pt"),
