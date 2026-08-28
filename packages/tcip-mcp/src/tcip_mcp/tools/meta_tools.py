@@ -478,7 +478,7 @@ def project_retrospective(
 
     from tcip_mcp.project_status import record_retrospective
 
-    record_retrospective(project_path, project_id, retro_path)
+    record_retrospective(project_path, project_id)
 
     return {
         "retrospective_path": _path_if_written(retro_path),

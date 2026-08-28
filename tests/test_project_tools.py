@@ -151,6 +151,21 @@ def test_inspect_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     assert status["recent_activity"]["reports_since_last_retrospective"] == 1
 
 
+def test_inspect_project_folds_in_last_retrospective_by_id_not_path(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    from tcip_mcp.tools.meta_tools import project_retrospective
+
+    init_project(str(tmp_path), site="north orchard")
+    project_retrospective(
+        str(tmp_path), project_id="p", task="t", worked="w", did_not_work="d",
+    )
+
+    status = inspect_project(str(tmp_path))
+    last = status["recent_activity"]["last_retrospective"]
+    assert last["project_id"] == "p"
+    assert "path" not in last
+
+
 def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
     from tcip_mcp.project_status import project_status_key, record_report

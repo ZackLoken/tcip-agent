@@ -84,19 +84,19 @@ def test_record_report_increments_both_counters(tmp_path: Path):
 def test_record_retrospective_resets_retro_counter_not_distillation(tmp_path: Path):
     record_report(tmp_path)
     record_report(tmp_path)
-    record_retrospective(tmp_path, "proj-a", tmp_path / ".tcip" / "retrospectives" / "proj-a.md")
+    record_retrospective(tmp_path, "proj-a")
 
     status = read_project_status(tmp_path)
     assert status["reports_since_last_retrospective"] == 0  # reset
     assert status["retrospectives_since_last_distillation"] == 1  # bumped, not reset
     assert status["last_retrospective"]["project_id"] == "proj-a"
     assert "content" not in status["last_retrospective"]  # pointer only, no cached text
-    assert status["last_retrospective"]["path"]
+    assert "path" not in status["last_retrospective"]  # backend-dependent, never persisted
     assert status["last_retrospective"]["modified_at"]
 
 
 def test_record_report_after_retrospective_does_not_reset_distillation_counters(tmp_path: Path):
-    record_retrospective(tmp_path, "proj-a", "x.md")
+    record_retrospective(tmp_path, "proj-a")
     record_report(tmp_path)
 
     status = read_project_status(tmp_path)
@@ -107,7 +107,7 @@ def test_record_report_after_retrospective_does_not_reset_distillation_counters(
 
 def test_record_distillation_resets_both_distillation_counters_only(tmp_path: Path):
     record_report(tmp_path)
-    record_retrospective(tmp_path, "proj-a", "x.md")
+    record_retrospective(tmp_path, "proj-a")
     record_report(tmp_path)
 
     record_distillation(tmp_path)
