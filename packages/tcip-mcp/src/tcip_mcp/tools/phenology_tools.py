@@ -183,14 +183,10 @@ def update_trait_spec_fields(
         fields: `TraitSpec` field names to new values, merged into the existing spec (unknown
             fields, off-vocab `delivers` entries, or an invalid value refuse the whole write).
     """
-    import dataclasses
-
     from tcip_mcp import operationalization, traits
 
     spec = traits.write_trait_spec_fields(trait_name, fields, project_root=project_root)
-    updated = {
-        k: (list(v) if isinstance(v, tuple) else v) for k, v in dataclasses.asdict(spec).items()
-    }
+    updated = traits._encode_spec(spec)
     updated["superseded"] = operationalization.superseded_confirmations(
         project_root, trait_name, spec=spec
     )
