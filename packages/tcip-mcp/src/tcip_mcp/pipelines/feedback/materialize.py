@@ -212,6 +212,13 @@ def materialize_dataset(
 ) -> dict:
     """Write ``output_dir/images/`` + ``output_dir/annotations/`` + manifest.
 
+    The label tree is flat: every image's label lands directly under ``annotations/``, with no
+    per-date segment, since a curated harvest has no capture date of its own to nest under. This
+    is the platform's own undated dataset layout (``annotation_dir(root, None)``), the same shape
+    ``_scan_dataset`` and ``_split_date_dirs`` already read as a dateless entry, not a deviation
+    from it: the per-image document is addressed through ``ANNOTATION_RECORDS_STORE``'s
+    directory-rooted key, which never required a date.
+
     ``subject`` is the object the review was about (the confirmed negatives are keyed under it). When
     omitted it is derived from every subject the verdicts name, rejections included, and answers only
     when they name exactly one. ``producer_model`` (best-effort) records the model whose predictions
