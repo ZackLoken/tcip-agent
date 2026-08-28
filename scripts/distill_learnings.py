@@ -23,7 +23,6 @@ audited, kept out of this script on purpose.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -170,6 +169,23 @@ def _read_retrospectives(project_root: Path) -> list:
     return retrospective_documents(str(project_root))
 
 
+def _read_captures(project_root: Path) -> list[dict]:
+    """Every SessionEnd capture entry for this project's root, through the store the hook
+    (`agent_learning_capture.py`) appends through, under whichever backend this process bound.
+
+    Importing the hook's module registers the log's store descriptor as a side effect, the
+    same way ``scripts/_store_bootstrap.py`` does for the tools that must cover every store.
+    An undecodable entry is excluded from what ``read_log`` returns here exactly as the old
+    direct file read skipped one it could not parse; that page also carries a `corrupt` count
+    of such entries this worksheet does not otherwise surface.
+    """
+    from tcip_store import read_log
+    from tcip_web.agent_learning_capture import learning_capture_key
+
+    page = read_log(learning_capture_key(project_root))
+    return [dict(r) for r in page.records]
+
+
 def build_worksheet(project_root: Path) -> str:
     """Assemble the Markdown distill worksheet (pure: no writes)."""
     lines: list[str] = [f"# Learning-review worksheet: {project_root}", ""]
@@ -206,15 +222,7 @@ def build_worksheet(project_root: Path) -> str:
             lines.append(f"- {document.name}")
 
     # SessionEnd capture backstop (machine-local; agent_learning_capture.py writes it).
-    cap_file = project_root / ".tcip" / "learning_capture.jsonl"
-    captures: list[dict] = []
-    if cap_file.is_file():
-        for line in cap_file.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                try:
-                    captures.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    captures = _read_captures(project_root)
     if captures:
         lines.append(f"\n## Session captures ({len(captures)}): SessionEnd backstop")
         for c in captures[-10:]:

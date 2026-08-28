@@ -35,14 +35,25 @@ def _seed_report(project_root: Path, report_id: str, entry: dict) -> None:
                expect=ts.Version.ABSENT)
 
 
+def _seed_capture(project_root: Path, session_id: str) -> None:
+    """Record one SessionEnd capture through the hook's own writer, the way the hook does."""
+    from tcip_web import agent_learning_capture
+
+    stdin = io.StringIO(json.dumps({"session_id": session_id, "cwd": str(project_root)}))
+    old_stdin, sys.stdin = sys.stdin, stdin
+    try:
+        agent_learning_capture.main()
+    finally:
+        sys.stdin = old_stdin
+
+
 def test_distill_worksheet_gathers_reports_captures_and_themes(tmp_path):
     distill = _load_distill()
     _seed_report(tmp_path, "r", {"category": "needs_human_judgment",
                                  "detail": "the EXIF orientation thing"})
-    # The capture backstop is a plain file the worksheet reads directly, so it is written once the
-    # seam already holds this root: a record file beside an empty database is what the store refuses.
-    (tmp_path / ".tcip" / "learning_capture.jsonl").write_text(
-        json.dumps({"ts": "2026-01-01T00:00:00Z", "session_id": "s1"}) + "\n", encoding="utf-8")
+    # The capture backstop is a log the worksheet now reads through the store, the same seam the
+    # SessionEnd hook appends through, so it is visible under whichever backend this test binds.
+    _seed_capture(tmp_path, "s1")
 
     ws = distill.build_worksheet(tmp_path)
     assert "Friction reports (1)" in ws
