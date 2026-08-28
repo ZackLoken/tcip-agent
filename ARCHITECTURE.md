@@ -1431,7 +1431,7 @@ to a named `split_manifest` record (format 26) carries here, is exercised by
 
 Path: `<project_path>/.tcip/models/registry.json`.
 
-Writer: `register_entry`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py`, the one write both
+Writer: `_register_entry`, `packages/tcip-mcp/src/tcip_mcp/model_registry.py`, the one write both
 registration modes share, replacing one entry by name inside one storage-seam transaction on the
 key `registry_index_key` mints so a concurrent registrar's entries are not clobbered.
 `ModelRegistry.register_model` wraps it for explicit mode (`experiment_id=None`, its own hash of
@@ -1439,7 +1439,7 @@ key `registry_index_key` mints so a concurrent registrar's entries are not clobb
 digest a completed run's own `complete_run` already recorded, and `experiment_id` set to that run.
 An entry a run bound this way (`experiment_id` non-null) refuses a replace by anything but that
 run (`EntryOwnedByRun`); the retired `experiment:<id>` tag convention is written by nothing any
-more. `register_model`/`register_entry` take `metrics_source` as a required keyword, `"trainer"` /
+more. `register_model`/`_register_entry` take `metrics_source` as a required keyword, `"trainer"` /
 `"training_source"` / `"caller"` / `None`, naming which path produced `metrics` without claiming
 anyone verified it; only the two production callers set it, `register_model_from_experiment`
 (reading whether the run's config carries `training_source`) and the `register_model` tool's
