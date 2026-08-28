@@ -83,9 +83,9 @@ def _open_project_root(stated: Optional[str] = None) -> Path:
 
 def _evidence_roots(root: Path) -> list[Path]:
     """The open project's own tree plus every dataset root registered to it."""
-    from tcip_mcp.tools.project_tools import read_datasets
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
-    return [root, *(Path(e["path"]) for e in read_datasets(root) if e.get("path"))]
+    return [root, *(dataset_entry_path(root, e) for e in read_datasets(root) if e.get("path"))]
 
 
 def _belonging(root: Path, *paths: Optional[str]) -> list[Optional[Path]]:

@@ -68,10 +68,9 @@ def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:
     ]
     seen = {os.path.normcase(str(root))}
     for entry in project_tools.read_datasets(root):
-        path = entry.get("path")
-        if not isinstance(path, str) or not path:
+        if not entry.get("path"):
             continue
-        dataset_root = Path(path).absolute()
+        dataset_root = project_tools.dataset_entry_path(root, entry).absolute()
         if os.path.normcase(str(dataset_root)) in seen:
             continue
         seen.add(os.path.normcase(str(dataset_root)))

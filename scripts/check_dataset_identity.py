@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from tcip_mcp.dataset_layout import dataset_identity_path
 from tcip_mcp.pipelines.resolution import dataset_fingerprint
-from tcip_mcp.tools.project_tools import read_datasets
+from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
 
 def main() -> int:
@@ -56,12 +57,19 @@ def main() -> int:
               f"(recorded={recorded} current={current}); a number reproduced from it is no longer valid")
         status = 2
 
-    # Moved: the project registry knows this id at a different path.
-    regs = read_datasets(args.project or root)
+    # Moved: the project registry knows this id at a different path, by identity rather than a
+    # stored-versus-passed spelling (a relatively-registered "." entry is not a move).
+    project = args.project or root
+    regs = read_datasets(project)
     same_id = [r for r in regs if r.get("id") == ds_id]
     for r in same_id:
-        if Path(r.get("path", "")) != root and r.get("fingerprint") == current:
-            print(f"  MOVED: id {ds_id} is registered at {r.get('path')} but the same content is now at {root}")
+        entry_path = dataset_entry_path(project, r)
+        try:
+            same_as_root = os.path.samefile(entry_path, root)
+        except OSError:
+            same_as_root = False
+        if not same_as_root and r.get("fingerprint") == current:
+            print(f"  MOVED: id {ds_id} is registered at {entry_path} but the same content is now at {root}")
     return status
 
 

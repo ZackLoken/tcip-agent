@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
 import zipfile
@@ -74,6 +75,49 @@ def read_datasets(project_root: str | Path) -> list[dict]:
     return _registry_entries(tcip_store.read(dataset_registry_key(project_root), default=[]))
 
 
+def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str:
+    """What a dataset registry entry stores for ``path``: relative to ``project_root`` when
+    ``dataset_root`` is that root or sits under it, the project's own tree becoming ``"."``;
+    absolute otherwise, and a ``".."`` form is never produced.
+
+    Containment is decided by filesystem identity (``os.path.samefile`` over the resolved
+    dataset root's own ancestors), never a string or ``Path.relative_to`` comparison on the
+    caller's own spellings, so a case variant, an alias or a junction of either root reads
+    exactly as the filesystem sees it. One implementation, called by :func:`register_dataset`
+    and by ``scripts/conform_dataset_registry_paths.py``, the one-off script that carries an
+    already-registered project onto this rule. Absolute (unchanged) whenever either side is not
+    an existing directory: there is nothing to compare a missing path against.
+    """
+    dataset_root, project_root = Path(dataset_root), Path(project_root)
+    if dataset_root.is_dir() and project_root.is_dir():
+        resolved = dataset_root.resolve()
+        for ancestor in (resolved, *resolved.parents):
+            try:
+                if os.path.samefile(ancestor, project_root):
+                    return str(resolved.relative_to(ancestor))
+            except OSError:
+                continue
+    return str(dataset_root)
+
+
+def dataset_entry_path(project_root: str | Path, entry: dict) -> Path:
+    """The absolute path a dataset registry ``entry`` names, resolving a relative ``path``
+    (the project's own tree, stored ``"."`` or a deeper relative form by
+    :func:`registry_path_for`) against ``project_root``; an already-absolute ``path`` (an
+    external dataset) is returned unchanged.
+
+    The one place a registry entry's location becomes a path: every reader of
+    :func:`read_datasets` calls this rather than re-deriving the resolution, so a project's own
+    relative entry and an external dataset's absolute one are handled identically wherever the
+    registry is read.
+    """
+    path = entry.get("path")
+    if not path:
+        raise ValueError(f"dataset registry entry {entry!r} carries no path")
+    p = Path(path)
+    return p if p.is_absolute() else Path(project_root) / p
+
+
 def upsert_dataset(project_root: str | Path, entry: dict) -> None:
     """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset updates
     the ``path`` of its existing id rather than duplicating, so identity survives a move.
@@ -106,6 +150,12 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     document no longer names. A conflict re-reads what committed and keeps the id it carries, and
     the project registry is reconciled against that committed id rather than the one this call
     proposed.
+
+    The registry's stored ``path`` (see :func:`registry_path_for`) is relative to
+    ``project_root`` whenever the dataset sits under it, the project's own tree becoming
+    ``"."``; a genuinely external dataset stays absolute. A relative entry resolves at whatever
+    path the project itself is opened from, so a project archived and imported elsewhere, or
+    renamed in place, needs no operator rewrite of its own registry.
 
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``annotations/``, ``classes.json``).
@@ -156,8 +206,8 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         break
 
     proj = Path(project_root) if project_root else root
-    upsert_dataset(proj, {"id": identity["id"], "path": str(root), "crop": crop,
-                          "fingerprint": fingerprint})
+    upsert_dataset(proj, {"id": identity["id"], "path": registry_path_for(root, proj),
+                          "crop": crop, "fingerprint": fingerprint})
     return {"dataset_root": str(root), **identity}
 
 

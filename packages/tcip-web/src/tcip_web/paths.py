@@ -55,7 +55,7 @@ def allowed_roots() -> list[Path]:
     A project whose dataset registry will not decode raises rather than contributing nothing: an
     empty answer would strand that project's external data silently.
     """
-    from tcip_mcp.tools.project_tools import read_datasets
+    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
     from tcip_mcp.workspace import workspace_root
     from tcip_store import DecodeError
 
@@ -72,7 +72,7 @@ def allowed_roots() -> list[Path]:
                 f"the dataset registry of project {project} will not decode, so its registered "
                 f"roots cannot be admitted: {exc}"
             ) from exc
-        roots.extend(Path(e["path"]) for e in entries if e.get("path"))
+        roots.extend(dataset_entry_path(project, e) for e in entries if e.get("path"))
     roots.extend(allowed_image_roots())
     seen: set[str] = set()
     unique: list[Path] = []
