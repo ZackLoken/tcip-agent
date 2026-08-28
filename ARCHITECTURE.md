@@ -1586,15 +1586,15 @@ instead.
 ## 20. `.tcip/state/project_status.json`, per-project activity pointer
 
 Path: `<project_path>/.tcip/state/project_status.json`, addressed by `project_status_key`,
-`packages/tcip-mcp/src/tcip_mcp/project_status.py:53`, on the store `PROJECT_STATUS_STORE`,
-`project_status.py:39`; `project_status_path`, `project_status.py:63`, is the same address as a
+`packages/tcip-mcp/src/tcip_mcp/project_status.py:56`, on the store `PROJECT_STATUS_STORE`,
+`project_status.py:42`; `project_status_path`, `project_status.py:66`, is the same address as a
 path for a caller that needs one.
 
-Writers: `record_report`, `project_status.py:119`; `record_retrospective`,
-`project_status.py:135`; `record_distillation`, `project_status.py:155`; all via the shared
-locked read-modify-write `_update`, `project_status.py:89`.
+Writers: `record_report`, `project_status.py:122`; `record_retrospective`,
+`project_status.py:138`; `record_distillation`, `project_status.py:158`; all via the shared
+locked read-modify-write `_update`, `project_status.py:92`.
 
-Reader: `read_project_status`, `project_status.py:69`.
+Reader: `read_project_status`, `project_status.py:72`.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project_status.json`. S09 ("Web
 job registries persisted to .tcip/state/<name>.json") names a structurally similar but distinct
