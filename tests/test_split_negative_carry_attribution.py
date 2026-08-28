@@ -238,7 +238,7 @@ def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
     """A confirmed negative whose label file will not read is caught by the admission's own read,
     before any stem list, manifest or split tree is written: the call answers an error dict
     naming the file, and nothing from this call is left on disk."""
-    from tcip_mcp.tools.data_tools import split_manifest_key, split_stem_list_key
+    from tcip_mcp.tools.data_tools import split_manifest_key
 
     root = _dataset_with_one_confirmed_negative(tmp_path / "ds")
     bad = root / "annotations" / DATE / f"{NEGATIVE_STEM}.json"
@@ -253,6 +253,4 @@ def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
     assert "error" in result
     assert str(bad) in result["error"]
     assert not ts.exists(split_manifest_key(out))
-    assert not ts.exists(split_stem_list_key(out, "train"))
-    assert not ts.exists(split_stem_list_key(out, "val"))
     assert not out.exists()

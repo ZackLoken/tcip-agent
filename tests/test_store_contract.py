@@ -1604,9 +1604,6 @@ REGISTERED = {
     "dataset_registry": Registered(
         [{"id": "a1", "path": "dü", "crop": "hazelnut", "fingerprint": "9f2c"}],
         project_tools.dataset_registry_key, ".tcip/datasets.json"),
-    "split_stem_list": Registered(
-        ["a_1", "ü_2"], lambda root: data_tools.split_stem_list_key(_split_dir(root), "train"),
-        "splits/train.json", root_of=_split_dir),
     "split_manifest": Registered(
         {"seed": 42, "dataset_hash": "9f2c", "group_by": "stem_prefix",
          "labels_root": "ü/annotations", "dataset_fingerprint": "7ac1",

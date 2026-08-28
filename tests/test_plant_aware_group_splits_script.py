@@ -287,7 +287,7 @@ def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_manifest(
 ) -> None:
     """--train-ratio, --val-ratio and --calibration-ratio have no default and are all stated:
     the write lands a real three-sided manifest."""
-    from tcip_mcp.tools.data_tools import split_manifest_key, split_stem_list_key
+    from tcip_mcp.tools.data_tools import split_manifest_key
 
     dataset_root = _four_plant_dataset(tmp_path)
 
@@ -297,11 +297,11 @@ def test_main_cli_states_all_three_ratios_and_writes_a_three_sided_manifest(
               "--output-path", str(out_dir)])
 
     assert rc == 0
-    assert ts.exists(split_stem_list_key(out_dir, "train"))
-    assert ts.exists(split_stem_list_key(out_dir, "val"))
-    assert ts.exists(split_stem_list_key(out_dir, "calibration"))
     manifest = ts.read(split_manifest_key(out_dir))
     assert set(manifest["splits"]) == {"train", "val", "calibration"}
+    assert manifest["splits"]["train"]
+    assert manifest["splits"]["val"]
+    assert manifest["splits"]["calibration"]
 
 
 def test_main_cli_missing_a_required_ratio_flag_refuses(tmp_path: Path, four_plant_csv: Path) -> None:
