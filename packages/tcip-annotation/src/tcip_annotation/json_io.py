@@ -68,6 +68,7 @@ register_store(
         name=ANNOTATION_RECORDS_STORE,
         kind="blob",
         key_fields=("stem",),
+        path_readable=True,
         locator=_ANNOTATION_RECORD_LOCATOR,
     )
 )
