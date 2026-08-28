@@ -139,9 +139,19 @@ class TrainContext:
 
     def auto_train_val(self, task: str | None = None, data_cfg: dict | None = None,
                        transforms: Any = None) -> Any:
+        """``(train_ds, val_ds)``, the seam a bespoke ``train(ctx)`` body writes against.
+
+        ``_auto_train_val`` also resolves a manifest-bound run's per-stem label digests as a
+        third value; that value reaches ``_persist_split_manifest`` through the internal bind
+        path (``subprocess_worker.run`` and this envelope's own binder), never through this
+        seam, so a caller written as ``train_ds, val_ds = ctx.auto_train_val()`` is not broken by
+        a change to what the bind path itself records.
+        """
         from tcip_mcp.tools.training_tools import _auto_train_val
 
-        return _auto_train_val(task or self.task, data_cfg or self.config.get("data", {}), transforms)
+        train_ds, val_ds, _label_digests = _auto_train_val(
+            task or self.task, data_cfg or self.config.get("data", {}), transforms)
+        return train_ds, val_ds
 
     def compute_class_weights(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.components.losses import compute_class_weights
