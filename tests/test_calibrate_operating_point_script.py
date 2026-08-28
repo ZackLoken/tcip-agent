@@ -336,3 +336,36 @@ def test_script_split_manifest_dir_conflicts_with_group_by(tmp_path):
               "--subject", "catkin", "--group-by", "stem"])
 
     assert rc == 2
+
+
+def test_script_runs_end_to_end_with_a_checkpoint_registered_under_project_root(
+    tmp_path, seed_catkin_trait_spec,
+):
+    """The admitting half of the registry rail: no stub anywhere on the checkpoint's own path,
+    a real load_registered_checkpoint against --project-root, and the script completes."""
+    from PIL import Image
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    labels_dir = tmp_path / "labels"
+    labels_dir.mkdir()
+    for i in range(3):
+        Image.new("RGB", (64, 64), (100, 100, 100)).save(images_dir / f"img{i}.png")
+        json_io.write_annotations(
+            str(labels_dir / f"img{i}.json"),
+            [Annotation(subject="catkin", geometry=BBox(10, 10, 40, 40))], 64, 64)
+
+    from scripts.calibrate_operating_point import main
+
+    rc = main([
+        "--checkpoint", ckpt, "--trait", "catkin", "--subject", "catkin",
+        "--labels-dir", str(labels_dir), "--images-dir", str(images_dir),
+        "--dataset-root", str(tmp_path), "--project-root", str(tmp_path),
+    ])
+    assert rc == 0
