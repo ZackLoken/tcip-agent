@@ -378,7 +378,11 @@ def inspect_project(project_path: str = "") -> dict:
 
     For a project with ``.tcip``, carries ``site`` and ``site_problem`` from
     ``tcip_mcp.project_record.site_fields``: exactly one is set, and ``site_problem`` names why
-    there is no site (no record yet, a damaged one, or a root the store refuses to read). A path
+    there is no site (no record yet, a damaged one, or a root the store refuses to read). ``plant_
+    mappings`` carries every mapping name persisted under the project, the same shape:
+    ``plant_mappings_problem`` names why the listing came back empty when the root's state is a
+    store the bound backend refuses to read (a root still in the loose-file layout under the
+    database default), rather than raising and taking the whole overview down with it. A path
     with no ``.tcip`` carries neither, the same as it carries no other live-computed field.
 
     Args:
@@ -433,9 +437,15 @@ def inspect_project(project_path: str = "") -> dict:
         )
         status["dates"] = dataset_layout.list_dates(root)
 
+    from tcip_store import StoreError
+
     from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_names
 
-    status["plant_mappings"] = plant_mapping_names(root)
+    try:
+        status["plant_mappings"] = plant_mapping_names(root)
+    except StoreError as exc:
+        status["plant_mappings"] = []
+        status["plant_mappings_problem"] = str(exc)
 
     status["recent_activity"] = _recent_activity(project_path)
     return status

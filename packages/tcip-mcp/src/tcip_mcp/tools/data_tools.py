@@ -78,7 +78,9 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     run names its ``data.split.manifest_dir`` through.
 
     Refuses with ``ValueError`` naming ``split_dir`` when the record is absent, undecodable, not
-    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, lacks any name
+    a mapping, lacks any key of :data:`_SPLIT_MANIFEST_REQUIRED_KEYS`, holds a ``members`` block
+    whose ``label_digests`` is missing or not a non-empty mapping (a manifest drawn before the
+    platform recorded per-stem digests binds nothing here), lacks any name
     :data:`~tcip_mcp.pipelines.data.splits.SPLIT_NAMES` states under ``splits``, or whose sides
     are not pairwise disjoint (a member on two sides would be trained on and selected on, or
     trained on and held out for calibration, at once). One reader, one refusal: the binder, the
@@ -111,7 +113,8 @@ def read_split_manifest_dir(split_dir: str | Path) -> dict:
     members = manifest.get("members")
     dates_missing_label_digests = sorted(
         date_key for date_key, block in (members if isinstance(members, dict) else {}).items()
-        if not isinstance(block, dict) or "label_digests" not in block
+        if not isinstance(block, dict) or not isinstance(block.get("label_digests"), dict)
+        or not block["label_digests"]
     )
     if dates_missing_label_digests:
         raise ValueError(

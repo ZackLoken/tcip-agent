@@ -589,12 +589,21 @@ def _resolve_label_movement(
     ``split.json``'s ``label_digests`` block (``at_split``/``at_run``/``manifest_sha256``) and
     the calibration's own labels directory, when it read one.
 
-    All four keys ``None`` when the run recorded no ``label_digests`` block: a run bound before
-    that block existed, or an unbound run calibrated under a caller-named manifest. Otherwise the
-    two digest dictionaries share one key set (the draw's), so a stem present only in ``at_run``
-    or added to the calibration universe after the draw is named by no key.
+    All four keys ``None`` when the run recorded no ``label_digests`` block, or recorded one with
+    an empty ``at_split`` (a run bound before that block existed, or an unbound run calibrated
+    under a caller-named manifest): "not checked" must never read as "nothing moved". Otherwise
+    the two digest dictionaries share one key set (the draw's), so a stem present only in
+    ``at_run`` or added to the calibration universe after the draw is named by no key.
+
+    The second window (``labels_moved_run_to_now``) is scoped to ``cal_ids``, the calibration's
+    own universe, rather than to every stem of ``at_run``: ``calibration_labels_dir`` may be one
+    of several already-split per-image directories (a classifier calibration's own GT dir, say),
+    holding only the calibration side's own files, so recomputing over the run's whole bound set
+    would read a train- or val-side stem's absence as a move it never made. When the scoped set is
+    empty (the named directory holds none of ``at_run``'s documents), the second window is left
+    unsealed (``None``) rather than sealed empty, since nothing in it was actually checked.
     """
-    if not label_digests_block:
+    if not label_digests_block or not label_digests_block.get("at_split"):
         return {
             "labels_moved_draw_to_run": None,
             "labels_moved_run_to_now": None,
@@ -608,10 +617,11 @@ def _resolve_label_movement(
 
     labels_moved_draw_to_run = sorted(
         stem for stem, digest in at_split.items() if at_run.get(stem) != digest)
-    if calibration_labels_dir is not None:
-        now = label_digests(calibration_labels_dir, sorted(at_run))
+    scoped = sorted(set(at_run) & cal_ids) if calibration_labels_dir is not None else []
+    if scoped:
+        now = label_digests(calibration_labels_dir, scoped)
         labels_moved_run_to_now = sorted(
-            stem for stem, digest in at_run.items() if now.get(stem) != digest)
+            stem for stem in scoped if now.get(stem) != at_run.get(stem))
     else:
         labels_moved_run_to_now = None
 
@@ -657,8 +667,9 @@ def _selection_disjointness(
 
     Returns the same shape :func:`_train_disjointness` does, plus ``applicable``/``reason``, and
     on the applicable path the four label-movement keys plus ``calibration_labels_dir``
-    (:func:`_resolve_label_movement`): ``null`` for all five, and ``reason`` naming why, when the
-    run recorded no ``label_digests`` block on its ``split.json``.
+    (:func:`_resolve_label_movement`): the four movement keys ``null``, ``calibration_labels_dir``
+    preserved from the caller, and ``reason`` naming why, when the run recorded no
+    ``label_digests`` block on its ``split.json`` or recorded one with an empty ``at_split``.
     """
     if experiment_id is None:
         if split_manifest_dir is not None:
@@ -720,7 +731,7 @@ def _selection_disjointness(
     moved = _resolve_label_movement(
         label_digests_block, cal_ids, calibration_labels_dir, split_manifest_sha256)
     reason = None
-    if not label_digests_block:
+    if not label_digests_block or not label_digests_block.get("at_split"):
         reason = (
             "this run's split.json recorded no label_digests block, so a calibration label "
             "moved since the draw cannot be named: the run was bound before that block existed, "

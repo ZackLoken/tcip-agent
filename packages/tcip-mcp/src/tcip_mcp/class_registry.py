@@ -511,14 +511,18 @@ def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
     Refuses (``RegistryError``) when the directories span more than one dataset root, the same
     check ``registry_for_pred_dirs`` makes, and refuses by name when none resolves to a dataset
     root at all: a plant-mapping delivery needs the dataset the buckets belong to, and buckets
-    under no dataset root cannot supply one.
+    under no dataset root cannot supply one. This is a mapping-delivery-only requirement:
+    ``export_predictions`` itself writes and reads a bucket under no dataset root fine, only this
+    dataset-bound delivery refuses it.
     """
     root = _distinct_dataset_root(pred_dirs)
     if root is None:
         raise RegistryError(
             f"none of the prediction directories {[str(d) for d in pred_dirs]} resolves to a "
             "dataset root, so there is no dataset for a plant-mapping delivery to attribute "
-            "these predictions to"
+            "these predictions to; re-export under the dataset's own predictions tree "
+            "(images/<date>/ sibling), or register this bucket's root as a dataset through "
+            "register_dataset"
         )
     return root
 
