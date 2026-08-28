@@ -219,6 +219,26 @@ def label_baseline_key(label_dir: str | Path, stem: str) -> Key:
     return Key(LABEL_BASELINES_STORE, str(Path(label_dir).absolute()), (str(stem),))
 
 
+def capture_label_baseline(label_path: str | Path) -> bool:
+    """Capture one label file's current bytes as its pristine baseline, if none is held yet.
+
+    Create-only: a baseline already on record is left alone rather than overwritten by this
+    call's read, so a capture that lands in between two callers is never clobbered by the
+    later one. Returns ``True`` if this call captured a new baseline, ``False`` if one was
+    already held. The caller is responsible for confirming ``label_path`` names an existing
+    file first; this function only performs the capture.
+    """
+    src = Path(label_path)
+    try:
+        tcip_store.put_blob(
+            label_baseline_key(src.parent, src.stem), src.read_bytes(),
+            expect=Version.ABSENT,
+        )
+    except tcip_store.VersionConflict:
+        return False
+    return True
+
+
 # ── Engine ────────────────────────────────────────────────────────────────
 
 
@@ -816,14 +836,8 @@ class ReviewEngine:
             for src in d.iterdir():
                 if not (src.is_file() and src.suffix == ".json"):
                     continue
-                try:
-                    tcip_store.put_blob(
-                        label_baseline_key(d, src.stem), src.read_bytes(),
-                        expect=Version.ABSENT,
-                    )
-                except tcip_store.VersionConflict:
-                    continue
-                captured += 1
+                if capture_label_baseline(src):
+                    captured += 1
         return captured
 
     def save_gt(self, ctx: ReviewContext, *, path: Optional[str] = None) -> bool:
