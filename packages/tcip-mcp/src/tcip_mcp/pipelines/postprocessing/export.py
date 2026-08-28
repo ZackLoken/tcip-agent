@@ -189,7 +189,7 @@ def _mask_geometry_for_export(
     return BBox(x1, y1, x2, y2)
 
 
-_PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "operating_point_conf",
+_PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "operating_point_conf",
                        "produced_at", "measurement_validated", "validation_record"]
 
 _MEASUREMENT_DOCUMENT = "operating_point"
@@ -232,10 +232,11 @@ def export_detection_csv(
     that path. Either way, ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional
     CSV stamped ``validated=false``. The ``provenance`` stamp (producing checkpoint sha, experiment
     id, operating-point conf, timestamp) travels alongside; the number is only as trustworthy as the
-    operating point + model behind it. Those cells are built by ``delivered_provenance`` from the
+    operating point + model behind it. Those cells are built by ``delivered_tail`` from the
     verification the gate already ran, so a producer this delivery cannot corroborate is reported
-    unknown rather than repeated from the stamp that asserted it, and ``validation_record`` names the
-    record a reader can open to see what the claim was earned against.
+    unknown rather than repeated from the stamp that asserted it, ``produced_at`` is the write's own
+    timestamp rather than one the caller asserts, and ``validation_record`` names the record a
+    reader can open to see what the claim was earned against.
 
     Every row also carries ``measurement_document``, always ``"operating_point"``: a detection count
     never rests on a scalar head or a physical scale, so this is a constant column, unlike
@@ -276,7 +277,7 @@ def export_detection_csv(
         VALIDATED_FALSE,
         binding_notes_text,
         check_delivery_gate,
-        delivered_provenance,
+        delivered_tail,
         record_delivery_binding_event,
         reconcile_operating_point_validity,
         reconcile_tile_size_validity,
@@ -319,9 +320,8 @@ def export_detection_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = delivered_provenance(provenance, measurement_recon["bindings"],
-                                 columns=_PROVENANCE_COLUMNS)
-    stamp["measurement_validated"] = gate.column_stamp("measurement")
+    stamp = delivered_tail(provenance, measurement_recon["bindings"], gate,
+                           columns=_PROVENANCE_COLUMNS)
     fieldnames = (["image", "detection_count", "avg_confidence", "measurement_document"]
                  + _PROVENANCE_COLUMNS)
 

@@ -345,15 +345,27 @@ def test_the_record_is_read_from_the_project_the_caller_names(project: Path, mon
 # ── the crossing delivery doors ──────────────────────────────────────────────
 
 
-def delivered_golden(body: dict) -> bytes:
+def _extract_produced_at(written: bytes) -> bytes:
+    """A just-written delivery's own tail write-time cell, read back rather than predicted: the
+    composition stamps it at write time, so no golden can hold it as a constant."""
+    import csv as _csv
+
+    rows = list(_csv.DictReader(written.decode().splitlines()))
+    return rows[0]["produced_at"].encode()
+
+
+def delivered_golden(body: dict, produced_at: bytes) -> bytes:
     """What a confirmed crossing delivery writes, byte for byte, for the golden inputs below.
 
     Both doors produce this through the one writer they share (``write_phenology_csv``). A
     precondition in front of a door must leave what the door delivers untouched, so this is
     asserted as bytes rather than as the absence of an error.
 
-    The one cell no constant can hold is ``validation_record``: a record's digest covers the buckets
-    at their absolute dataset root, which is this run's own temporary directory. It is read from the
+    ``produced_at`` cannot be a constant either: it is the tail composition's own write-time
+    stamp, so the caller reads it back from the delivery it just wrote (:func:`_extract_produced_at`)
+    and splices it in here, the same way the cells below already are. The one cell no other
+    constant can hold is ``validation_record``: a record's digest covers the buckets at their
+    absolute dataset root, which is this run's own temporary directory. It is read from the
     buckets' own stamps, so the golden still compares the delivered cell against the records the
     stamps name rather than against whatever the delivery put there. ``plant_mapping_sha256`` and
     ``captures_unverified`` are likewise read from the mapping itself, for the same reason: the
@@ -371,15 +383,16 @@ def delivered_golden(body: dict) -> bytes:
     sha = producer_checkpoint_sha256("exp-1").encode()
     row = (b",2,2,0,0,2026-02-24,2026-02-12,2026-02-18,2026-02-24,interpolated,interpolated,"
            b"interpolated,interpolated,true,0.4,held_out_annotations,held_out_annotations,"
-           + sha + b",exp-1," + record + b"," + mapping_sha + b"," + captures_unverified + b",\r\n")
+           + sha + b",exp-1," + produced_at + b"," + record + b"," + mapping_sha + b","
+           + captures_unverified + b",\r\n")
     return (
         b"plant_id,accession,n_dates,n_observed_dates,n_dates_unclassified,n_dates_missing_images,"
         b"catkin_elongation_date,catkin_05per_date,catkin_50per_date,catkin_95per_date,"
         b"catkin_elongation_date_bound,catkin_05per_date_bound,catkin_50per_date_bound,"
         b"catkin_95per_date_bound,catkin_elongation_provisional,operating_point_conf,"
         b"operating_point_validated,positive_state_classifier_validated,producer_model_sha256,"
-        b"producer_experiment_id,validation_record,plant_mapping_sha256,captures_unverified,"
-        b"plant_csvs_unverified\r\n"
+        b"producing_experiment_id,produced_at,validation_record,plant_mapping_sha256,"
+        b"captures_unverified,plant_csvs_unverified\r\n"
         + b"PLANT_A,AccA" + row
         + b"PLANT_B,AccB" + row
     )
@@ -654,7 +667,8 @@ def test_a_confirmed_delivery_writes_the_bytes_it_wrote_before_the_precondition(
     res = _compute(body, out_csv, **_validated_call(body))
 
     assert "error" not in res, res
-    assert out_csv.read_bytes() == delivered_golden(body)
+    written = out_csv.read_bytes()
+    assert written == delivered_golden(body, _extract_produced_at(written))
 
 
 def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
@@ -667,8 +681,9 @@ def test_the_web_export_door_writes_the_bytes_it_wrote_before_the_precondition(
                        json={**body, "payload": "milestones", "filename": "x.csv"})
 
     assert resp.status_code == 200, resp.text
-    assert resp.content == delivered_golden(body)
-    assert (tmp_path / "results_export" / "x.csv").read_bytes() == delivered_golden(body)
+    golden = delivered_golden(body, _extract_produced_at(resp.content))
+    assert resp.content == golden
+    assert (tmp_path / "results_export" / "x.csv").read_bytes() == golden
 
 
 def test_write_phenology_csv_with_a_basis_writes_the_delivered_schema(tmp_path: Path):

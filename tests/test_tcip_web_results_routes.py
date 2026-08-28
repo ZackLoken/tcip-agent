@@ -529,7 +529,7 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["positive_state_classifier_validated"] == "held_out_annotations"
     assert cells["operating_point_conf"] == "0.4"
-    assert cells["producer_experiment_id"] == "exp-1"
+    assert cells["producing_experiment_id"] == "exp-1"
     assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
     # plant_csvs_unverified is legitimately empty: the fixture's mapping names no plant CSV to
@@ -693,7 +693,7 @@ def test_export_csv_also_saves_the_delivery_into_the_projects_exports_dir(
         assert cells["operating_point_conf"] == "0.4"
         assert cells["operating_point_validated"] == "held_out_annotations"
         assert cells["positive_state_classifier_validated"] == "held_out_annotations"
-        assert cells["producer_experiment_id"] == "exp-1"
+        assert cells["producing_experiment_id"] == "exp-1"
         assert cells["validation_record"] == _expected_validation_record(body)
 
     audit = tcip_store.read_log(audit_log_key(tmp_path)).records
@@ -712,8 +712,8 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     # fails on the delivered BYTES when the stamp is absent, not on a missing symbol.
     provenance = ["operating_point_conf", "operating_point_validated",
                   "positive_state_classifier_validated", "producer_model_sha256",
-                  "producer_experiment_id", "validation_record", "plant_mapping_sha256",
-                  "captures_unverified", "plant_csvs_unverified"]
+                  "producing_experiment_id", "produced_at", "validation_record",
+                  "plant_mapping_sha256", "captures_unverified", "plant_csvs_unverified"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
@@ -726,7 +726,7 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
             continue  # legitimately empty: the fixture's mapping names no plant CSV to check
         assert cells[col] != "", col
     assert cells["operating_point_validated"] == "held_out_annotations"
-    assert cells["producer_experiment_id"] == "exp-1"
+    assert cells["producing_experiment_id"] == "exp-1"
     assert cells["validation_record"] == _expected_validation_record(body)
 
 

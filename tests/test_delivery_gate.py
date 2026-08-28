@@ -1400,13 +1400,12 @@ def test_a_bespoke_producer_keeps_its_checkpoint_hash_in_a_provisional_delivery(
     out = tmp_path / "o.csv"
     export_aggregated_csv(
         _COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
-        provenance={"producer_model_sha256": "a" * 64, "experiment_id": None,
-                    "produced_at": "2026-03-04T12:00:00+00:00"},
+        provenance={"producer_model_sha256": "a" * 64, "producing_experiment_id": None},
         acknowledge_unvalidated=True)
 
     row = _delivered_row(out)
     assert row["producer_model_sha256"] == "a" * 64
-    assert row["experiment_id"] == ""
+    assert row["producing_experiment_id"] == ""
     assert row["validation_record"] == ""
     assert row["measurement_validated"] == VALIDATED_FALSE
 
@@ -1421,13 +1420,13 @@ def test_a_bucket_naming_an_experiment_that_never_ran_delivers_no_producer_ident
     out = tmp_path / "o.csv"
     export_aggregated_csv(
         _COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
-        provenance={"producer_model_sha256": "0" * 64, "experiment_id": "exp_that_never_ran",
-                    "produced_at": "2026-03-04T12:00:00+00:00"},
+        provenance={"producer_model_sha256": "0" * 64,
+                    "producing_experiment_id": "exp_that_never_ran"},
         acknowledge_unvalidated=True)
 
     row = _delivered_row(out)
     assert row["producer_model_sha256"] == ""
-    assert row["experiment_id"] == ""
+    assert row["producing_experiment_id"] == ""
     assert row["validation_record"] == ""
 
 
@@ -1439,8 +1438,7 @@ def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
 
     d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
     out = tmp_path / "o.csv"
-    export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
-                          provenance={"produced_at": "2026-03-04T12:00:00+00:00"})
+    export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d])
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 
@@ -1448,7 +1446,20 @@ def test_a_validated_delivery_names_the_record_its_numbers_rest_on(tmp_path):
     row = _delivered_row(out)
     assert row["measurement_validated"] == VALIDATED_HELD_OUT
     assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
-    assert row["experiment_id"] == "exp-preds"
+    assert row["producing_experiment_id"] == "exp-preds"
+
+
+def test_export_aggregated_csv_refuses_a_caller_asserted_produced_at(tmp_path):
+    """produced_at is the shared tail composition's own write-time fact; a caller asserting one is
+    refused rather than silently overridden, the source-of-truth rule every other tail cell
+    already follows."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+
+    d = _write_bucket(tmp_path, "preds", conf_ref=VALIDATED_HELD_OUT)
+    out = tmp_path / "o.csv"
+    with pytest.raises(ValueError, match="produced_at"):
+        export_aggregated_csv(_COUNT_RESULTS, str(out), trait_name="stem_count", pred_dirs=[d],
+                              provenance={"produced_at": "2026-03-04T12:00:00+00:00"})
 
 
 def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_path):
@@ -1461,7 +1472,7 @@ def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_pa
     export_detection_csv([{"image": "img_a.jpg", "count": 5}], str(out), pred_dirs=[d],
                          trait=fx.COUNT_TRAIT,
                          provenance={"producer_model_sha256": "b" * 64,
-                                     "experiment_id": "exp_that_never_ran",
+                                     "producing_experiment_id": "exp_that_never_ran",
                                      "operating_point_conf": 0.4})
 
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
@@ -1470,7 +1481,7 @@ def test_the_detection_csv_carries_the_same_provenance_the_aggregate_does(tmp_pa
     row = _delivered_row(out)
     assert row["validation_record"] == f"{pointer['experiment_id']}:{pointer['record_digest']}"
     # The record's own producing run wins over the asserted one, so the forged name never ships.
-    assert row["experiment_id"] == "exp-preds"
+    assert row["producing_experiment_id"] == "exp-preds"
     assert row["producer_model_sha256"] == ""
     assert row["operating_point_conf"] == "0.4"
     assert len(_audit_rows(tmp_path / "ds", "export_detection_csv")) == 1

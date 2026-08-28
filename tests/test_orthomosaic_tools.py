@@ -581,7 +581,7 @@ def test_deliver_orthomosaic_keeps_a_bespoke_producer_checkpoint(tmp_path, monke
     assert "error" not in result
     stamped = read_operating_point_sidecar(bucket_dir)
     assert result["checkpoint_sha256"] == stamped["checkpoint_sha256"]
-    assert result["experiment_id"] is None
+    assert result["producing_experiment_id"] is None
     assert result["validation_record"] == ""
     row = next(csv.DictReader(out_csv.open(newline="")))
     assert row["producer_model_sha256"] == stamped["checkpoint_sha256"]
@@ -626,8 +626,8 @@ def test_deliver_orthomosaic_drops_a_producer_no_experiment_answers_for(tmp_path
 
     assert "error" not in result
     assert result["checkpoint_sha256"] is None
-    assert result["experiment_id"] is None
+    assert result["producing_experiment_id"] is None
     row = next(csv.DictReader(out_csv.open(newline="")))
     assert row["producer_model_sha256"] == ""
-    assert row["experiment_id"] == ""
+    assert row["producing_experiment_id"] == ""
     assert row["validation_record"] == ""

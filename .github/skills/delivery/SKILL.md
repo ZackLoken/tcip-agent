@@ -28,8 +28,8 @@ it in `pipelines/postprocessing/aggregation.py` if this table looks stale):
 | plant_id_source | string | How the plant identity was resolved for this plant's images (`"mixed"` when they disagree); blank when the records carried no identity provenance |
 | plant_id_distance_m_max | float | Worst per-image plant-assignment distance, in metres, across this plant's images; the identity-confidence signal `build_plant_mapping` produces |
 | producer_model_sha256 | string | Checkpoint hash of the model that produced the predictions; blank when the bucket names an experiment nothing outside it can corroborate |
-| experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
-| produced_at | string | Timestamp stamped by the producing run |
+| producing_experiment_id | string | The run that produced the predictions, blank when there was none or nothing corroborates it; never the calibration a claim was earned under |
+| produced_at | string | Timestamp this CSV was written, stamped by the shared tail composition; never the producing run's own timestamp |
 | measurement_validated | string | The reconciled validity state stamped into every row by the delivery gate |
 | validation_record | string | `experiment:digest` of the validation record the delivered claim was verified against; blank when the numbers rest on no record |
 
@@ -118,9 +118,9 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   carries the same schema and the same composition. The MCP door alone can carry a caller-stated
   `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py:745`, `:882-886`),
   fields the web door has none for. The producer tail (`producer_model_sha256`,
-  `producer_experiment_id`, `validation_record`) is filled from the verified bindings, so a bucket
-  whose claim no record answers for delivers those cells blank rather than repeating the names its
-  stamp asserted.
+  `producing_experiment_id`, `produced_at`, `validation_record`) is filled from the verified
+  bindings, so a bucket whose claim no record answers for delivers those cells blank rather than
+  repeating the names its stamp asserted.
 - `tabulate_counts` gates the count operating point on the run's resolved bundle and hands
   `export_detection_csv` the already-reconciled state, plus the bucket it persisted when it was
   given a `predictions_dir` to persist one into.
