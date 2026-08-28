@@ -381,7 +381,6 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
         SWEEP, ((Patterned(ANY), Patterned(literal("metrics"), tail=".jsonl")),)
     ),
     "split_manifest": Claim(SPLITS, (_named(name="split_manifest", suffix=".json"),)),
-    "split_stem_list": Claim(SPLITS, (_rooted(suffix=".json"),)),
     "curated_manifest": Claim(CURATED, (_named(name="curated_manifest", suffix=".json"),)),
     "evaluation_results": Claim(RUN, (_named(name="test_results", suffix=".json"),)),
     "run_launch_config": Claim(RUN, (_named(name="launch_config", suffix=".json"),)),

@@ -19,28 +19,6 @@ _SPLIT_DOC = RootedFileLocator(suffix=".json")
 partition to be written, so no dataset resolver owns its layout and the entries are addressed
 by name under it, the way a label tree no resolver describes is addressed."""
 
-SPLIT_STEM_LIST_STORE = "split_stem_list"
-register_store(
-    StoreDescriptor(
-        name=SPLIT_STEM_LIST_STORE,
-        kind="record",
-        key_fields=("split",),
-        codec=RECORD_JSON,
-        concurrency="last_writer_wins",
-        locator=_SPLIT_DOC,
-    )
-)
-
-
-def split_stem_list_key(split_dir: str | Path, split_name: str) -> Key:
-    """The stems one split of a partition holds.
-
-    ``last_writer_wins``: the whole list is written once from a partition the caller already
-    computed, and no writer merges into the stored list.
-    """
-    return Key(SPLIT_STEM_LIST_STORE, str(Path(split_dir).absolute()), (split_name,))
-
-
 SPLIT_MANIFEST_STORE = "split_manifest"
 _SPLIT_MANIFEST_PARTS = ("split_manifest",)
 register_store(
@@ -484,8 +462,9 @@ def make_splits(
 ) -> dict:
     """Compute a leakage-free, annotation-stratified train/val/calibration split.
 
-    Non-destructive by default: emits ``{train,val,calibration}.json`` stem manifests plus a
-    stats dict. Sibling tiles of one source image are kept in the same split (no tree-/
+    Non-destructive by default: emits a ``split_manifest.json`` record (when writing a manifest)
+    plus a stats dict; a side's membership lives only in the manifest's own ``splits`` field.
+    Sibling tiles of one source image are kept in the same split (no tree-/
     canopy-level leakage), and, when ``stratify_foreground`` is set, splits are balanced by
     annotation count so dense and sparse sources are proportionally represented. Groups whole
     source images; a within-image split for a folder holding a single source is a training run's
@@ -807,8 +786,8 @@ def make_splits(
                 for split_name in kept_splits:
                     for stem in bare_parts[split_name]:
                         resolve_image_source(images_dir_for_date, stem)
-                # Read every confirmed negative before anything (a stem list, the manifest, the
-                # split tree) is written: a refusal here must leave nothing persisted.
+                # Read every confirmed negative before anything (the manifest, the split tree)
+                # is written: a refusal here must leave nothing persisted.
                 negative_carry = _compute_negative_carry(
                     label_map, bare_parts, image_map, subject, only_date)
     except (UnreadableLabelDocument, AmbiguousImageStem, BandGroupIncomplete) as exc:
@@ -852,8 +831,6 @@ def make_splits(
         manifest["group_key_map"] = group_key_map
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    for split_name in kept_splits:
-        tcip_store.replace(split_stem_list_key(out_dir, split_name), sorted(parts[split_name]))
     tcip_store.replace(split_manifest_key(out_dir), manifest)
 
     counts = annotation_counts or {}
