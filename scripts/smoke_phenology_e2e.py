@@ -21,7 +21,6 @@ Exits non-zero on the first failed assertion.
 from __future__ import annotations
 
 import csv
-import json
 import os
 import shutil
 import sys
@@ -39,6 +38,7 @@ from PIL import Image  # noqa: E402
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.pipelines.resolution import write_sidecar  # noqa: E402
 from tcip_mcp.tools.phenology_tools import (  # noqa: E402
     build_plant_mapping,
     compute_phenology,
@@ -140,7 +140,7 @@ def main() -> int:
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
 
-    bind_default()
+    backend = bind_default()
 
     print("Phenology e2e smoke: build_plant_mapping -> compute_phenology\n")
     with tempfile.TemporaryDirectory() as td:
@@ -179,10 +179,9 @@ def main() -> int:
                         preds_root / date / f"{stem}.json",
                         _pred_boxes(n_elong, N_DETECTIONS), 8, 8,
                     )
-                # The bucket's own recorded id_map (count_by_class reads the positive class from this,
-                # per date, never a pinned integer), the real shape export_predictions stamps.
-                (preds_root / date / "operating_point.json").write_text(
-                    json.dumps({"id_map": ID_MAP}), encoding="utf-8")
+                # The bucket's own recorded id_map, the real shape export_predictions stamps,
+                # written through the store so a database-bound backend's reader can see it.
+                write_sidecar(preds_root / date, {"id_map": ID_MAP}, "operating_point")
 
             plant_csv = root / "plants.csv"
             with plant_csv.open("w", newline="", encoding="utf-8") as f:
@@ -251,6 +250,9 @@ def main() -> int:
                 os.environ.pop("TCIP_PROJECT_ROOT", None)
             else:
                 os.environ["TCIP_PROJECT_ROOT"] = _saved_project_root
+            # Windows can't remove the tempdir the bound backend still holds a database handle
+            # into; close it before the enclosing TemporaryDirectory context tears the tree down.
+            backend.close()
 
     print()
     if _failures:
