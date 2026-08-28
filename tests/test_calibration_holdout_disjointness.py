@@ -7,7 +7,7 @@ stems; an unresolvable or leaked train-disjointness check must be visible to the
 misreported as a generic "review more images"; a locked cal/holdout split must refuse rather than
 silently redraw when stale (a missing image) or when its lock file is corrupt; and a declared
 seed/holdout_ratio must reach the first (locking) calibration draw, not only later redraws. Also
-covers model_registry.resolve_model_identity's checkpoint deserialization.
+covers resolve_model_identity reading the codebase's own stamped checkpoints off a verified load.
 """
 
 from __future__ import annotations
@@ -855,7 +855,7 @@ def test_recorded_training_id_map_helper_is_none_when_config_carries_no_map():
     assert itools._recorded_training_id_map(stub) == {"elongated": 0, "dormant": 1}
 
 
-# --- Minor: resolve_model_identity's checkpoint deserialization. --------------------------
+# --- Minor: resolve_model_identity off a load_registered_checkpoint object. -------------------
 
 def test_minor_resolve_model_identity_reads_the_codebase_own_stamped_checkpoints(tmp_path):
     """weights_only=True must still read a checkpoint saved the way stamp_model_ref produces it:

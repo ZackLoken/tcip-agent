@@ -2580,6 +2580,9 @@ def evaluate_model(
 
     Args:
         run_id_or_ckpt: A training run id (uses its ``model_best.pt``) or a checkpoint path.
+            Either way the resolved checkpoint must be registered under this process's project
+            root (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this
+            door refuses before loading it.
         images_dir: Images directory for the evaluation split.
         labels_dir: Labels dir (detection/instance_seg), masks dir (semantic_seg), or the GT CSV
             path (classification/ordinal/regression, one row per image stem).

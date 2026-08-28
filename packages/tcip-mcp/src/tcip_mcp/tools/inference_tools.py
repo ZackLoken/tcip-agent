@@ -729,7 +729,9 @@ def run_inference(
     high-resolution imagery with many small objects (detection heads only).
 
     Args:
-        checkpoint_path: Path to model .pt checkpoint.
+        checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
+            project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
+            or this door refuses before loading it.
         image_paths: List of specific image paths.
         images_dir: Directory containing images to process.
         conf_threshold: Minimum confidence score. ``None`` (default) states nothing and runs at the
@@ -1836,7 +1838,9 @@ def export_predictions(
     stamp or a record no stamp names, both of which floor to unvalidated at every delivery door.
 
     Args:
-        checkpoint_path: Path to model .pt checkpoint.
+        checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
+            project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
+            or this door refuses before loading it.
         images_dir: Directory containing input images (mutually exclusive with ``raster_path``).
         output_dir: Directory for output .json prediction file(s). A relative path resolves
             against the project root, never the server process's cwd.
@@ -2013,8 +2017,8 @@ def export_predictions(
 
     exp_id = result.get("experiment_id")
     if exp_id:
-        # Checked before the publisher writes the bucket: inference itself already ran and was
-        # audited by this point, so this refuses only the file write that would follow it.
+        # Checked before the publisher writes the bucket, ahead of this door's own @audited
+        # entry (appended only after this body returns), so nothing on disk needs unwinding.
         from tcip_mcp.experiments import pointer_frozen
 
         frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
@@ -2109,7 +2113,9 @@ def tabulate_counts(
     one, so a check placed after the pass would hand back the very numbers it refused to write.
 
     Args:
-        checkpoint_path: Path to model .pt checkpoint.
+        checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
+            project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
+            or this door refuses before loading it.
         images_dir: Directory containing input images.
         output_path: Path for the output CSV file. A relative path resolves against the
             project root, never the server process's cwd.

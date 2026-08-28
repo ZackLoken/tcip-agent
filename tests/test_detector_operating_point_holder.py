@@ -147,7 +147,9 @@ def _persisted_sweep(run_inference_result: dict) -> dict:
 def test_a_bespoke_module_exposing_its_own_knob_reaches_a_validated_point(tmp_path, monkeypatch):
     """Built through build_model, calibrated through run_inference: a hand-rolled, non-torchvision
     module that exposes score_thresh on itself reaches a validated operating point, with the
-    attribute path it was applied on recorded."""
+    attribute path it was applied on recorded. Also the admitting half of the sweep-identity
+    codec check: an ordinary calibration's evidence carries nothing the codec refuses, so it
+    survives the check test_checkpoint_digest_rails.py's NaN-evidence test drives to a refusal."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     monkeypatch.chdir(tmp_path)
