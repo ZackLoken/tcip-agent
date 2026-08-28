@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +28,19 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
-                                    replace: bool = False,
-                                    train_native_size: list | None = None) -> None:
-    """Best-effort: patch the effective tiling geometry into the durable experiment record's
-    own ``config.json``, a small patch of the data section, not a rewrite. ``replace`` swaps
-    the tiling record wholesale instead of merging: an untiled run's record must not keep a
-    stale requested ``tile_size`` a merge would leave behind. ``train_native_size``, when
-    stamped, lands beside it. Never sinks the run if there is no experiment record to patch
-    (experiment tracking is best-effort throughout this path, same as every other write in
-    it)."""
+def _patch_experiment_config(experiment_id: str, action: str,
+                             mutate: Callable[[dict], None]) -> None:
+    """Best-effort: open the durable experiment record's own ``config.json`` behind its status
+    member, refuse a terminal record, and apply ``mutate`` to the config's ``data`` section
+    inside the same transaction before writing it back, a patch of that section, never a
+    rewrite of the whole record. ``action`` names the operation for both the terminal refusal
+    and its audit line, one string every caller of this run's provenance patches shares with
+    its own identity (``patch_experiment_config_tiling``, ``..._id_map``, ``..._split``). Never
+    sinks the run if there is no experiment record to patch (experiment tracking is best-effort
+    throughout this path, same as every other write in it); a terminal record's refusal is the
+    one exception, since a lost provenance write there is itself a run failure, not a
+    degradable one.
+    """
     from tcip_mcp.experiments import ExperimentTerminal
 
     try:
@@ -50,62 +54,52 @@ def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
         try:
             with store.transaction(key, st_key) as txn:
                 state = (txn.read(st_key, default={}) or {}).get("state")
-                refuse_if_terminal(experiment_id, "patch_experiment_config_tiling", state)
+                refuse_if_terminal(experiment_id, action, state)
                 cfg = txn.read(key, default={})
                 data_cfg = cfg.setdefault("data", {})
-                if replace:
-                    data_cfg["tiling"] = dict(tiling_cfg)
-                else:
-                    data_cfg.setdefault("tiling", {}).update(tiling_cfg)
-                if train_native_size is not None:
-                    data_cfg["train_native_size"] = list(train_native_size)
+                mutate(data_cfg)
                 txn.write(key, cfg)
         except ExperimentTerminal as exc:
             from tcip_mcp.experiments import audit_refusal_reraising
-            audit_refusal_reraising(experiment_id, "patch_experiment_config_tiling", {}, exc)
+            audit_refusal_reraising(experiment_id, action, {}, exc)
     except ExperimentTerminal:
         raise
     except Exception:
-        logger.warning("tiling geometry patch-back failed for %s", experiment_id, exc_info=True)
+        logger.warning("experiment config patch-back failed for %s (%s)", experiment_id, action,
+                       exc_info=True)
+
+
+def _patch_experiment_config_tiling(experiment_id: str, tiling_cfg: dict, *,
+                                    replace: bool = False,
+                                    train_native_size: list | None = None) -> None:
+    """Patch the effective tiling geometry into the durable experiment record. ``replace`` swaps
+    the tiling record wholesale instead of merging: an untiled run's record must not keep a
+    stale requested ``tile_size`` a merge would leave behind. ``train_native_size``, when
+    stamped, lands beside it."""
+    def mutate(data_cfg: dict) -> None:
+        if replace:
+            data_cfg["tiling"] = dict(tiling_cfg)
+        else:
+            data_cfg.setdefault("tiling", {}).update(tiling_cfg)
+        if train_native_size is not None:
+            data_cfg["train_native_size"] = list(train_native_size)
+
+    _patch_experiment_config(experiment_id, "patch_experiment_config_tiling", mutate)
 
 
 def _patch_experiment_config_id_map(experiment_id: str, subject: str, attribute: str | None,
                                     id_map: dict) -> None:
-    """Best-effort: patch this run's resolved name->id map into the durable
-    experiment record's own ``config.json``, a small merge, not a rewrite, the same shape
-    :func:`_patch_experiment_config_tiling` already uses for the tile geometry. Called from
+    """Patch this run's resolved name->id map into the durable experiment record. Called from
     ``run()`` right after the dataset is built (mirroring where the tiling patch fires), though
     unlike tile geometry this fact is a pure function of ``data_cfg`` and would be resolvable
     before the build too, the call site is chosen for symmetry with the tiling patch, not because
-    the dataset build is a precondition for it. Never sinks the run if there is no experiment
-    record to patch."""
-    from tcip_mcp.experiments import ExperimentTerminal
+    the dataset build is a precondition for it."""
+    def mutate(data_cfg: dict) -> None:
+        data_cfg["subject"] = subject
+        data_cfg["attribute"] = attribute
+        data_cfg["id_map"] = dict(id_map)
 
-    try:
-        from tcip_store import store
-
-        from tcip_mcp.experiments import config_key, refuse_if_terminal, status_key
-
-        key, st_key = config_key(experiment_id), status_key(experiment_id)
-        if not store.exists(key):
-            return
-        try:
-            with store.transaction(key, st_key) as txn:
-                state = (txn.read(st_key, default={}) or {}).get("state")
-                refuse_if_terminal(experiment_id, "patch_experiment_config_id_map", state)
-                cfg = txn.read(key, default={})
-                data_cfg = cfg.setdefault("data", {})
-                data_cfg["subject"] = subject
-                data_cfg["attribute"] = attribute
-                data_cfg["id_map"] = dict(id_map)
-                txn.write(key, cfg)
-        except ExperimentTerminal as exc:
-            from tcip_mcp.experiments import audit_refusal_reraising
-            audit_refusal_reraising(experiment_id, "patch_experiment_config_id_map", {}, exc)
-    except ExperimentTerminal:
-        raise
-    except Exception:
-        logger.warning("class-id-map patch-back failed for %s", experiment_id, exc_info=True)
+    _patch_experiment_config(experiment_id, "patch_experiment_config_id_map", mutate)
 
 
 def _is_manifest_bound_split(split_cfg: object) -> bool:
@@ -117,38 +111,15 @@ def _is_manifest_bound_split(split_cfg: object) -> bool:
 
 
 def _patch_experiment_config_split(experiment_id: str, split_cfg: dict) -> None:
-    """Best-effort: merge this run's resolved split policy into the durable experiment record's
-    own ``config.json``, the same merge-not-rewrite shape :func:`_patch_experiment_config_tiling`
-    and :func:`_patch_experiment_config_id_map` already use. A binding to a named split manifest
-    (``data.split.manifest_binding``) is what this exists for: ``launch_config.json``, written
-    before the child exists, never carries it, so the durable record is the only other place a
-    reviewer can see that a recorded partition, not a drawn one, governed the run. Never sinks
-    the run if there is no experiment record to patch."""
-    from tcip_mcp.experiments import ExperimentTerminal
+    """Merge this run's resolved split policy into the durable experiment record. A binding to a
+    named split manifest (``data.split.manifest_binding``) is what this exists for:
+    ``launch_config.json``, written before the child exists, never carries it, so the durable
+    record is the only other place a reviewer can see that a recorded partition, not a drawn
+    one, governed the run."""
+    def mutate(data_cfg: dict) -> None:
+        data_cfg.setdefault("split", {}).update(split_cfg)
 
-    try:
-        from tcip_store import store
-
-        from tcip_mcp.experiments import config_key, refuse_if_terminal, status_key
-
-        key, st_key = config_key(experiment_id), status_key(experiment_id)
-        if not store.exists(key):
-            return
-        try:
-            with store.transaction(key, st_key) as txn:
-                state = (txn.read(st_key, default={}) or {}).get("state")
-                refuse_if_terminal(experiment_id, "patch_experiment_config_split", state)
-                cfg = txn.read(key, default={})
-                data_cfg = cfg.setdefault("data", {})
-                data_cfg.setdefault("split", {}).update(split_cfg)
-                txn.write(key, cfg)
-        except ExperimentTerminal as exc:
-            from tcip_mcp.experiments import audit_refusal_reraising
-            audit_refusal_reraising(experiment_id, "patch_experiment_config_split", {}, exc)
-    except ExperimentTerminal:
-        raise
-    except Exception:
-        logger.warning("split policy patch-back failed for %s", experiment_id, exc_info=True)
+    _patch_experiment_config(experiment_id, "patch_experiment_config_split", mutate)
 
 
 def _resolve_run_id_map(task: str, data_cfg: dict) -> tuple[str, str | None, dict] | None:
