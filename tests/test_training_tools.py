@@ -883,6 +883,31 @@ def test_run_hpo_trial_writes_resolved_config_with_unconsumed_params(monkeypatch
     assert resolved["unconsumed_params"] == ["totally_bogus_key"]
 
 
+def test_run_hpo_trial_resolved_config_records_seed_actually_trained_under(monkeypatch, tmp_path):
+    """resolved_config.json's seed must match the seed the run actually trained under.
+    An unset seed is drawn fresh onto the run's own config, never copied back onto the
+    pre-run merged config the persisted record is built from."""
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import _run_hpo_trial, trial_config_key
+
+    captured: dict = {}
+
+    def fake_train(run, train_loader, val_loader, task="detection",
+                   epoch_callback=None, resume_from=""):
+        captured["seed"] = run.config.get("seed")
+        run.best_metric = 1.0
+        run.status = "completed"
+        return run
+
+    _patch_hpo_trial_machinery(monkeypatch, fake_train)
+    trial_dir = tmp_path / "trial_0"
+    _run_hpo_trial({"lr": 3e-4}, [].append, _detection_base(), str(trial_dir))
+
+    resolved = ts.read(trial_config_key(trial_dir.parent, trial_dir.name))
+    assert resolved["seed"] is not None
+    assert resolved["seed"] == captured["seed"]
+
+
 def _bespoke_hpo_agent_train(ctx):
     """Module-level (dotted-import-able) bespoke train(ctx) that reads its own swept key."""
     ctx.config.get("custom_axis")  # the bespoke loop reads its own swept key
