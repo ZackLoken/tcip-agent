@@ -1342,7 +1342,7 @@ are listed here with the rest rather than taking numbers of their own.
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 72
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
   119 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1399`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1508`.
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1582`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
   `experiments.py:526` (`def update_status(`), `stamp_run_identity` (`experiments.py:659`),
   `_touch_heartbeat`, `experiments.py:855` (`def _touch_heartbeat(`). Read by `get_experiment`
@@ -2037,7 +2037,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1616` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1694` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
