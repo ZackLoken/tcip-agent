@@ -180,6 +180,28 @@ def test_inference_jobs_persist_list_and_rehydrate_per_root_across_a_repin(tmp_p
         inference._jobs.clear()
 
 
+def test_inference_rehydrate_restores_dropped_nonpositive_boxes(tmp_path, monkeypatch):
+    """``dropped_nonpositive_boxes`` is written on the persisted row (``_summary``); a restart
+    must serve the recorded count back, not the field's own zero default."""
+    from tcip_web.routes import inference
+
+    job = inference.InferenceJob(
+        job_id="j-dropped", checkpoint_path="c", images_dir="i", output_dir="o",
+        tile=False, conf=0.25, iou=0.7, slice_hw=(640, 640), overlap=0.2,
+    )
+    job.status = "completed"
+    job.dropped_boxes = 3
+    inference._register(job)
+
+    inference._jobs.clear()
+    try:
+        inference.rehydrate_for_current_root()
+        jobs = {j["job_id"]: j for j in inference.list_jobs()["jobs"]}
+        assert jobs["j-dropped"]["dropped_nonpositive_boxes"] == 3
+    finally:
+        inference._jobs.clear()
+
+
 def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_repin(
     tmp_path, monkeypatch
 ):

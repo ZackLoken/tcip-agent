@@ -190,6 +190,7 @@ def rehydrate_for_current_root() -> None:
                 status=status,
                 error=s.get("error"),
                 warning=s.get("warning"),
+                dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
             )
         jobstore.evict_terminal(_jobs, root)
 
