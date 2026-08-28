@@ -35,6 +35,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     resolve_match_criterion,
     run_test_evaluation,
     sweep_operating_point,
+    write_evaluation_result,
 )
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     _selection_value,
@@ -771,6 +772,21 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, 
         assert field in ff_result, f"{field} missing from the full-frame-regime record"
     assert not (test_only_fields & set(ff_result))
     assert not (full_frame_only_fields & set(test_result))
+
+
+def test_write_evaluation_result_refuses_a_key_extra_shares_with_common(tmp_path):
+    """A key present in both common and extra is a programming error, not a precedence rule:
+    extra silently shadowing a common identity field (or the reverse) would defeat the
+    unification write_evaluation_result exists to enforce, so this refuses naming the key
+    rather than pick a winner."""
+    common = {
+        "model_path": "m.pt", "task": "detection", "model_sha256": "abc", "experiment_id": "e1",
+        "iou_type": "bbox", "iou_threshold": 0.5, "conf_threshold": 0.3, "max_dets": 100,
+        "tiled": False, "eval_regime": "full-frame-single-pass",
+    }
+    extra = {"precision": 0.9, "task": "classification"}
+    with pytest.raises(ValueError, match="task"):
+        write_evaluation_result(tmp_path / "eval_out", common, extra)
 
 
 def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch):

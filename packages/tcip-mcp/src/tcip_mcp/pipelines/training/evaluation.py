@@ -1288,11 +1288,17 @@ def write_evaluation_result(output_dir: Path | str, common: dict, extra: dict) -
     ``experiment_id`` may legitimately be ``None``, but every key must be present, or this
     refuses rather than write a result silently missing part of its own identity. ``extra``
     carries this regime's own fields (metrics included) and is written through unmodified.
+    A key present in both ``common`` and ``extra`` is a programming error, not a precedence rule
+    to resolve silently: this refuses rather than let one shadow the other, either direction.
     """
     missing = [field for field in _COMMON_EVAL_FIELDS if field not in common]
     if missing:
         raise ValueError(
             f"write_evaluation_result: common is missing required field(s): {missing}")
+    collisions = sorted(set(common) & set(extra))
+    if collisions:
+        raise ValueError(
+            f"write_evaluation_result: extra collides with common on field(s): {collisions}")
     result = {**{field: common[field] for field in _COMMON_EVAL_FIELDS}, **extra}
     store.replace(evaluation_results_key(output_dir), result)
     return result
