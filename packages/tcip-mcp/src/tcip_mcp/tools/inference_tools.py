@@ -322,11 +322,12 @@ def _calibrate_operating_point(predictor, trait, labels_dir, images_dir, *,
                 "labels-only universe can include a stem whose image is gone, a lock the redraw "
                 "would address that no manifest-restricted calibration ever draws."
             )
+        from tcip_mcp.model_registry import _sha256_of_bytes
         from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(split_manifest_dir)
-        split_manifest_sha256 = hashlib.sha256(RECORD_JSON.encode(manifest)).hexdigest()
+        split_manifest_sha256 = _sha256_of_bytes(RECORD_JSON.encode(manifest))
         stems, group_by, group_key_map, excluded, cal_date = resolve_manifest_calibration_universe(
             manifest, split_manifest_dir, labels_dir, images_dir, _subject, _attribute, stems)
         stem_to_image = {s: stem_to_image[s] for s in stems}
