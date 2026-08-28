@@ -132,6 +132,41 @@ def test_first_verdict_baselines_the_label_file_under_its_original_directory(
     assert sorted(p.name for p in label_dir.glob("*.json")) == ["IMG_0000.json"]
 
 
+def test_save_gt_baselines_the_label_file_before_its_first_mutation(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """``/save_gt`` can be the first writer to touch a label file (a GUI edit with no verdict
+    behind it), so it must baseline the file itself rather than relying on ``/action`` to have
+    run first: the pristine pre-edit geometry must survive under ``.original`` either way."""
+    img = _image(tmp_path)
+    label_dir = tmp_path / "annotations" / "2-11-26"
+    label_dir.mkdir(parents=True)
+    gt = label_dir / "IMG_0000.json"
+    original = (10.0, 10.0, 50.0, 30.0)
+    write_annotations(str(gt), [Annotation(subject="catkin", geometry=BBox(*original))],
+                      IMG_W, IMG_H)
+    dataset_root = _dataset_root(tmp_path)
+
+    resp = client.post("/api/review/save_gt", json={
+        "dataset_root": str(dataset_root),
+        "image_name": "IMG_0000.JPG",
+        "image_path": str(img),
+        "label_path": str(gt),
+        "annotations": [{"subject": "catkin", "bbox": list(EDITED_BOX)}],
+    })
+    assert resp.status_code == 200, resp.text
+
+    baseline = label_dir / ".original" / "IMG_0000.json"
+    assert baseline.is_file()
+    (kept,) = read_annotations(str(baseline))
+    assert (kept.geometry.x1, kept.geometry.y1,
+            kept.geometry.x2, kept.geometry.y2) == original
+
+    (live,) = read_annotations(str(gt))
+    assert (live.geometry.x1, live.geometry.y1,
+            live.geometry.x2, live.geometry.y2) == EDITED_BOX
+
+
 def _verdict(client: TestClient, dataset_root: Path, img: Path, gt: Path,
              box: tuple[float, float, float, float],
              edited: tuple[float, float, float, float]) -> None:

@@ -877,11 +877,11 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:773` |
 | POST | `/save_gt` | `save_gt` | `routes/review.py:794` |
 | POST | `/validate_reference` | `validate_reference` | `routes/review.py:845` |
-| GET | `/image_status` | `get_image_status` | `routes/review.py:1193` |
+| GET | `/image_status` | `get_image_status` | `routes/review.py:1194` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1246` |
-| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1276` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1446` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1474` |
+| GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1277` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1447` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1475` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 

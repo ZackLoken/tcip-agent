@@ -806,6 +806,7 @@ def save_gt(payload: SaveGtPayload) -> dict:
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     ctx = ReviewContext(img_name=payload.image_name, img_width=w, img_height=h, gt=gt)
+    _ensure_original_backup(label_path)  # baseline this file before its first mutation
     ok = engine.save_gt(ctx, path=label_path)
     # Ground truth travels with its dataset, so the edit is recorded beside the labels it changed.
     _audit(payload.dataset_root, "gui_review_save_gt", {
