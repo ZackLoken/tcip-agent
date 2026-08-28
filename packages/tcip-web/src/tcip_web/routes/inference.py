@@ -223,7 +223,6 @@ def _worker(job: InferenceJob) -> None:
         job.status = "running"
         _persist()
         output_dir = Path(job.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         images = _list_images(Path(job.images_dir))
         job.total = len(images)
@@ -243,6 +242,7 @@ def _worker(job: InferenceJob) -> None:
             job.error = str(exc)
             logger.warning("inference job %s refused: %s", job.job_id, job.error)
             return
+        output_dir.mkdir(parents=True, exist_ok=True)
         predictor = build_predictor(
             checkpoint,
             device=None,  # auto: cuda if available, else cpu
