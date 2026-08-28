@@ -672,8 +672,7 @@ def make_splits(
 
     from tcip_mcp.pipelines.data.datasets import _resolve_registry_id_map, trainable_stems
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, BandGroupIncomplete
-    from tcip_mcp.pipelines.resolution import dataset_hash as _dataset_hash
-    from tcip_mcp.pipelines.resolution import label_digests as _label_digests
+    from tcip_mcp.pipelines.resolution import dataset_hash_and_label_digests
 
     date_dirs = _split_date_dirs(folder_path)
     if not date_dirs:
@@ -719,11 +718,13 @@ def make_splits(
             for stem in admitted:
                 identity_locations[member_identity(date, stem)] = (date, stem)
             if admitted:
+                date_hash, date_label_digests = dataset_hash_and_label_digests(
+                    labels_dir, sorted(admitted))
                 members[manifest_date_key(date)] = {
                     "labels_root": str(labels_dir),
                     "images_root": str(images_dir),
-                    "dataset_hash": _dataset_hash(labels_dir, stems=sorted(admitted)),
-                    "label_digests": _label_digests(labels_dir, sorted(admitted)),
+                    "dataset_hash": date_hash,
+                    "label_digests": date_label_digests,
                 }
 
         stems = sorted(identity_locations)
