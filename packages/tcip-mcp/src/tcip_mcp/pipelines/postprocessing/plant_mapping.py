@@ -966,3 +966,68 @@ def verify_mapping_inputs(build: MappingBuild, dataset_root: Path | str) -> dict
                 "rebuild")}
 
     return {"captures_unverified": captures_unverified, "plant_csvs_unverified": plant_csvs_unverified}
+
+
+class MappingDeliveryRefusal(Exception):
+    """A phenology delivery cannot proceed from a named mapping; ``str(exc)`` is the caller-facing
+    message. ``status`` is the web door's HTTP status for it (400 by default, 404 for a mapping
+    that is not stored, 409 for a store-level problem reading it), unused by an MCP tool door,
+    which reports ``str(exc)`` in its own ``{"error": ...}`` shape instead."""
+
+    def __init__(self, message: str, *, status: int = 400) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def resolve_delivery_mapping(
+    project_root: Path | str, name: str, predictions_by_date: dict[str, str],
+) -> tuple[MappingBuild, dict]:
+    """The two phenology doors' shared preamble: load the named mapping, refuse a
+    ``predictions_by_date`` date it does not cover, resolve the delivered buckets' one dataset
+    root and require it to carry the mapping's own minted dataset id, then verify the mapping's
+    recorded inputs against that resolved root, so a dataset moved (or copied and the original
+    renamed) after registration still verifies. Returns the loaded build and
+    :func:`verify_mapping_inputs`'s disclosure; raises :class:`MappingDeliveryRefusal`, naming
+    the remedy, for every case a delivery must not proceed from, a ``StoreError`` reading the
+    mapping store included, so a root whose state is still in the file layout refuses with the
+    store's own sentence rather than escaping as an unhandled exception.
+    """
+    from tcip_store import StoreError
+
+    from tcip_mcp.class_registry import RegistryError, dataset_root_for_pred_dirs
+    from tcip_mcp.dataset_layout import require_dataset_identity
+
+    try:
+        mapping_build = load_mapping(project_root, name)
+    except (StoreError, ValueError) as exc:
+        raise MappingDeliveryRefusal(
+            f"could not read mapping {name!r}: {exc}", status=409) from exc
+    if mapping_build is None:
+        raise MappingDeliveryRefusal(
+            f"mapping not found: {name!r}; build one with build_plant_mapping before "
+            "computing phenology", status=404)
+
+    missing_dates = [d for d in predictions_by_date if d not in mapping_build.dates]
+    if missing_dates:
+        raise MappingDeliveryRefusal(
+            f"predictions_by_date names date(s) {missing_dates} the mapping {name!r} does not "
+            "cover; rebuild the mapping to cover them, or drop the date(s)")
+
+    try:
+        delivered_root = dataset_root_for_pred_dirs(list(predictions_by_date.values()))
+    except RegistryError as exc:
+        raise MappingDeliveryRefusal(str(exc)) from exc
+    try:
+        delivered_identity = require_dataset_identity(delivered_root)
+    except ValueError as exc:
+        raise MappingDeliveryRefusal(str(exc)) from exc
+    if delivered_identity.get("id") != mapping_build.dataset_id:
+        raise MappingDeliveryRefusal(
+            f"the predictions under {delivered_root} belong to a different dataset than the "
+            f"mapping {name!r} was built over (mapping dataset_root "
+            f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
+
+    verified = verify_mapping_inputs(mapping_build, delivered_root)
+    if "refusal" in verified:
+        raise MappingDeliveryRefusal(verified["refusal"])
+    return mapping_build, verified

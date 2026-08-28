@@ -317,7 +317,7 @@ export function ResultsTab() {
 
   // Plant-mapping build inputs.
   const [plantCsvText, setPlantCsvText] = useState("");
-  const [nnTolerance, setNnTolerance] = useState(10);
+  const [nnTolerance, setNnTolerance] = useState<number | "">("");
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
@@ -631,7 +631,7 @@ export function ResultsTab() {
         name: mappingName,
         images_root: `${datasetRoot}/images`,
         plant_csv_paths: paths,
-        nn_tolerance_m: nnTolerance,
+        ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
       });
       setBuildSummary(res.summary);
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
@@ -907,8 +907,11 @@ export function ResultsTab() {
               type="number"
               step="1"
               min="0"
+              placeholder="derived from grid pitch"
               value={nnTolerance}
-              onChange={(e) => setNnTolerance(parseFloat(e.target.value) || 0)}
+              onChange={(e) =>
+                setNnTolerance(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)
+              }
             />
             <button
               className="tcip-btn-primary"

@@ -903,47 +903,15 @@ def compute_phenology(
         return {"error": stated.message, "n_plants": 0}
     pos = spec.positive_class_name
 
-    from tcip_store import StoreError
-
-    from tcip_mcp.class_registry import dataset_root_for_pred_dirs
-    from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.project_paths import project_root as platform_project_root
 
     project_root = platform_project_root()
     try:
-        mapping_build = plant_mapping.load_mapping(project_root, mapping_name)
-    except (StoreError, ValueError) as e:
-        return {"error": f"could not read mapping {mapping_name!r}: {e}", "n_plants": 0}
-    if mapping_build is None:
-        return {"error": f"mapping not found: {mapping_name!r}; build one with "
-                         f"build_plant_mapping before computing phenology", "n_plants": 0}
-
-    missing_dates = [d for d in predictions_by_date if d not in mapping_build.dates]
-    if missing_dates:
-        return {"error": (
-            f"predictions_by_date names date(s) {missing_dates} the mapping {mapping_name!r} "
-            "does not cover; rebuild the mapping to cover them, or drop the date(s)"),
-            "n_plants": 0}
-
-    try:
-        delivered_root = dataset_root_for_pred_dirs(list(predictions_by_date.values()))
-    except RegistryError as e:
+        mapping_build, verified = plant_mapping.resolve_delivery_mapping(
+            project_root, mapping_name, predictions_by_date)
+    except plant_mapping.MappingDeliveryRefusal as e:
         return {"error": str(e), "n_plants": 0}
-    try:
-        delivered_identity = require_dataset_identity(delivered_root)
-    except ValueError as e:
-        return {"error": str(e), "n_plants": 0}
-    if delivered_identity.get("id") != mapping_build.dataset_id:
-        return {"error": (
-            f"the predictions under {delivered_root} belong to a different dataset than the "
-            f"mapping {mapping_name!r} was built over (mapping dataset_root "
-            f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})"),
-            "n_plants": 0}
-
-    verified = plant_mapping.verify_mapping_inputs(mapping_build, mapping_build.dataset_root)
-    if "refusal" in verified:
-        return {"error": verified["refusal"], "n_plants": 0}
 
     mapping = mapping_build.rows()
 
@@ -1102,4 +1070,6 @@ def compute_phenology(
         "tile_size_validated": gate.stamp.get("tile_size"),
         "n_images_unmapped": result["n_images_unmapped"],
         "columns": phenology.phenology_csv_columns(spec),
+        "captures_unverified": verified["captures_unverified"],
+        "plant_csvs_unverified": verified["plant_csvs_unverified"],
     }
