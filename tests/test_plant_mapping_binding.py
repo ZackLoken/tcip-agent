@@ -717,6 +717,48 @@ def test_a_moved_plant_csv_and_an_archived_date_deliver_with_disclosures(
     assert DATES[0] in pm["captures_unverified"]
 
 
+def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_reports_it_moved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One plant's verified CSV must not answer for another plant's missing one: a read capture
+    whose recorded plant sits in the unreachable CSV did not move, and the delivery proceeds with
+    that CSV in plant_csvs_unverified rather than refusing as if the capture had moved."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, _plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+
+    per_plant_csvs = []
+    for p in PLANTS:
+        path = tmp_path / f"plants_{p['plot']}.csv"
+        with path.open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
+            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
+        per_plant_csvs.append(path)
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root),
+        plant_csv_paths=[str(p) for p in per_plant_csvs])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    per_plant_csvs[1].unlink()
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert str(per_plant_csvs[1]) in pm["plant_csvs_unverified"]
+
+
 # ── rail 15: the build route's happy path, and a moved+re-registered dataset still binds ─
 
 
