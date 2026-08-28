@@ -1245,8 +1245,8 @@ def update_lineage(
         txn.write(key, lineage)
 
     if refused:
-        # Names the orphaned values themselves: for a path-like field (predictions, model_weights)
-        # that value is the file this refusal left unrecorded.
+        # Names the orphaned values themselves: for a path-like field (predictions) that value
+        # is the file this refusal left unrecorded.
         _audit_refused(experiment_id, "update_lineage", {"fields": sorted(refused), **refused})
     if identity_audit_exc is not None:
         raise identity_audit_exc
