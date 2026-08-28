@@ -63,7 +63,11 @@ def _write_geo_raster(path: Path, *, height: int = 64, width: int = 64, channels
 
 
 def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
+    """Write a bespoke detection checkpoint and register it in explicit mode against the
+    platform state root the caller has already pinned (``TCIP_PROJECT_ROOT``), so a caller can
+    hand its bare path to a door that resolves the registry itself."""
     from tcip_mcp.pipelines.model_build import build_model
+    from tcip_mcp.tools.model_tools import register_model
 
     model_source = {"builder": "tests.bespoke_models:build_bespoke_detection",
                     "builder_kwargs": {"num_classes": 1, "in_chans": in_chans,
@@ -72,6 +76,8 @@ def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3, tile_siz
     model = build_model({"model_source": model_source})
     ckpt = tmp_path / "model_best.pt"
     torch.save({"model_source": model_source, "model_state_dict": model.state_dict()}, str(ckpt))
+    result = register_model(name="test-model", checkpoint_path=str(ckpt), config={})
+    assert "error" not in result, result
     return str(ckpt)
 
 

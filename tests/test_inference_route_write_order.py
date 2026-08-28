@@ -28,13 +28,14 @@ class _FakePredictor:
                 for p in paths]
 
 
-def _job(job_id, images_dir, out_dir, ckpt):
+def _job(job_id, images_dir, out_dir, ckpt, platform_root):
     from tcip_web.routes.inference import InferenceJob
 
     return InferenceJob(
         job_id=job_id, checkpoint_path=str(ckpt), images_dir=str(images_dir),
         output_dir=str(out_dir), tile=False, conf=0.25, iou=0.7,
         slice_hw=(640, 640), overlap=0.2, postprocess="nms",
+        platform_root=str(platform_root),
     )
 
 
@@ -45,11 +46,11 @@ def test_worker_leaves_no_sidecar_when_a_prediction_write_fails_partway(tmp_path
     pytest.importorskip("fastapi")
     from tcip_mcp.pipelines.postprocessing import export
     from tcip_web.routes.inference import _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = _two_images(tmp_path)
     out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
@@ -65,7 +66,7 @@ def test_worker_leaves_no_sidecar_when_a_prediction_write_fails_partway(tmp_path
 
     monkeypatch.setattr(export, "write_predictions_json", failing_write)
 
-    job = _job("write-fails-partway", images_dir, out_dir, ckpt)
+    job = _job("write-fails-partway", images_dir, out_dir, ckpt, tmp_path)
     _worker(job)
 
     assert job.status == "failed"
@@ -80,16 +81,16 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
     certifies them are all on disk, and the job still reports what it reported before."""
     pytest.importorskip("fastapi")
     from tcip_web.routes.inference import _summary, _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = _two_images(tmp_path)
     out_dir = tmp_path / "out"
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path, filename="m.pt")
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
 
-    job = _job("full-pass", images_dir, out_dir, ckpt)
+    job = _job("full-pass", images_dir, out_dir, ckpt, tmp_path)
     _worker(job)
 
     assert job.status == "completed"

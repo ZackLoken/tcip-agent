@@ -238,9 +238,9 @@ def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.inference.predictor as predmod
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
@@ -248,7 +248,8 @@ def test_prioritize_review_queue_rejects_non_composed_kind(tmp_path, monkeypatch
     monkeypatch.setattr(predmod, "build_predictor",
                         lambda *a, **k: SimpleNamespace(kind="foreign_kind"))
 
-    r = prioritize_review_queue(checkpoint_path=str(ckpt), images_dir=str(images))
+    r = prioritize_review_queue(checkpoint_path=str(ckpt), images_dir=str(images),
+                                project_path=str(tmp_path))
     assert "error" in r and "foreign_kind" in r["error"]
 
 
@@ -260,9 +261,9 @@ def test_prioritize_review_queue_confidence_triage_surfaces_unscoreable(tmp_path
     from types import SimpleNamespace
 
     import tcip_mcp.pipelines.inference.predictor as predmod
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"stub")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     images = tmp_path / "images"
     images.mkdir()
     (images / "a.jpg").write_bytes(b"x")
@@ -273,7 +274,8 @@ def test_prioritize_review_queue_confidence_triage_surfaces_unscoreable(tmp_path
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
 
     r = prioritize_review_queue(
-        checkpoint_path=str(ckpt), images_dir=str(images), strategy="confidence_triage")
+        checkpoint_path=str(ckpt), images_dir=str(images), strategy="confidence_triage",
+        project_path=str(tmp_path))
     assert r["needs_review"] == 1
     assert r["review_images"] == ["a.jpg"]
     assert r["unscoreable_images"] == ["a.jpg"]

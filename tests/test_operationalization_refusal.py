@@ -830,7 +830,11 @@ def test_the_count_tool_refuses_before_it_has_any_counts_to_return(
 
     monkeypatch.setattr(itools, "run_inference", _never_runs)
 
-    res = itools.tabulate_counts("m.pt", str(tmp_path), str(tmp_path / "o.csv"),
+    # An existing but unregistered checkpoint: the refusal under test is the operationalization
+    # gate, which sits ahead of the registry check, so this must never reach that check either.
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"x")
+    res = itools.tabulate_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                  trait=fx.COUNT_TRAIT)
 
     assert "no operationalization is recorded" in res["error"]

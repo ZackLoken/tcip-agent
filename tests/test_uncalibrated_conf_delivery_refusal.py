@@ -79,11 +79,12 @@ def _held_out_bundle():
 
 def _prepare(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _CountStub())
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
-    return str(ckpt), _images_dir(tmp_path)
+    monkeypatch.setattr(predictor_mod, "build_predictor",
+                        lambda checkpoint, **kw: _CountStub())
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    return ckpt, _images_dir(tmp_path)
 
 
 def test_a_caller_chosen_conf_never_reaches_a_written_count_csv(tmp_path, monkeypatch):

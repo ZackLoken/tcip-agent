@@ -586,10 +586,12 @@ def test_manifest_calibrations_evidence_earns_a_validated_record_through_export(
                      "boxes": [[2, 2, 10, 10]], "scores": [0.95], "labels": [1], "count": 1}
                     for p in paths]
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _BucketStub())
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     result = itools.export_predictions(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "baseline" / DATES[0]),
@@ -687,10 +689,12 @@ def test_count_door_round_trip_earns_a_checked_selection_disjointness(tmp_path, 
                      "boxes": [[2, 2, 10, 10]], "scores": [0.95], "labels": [1], "count": 1}
                     for p in paths]
 
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _BucketStub())
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
 
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     result = itools.export_predictions(
         str(ckpt), images_dir=str(root / "images" / DATES[0]),
         output_dir=str(root / "predictions" / "bound" / DATES[0]),
