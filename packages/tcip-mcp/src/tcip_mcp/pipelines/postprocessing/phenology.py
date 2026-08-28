@@ -424,8 +424,13 @@ def per_plant_series(
     observed zero. This applies at the date level too: a date the
     mapping names for which the caller simply omits a ``predictions_by_date`` entry is not skipped,
     every stem the mapping names for it counts as missing, the same as a named stem with no file,
-    rather than the date vanishing from the series with no disclosure at all.
+    rather than the date vanishing from the series with no disclosure at all. Which stems count as
+    read, rather than missing, is decided by ``plant_mapping.stems_delivery_reads``, the same
+    predicate ``plant_mapping.verify_mapping_inputs`` uses to decide what a delivery may check a
+    fresh stamp for, so the two can never disagree about what this delivery actually reads.
     """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import stems_delivery_reads
+
     def _attr(a, name):
         return getattr(a, name, None) if not isinstance(a, dict) else a.get(name)
 
@@ -437,10 +442,9 @@ def per_plant_series(
         pred_dir = predictions_by_date.get(date_str)
         pred_path = Path(pred_dir) if pred_dir else None
         id_map = bucket_id_map(pred_path) if pred_path is not None else None
-        # [total, positive, unclassified, missing, n_images] per plant, accumulated across that
-        # plant's images on this date. ``n_images`` counts every image the mapping names for this
-        # (plant, date), including ones with no prediction file, which ``missing`` counts too,
-        # since it is the coverage the series entry summarises, not the files that happened to exist.
+        read_stems = stems_delivery_reads(mapping[date_str], pred_dir) if pred_dir else set()
+        # [total, positive, unclassified, missing, n_images] per plant: n_images is every stem
+        # the mapping names for this (plant, date), missing is one this delivery doesn't read.
         by_plant: dict[str, list[int]] = {}
         accession: dict[str, Optional[str]] = {}
         for a in mapping[date_str]:
@@ -451,11 +455,12 @@ def per_plant_series(
             acc = by_plant.setdefault(plant_id, [0, 0, 0, 0, 0])
             acc[4] += 1
             accession.setdefault(plant_id, _attr(a, "accession_name"))
-            img_path = pred_path / f"{_attr(a, 'stem')}.json" if pred_path is not None else None
-            if img_path is None or not img_path.is_file():
+            stem = _attr(a, "stem")
+            if pred_path is None or stem not in read_stems:
                 acc[3] += 1
                 continue
-            total, positive, unclassified = count_by_class(img_path, id_map, positive_class_name)
+            total, positive, unclassified = count_by_class(
+                pred_path / f"{stem}.json", id_map, positive_class_name)
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
