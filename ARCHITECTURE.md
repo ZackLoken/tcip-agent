@@ -887,10 +887,10 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/image_event` | `image_event` | `routes/sessions.py:120` |
-| POST | `/start` | `start_session` | `routes/sessions.py:191` |
-| POST | `/end` | `end_session` | `routes/sessions.py:212` |
-| GET | `/load` | `load_sessions` | `routes/sessions.py:228` |
+| POST | `/image_event` | `image_event` | `routes/sessions.py:118` |
+| POST | `/start` | `start_session` | `routes/sessions.py:185` |
+| POST | `/end` | `end_session` | `routes/sessions.py:206` |
+| GET | `/load` | `load_sessions` | `routes/sessions.py:222` |
 
 ### routes/terminal.py, prefix `/api/terminal` (4 HTTP + 1 WS)
 
@@ -1184,7 +1184,7 @@ attributed to a split by
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
-`packages/tcip-web/src/tcip_web/routes/sessions.py:269`;
+`packages/tcip-web/src/tcip_web/routes/sessions.py:263`;
 `tcip_mcp.class_registry._sweep_schema_change`,
 `packages/tcip-mcp/src/tcip_mcp/class_registry.py:259`, which enumerates every bucket of a
 subject whose attribute schema is about to change so the confirmations under it can be stamped
@@ -1919,7 +1919,7 @@ with. The key stopped being written; a project's existing record still carrying 
 `scripts/drop_annotation_stats_image_status.py`, a one-off operator script.
 Side A: `packages/tcip-mcp/src/tcip_mcp/dataset_layout.py:771` (`def is_confirmed_negative(`, the one membership predicate; `normalize_status_store` is the one store guard, called by `confirmed_negative_names` and the resolver's confirmations term instead of inline re-implementations).
 Side B: `packages/tcip-web/src/tcip_web/routes/classes.py` (`set_image_status`, writing through the registered store).
-Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:321` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
+Phase 3 verdict: single. `packages/tcip-web/src/tcip_web/routes/sessions.py:315` (`if is_confirmed_negative(status):`, session time classification) calls the same predicate against the real `image_status.json` rather than restating it.
 
 ## S14. dataset_layout.py as the on-disk path resolver
 
