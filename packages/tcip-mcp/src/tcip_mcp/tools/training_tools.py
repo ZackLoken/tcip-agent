@@ -1294,9 +1294,12 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
             # trial_params is the sampled point itself, the only record of which axes this
             # sweep actually varied (the merged config cannot say that).
             trial_path = Path(trial_dir)
+            # merged never gets create_run's drawn/pinned seed (tracked_config is a separate
+            # dict); read it back the same way create_run/train() resolve it.
+            seed = run.config.get("seed", run.config.get("training", {}).get("seed"))
             store.replace(trial_config_key(trial_path.parent, trial_path.name),
                           {**merged, "trial_params": dict(config),
-                           "unconsumed_params": unconsumed})
+                           "unconsumed_params": unconsumed, "seed": seed})
         except (OSError, StoreError):
             logger.warning("could not persist the resolved config for %s", trial_dir, exc_info=True)
         if unconsumed:
