@@ -598,9 +598,9 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `scan_dataset` | `data_tools.py:250` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
-| `validate_data_quality` | `data_tools.py:320` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
-| `make_splits` | `data_tools.py:470` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
+| `scan_dataset` | `data_tools.py:228` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
+| `validate_data_quality` | `data_tools.py:298` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
+| `make_splits` | `data_tools.py:448` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
 ### experiment_tools.py (4 tools)
 
@@ -1178,9 +1178,9 @@ Writers: `set_image_status`,
 (`trainable_stems`) before the split's stem lists, manifest or file tree are written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:710`, then applied by
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:689`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:904`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:881`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
@@ -1673,8 +1673,8 @@ written that way, so the fresh-interpreter claim is measured rather than inferre
 for this section); `pipelines/region_completeness.py`'s own digest-writing logic beyond the
 `dataset_layout.py` cross-reference already given for format 8; any format defined inside
 `pipelines/postprocessing/`, `pipelines/feedback/`, or `pipelines/data/splits.py`'s own materialized
-tree beyond the `image_status.json` carry-over covered in format 5 (`split_manifest.json`/
-`split_stem_list.json` are covered in format 26). No seam id covers this placeholder entry since
+tree beyond the `image_status.json` carry-over covered in format 5 (`split_manifest.json` is
+covered in format 26). No seam id covers this placeholder entry since
 it names no single format.
 
 ## 25. `.tcip/project.json`, per-project record (site)
@@ -1694,14 +1694,13 @@ one reader every surface (the picker, `inspect_project`, the doctor) calls, and 
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project.json`: the record is new.
 
-## 26. `split_manifest.json` / `split_stem_list.json`, a partition `make_splits` drew
+## 26. `split_manifest.json`, a partition `make_splits` drew
 
-Path: `<output_path>/split_manifest.json` and `<output_path>/{train,val,calibration}.json`,
-addressed by `split_manifest_key`, `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:58`, and
-`split_stem_list_key`, `data_tools.py:35`, under whatever directory the caller asked the
-partition to be written to; no dataset resolver owns this layout.
+Path: `<output_path>/split_manifest.json`, addressed by `split_manifest_key`,
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:36`, under whatever directory the caller
+asked the partition to be written to; no dataset resolver owns this layout.
 
-Writer: `make_splits`, `data_tools.py:470`, when `output_path` is given or `materialize=True`.
+Writer: `make_splits`, `data_tools.py:448`, when `output_path` is given or `materialize=True`.
 The three sides are `splits.SPLIT_NAMES` (`train`, `val`, `calibration`); a manifest write states
 all three ratios (`train_ratio`, `val_ratio`, `calibration_ratio`) non-zero, refusing whichever is
 zero by name, since a manifest always draws all three sides. The draw refuses, before any write,
@@ -1720,8 +1719,7 @@ but admitted nothing writes no block, so a reader that finds none under a date t
 the manifest never held, not one it holds empty), `splits` (`train`/`val`/`calibration`
 identities, `<date>/<stem>`, the bare `<stem>` under a flat tree), `admission_counts` (the summed
 `trainable_stems` counts across every date), `calibration_foreground_groups_by_date` and
-`realized_ratios` (both described below). Each `split_stem_list.json` document holds one side's
-identities, the same list `splits` already carries. The answer (and the persisted manifest
+`realized_ratios` (both described below). The answer (and the persisted manifest
 record) also carry `calibration_foreground_groups_by_date`, a count for every date `members`
 holds, `0` included, since the floor above is over the whole draw and one date's own calibration
 slice can still land short of two foreground groups; the calibration door's own floor is where
@@ -1736,7 +1734,7 @@ image/label scan found, plus a single
 `dataset_hash` only when that scan found exactly one such directory; over more than one,
 `dataset_hash` is `null` rather than one directory's hash blind to the rest.
 
-Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:76`, the one reader a training or
+Readers: `data_tools.read_split_manifest_dir`, `data_tools.py:54`, the one reader a training or
 tuning run's `data.split.manifest_dir` resolves through (`training_tools._auto_train_val`) and a
 manifest-restricted calibration resolves through (`splits.resolve_manifest_calibration_universe`),
 which refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
