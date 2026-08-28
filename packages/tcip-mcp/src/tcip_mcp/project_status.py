@@ -7,9 +7,12 @@ helpers, no business logic elsewhere duplicates. Read back by ``inspect_project`
 
 Deliberately persists status/history only, never a "next step" or plan. A retrospective's
 ``would_do_differently``/``knowledge_for_future`` fields are forward-looking; this module never
-caches their text, only a pointer (path + timestamp) to the retrospective that holds them, so
-reading the actual content (with its caveats intact) is always one explicit
-``load_project_memory(kind='retrospectives')`` call away, never silently resurfaced.
+caches their text, only a pointer (project_id + timestamp) to the retrospective that holds them,
+so reading the actual content (with its caveats intact) is always one explicit
+``load_project_memory(kind='retrospectives')`` call away, never silently resurfaced. The
+project_id, not a path, is what a reader resolves back to the retrospective: a path is
+backend-dependent (the database backend keeps no such file) while the project_id resolves
+through ``retrospective_key``/``read_retrospective`` under either backend.
 
 Unlike ``.tcip/reports/``/``.tcip/retrospectives/`` (expected to be pruned eventually), this file is
 meant to be a permanent fixture a project operates against for its whole life, so a corrupted
@@ -132,9 +135,10 @@ def record_report(project_path: str | Path) -> None:
     _update(project_path, mutate)
 
 
-def record_retrospective(project_path: str | Path, project_id: str, retro_path: str | Path) -> None:
+def record_retrospective(project_path: str | Path, project_id: str) -> None:
     """Call after a ``project_retrospective`` write: reset the report counter, bump the
-    distillation-retrospective counter, and point at the retrospective file (no cached text)."""
+    distillation-retrospective counter, and point at the retrospective by its project_id (no
+    cached text, no path: a path is backend-dependent and the database backend keeps no file)."""
     now = datetime.now(timezone.utc).isoformat()
 
     def mutate(data: dict[str, Any]) -> None:
@@ -145,7 +149,6 @@ def record_retrospective(project_path: str | Path, project_id: str, retro_path: 
         )
         data["last_retrospective"] = {
             "project_id": project_id,
-            "path": str(retro_path),
             "modified_at": now,
         }
 

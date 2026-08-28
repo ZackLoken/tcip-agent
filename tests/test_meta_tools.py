@@ -411,6 +411,7 @@ def test_project_retrospective_updates_project_status(tmp_path: Path):
     status = read_project_status(tmp_path)
     assert status["reports_since_last_retrospective"] == 0
     assert status["last_retrospective"]["project_id"] == "p"
+    assert "path" not in status["last_retrospective"]  # backend-dependent, never persisted
     assert "worked" not in json.dumps(status)  # no retrospective text cached, pointer only
 
 
