@@ -1180,7 +1180,7 @@ attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:710`, then applied by
 `_apply_negative_carry(negative_carry, out_dir, subject)`
-`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:897`).
+`packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:904`).
 
 Readers: `tcip_mcp.pipelines.data.datasets.confirmed_negative_names`,
 `packages/tcip-mcp/src/tcip_mcp/pipelines/data/datasets.py:438`; `_status_bucket_for`,
