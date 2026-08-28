@@ -545,14 +545,10 @@ def block_calibrated_export_operating_point(
 
 # --- dataset identity -----------------------------------------------------
 
-def _read_label_bytes(labels_dir: Path, stems: list[str]) -> dict[str, bytes]:
-    """Every stem's label bytes, read once, empty for a missing file: the pass both
-    :func:`dataset_hash` and :func:`label_digests` build their own digest from."""
-    out: dict[str, bytes] = {}
-    for stem in stems:
-        lp = labels_dir / f"{stem}.json"
-        out[stem] = lp.read_bytes() if lp.is_file() else b""
-    return out
+def _label_bytes(lp: Path) -> bytes:
+    """One label file's bytes, empty for a missing file: valid negatives are hashed as empty, not
+    skipped, so their presence/absence still contributes to identity."""
+    return lp.read_bytes() if lp.is_file() else b""
 
 
 def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
@@ -561,7 +557,8 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
     Two datasets with the same labels hash equal (so a calibration is valid iff its hash matches the
     inference dataset's). Content-based (label bytes), so it is machine-independent, a path can move
     between machines but the GT identity does not. Missing labels are hashed as empty (they are valid
-    negatives), so their presence/absence still contributes to identity.
+    negatives), so their presence/absence still contributes to identity. Streams one label's bytes
+    at a time into the running hash rather than buffering the whole labels directory in memory.
     """
     from tcip_annotation.json_io import prediction_documents
 
@@ -571,12 +568,11 @@ def dataset_hash(labels_dir: str | Path, stems: list[str] | None = None) -> str:
         stems = sorted(p.stem for p in prediction_documents(labels_dir))
     else:
         stems = sorted(stems)
-    byts = _read_label_bytes(labels_dir, stems)
     h = hashlib.sha256()
     for stem in stems:
         h.update(stem.encode("utf-8"))
         h.update(b"\0")
-        h.update(byts[stem])
+        h.update(_label_bytes(labels_dir / f"{stem}.json"))
         h.update(b"\0")
     return h.hexdigest()[:16]
 
@@ -585,13 +581,48 @@ def label_digests(labels_dir: str | Path, stems: list[str]) -> dict[str, str]:
     """Each stem's own content-addressed digest, ``sha256(label bytes)[:16]``, the same
     empty-bytes-for-a-missing-file convention :func:`dataset_hash` folds into its one combined
     hash, surfaced here per stem instead: a withdrawn label reads as the digest of empty bytes,
-    not as an absent key. Reads each label's bytes once, through the pass :func:`dataset_hash`
-    shares with this function.
+    not as an absent key. Streams one label's bytes at a time; a caller wanting both this and
+    :func:`dataset_hash` over the same stems calls :func:`dataset_hash_and_label_digests` instead,
+    which reads each label once for both.
+    """
+    labels_dir = Path(labels_dir)
+    return {
+        stem: hashlib.sha256(_label_bytes(labels_dir / f"{stem}.json")).hexdigest()[:16]
+        for stem in sorted(stems)
+    }
+
+
+def dataset_hash_and_label_digests(
+    labels_dir: str | Path, stems: list[str],
+) -> tuple[str, dict[str, str]]:
+    """:func:`dataset_hash` and :func:`label_digests` over the same stem set, in one pass: each
+    label's bytes read once and folded into both the combined hash and its own per-stem digest,
+    rather than through two separate calls that would each open every file. ``make_splits`` calls
+    this for a members block's ``dataset_hash``/``label_digests`` pair.
     """
     labels_dir = Path(labels_dir)
     stems = sorted(stems)
-    byts = _read_label_bytes(labels_dir, stems)
-    return {stem: hashlib.sha256(byts[stem]).hexdigest()[:16] for stem in stems}
+    h = hashlib.sha256()
+    per_stem: dict[str, str] = {}
+    for stem in stems:
+        b = _label_bytes(labels_dir / f"{stem}.json")
+        h.update(stem.encode("utf-8"))
+        h.update(b"\0")
+        h.update(b)
+        h.update(b"\0")
+        per_stem[stem] = hashlib.sha256(b).hexdigest()[:16]
+    return h.hexdigest()[:16], per_stem
+
+
+def manifest_digest(manifest: dict) -> str:
+    """The one digest a split-manifest record earns: sha256 over ``RECORD_JSON.encode(manifest)``.
+
+    Called at bind time (``training_tools._persist_split_manifest``, stamping ``split.json``'s
+    ``label_digests.manifest_sha256``) and at calibration time (``inference_tools``'s
+    ``split_manifest_sha256``, and the operator script that passes the same fact) so the two
+    sides that must agree on a manifest's identity can never spell the digest differently.
+    """
+    return hashlib.sha256(RECORD_JSON.encode(manifest)).hexdigest()
 
 
 def csv_dataset_hash(csv_path: str | Path) -> str:

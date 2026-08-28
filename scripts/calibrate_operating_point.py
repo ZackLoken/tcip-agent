@@ -138,11 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     from tcip_mcp.dataset_layout import annotation_date
 
     cal_date = annotation_date(args.labels_dir)
+    split_manifest_sha256 = None
     if args.split_manifest_dir:
         from tcip_mcp.pipelines.data.splits import resolve_manifest_calibration_universe
+        from tcip_mcp.pipelines.resolution import manifest_digest
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
         manifest = read_split_manifest_dir(args.split_manifest_dir)
+        split_manifest_sha256 = manifest_digest(manifest)
         try:
             stems, group_by, group_key_map, _excluded, cal_date = \
                 resolve_manifest_calibration_universe(
@@ -215,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         tiled=False,
         experiment_id=args.experiment_id, staged_conf_floor=applied.get("score_thresh"),
         split_manifest_dir=args.split_manifest_dir, calibration_date=manifest_date_key(cal_date),
+        calibration_labels_dir=args.labels_dir, split_manifest_sha256=split_manifest_sha256,
     )
     attach_split_policy_provenance(bundle, locked)
 

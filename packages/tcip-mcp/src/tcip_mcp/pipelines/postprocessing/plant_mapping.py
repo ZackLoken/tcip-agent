@@ -725,6 +725,16 @@ def plant_mapping_names(project_root: Path | str) -> list[str]:
     return sorted(name for name in names if NAME_SEGMENT.fullmatch(name))
 
 
+def record_digest(record: dict) -> str:
+    """The one digest a mapping record earns: sha256 over ``RECORD_JSON.encode(record)``.
+
+    Called from :func:`persist_mapping` (what the receipt names) and :func:`load_mapping` (what
+    the receipt is checked against), so the write side and the read side can never spell this
+    digest differently.
+    """
+    return hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
+
+
 def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) -> None:
     """Write the mapping record, then the receipt that binds it to this build.
 
@@ -737,7 +747,7 @@ def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) ->
 
     record = build.to_record()
     tcip_store.replace(plant_mapping_key(project_root, name), record)
-    record_sha256 = hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
+    record_sha256 = record_digest(record)
     record_event_or_raise(
         "plant_mapping_built",
         {
@@ -878,7 +888,7 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
     if raw is None:
         return None
     record = _validated_record(raw, project_root, name)
-    record_sha256 = hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
+    record_sha256 = record_digest(record)
     _require_receipt(project_root, name, record_sha256)
     assignments: dict[str, list[Assignment]] = {}
     for date, rows in record["assignments"].items():

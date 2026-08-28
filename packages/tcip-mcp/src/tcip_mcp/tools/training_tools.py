@@ -2312,14 +2312,12 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
                 f"through; task={task!r} cannot bind to one."
             )
 
-        import hashlib
-
         from tcip_mcp.dataset_layout import annotation_date
         from tcip_mcp.pipelines.data.splits import (
             bind_manifest_stems, manifest_date_key, member_identity_parts,
             refuse_if_images_root_moved,
         )
-        from tcip_mcp.pipelines.resolution import dataset_hash
+        from tcip_mcp.pipelines.resolution import dataset_hash, manifest_digest
         from tcip_mcp.pipelines.resolution import label_digests as compute_label_digests
         from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
@@ -2385,7 +2383,7 @@ def _auto_train_val(task: str, data_cfg: dict, transforms):
         label_digests_block = {
             "at_split": date_block.get("label_digests"),
             "at_run": compute_label_digests(labels_dir, bound_stems),
-            "manifest_sha256": hashlib.sha256(RECORD_JSON.encode(manifest)).hexdigest(),
+            "manifest_sha256": manifest_digest(manifest),
         }
         # Only detection/instance_seg reach here (checked above), so the build is the plain
         # stems=-narrowed geometry path, never the classification CSV/folder branch below.
