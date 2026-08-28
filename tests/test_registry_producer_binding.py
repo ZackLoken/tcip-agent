@@ -149,7 +149,7 @@ def test_forged_tag_never_feeds_the_experiment_s_own_recorded_checkpoint(tmp_pat
     name (coverage: replaced by name once the run registers) and under another name (coverage:
     never scanned at all)."""
     from tcip_mcp.experiments import create_experiment, update_status
-    from tcip_mcp.pipelines.resolution import corroborated_producer
+    from tcip_mcp.pipelines.resolution import corroborated_producer, experiment_recorded_checkpoint
     from tcip_mcp.tools.model_tools import register_model
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -171,20 +171,28 @@ def test_forged_tag_never_feeds_the_experiment_s_own_recorded_checkpoint(tmp_pat
 
     from tcip_mcp.model_registry import _sha256_of_bytes
 
-    forged_digest = _sha256_of_bytes(after.read_bytes())
-    assert corroborated_producer(forged_digest, exp_id) == (None, None)
+    assert experiment_recorded_checkpoint(exp_id) is None
+
+    before_digest = _sha256_of_bytes(before.read_bytes())
+    assert corroborated_producer(before_digest, exp_id) == (None, None)
+
+    after_digest = _sha256_of_bytes(after.read_bytes())
+    assert corroborated_producer(after_digest, exp_id) == (None, None)
 
 
 # Rail 2: bytes the run's completion did not record refuse, writing nothing.
 
 def test_register_model_from_experiment_refuses_bytes_the_run_did_not_record(tmp_path, monkeypatch):
     """A completed run's recorded path overwritten in place, and a running run given any file,
-    both refuse rather than bind or overwrite the lineage."""
+    both refuse rather than bind or overwrite the lineage, each appending an audit line naming
+    the caller's digest, the recorded digest and the recorded path."""
+    import tcip_store as ts
+    from tcip_mcp.audit import audit_log_key
     from tcip_mcp.experiments import (
         complete_run, create_experiment, lineage_key, read_member, register_model_from_experiment,
         update_status,
     )
-    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.model_registry import ModelRegistry, _sha256_of_bytes
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     exp_id = "exp-rail2"
@@ -195,7 +203,8 @@ def test_register_model_from_experiment_refuses_bytes_the_run_did_not_record(tmp
     completed = complete_run(exp_id, str(ckpt))
     assert "error" not in completed, completed
 
-    ckpt.write_bytes(b"a different payload written over the same path after completion")
+    overwritten = b"a different payload written over the same path after completion"
+    ckpt.write_bytes(overwritten)
     refused = register_model_from_experiment(exp_id, str(ckpt))
     assert "error" in refused
     assert ModelRegistry(str(tmp_path)).list_models() == []
@@ -209,6 +218,21 @@ def test_register_model_from_experiment_refuses_bytes_the_run_did_not_record(tmp
     refused2 = register_model_from_experiment(exp_id2, str(other))
     assert "error" in refused2
     assert ModelRegistry(str(tmp_path)).list_models() == []
+
+    events = ts.read_log(audit_log_key(tmp_path)).records
+    refusals = [e["arguments"] for e in events if e.get("tool") == "experiment_mutation_refused"
+                and e["arguments"].get("op") == "register_model_from_experiment"]
+    assert len(refusals) == 2
+
+    mismatch = next(a for a in refusals if a["experiment_id"] == exp_id)
+    assert mismatch["caller_sha256"] == _sha256_of_bytes(overwritten)
+    assert mismatch["recorded_sha256"] == completed["model_weights_sha256"]
+    assert mismatch["recorded_path"] == str(ckpt)
+
+    not_completed = next(a for a in refusals if a["experiment_id"] == exp_id2)
+    assert not_completed["caller_sha256"] == _sha256_of_bytes(b"any file at all")
+    assert not_completed["recorded_sha256"] is None
+    assert not_completed["recorded_path"] is None
 
 
 # Rail 4: a project_path other than the experiment's root refuses by name.
@@ -237,6 +261,7 @@ def test_register_model_from_experiment_refuses_a_project_path_not_the_experimen
 
 def test_register_model_from_experiment_admits_a_differently_spelled_own_root(tmp_path, monkeypatch):
     from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment, update_status
+    from tcip_mcp.model_registry import ModelRegistry
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     exp_id = "exp-rail9b"
@@ -249,6 +274,15 @@ def test_register_model_from_experiment_admits_a_differently_spelled_own_root(tm
     same_dir_other_spelling = str(tmp_path) + os.sep
     admitted = register_model_from_experiment(exp_id, str(ckpt), project_path=same_dir_other_spelling)
     assert "error" not in admitted, admitted
+
+    # A relative-looking (forward-slash) spelling of the same root resolves to an absolute
+    # registry root, never a BadKey out of the store.
+    forward_slash_spelling = str(tmp_path).replace(os.sep, "/")
+    admitted_slash = register_model_from_experiment(
+        exp_id, str(ckpt), project_path=forward_slash_spelling, name=f"{exp_id}-slash",
+    )
+    assert "error" not in admitted_slash, admitted_slash
+    assert ModelRegistry(str(tmp_path)).get_model(f"{exp_id}-slash") is not None
 
 
 # Rail 5: a name a run bound refuses eviction by anything but that run.

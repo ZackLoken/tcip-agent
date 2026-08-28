@@ -20,6 +20,7 @@ being members of it (checkpoints, TensorBoard logs, a bespoke run's source snaps
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 from datetime import datetime, timezone
@@ -1299,26 +1300,40 @@ def register_model_from_experiment(
     if project_path and not same_directory(project_path, root):
         return {"error": f"register_model_from_experiment: project_path {project_path!r} is not "
                          f"the root experiment {experiment_id!r}'s own keys hang off ({root!r})."}
-    registry_root = project_path or root
-
-    status = read_member(status_key(experiment_id), {})
-    state = status.get("state") if isinstance(status, dict) else None
-    lineage = read_member(lineage_key(experiment_id), {})
-    recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
-    if state != "completed" or not recorded_digest:
-        return {"error": f"experiment {experiment_id!r} has not completed with a recorded "
-                         f"digest (state={state!r}): its run has not said what it produced. "
-                         "complete_run records the digest when the run finishes."}
-
-    from tcip_mcp.model_registry import _compute_sha256
+    # Resolved once confirmed the same root: the index key refuses a non-absolute one, so a
+    # relative or forward-slash spelling of the root must still reach it.
+    registry_root = str(Path(project_path).resolve()) if project_path else root
 
     ckpt = Path(checkpoint_path)
     if not ckpt.is_file():
         return {"error": f"register_model_from_experiment: checkpoint_path {checkpoint_path!r} "
                          "does not exist."}
-    digest = _compute_sha256(ckpt)
-    recorded_path = lineage.get("model_weights")
+    with open(ckpt, "rb") as f:
+        data = f.read()
+
+    from tcip_mcp.model_registry import _sha256_of_bytes
+
+    digest = _sha256_of_bytes(data)
+
+    status = read_member(status_key(experiment_id), {})
+    state = status.get("state") if isinstance(status, dict) else None
+    lineage = read_member(lineage_key(experiment_id), {})
+    recorded_digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
+    recorded_path = lineage.get("model_weights") if isinstance(lineage, dict) else None
+    if state != "completed" or not recorded_digest:
+        _audit_refused(experiment_id, "register_model_from_experiment", {
+            "checkpoint_path": checkpoint_path, "caller_sha256": digest,
+            "recorded_sha256": recorded_digest, "recorded_path": recorded_path,
+        })
+        return {"error": f"experiment {experiment_id!r} has not completed with a recorded "
+                         f"digest (state={state!r}): its run has not said what it produced. "
+                         "complete_run records the digest when the run finishes."}
+
     if digest != recorded_digest:
+        _audit_refused(experiment_id, "register_model_from_experiment", {
+            "checkpoint_path": checkpoint_path, "caller_sha256": digest,
+            "recorded_sha256": recorded_digest, "recorded_path": recorded_path,
+        })
         return {"error": f"{checkpoint_path} (sha256 {digest}) is not the bytes experiment "
                          f"{experiment_id!r}'s completion recorded (sha256 {recorded_digest}, at "
                          f"{recorded_path!r}): the caller's path must be the recorded path or a "
@@ -1327,28 +1342,26 @@ def register_model_from_experiment(
     config = read_member(config_key(experiment_id), {})
 
     # Metrics stored in the checkpoint describe the epoch it was saved at, so a best-checkpoint
-    # is never mislabelled with a later, worse epoch's numbers.
+    # is never mislabelled with a later, worse epoch's numbers; read from the digested bytes.
     final_metrics: dict[str, Any] = {}
     kind: str | None = None
-    ckpt = Path(checkpoint_path)
-    if ckpt.is_file():
-        payload = None
-        try:
-            import torch  # local checkpoint the caller is registering deliberately
+    payload = None
+    try:
+        import torch  # local checkpoint the caller is registering deliberately
 
-            payload = torch.load(ckpt, map_location="cpu", weights_only=False)
-        except Exception as exc:
-            logger.warning(
-                "checkpoint %s would not load (%s); registering experiment %s with no metrics "
-                "rather than substituting a different epoch's numbers.", ckpt, exc, experiment_id,
-            )
-        if isinstance(payload, dict):
-            kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
-            stamped = payload.get("metrics")
-            if isinstance(stamped, dict) and stamped:
-                final_metrics = dict(stamped)
-                if payload.get("epoch") is not None:
-                    final_metrics.setdefault("epoch", payload["epoch"])
+        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=False)
+    except Exception as exc:
+        logger.warning(
+            "checkpoint %s would not load (%s); registering experiment %s with no metrics "
+            "rather than substituting a different epoch's numbers.", ckpt, exc, experiment_id,
+        )
+    if isinstance(payload, dict):
+        kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
+        stamped = payload.get("metrics")
+        if isinstance(stamped, dict) and stamped:
+            final_metrics = dict(stamped)
+            if payload.get("epoch") is not None:
+                final_metrics.setdefault("epoch", payload["epoch"])
 
     metrics_source: str | None = None
     if final_metrics:
@@ -1356,10 +1369,10 @@ def register_model_from_experiment(
 
         metrics_source = "training_source" if config.get(TRAINING_SOURCE_KEY) else "trainer"
 
-    from tcip_mcp.model_registry import EntryOwnedByRun, register_entry
+    from tcip_mcp.model_registry import EntryOwnedByRun, _register_entry
 
     try:
-        entry = register_entry(
+        entry = _register_entry(
             registry_root, name=name or experiment_id, checkpoint_path=checkpoint_path,
             config=config, metrics=final_metrics, tags=[], kind=kind,
             metrics_source=metrics_source, experiment_id=experiment_id, sha256=digest,
