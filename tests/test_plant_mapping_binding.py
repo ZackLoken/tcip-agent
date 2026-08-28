@@ -585,6 +585,23 @@ def test_a_moved_and_re_registered_dataset_still_delivers_through_the_earlier_ma
     assert "error" not in res, res
     assert out_csv.exists()
 
+    # images/ removed under the original root (predictions/ nests a locked bucket store, left
+    # alone): the check must resolve against delivered_root, not the recorded dataset_root.
+    shutil.rmtree(str(images_root))
+    out_csv2 = tmp_path / "out2.csv"
+    res2 = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=moved_preds,
+        output_csv_path=str(out_csv2), acknowledge_unvalidated=True)
+    assert "error" not in res2, res2
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [], pm
+
 
 # ── rail 13 (listing only): legal names are listed, an illegally-named stray is not ─────
 
