@@ -278,6 +278,32 @@ def test_compare_experiments_refused_mutations_absent_when_the_page_reports_corr
     assert "refused_mutations" not in result["experiments"][0]
 
 
+def test_compare_experiments_finds_a_refusal_under_the_runs_own_launch_root(tmp_path, monkeypatch):
+    """A refusal the watchdog path recorded under a run's own launch root (through
+    _audit_refused's own root parameter, the platform's one producer of this entry), a root
+    distinct from the one compare_experiments currently resolves to, still appears in
+    refused_mutations: the run's own output_dir still names that root and the reader now scans
+    it too, not only the current platform root."""
+    current_root = tmp_path / "current_root"
+    launch_root = tmp_path / "launch_root"
+    current_root.mkdir()
+    launch_root.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(current_root))
+
+    from tcip_mcp.experiments import (
+        _audit_refused, compare_experiments, create_experiment, stamp_run_identity,
+    )
+
+    create_experiment("exp-moved", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    stamp_run_identity("exp-moved", "run-1", str(launch_root / ".tcip" / "experiments" / "exp-moved"))
+    _audit_refused("exp-moved", "update_status", {"from": "running", "to": "failed"}, root=launch_root)
+
+    result = compare_experiments(["exp-moved"])
+    refusals = result["experiments"][0]["refused_mutations"]
+    assert len(refusals) == 1
+    assert refusals[0]["arguments"]["op"] == "update_status"
+
+
 def test_compare_experiments_running_with_fresh_heartbeat(tmp_path, monkeypatch):
     """A rail must admit valid work: a launched, running run with a fresh heartbeat compares
     state="running", unlocked, with no rows-after-end count since it hasn't ended."""
