@@ -1381,7 +1381,13 @@ are listed here with the rest rather than taking numbers of their own.
   counts stems the manifest's `calibration` side names for this date, placed on neither loader
   whether or not the run currently admits them, and `calibration_unadmitted` counts the subset the
   run no longer admits at all, so a review of this one record shows the manifest's held-out side
-  was honored rather than silently folded into training or selection.
+  was honored rather than silently folded into training or selection. Beside `manifest_binding`,
+  never inside it, `label_digests` carries the per-stem facts the count-shaped binding block
+  deliberately excludes: `at_split` (copied from the manifest's own members block for this date),
+  `at_run` (the same per-stem digests recomputed at bind time) and `manifest_sha256` (the digest
+  of the manifest record the run bound to), so a calibration can name a label that moved between
+  the draw and now without the durable experiment config, a checkpoint's embedded config or a
+  trial's resolved config ever carrying a per-stem digest.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
   run's evidence. Written only by the module-private `_append_validation`, `experiments.py:987`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
@@ -1391,14 +1397,19 @@ are listed here with the rest rather than taking numbers of their own.
   parallel field for whether the calibration used to validate a checkpoint's own reference was kept
   disjoint from that checkpoint's own selection (val) side: `{"applicable": bool, "reason": str |
   None, "checked": bool, "unresolvable": bool, "leaked_groups": list, "leaked_stems": list,
-  "group_check": str | None}` for the four documents `resolver_selection_disjointness` covers,
-  `null` for `resolve_scale`; `applicable` is `False` when no split manifest is in play (no
+  "group_check": str | None, "labels_moved_draw_to_run": list | None, "labels_moved_run_to_now":
+  list | None, "calibration_labels_moved": list | None, "manifest_redrawn": bool | None,
+  "calibration_labels_dir": str | None}` for the four documents `resolver_selection_disjointness`
+  covers, `null` for `resolve_scale`; `applicable` is `False` when no split manifest is in play (no
   `split_manifest_dir` named and no `manifest_binding` on the checkpoint's own run, a within-image
   `spatial_strip` split, an empty `val`, an `external` group_by, no `calibration_date` derived at
   all, or a `calibration_date` other than the run's own `split.json` `date`), each such case
   carrying its own `reason`; `unresolvable` marks
   the one case the ruling refuses rather than skips, a named manifest with no experiment record to
-  read a selection side from. Read by `read_validations`, `experiments.py:1022`,
+  read a selection side from. `verify_stamp_binding` (line 1399) requires the five label-movement
+  keys present, `null` admitted, on an applicable row it would otherwise pass: an applicable,
+  checked, no-leak row missing any of them floors, the same as a leak does, so a row earned before
+  the keys existed cannot read as cleared. Read by `read_validations`, `experiments.py:1022`,
   `find_validation`, `experiments.py:1037` (matching rows by recomputed `validation_digest`,
   `experiments.py:940`), and included whole by `get_experiment` (1201). The one member appendable
   after a terminal state, because a validation is a statement made about a run after it ended.
@@ -1701,7 +1712,9 @@ records `seed`, `group_by` (the resolved policy), `group_key_map` when one was s
 `dataset_fingerprint`, `subject`, `attribute` (`null` when none), `id_map` (the
 `assign_class_ids` map the draw resolved), `members` (one block per capture date that admitted at
 least one stem, keyed through `splits.manifest_date_key` (the date, or `""` for a flat tree),
-holding `labels_root`, `images_root`, and that date's own `dataset_hash`; a date the draw searched
+holding `labels_root`, `images_root`, that date's own `dataset_hash`, and `label_digests` (the
+per-stem sha256[:16] over each admitted stem's own label bytes, the same absent-file convention
+`dataset_hash` uses); a date the draw searched
 but admitted nothing writes no block, so a reader that finds none under a date treats it as one
 the manifest never held, not one it holds empty), `splits` (`train`/`val`/`calibration`
 identities, `<date>/<stem>`, the bare `<stem>` under a flat tree), `admission_counts` (the summed
@@ -1728,7 +1741,9 @@ manifest-restricted calibration resolves through (`splits.resolve_manifest_calib
 which refuses by name when the record is absent, undecodable, not a mapping, lacks any of `seed`,
 `group_by`, `dataset_fingerprint`, `subject`, `attribute`, `id_map`, `members`, `splits`,
 `admission_counts` (the tuple `data_tools._SPLIT_MANIFEST_REQUIRED_KEYS`, kept beside the writer's
-dict so the two cannot drift), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
+dict so the two cannot drift), holds a `members` block whose `label_digests` is missing or not a
+non-empty mapping (a manifest drawn before the platform recorded per-stem digests binds nothing
+here), lacks any name in `splits.SPLIT_NAMES` under `splits`, or whose
 sides are not pairwise disjoint; `scripts/plant_aware_group_splits.py` reads no manifest back, it
 only writes one through `make_splits`. `bind_manifest_stems` (`splits.py:403`) reads all three
 sides for one capture date: a `calibration` member is placed on neither loader, whether or not the
