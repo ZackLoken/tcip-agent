@@ -570,3 +570,163 @@ def test_plant_mapping_names_lists_legal_names_and_omits_a_stray_file(
     ts.replace(plant_mapping.plant_mapping_key(tmp_path, "Not A Legal Name"), {})
 
     assert plant_mapping.plant_mapping_names(tmp_path) == ["valley-a", "valley-b"]
+
+
+# ── rail 2: a capture added under a mapped date, through the platform's own writers ─────
+
+
+def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_date(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.tools.ingest_tools import ingest_images
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    extra_source = tmp_path / "extra_source"
+    _write_geo_image(extra_source / "P3_extra.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 40))
+    res = ingest_images(
+        source=str(extra_source), name="ds", site="orchard block",
+        project_path=str(dataset_root), date_from=DATES[0])
+    assert "error" not in res, res
+    assert res["buckets"].get(DATES[0]) == 1
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" in res
+    assert DATES[0] in res["error"]
+    assert not out_csv.exists()
+
+
+def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_way(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No band group existed at build time; ``detect_and_write_band_groups`` forms one from two
+    previously-standalone files, so the date's capture set changes shape (two stems collapse
+    into one) the same way an added image does: refused, naming the date, through the same
+    whole-date identity check, not the manifest-specific wording (which needs the old build's
+    own recorded manifest digest and members, not just its name; that disambiguation is not
+    implemented here, see the report).
+    """
+    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    date_dir = images_root / DATES[0]
+    _write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
+    _write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    grouped = detect_and_write_band_groups(
+        date_dir, explicit_groups={"aux": {"b1": "aux_b1.jpg", "b2": "aux_b2.jpg"}})
+    assert grouped["formed"], grouped
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" in res
+    assert DATES[0] in res["error"]
+    assert not out_csv.exists()
+
+
+# ── rail 11: an unreadable image, a raster and a band group all build and deliver ───────
+
+
+def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_delivers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import _read_date_stamps
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    date_dir = images_root / DATES[0]
+
+    bad = date_dir / "bad.jpg"
+    bad.write_bytes(b"not a real jpeg")
+    (date_dir / "raster.npy").write_bytes(b"not really a numpy array, list_logical_images "
+                                           b"never decodes it")
+    _write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
+    _write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
+    grouped = detect_and_write_band_groups(
+        date_dir, explicit_groups={"aux": {"b1": "aux_b1.jpg", "b2": "aux_b2.jpg"}})
+    assert grouped["formed"], grouped
+
+    # White-box: the raster and band-group stamps carry readable=None (no EXIF to fail reading),
+    # the unreadable image carries readable=False, before build_mapping ever touches a store.
+    logical = list_logical_images(date_dir)
+    stamps_by_stem = {s.stem: s for s in _read_date_stamps(logical, DATES[0])}
+    assert stamps_by_stem["bad"].kind == "image" and stamps_by_stem["bad"].readable is False
+    assert stamps_by_stem["raster"].kind == "raster" and stamps_by_stem["raster"].readable is None
+    assert stamps_by_stem["aux"].kind == "band_group" and stamps_by_stem["aux"].readable is None
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    assert build_res["unreadable"][DATES[0]] == ["bad.jpg"]
+    _seed_currant_bloom_trait(tmp_path)
+
+    build = plant_mapping.load_mapping(tmp_path, "valley")
+    assert build is not None
+    by_stem = {a.stem: a for a in build.assignments[DATES[0]]}
+    assert by_stem["bad"].source == "unmapped"
+    assert by_stem["raster"].source == "unmapped"
+    assert by_stem["aux"].source == "unmapped"
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+
+# ── rail 14 (cursor memo): the second receipt scan in one process reads only what was ───
+# ── appended since the first, never the whole log again ─────────────────────────────────
+
+
+def test_second_receipt_scan_in_one_process_reads_only_what_was_appended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, _ = _write_scene(dataset_root)
+
+    calls: list[str | None] = []
+    real_read_log = ts.read_log
+
+    def spy(key, after=None):
+        calls.append(after)
+        return real_read_log(key, after=after)
+
+    monkeypatch.setattr(ts, "read_log", spy)
+
+    res_a = build_plant_mapping(
+        name="valley-a", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in res_a, res_a
+    build_a = plant_mapping.load_mapping(tmp_path, "valley-a")
+    assert build_a is not None
+    assert calls == [None]
+
+    res_b = build_plant_mapping(
+        name="valley-b", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in res_b, res_b
+    build_b = plant_mapping.load_mapping(tmp_path, "valley-b")
+    assert build_b is not None
+    assert len(calls) == 2
+    assert calls[1] is not None
