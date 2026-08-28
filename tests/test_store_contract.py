@@ -1413,13 +1413,6 @@ REGISTERED = {
     "dataset_identity": Registered(
         DATASET_IDENTITY_BYTES,
         dataset_layout.dataset_identity_key, "dataset.json", pin=_pin_platform_root),
-    "labels": Registered(
-        LABEL_BYTES, lambda root: dataset_layout.label_key(root, "2026-03-04", "a_1"),
-        "annotations/2026-03-04/a_1.json"),
-    "predictions": Registered(
-        LABEL_BYTES,
-        lambda root: dataset_layout.prediction_key(root, "live", "2026-03-04", "a_1"),
-        "predictions/live/2026-03-04/a_1.json"),
     "review_verdicts": Registered(
         {"image": "a_1.jpg", "reviewed_by": "ü", "verdict": "accepted"},
         lambda root: review_engine.review_verdict_key(
@@ -2005,22 +1998,21 @@ def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_
         assert handle.read() in (b"first", b"second")
 
 
-def test_the_layout_key_and_the_generic_key_for_one_document_agree_on_it(store):
-    """A label document addressed by its layout and by its bare directory is one document.
-
-    Both forms are legal inputs to the writer, so they must place the file identically and share
-    the version derived from its bytes, or a create-only write through one would not see what the
-    other already wrote.
+def test_the_generic_key_a_dated_write_uses_lands_where_dataset_layout_computes_the_path(store):
+    """``write_annotations`` addresses a real dataset's label through the store's own generic,
+    directory-rooted key, never a layout-specific one; ``dataset_layout``'s readers find the same
+    file by plain path arithmetic instead. The two must name one file, or a document the store
+    places would sit somewhere its own layout's readers never look.
     """
-    only_on(store, FILE, "the agreement asserted here is between two locators' paths, which "
-                         "the seam reaches through path_for and only the file backend answers")
-    layout_key = dataset_layout.label_key(store.root, "2026-03-04", "a_1")
+    only_on(store, FILE, "the agreement asserted here is between the store's locator and "
+                         "dataset_layout's own path arithmetic, which path_for exposes only on "
+                         "the file backend")
+    layout_path = dataset_layout.annotation_path(store.root, "2026-03-04", "a_1")
     generic_key = json_io.annotation_record_key(
         dataset_layout.annotation_dir(store.root, "2026-03-04"), "a_1"
     )
-    assert store.backend.path_for(generic_key) == store.backend.path_for(layout_key)
+    assert store.backend.path_for(generic_key) == layout_path
 
-    version = ts.put_blob(layout_key, b"{}", expect=ts.Version.ABSENT)
-    with pytest.raises(ts.VersionConflict):
-        ts.put_blob(generic_key, b"[]", expect=ts.Version.ABSENT)
+    version = ts.put_blob(generic_key, b"{}", expect=ts.Version.ABSENT)
+    assert layout_path.read_bytes() == b"{}"
     assert ts.read_blob_versioned(generic_key).version == version

@@ -328,6 +328,7 @@ def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_s
     """The admit half, asserted rather than assumed: imagery, labels and an export to a plain
     ``<name>.json`` must not pay for the collision above, and a lock taken on their behalf
     would put a ``.tcip`` directory inside every output directory the platform writes into."""
+    from tcip_annotation import json_io
     from tcip_mcp import dataset_layout
     from tcip_store import file_backend as file_backend_module
 
@@ -346,7 +347,12 @@ def test_an_ordinary_blob_write_beside_a_database_takes_no_lock_and_creates_no_s
 
     with bound(FileBackend()):
         ts.put_blob(_coco_target(output, "annotations"), b"{}")
-        ts.put_blob(dataset_layout.label_key(tmp_path, "2026-03-04", "a_1"), b"[]")
+        ts.put_blob(
+            json_io.annotation_record_key(
+                dataset_layout.annotation_dir(tmp_path, "2026-03-04"), "a_1"
+            ),
+            b"[]",
+        )
         ts.put_blob(dataset_layout.image_key(tmp_path, "2026-03-04", "a_1", ".jpg"), b"\xff\xd8")
 
     assert locked == []
