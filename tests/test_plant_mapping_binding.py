@@ -322,32 +322,196 @@ def test_compute_phenology_refuses_a_plant_csv_rewritten_in_place(
     assert not out_csv.exists()
 
 
-# ── rail 7: a readability flip in either direction refuses, naming the file ─────────────
+# ── rail 7: a readability flip on a capture this delivery reads refuses, naming the file ─
 
 
-def test_a_capture_unreadable_at_build_and_readable_at_verify_refuses(
+def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recorded, mapped capture this delivery's own ``predictions_by_date`` carries no
+    document for is unread: corrupting its bytes afterward must surface only as this capture's
+    own disclosure, never a readability refusal, since an unread capture is never opened."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
+    (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
+    (images_root / DATES[0] / f"{p2_stem}.jpg").write_bytes(b"not a real jpeg any more")
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg"]
+
+
+def test_an_unread_captures_bytes_changing_in_place_no_longer_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same unread capture as above, but changed to a different, still-readable image rather
+    than garbage: the whole-date identity this would have flipped is never recomputed either,
+    since this delivery does not read every capture of the date."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
+    (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
+    _write_geo_image(
+        images_root / DATES[0] / f"{p2_stem}.jpg", PLANTS[1]["lat"], PLANTS[1]["lon"],
+        datetime(2026, 2, 11, 10, 45))
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg"]
+
+
+def test_a_non_delivered_mapping_date_is_never_walked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mapped date this delivery's own ``predictions_by_date`` omits is disclosed as a bare
+    date and never enumerated: a capture corrupted under it changes nothing about the delivery."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    stem = f"{PLANTS[0]['plot']}_{DATES[1].replace('-', '')}"
+    (images_root / DATES[1] / f"{stem}.jpg").write_bytes(b"garbage, never read by this delivery")
+
+    delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered_preds,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [DATES[1]]
+
+
+def test_a_moved_read_capture_refuses_naming_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path, monkeypatch)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
-    bad = images_root / DATES[0] / "bad.jpg"
-    bad.write_bytes(b"not a real jpeg")
-
     build_res = build_plant_mapping(
         name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
     assert "error" not in build_res, build_res
-    assert "bad.jpg" in build_res.get("unreadable", {}).get(DATES[0], [])
     _seed_currant_bloom_trait(tmp_path)
 
-    _write_geo_image(bad, 43.1968, -90.0581, datetime(2026, 2, 11, 9, 5))
+    stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
+    target = images_root / DATES[0] / f"{stem}.jpg"
+    # Several meters east: nowhere near either recorded plant, so nothing matches the distance
+    # this mapping's own row recorded for it.
+    _write_geo_image(
+        target, PLANTS[0]["lat"], PLANTS[0]["lon"] + 0.0002, datetime(2026, 2, 11, 9, 30))
+
     out_csv = tmp_path / "out.csv"
     res = compute_phenology(
         trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
-    assert "bad.jpg" in res["error"]
+    assert target.name in res["error"]
+    assert "assignment would differ" in res["error"]
     assert not out_csv.exists()
+
+
+def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With every mapped capture's prediction present, an in-place EXIF timestamp change at the
+    same GPS position is caught by the whole-date identity recompute, not the moved-position
+    check, since the position itself never moved."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
+    target = images_root / DATES[0] / f"{stem}.jpg"
+    _write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" in res
+    assert "changed since this mapping was built" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
+    (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
+
+    delivered_preds = {DATES[0]: preds_by_date[DATES[0]]}
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=delivered_preds,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [f"{DATES[0]}/{p2_stem}.jpg", DATES[1]]
 
 
 def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
@@ -725,6 +889,7 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
     assert DATES[0] in res["error"]
+    assert "P3_extra.jpg" in res["error"]
     assert not out_csv.exists()
 
 
@@ -733,10 +898,9 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
 ) -> None:
     """No band group existed at build time; ``detect_and_write_band_groups`` forms one from two
     previously-standalone files, so the date's capture set changes shape (two stems collapse
-    into one) the same way an added image does: refused, naming the date, through the same
-    whole-date identity check, not the manifest-specific wording (which needs the old build's
-    own recorded manifest digest and members, not just its name; that disambiguation is not
-    implemented here, see the report).
+    into one) the same way an added image does: refused, naming the date and the manifest's own
+    file name, through the added-capture check, since the mapping's own assignment rows name
+    the two original standalone stems, never the grouped one.
     """
     from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
 
@@ -762,6 +926,7 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
     assert DATES[0] in res["error"]
+    assert "aux.bandgroup" in res["error"]
     assert not out_csv.exists()
 
 

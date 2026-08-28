@@ -24,9 +24,12 @@ measurement-integrity invariant).
 A mapping is project state with a name, bound to the dataset it was built over and to its own
 build receipt: ``build_mapping`` produces a :class:`MappingBuild` (provenance plus assignments),
 ``persist_mapping`` writes the record and then the receipt that binds it, and ``load_mapping``
-refuses a record no receipt names. ``verify_mapping_inputs`` is the delivery-time check: it
-re-reads the dates and plant CSVs the record names and refuses (never raises) when what is on
-disk now no longer matches what the build was made from.
+refuses a record no receipt names. ``verify_mapping_inputs`` is the delivery-time check: for each
+mapped date a delivery's own ``predictions_by_date`` actually names, it re-reads only the captures
+the delivery reads (:func:`stems_delivery_reads`) plus the plant CSVs the record names, and
+refuses (never raises) when what is on disk now no longer matches what the build was made from; a
+date the delivery omits, or a capture of a delivered date the delivery does not read, is
+disclosed rather than checked.
 """
 
 from __future__ import annotations
@@ -283,8 +286,9 @@ def capture_identity(stamps: list[ImageStamp]) -> str:
     An EXIF/manifest identity, never an image-content identity: it certifies the inputs the
     assignment was made from, and no reader may cite it as provenance for the pixels a phenotype
     was counted over (the prediction bucket's own stamps carry that). ``build_mapping`` calls
-    this once per date; the delivery's ``verify_mapping_inputs`` calls it again to detect a
-    changed input set.
+    this once per date; the delivery's ``verify_mapping_inputs`` recomputes it for a date only
+    when the delivery read every capture the date has, to detect a changed input set at no added
+    cost precisely when it can (see that function's own docstring for the case it can't).
     """
     rows: list[list[object]] = []
     for s in sorted(stamps, key=lambda s: s.name):
@@ -353,6 +357,33 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
     c = 2 * math.asin(min(1.0, math.sqrt(a)))
     return EARTH_RADIUS_M * c
+
+
+def stems_delivery_reads(rows: Iterable[object], pred_dir: Path | str) -> set[str]:
+    """Stems of ``rows`` (one date's assignment rows, :class:`Assignment` objects or the plain
+    dict rows :meth:`MappingBuild.rows` produces) whose ``plot_name`` is truthy and whose stem
+    carries a prediction document under ``pred_dir``: the one predicate for "which prediction
+    documents this delivery reads."
+
+    Both :func:`verify_mapping_inputs` (what it may re-check a fresh stamp for) and
+    :func:`~tcip_mcp.pipelines.postprocessing.phenology.per_plant_series` (what it aggregates
+    rather than counts missing) call this rather than each inlining the same test, so the two can
+    never disagree about what a delivery actually reads.
+    """
+    from tcip_mcp.prediction_buckets import bucket_stems
+
+    def _attr(row: object, name: str) -> object:
+        return getattr(row, name, None) if not isinstance(row, dict) else row.get(name)
+
+    pred_stems = bucket_stems(pred_dir)
+    out: set[str] = set()
+    for row in rows:
+        if not _attr(row, "plot_name"):
+            continue
+        stem = _attr(row, "stem")
+        if isinstance(stem, str) and stem in pred_stems:
+            out.add(stem)
+    return out
 
 
 def _nearest_plant(
@@ -911,48 +942,53 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
     )
 
 
-def verify_mapping_inputs(build: MappingBuild, dataset_root: Path | str) -> dict:
-    """Check a mapping's recorded inputs against what is on disk now, at delivery time.
+def verify_mapping_inputs(
+    build: MappingBuild, dataset_root: Path | str, predictions_by_date: dict[str, str],
+) -> dict:
+    """Check a mapping's recorded inputs against what is on disk now, for the captures this
+    delivery actually reads, at delivery time.
 
-    Never raises: returns ``{"refusal": str}`` when a mapped date's captures changed since the
-    build, a capture's readability flipped, an ambiguous stem is found, or a plant CSV was
-    rewritten in place; otherwise ``{"captures_unverified": [date, ...], "plant_csvs_unverified":
-    [path, ...]}`` naming what could not be checked (a date folder archived after inference, a
-    CSV moved) without refusing.
+    A mapped date not named in ``predictions_by_date`` is never walked (no enumeration, no EXIF):
+    disclosed in ``captures_unverified`` as the bare date string, the same as a named date whose
+    image folder is absent. A named date's folder is enumerated once
+    (``image_utils.list_logical_images``, still refusing by name on
+    :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem`); an enumerated stem the
+    mapping's own assignment rows for that date do not name means the mapping does not cover what
+    is on disk, and refuses, naming the date, the file(s) and the rebuild remedy. A recorded stem
+    no longer enumerated (its capture moved or was deleted) is disclosed as ``"<date>/<name>"``,
+    using the recorded row's own file name; so is a recorded, still-enumerated stem this
+    delivery's own prediction bucket carries no document for (:func:`stems_delivery_reads`),
+    never opened to check.
+
+    Only a capture this delivery reads gets its fresh stamp read. For each: a readability flip in
+    either direction refuses by name, as before; a row that recorded a plant position (a truthy
+    ``plot_name`` with a ``distance_m``) refuses by name when the capture's fresh GPS position no
+    longer sits ``distance_m`` from any plant of that name in the plant CSVs whose bytes this same
+    call just verified (or when the fresh capture carries no GPS position at all; this check runs
+    only when at least one plant CSV verified, since a mapping with none to check against has
+    nothing to compare a position to). When a date's read captures are its whole recorded and
+    enumerated set, every stamp needed is already in hand, so the whole date's identity
+    (:func:`capture_identity`) is recomputed and compared against the record, at no added cost,
+    the same strength as before. A capture read alongside others left unread on the same date is
+    not covered by that whole-date recompute, since one identity digest covers the date rather
+    than the capture; the per-capture readability and moved-position checks above are what still
+    catches it changing in place.
+
+    Never raises: returns ``{"refusal": str}`` for any of the above; otherwise
+    ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``
+    order and, within a date, sorted by name. A plant CSV missing or rewritten in place
+    disclose/refuse exactly as before.
     """
     from tcip_mcp.dataset_layout import image_dir
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+    from tcip_mcp.pipelines.image_utils import (
+        AmbiguousImageStem,
+        list_logical_images,
+        logical_image_name,
+    )
 
-    captures_unverified: list[str] = []
-    for date in build.dates:
-        date_dir = image_dir(dataset_root, date)
-        if not date_dir.is_dir():
-            captures_unverified.append(date)
-            continue
-        try:
-            logical = list_logical_images(date_dir)
-        except AmbiguousImageStem as exc:
-            return {"refusal": str(exc)}
-        stamps = _read_date_stamps(logical, date)
-        was_unreadable = set(build.unreadable.get(date, []))
-        for s in stamps:
-            if s.kind != "image":
-                continue
-            if s.name in was_unreadable and s.readable:
-                return {"refusal": (
-                    f"{s.name} (date {date}) was unreadable when this mapping was built and its "
-                    "EXIF is available now: rebuild, since its assignment would differ")}
-            if s.name not in was_unreadable and s.readable is False:
-                return {"refusal": (
-                    f"{s.name} (date {date}) was readable when this mapping was built and "
-                    "could not be read now: retry, or rebuild if it is gone")}
-        new_identity = capture_identity(stamps)
-        if new_identity != build.capture_identity.get(date):
-            return {"refusal": (
-                f"the captures under date {date} changed since this mapping was built "
-                f"(recorded {build.capture_identity.get(date)!r}, now {new_identity!r}); "
-                "rebuild to cover the images actually on disk")}
+    remedy = "rebuild with build_plant_mapping"
 
+    # Plant CSVs first: the per-capture moved-position check below trusts only verified bytes.
     plant_csvs_unverified: list[str] = []
     for entry in build.plant_csvs:
         p = Path(entry["path"])
@@ -964,6 +1000,87 @@ def verify_mapping_inputs(build: MappingBuild, dataset_root: Path | str) -> dict
             return {"refusal": (
                 f"plant CSV {entry['path']} was rewritten since this mapping was built; "
                 "rebuild")}
+    verified_plants = read_plant_csvs(
+        Path(entry["path"]) for entry in build.plant_csvs
+        if entry["path"] not in plant_csvs_unverified
+    )
+
+    captures_unverified: list[str] = []
+    for date in build.dates:
+        rows = build.assignments.get(date, [])
+        recorded_by_stem = {a.stem: a for a in rows}
+        recorded_stems = set(recorded_by_stem)
+
+        pred_dir = predictions_by_date.get(date)
+        if pred_dir is None:
+            captures_unverified.append(date)
+            continue
+
+        date_dir = image_dir(dataset_root, date)
+        if not date_dir.is_dir():
+            captures_unverified.append(date)
+            continue
+
+        try:
+            logical = list_logical_images(date_dir)
+        except AmbiguousImageStem as exc:
+            return {"refusal": str(exc)}
+
+        enumerated_stems = set(logical)
+        added = enumerated_stems - recorded_stems
+        if added:
+            names = sorted(logical_image_name(logical[s]) for s in added)
+            return {"refusal": (
+                f"date {date} carries capture(s) {names} this mapping's assignments do not "
+                f"name: the mapping does not cover what is on disk now; {remedy}")}
+
+        missing_stems = recorded_stems - enumerated_stems
+        present_stems = recorded_stems & enumerated_stems
+        read_set = stems_delivery_reads(rows, pred_dir) & present_stems
+        unread_stems = present_stems - read_set
+
+        for name, _stem in sorted(
+            (Path(recorded_by_stem[s].image_path).name, s) for s in (missing_stems | unread_stems)
+        ):
+            captures_unverified.append(f"{date}/{name}")
+
+        read_logical = {s: logical[s] for s in read_set}
+        stamps = _read_date_stamps(read_logical, date)
+        was_unreadable = set(build.unreadable.get(date, []))
+        for s in stamps:
+            row = recorded_by_stem[s.stem]
+            if s.kind == "image":
+                if s.name in was_unreadable and s.readable:
+                    return {"refusal": (
+                        f"{s.name} (date {date}) was unreadable when this mapping was built and "
+                        "its EXIF is available now: rebuild, since its assignment would differ")}
+                if s.name not in was_unreadable and s.readable is False:
+                    return {"refusal": (
+                        f"{s.name} (date {date}) was readable when this mapping was built and "
+                        "could not be read now: retry, or rebuild if it is gone")}
+            if verified_plants and row.plot_name and row.distance_m is not None:
+                if s.lat is None or s.lon is None:
+                    return {"refusal": (
+                        f"{s.name} (date {date}) recorded a plant position when this mapping was "
+                        "built and now carries no GPS position: rebuild, since its assignment "
+                        "would differ")}
+                distances = [
+                    haversine_m(s.lat, s.lon, p.lat, p.lon)
+                    for p in verified_plants if p.plot_name == row.plot_name
+                ]
+                if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
+                    return {"refusal": (
+                        f"{s.name} (date {date}) has moved since this mapping was built: no "
+                        f"plant named {row.plot_name!r} is {row.distance_m} m away now; rebuild, "
+                        "since its assignment would differ")}
+
+        if not missing_stems and read_set == recorded_stems:
+            new_identity = capture_identity(stamps)
+            if new_identity != build.capture_identity.get(date):
+                return {"refusal": (
+                    f"the captures under date {date} changed since this mapping was built "
+                    f"(recorded {build.capture_identity.get(date)!r}, now {new_identity!r}); "
+                    "rebuild to cover the images actually on disk")}
 
     return {"captures_unverified": captures_unverified, "plant_csvs_unverified": plant_csvs_unverified}
 
@@ -985,12 +1102,14 @@ def resolve_delivery_mapping(
     """The two phenology doors' shared preamble: load the named mapping, refuse a
     ``predictions_by_date`` date it does not cover, resolve the delivered buckets' one dataset
     root and require it to carry the mapping's own minted dataset id, then verify the mapping's
-    recorded inputs against that resolved root, so a dataset moved (or copied and the original
-    renamed) after registration still verifies. Returns the loaded build and
-    :func:`verify_mapping_inputs`'s disclosure; raises :class:`MappingDeliveryRefusal`, naming
-    the remedy, for every case a delivery must not proceed from, a ``StoreError`` reading the
-    mapping store included, so a root whose state is still in the file layout refuses with the
-    store's own sentence rather than escaping as an unhandled exception.
+    recorded inputs against that resolved root for exactly the captures
+    ``predictions_by_date`` reads, so a dataset moved (or copied and the original renamed) after
+    registration still verifies without re-reading a delivery's own unread captures. Returns the
+    loaded build and :func:`verify_mapping_inputs`'s disclosure; raises
+    :class:`MappingDeliveryRefusal`, naming the remedy, for every case a delivery must not
+    proceed from, a ``StoreError`` reading the mapping store included, so a root whose state is
+    still in the file layout refuses with the store's own sentence rather than escaping as an
+    unhandled exception.
     """
     from tcip_store import StoreError
 
@@ -1027,7 +1146,7 @@ def resolve_delivery_mapping(
             f"mapping {name!r} was built over (mapping dataset_root "
             f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})")
 
-    verified = verify_mapping_inputs(mapping_build, delivered_root)
+    verified = verify_mapping_inputs(mapping_build, delivered_root, predictions_by_date)
     if "refusal" in verified:
         raise MappingDeliveryRefusal(verified["refusal"])
     return mapping_build, verified
