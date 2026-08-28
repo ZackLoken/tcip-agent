@@ -647,8 +647,8 @@ Docstring is the function's docstring first line, verbatim.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `register_model` | `model_tools.py:18` | yes | Register a trained model in the project model registry. |  <!-- queued: P5-23 merge-or-split -->
-| `list_registered_models` | `model_tools.py:75` | yes | List models in the project registry. |
-| `select_best_model` | `model_tools.py:123` | yes | Get the best registered model by an explicit metric, no default is assumed. |
+| `list_registered_models` | `model_tools.py:78` | yes | List models in the project registry. |
+| `select_best_model` | `model_tools.py:126` | yes | Get the best registered model by an explicit metric, no default is assumed. |
 
 ### operationalization_tools.py (1 tool)
 
@@ -1326,30 +1326,30 @@ platform write against one log and holds the two rows to the same core fields.
 ## 10-15. `.tcip/experiments/<experiment_id>/`, eight sub-formats
 
 Path root: `.tcip/experiments/<experiment_id>/`, resolved via `experiments_dir()`,
-`packages/tcip-mcp/src/tcip_mcp/experiments.py:49`, against the pinned platform state root. Each
+`packages/tcip-mcp/src/tcip_mcp/experiments.py:50`, against the pinned platform state root. Each
 member is a store of its own with its own key constructor beside it, and every writer and reader
 below addresses the member through that key rather than composing a path. Eight members are
 declared; the numbered range 10-15 carries six of them, and `env.json` and `validations.jsonl`
 are listed here with the rest rather than taking numbers of their own.
 
-- `config.json` (`config_key`, `experiments.py:115`): written by `create_experiment`,
-  `experiments.py:398` (`def create_experiment(`), `overwrite_config_if_pristine`,
+- `config.json` (`config_key`, `experiments.py:116`): written by `create_experiment`,
+  `experiments.py:399` (`def create_experiment(`), `overwrite_config_if_pristine`,
   `experiments.py:474` (rewrites only while the record is still pristine, no metrics logged), and
   three best-effort merges the subprocess worker patches into the durable record after a run's
   own resolution is known: `_patch_experiment_config_tiling`,
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:30`
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 72
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
-  119 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1387`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1496`.
+  119 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1399`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1508`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
-  `experiments.py:525` (`def update_status(`), `stamp_run_identity` (`experiments.py:659`),
+  `experiments.py:526` (`def update_status(`), `stamp_run_identity` (`experiments.py:659`),
   `_touch_heartbeat`, `experiments.py:855` (`def _touch_heartbeat(`). Read by `get_experiment`
   (1288), `reconstruct_run_status`, `experiments.py:802` (`def reconstruct_run_status(`),
   `resolve_experiment_dir_for_run` (`experiments.py:683`). `state` is terminal-locked once
   `"completed"`/`"failed"`.
 - `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (397), `complete_run`,
-  `experiments.py:592` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
+  `experiments.py:593` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
   digest, sealed into the transaction that completes the run) and `update_lineage`,
   `experiments.py:1191` (every other field; refuses `model_weights`/`model_weights_sha256` as
   `complete_run`'s alone). Read by `get_experiment` (1288) and `get_experiment_lineage`,
@@ -1851,7 +1851,7 @@ Phase 3 verdict: single.
 ## S07. Experiment record .tcip/experiments/<id>/
 
 Must agree: three processes agree on the experiment directory layout and immutability rules for each file.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:59` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:60` (`def experiment_dir(` plus the per-member key constructors, the one declaration of the record's path and member set).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py` (config patch goes through `store.transaction(config_key(...))`; every member writer takes its target from the experiments module's accessors).
 Phase 3 verdict: single.
 
@@ -2021,7 +2021,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1604` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1616` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
