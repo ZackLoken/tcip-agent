@@ -72,13 +72,17 @@ def _write_geo_image(path: Path, lat: float, lon: float, when: datetime) -> None
     Image.new("RGB", (8, 8)).save(path, exif=exif)
 
 
-def _write_scene(dataset_root: Path, *, dates: list[str] = DATES) -> tuple[Path, Path, dict[str, str]]:
-    """Real geolocated images for two plants across ``dates``, plus matching classified
-    prediction buckets (id_map only, unvalidated: these rails are about the mapping's own
-    binding, not the measurement-validity gate). Returns (images_root, plant_csv, preds_by_date).
+def _write_scene(
+    dataset_root: Path, *, dates: list[str] = DATES, plants: list[dict] | None = None,
+) -> tuple[Path, Path, dict[str, str]]:
+    """Real geolocated images for ``plants`` (``PLANTS`` by default) across ``dates``, plus
+    matching classified prediction buckets (id_map only, unvalidated: these rails are about the
+    mapping's own binding, not the measurement-validity gate). Returns
+    (images_root, plant_csv, preds_by_date).
     """
     from tcip_mcp.pipelines.resolution import write_sidecar
 
+    plants = PLANTS if plants is None else plants
     images_root = dataset_root / "images"
     preds_root = dataset_root / "predictions" / "live"
     preds_by_date: dict[str, str] = {}
@@ -86,7 +90,7 @@ def _write_scene(dataset_root: Path, *, dates: list[str] = DATES) -> tuple[Path,
         base_time = datetime.strptime(date, "%Y-%m-%d").replace(hour=9, minute=30)
         bucket = preds_root / date
         bucket.mkdir(parents=True, exist_ok=True)
-        for j, plant in enumerate(PLANTS):
+        for j, plant in enumerate(plants):
             stem = f"{plant['plot']}_{date.replace('-', '')}"
             _write_geo_image(
                 images_root / date / f"{stem}.jpg", plant["lat"], plant["lon"],
@@ -101,7 +105,7 @@ def _write_scene(dataset_root: Path, *, dates: list[str] = DATES) -> tuple[Path,
     with plant_csv.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
-        for p in PLANTS:
+        for p in plants:
             w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
     return images_root, plant_csv, preds_by_date
 
@@ -483,6 +487,68 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
     assert not out_csv.exists()
 
 
+def test_an_unmapped_raster_no_longer_blocks_the_whole_date_digest_from_catching_a_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unmapped raster capture beside two fully-read mapped plants used to make the whole-date
+    recompute structurally unreachable (it required reading every recorded stem, and an unmapped
+    capture is never delivery-read); now the trigger is every mapped capture read, so an in-place
+    EXIF timestamp change on a mapped capture still refuses even with the raster never read."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
+    target = images_root / DATES[0] / f"{stem}.jpg"
+    _write_geo_image(target, PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 11, 0))
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" in res
+    assert "changed since this mapping was built" in res["error"]
+    assert not out_csv.exists()
+
+
+def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disclosed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admitting side of the same scene: nothing changed on disk, both plants' predictions are
+    present, and the raster is verified only through the whole-date digest, so it is not also
+    listed among the unverified captures."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    (images_root / DATES[0] / "orthomosaic_block.tif").write_bytes(b"")
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert pm["captures_unverified"] == [], pm
+
+
 def test_a_partial_delivery_delivers_with_disclosures_naming_exactly_what_it_did_not_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -536,6 +602,56 @@ def test_a_capture_readable_at_build_and_unreadable_at_verify_refuses(
     assert "error" in res
     assert target.name in res["error"]
     assert not out_csv.exists()
+
+
+def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_discloses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capture unreadable when the mapping was built has no GPS, so ``assign_plants`` records it
+    unmapped, and an unmapped row's stem is never among what a delivery reads
+    (``stems_delivery_reads`` requires a truthy ``plot_name``): replacing it with a readable,
+    geotagged image later is never examined for a readability flip at all, coverage of that dead
+    path rather than a guard, and under a partial read (another mapped plant's prediction absent)
+    it surfaces only as this capture's own disclosure."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    # Both dates, not just DATES[0]: DATES[1] stays fully intact so the classifier is still
+    # assessed somewhere once DATES[0]'s own P2 prediction is removed below.
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
+    stem = f"{PLANTS[0]['plot']}_{DATES[0].replace('-', '')}"
+    target = images_root / DATES[0] / f"{stem}.jpg"
+    original_bytes = target.read_bytes()
+    target.write_bytes(b"garbage, no EXIF, unreadable at build time")
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    build = plant_mapping.load_mapping(tmp_path, "valley")
+    assert build is not None
+    assert f"{stem}.jpg" in build.unreadable[DATES[0]]
+    by_stem = {a.stem: a for a in build.assignments[DATES[0]]}
+    assert by_stem[stem].plot_name is None
+    _seed_currant_bloom_trait(tmp_path)
+
+    target.write_bytes(original_bytes)
+
+    p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
+    (Path(preds_by_date[DATES[0]]) / f"{p2_stem}.json").unlink()
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert f"{DATES[0]}/{stem}.jpg" in pm["captures_unverified"]
 
 
 # ── rail 8: a receipt that cannot be written fails loudly and the record stays refused ──
@@ -757,6 +873,60 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
     events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
     pm = events[-1]["plant_mapping"]
     assert str(per_plant_csvs[1]) in pm["plant_csvs_unverified"]
+    p2_stem = f"{PLANTS[1]['plot']}_{DATES[0].replace('-', '')}"
+    assert f"{DATES[0]}/{p2_stem}.jpg" in pm["captures_unverified"]
+
+
+def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three plants, one CSV each: one plant's capture moves on disk and that plant's own CSV is
+    deleted, while a partial read (a third plant's prediction absent) means the delivery cannot
+    fall back on the whole-date digest either. The moved capture is disclosed as unverified rather
+    than refused as moved, since its own plant's CSV cannot answer for whether it moved."""
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    plants3 = PLANTS + [{"plot": "P3", "accession": "acc-C", "lat": 43.19670, "lon": -90.058074}]
+    images_root, _plant_csv, preds_by_date = _write_scene(
+        dataset_root, dates=[DATES[0]], plants=plants3)
+
+    per_plant_csvs = []
+    for p in plants3:
+        path = tmp_path / f"plants_{p['plot']}.csv"
+        with path.open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["plot_name", "accession_name", "WGS84_centroid_x", "WGS84_centroid_y"])
+            w.writerow([p["plot"], p["accession"], p["lon"], p["lat"]])
+        per_plant_csvs.append(path)
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root),
+        plant_csv_paths=[str(p) for p in per_plant_csvs])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    p2_stem = f"{plants3[1]['plot']}_{DATES[0].replace('-', '')}"
+    moved = images_root / DATES[0] / f"{p2_stem}.jpg"
+    _write_geo_image(
+        moved, plants3[1]["lat"], plants3[1]["lon"] + 0.0002, datetime(2026, 2, 11, 9, 31))
+    per_plant_csvs[1].unlink()
+
+    p3_stem = f"{plants3[2]['plot']}_{DATES[0].replace('-', '')}"
+    (Path(preds_by_date[DATES[0]]) / f"{p3_stem}.json").unlink()
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+    from tcip_mcp.pipelines import resolution
+
+    scope = resolution.delivery_events_scope(tmp_path)
+    keys = ts.keys(resolution.DELIVERY_EVENTS_STORE, str(scope))
+    events = [ts.read(k) for k in keys if ts.read(k)["door"] == "compute_phenology"]
+    pm = events[-1]["plant_mapping"]
+    assert f"{DATES[0]}/{p2_stem}.jpg" in pm["captures_unverified"]
 
 
 # ── rail 15: the build route's happy path, and a moved+re-registered dataset still binds ─
