@@ -706,8 +706,8 @@ Docstring is the function's docstring first line, verbatim.
 | `list_training_runs` | `training_tools.py:884` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:898` | yes | Request graceful cancellation of a running training run. |
 | `inspect_compute_resources` | `training_tools.py:927` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
-| `run_hpo` | `training_tools.py:1305` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:2563` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `run_hpo` | `training_tools.py:1311` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:2573` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (6 tools)
 
@@ -920,15 +920,15 @@ registered at HEAD.
 
 | method | path | handler | line |
 |---|---|---|---|
-| POST | `/launch` | `launch_hpo` | `routes/tuning.py:258` |
-| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:289` |
-| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:307` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:339` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:372` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:396` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:482` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:499` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:513` |
+| POST | `/launch` | `launch_hpo` | `routes/tuning.py:303` |
+| GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:334` |
+| GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:352` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:386` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:419` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:443` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:529` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:546` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:560` |
 
 ### 11 routes with no located frontend caller
 
@@ -1367,7 +1367,7 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py:355`. No accessor in this module
   reads it back; it is provenance a reviewer reads directly.
 - `split.json` (`split_key`, line 232): written by `training_tools._persist_split_manifest`,
-  `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:1706`
+  `packages/tcip-mcp/src/tcip_mcp/tools/training_tools.py:1716`
   (`def _persist_split_manifest(`). Read by `read_split_manifest`,
   `experiments.py:1058`, which `pipelines/block_calibration.py` and `pipelines/operating_point.py`
   both take the manifest from. Every run, bound to a manifest or not, records `date`, the labels
