@@ -278,27 +278,36 @@ def test_compare_experiments_refused_mutations_absent_when_the_page_reports_corr
     assert "refused_mutations" not in result["experiments"][0]
 
 
-def test_compare_experiments_finds_a_refusal_under_the_runs_own_launch_root(tmp_path, monkeypatch):
-    """A refusal the watchdog path recorded under a run's own launch root (through
-    _audit_refused's own root parameter, the platform's one producer of this entry), a root
-    distinct from the one compare_experiments currently resolves to, still appears in
-    refused_mutations: the run's own output_dir still names that root and the reader now scans
-    it too, not only the current platform root."""
-    current_root = tmp_path / "current_root"
-    launch_root = tmp_path / "launch_root"
-    current_root.mkdir()
-    launch_root.mkdir()
-    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(current_root))
+def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, monkeypatch):
+    """Coverage of the one-root invariant: a refusal update_status itself records for an
+    experiment under the platform root this process is pinned to appears in refused_mutations
+    when comparing that experiment, produced through the real producer (a terminal-to-terminal
+    move) rather than a raw internal write. An output_dir naming a second root, even one whose
+    store.db holds garbage bytes, does not make the field absent: a refusal lands only under the
+    root that holds the record, so the platform log this reader scans is complete for an
+    experiment that resolves under it at all, and nothing about a second root ever gets read."""
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(root))
 
     from tcip_mcp.experiments import (
-        _audit_refused, compare_experiments, create_experiment, stamp_run_identity,
+        compare_experiments, create_experiment, stamp_run_identity, update_status,
     )
 
-    create_experiment("exp-moved", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
-    stamp_run_identity("exp-moved", "run-1", str(launch_root / ".tcip" / "experiments" / "exp-moved"))
-    _audit_refused("exp-moved", "update_status", {"from": "running", "to": "failed"}, root=launch_root)
+    create_experiment("exp-terminal", {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+    completed = update_status("exp-terminal", "completed")
+    assert completed["state"] == "completed"
+    refused = update_status("exp-terminal", "failed")
+    assert "error" in refused
 
-    result = compare_experiments(["exp-moved"])
+    other_root = tmp_path / "other_root"
+    (other_root / ".tcip").mkdir(parents=True)
+    (other_root / ".tcip" / "store.db").write_bytes(b"not a real sqlite database")
+    stamp_run_identity(
+        "exp-terminal", "run-1", str(other_root / ".tcip" / "experiments" / "exp-terminal")
+    )
+
+    result = compare_experiments(["exp-terminal"])
     refusals = result["experiments"][0]["refused_mutations"]
     assert len(refusals) == 1
     assert refusals[0]["arguments"]["op"] == "update_status"

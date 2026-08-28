@@ -1470,51 +1470,31 @@ def list_experiments() -> list[dict[str, Any]]:
     return experiments
 
 
-def _launch_root_of(output_dir: Any) -> Path | None:
-    """The root a run's own ``output_dir`` sat under at launch, when that path still carries the
-    literal ``.tcip`` segment :func:`stamp_run_identity`'s own layout writes it under (the
-    segment everything below ``experiments_dir()`` sits beneath); the root is everything before
-    the last such segment, the same anchor-on-a-named-segment technique
-    :func:`~tcip_mcp.dataset_layout.dataset_root_of` uses for a dataset root.
-
-    ``None`` for a caller-supplied ``output_dir`` that escapes that convention (a custom relative
-    or absolute path with no ``.tcip`` segment in it): a run launched under one platform root can
-    still leave its watchdog's refusal in that root's own audit log after this process adopts a
-    different one (see ``update_status``'s ``root`` parameter), and that root is not otherwise
-    recorded anywhere the refusal reader can reach it, but only when the path in hand positively
-    carries the segment the root is recovered from, never by assuming a fixed directory depth.
-    """
-    if not isinstance(output_dir, str) or not output_dir:
-        return None
-    parts = Path(output_dir).parts
-    idxs = [k for k, p in enumerate(parts) if p == ".tcip"]
-    if not idxs:
-        return None
-    i = max(idxs)
-    return Path(*parts[:i]) if i > 0 else None
-
-
-def _scan_refusal_log(
-    root: Path | str | None, wanted: set[str]
-) -> tuple[dict[str, list[dict[str, Any]]], bool]:
-    """Every ``experiment_mutation_refused`` entry in the log ``root`` names (``None`` for the
-    platform log) whose ``arguments.experiment_id`` is in ``wanted``, indexed by that id.
-
-    The second element is ``False`` when the log can't be read at all (the read itself raised, or
-    :func:`~tcip_store.read_log` reports corrupt entries, folded onto ``page.corrupt`` rather than
-    raising), in which case the index is empty rather than a partial answer: the caller must not
-    read "nothing found in this log" off an index that was never actually populated.
+def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[str, Any]]] | None:
+    """Every ``experiment_mutation_refused`` audit entry naming one of ``experiment_ids``, indexed
+    by ``arguments.experiment_id``, from one scan of the platform audit log, the read
+    :func:`compare_experiments` shares across every experiment it compares rather than repeating
+    per experiment. ``None`` for the whole call when the log can't be read: the read itself
+    raised, or :func:`~tcip_store.read_log` reports corrupt entries (folded onto ``page.corrupt``
+    rather than raising, so an unreadable page would otherwise look like a page with nothing to
+    report). Either way every experiment's own field is then absent, never an empty list, so
+    "no refusals" and "couldn't read the log" are never confused for each other. An id present in
+    the index only when it has at least one entry; an id with none is absent from the index and
+    the caller reads that as an empty list, not as unreadable. A refusal line lands only under the
+    root that holds the record, which is the root this reader must be pinned to for the experiment
+    to resolve at all, so the one-root scan is complete for every experiment it can answer for.
     """
     try:
         from tcip_store import read_log
 
         from tcip_mcp.audit import audit_log_key
 
-        page = read_log(audit_log_key(root))
+        page = read_log(audit_log_key())
     except Exception:
-        return {}, False
+        return None
     if page.corrupt:
-        return {}, False
+        return None
+    wanted = set(experiment_ids)
     index: dict[str, list[dict[str, Any]]] = {}
     for e in page.records:
         if e.get("tool") != "experiment_mutation_refused":
@@ -1524,59 +1504,7 @@ def _scan_refusal_log(
         if eid not in wanted:
             continue
         index.setdefault(eid, []).append({"timestamp": e.get("timestamp"), "arguments": arguments})
-    return index, True
-
-
-def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[str, Any]] | None]:
-    """Every ``experiment_mutation_refused`` audit entry naming one of ``experiment_ids``, indexed
-    by experiment id, from the platform audit log plus, for an experiment whose own ``output_dir``
-    still names one (see :func:`_launch_root_of`), the log under the root it actually launched
-    under, so a refusal a scoped writer left there while this process had since adopted a
-    different active project is not silently missed. A root that resolves to the same log as the
-    platform's own is never scanned twice: entries would otherwise double-count instead of merge.
-
-    Every id in ``experiment_ids`` is a key of the result. Its value is ``None`` when any log that
-    could hold its entries (the platform log, or its own launch root's log when it has one)
-    couldn't be read, an unreadable scoped log naming only the ids whose own root it is, never
-    every id compared; the caller reads ``None`` as "unresolved", never as "no refusals", and a
-    list (possibly empty) otherwise, merged from every log that does hold this id's entries.
-
-    One scan of the platform log covers the whole call, same as before; a scoped log is scanned
-    once per distinct root among the ids compared, not once per id.
-    """
-    wanted = set(experiment_ids)
-    platform_index, platform_ok = _scan_refusal_log(None, wanted)
-
-    from tcip_mcp.audit import platform_audit_scope
-
-    platform_root_str = str(platform_audit_scope().resolve())
-    roots_to_ids: dict[str, set[str]] = {}
-    for eid in experiment_ids:
-        status = read_member(status_key(eid))
-        root = _launch_root_of(status.get("output_dir") if isinstance(status, dict) else None)
-        if root is None:
-            continue
-        root_str = str(root.resolve())
-        if root_str == platform_root_str:
-            continue  # the same log the platform scan already covered
-        roots_to_ids.setdefault(root_str, set()).add(eid)
-
-    scoped_ok: dict[str, bool] = {}
-    scoped_index: dict[str, list[dict[str, Any]]] = {}
-    for root_str, ids in roots_to_ids.items():
-        idx, ok = _scan_refusal_log(root_str, ids)
-        for eid in ids:
-            scoped_ok[eid] = ok
-            if ok:
-                scoped_index.setdefault(eid, []).extend(idx.get(eid, []))
-
-    result: dict[str, list[dict[str, Any]] | None] = {}
-    for eid in experiment_ids:
-        if not platform_ok or not scoped_ok.get(eid, True):
-            result[eid] = None
-            continue
-        result[eid] = list(platform_index.get(eid, [])) + scoped_index.get(eid, [])
-    return result
+    return index
 
 
 def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600.0) -> dict[str, Any]:
@@ -1602,13 +1530,10 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
     unlocked log's own append can admit after the mark, or any row an outside writer appended
     later), ``None`` when the record has no ``ended``, and a row whose own ``timestamp`` is
     missing or unparseable never counted rather than raising; ``n_epochs``/``n_rows``, always
-    present; and ``refused_mutations``, every refused write recorded against this experiment in
-    the platform audit log or, when its own ``output_dir`` still names one, the log under the
-    root it actually launched under (see :func:`_index_refused_mutations`), absent, not empty,
-    for this experiment specifically when a log that could hold its entries can't be read.
-    Reading it costs one scan of the platform audit log for the whole call, plus one scan per
-    distinct launch root among the experiments compared, on top of one :func:`get_experiment` per
-    experiment compared.
+    present; and ``refused_mutations``, every refused write the platform audit log recorded
+    against this experiment (see :func:`_index_refused_mutations`), absent rather than empty when
+    that log itself can't be read. Reading it costs one scan of the platform audit log for the
+    whole call, on top of one :func:`get_experiment` per experiment compared.
     """
     comparisons: list[dict[str, Any]] = []
     refused_index = _index_refused_mutations(experiment_ids)
@@ -1646,9 +1571,8 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
             )
         summary["rows_after_end"] = rows_after_end
 
-        refused = refused_index.get(eid)
-        if refused is not None:
-            summary["refused_mutations"] = refused
+        if refused_index is not None:
+            summary["refused_mutations"] = refused_index.get(eid, [])
 
         # Get config summary
         config = exp.get("config", {})
