@@ -696,7 +696,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     def fake_auto_train_val(task, data_cfg, transforms):
         if captured is not None:
             captured["transforms"] = transforms
-        return ds, ds
+        return ds, ds, None
 
     monkeypatch.setattr(tt, "_auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(gt, "train", fake_train)
@@ -899,7 +899,7 @@ def test_run_hpo_trial_bespoke_custom_key_not_falsely_flagged_unconsumed(monkeyp
 
     import tcip_mcp.tools.training_tools as tt
     monkeypatch.setattr(tt, "_auto_train_val",
-                        lambda task, data_cfg, transforms: (_FakeDataset(), _FakeDataset()))
+                        lambda task, data_cfg, transforms: (_FakeDataset(), _FakeDataset(), None))
     import torch.utils.data as tud
     monkeypatch.setattr(tud, "DataLoader", lambda *a, **k: object())
     from tcip_mcp.pipelines.data import samplers

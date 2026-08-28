@@ -135,7 +135,7 @@ def test_group_key_map_end_to_end_not_permanently_blocked(tmp_path):
         "auto_val": True,
         "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": dict(group_key_map)},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     # The two groups (gA/gB) never straddle train/val: group-coherent by construction.
     train_groups = {group_key_map[s] for s in train_ds.stems}
@@ -317,7 +317,7 @@ def test_train_disjointness_geometric_check_end_to_end_with_persisted_regions(tm
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
     create_experiment("exp_geo_e2e", {})
@@ -371,7 +371,7 @@ def test_spatial_manifest_never_reads_as_a_bare_stem_leak(tmp_path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
     create_experiment("exp_spatial_e2e", {})

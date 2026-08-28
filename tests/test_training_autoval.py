@@ -66,7 +66,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
     assert sorted(train_ds.stems + val_ds.stems) == sorted(all_stems)
@@ -100,7 +100,7 @@ def test_auto_train_val_malformed_val_ratio_degrades(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": "not_a_number"},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is None
     assert sorted(train_ds.stems) == sorted(all_stems)
 
@@ -118,7 +118,7 @@ def test_auto_train_val_ordinal_returns_none(tmp_path: Path):
         w.writerows(rows)
 
     data_cfg = {"images_dir": str(images_dir), "csv_path": str(csv_path), "auto_val": True}
-    _ds, val_ds = _auto_train_val("ordinal", data_cfg, None)
+    _ds, val_ds, _ = _auto_train_val("ordinal", data_cfg, None)
     assert val_ds is None
 
 
@@ -147,7 +147,7 @@ def test_auto_train_val_ordinal_explicit_val_csv_path(tmp_path: Path):
 
     data_cfg = {"images_dir": str(train_images), "csv_path": str(train_csv),
                 "val_images_dir": str(val_images), "val_csv_path": str(val_csv)}
-    train_ds, val_ds = _auto_train_val("ordinal", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("ordinal", data_cfg, None)
     assert val_ds is not None
     assert val_ds.num_samples == 2
     assert train_ds.num_samples == 4
@@ -175,7 +175,7 @@ def test_auto_train_val_ordinal_val_images_dir_without_val_csv_path_degrades(tmp
 
     data_cfg = {"images_dir": str(train_images), "csv_path": str(train_csv),
                 "val_images_dir": str(val_images)}
-    train_ds, val_ds = _auto_train_val("ordinal", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("ordinal", data_cfg, None)
     assert val_ds is None
     assert train_ds.num_samples == 4
 
@@ -195,7 +195,7 @@ def test_auto_train_val_tiny_dataset_guard(tmp_path: Path):
 
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "subject": "catkin", "auto_val": True}
-    _train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    _train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # single group -> no leakage-free val possible
 
 
@@ -213,7 +213,7 @@ def test_auto_train_val_single_source_untiled_still_no_val(tmp_path: Path):
     )
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "subject": "catkin", "auto_val": True}
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is None
     assert not hasattr(train_ds, "tile_size")
 
@@ -245,7 +245,7 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert train_ds.tile_size == 128 and val_ds.tile_size == 128
     assert train_ds.num_samples > 0 and val_ds.num_samples > 0
@@ -290,7 +290,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
                   "keep_regions": [(0, 0, 100, 100)]},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
 
@@ -311,7 +311,7 @@ def test_auto_train_val_degenerate_group_retries_at_stem_level(tmp_path: Path):
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "subject": "catkin", "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1}}
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
     assert sorted(train_ds.stems + val_ds.stems) == sorted(stems)
@@ -336,7 +336,7 @@ def test_auto_train_val_explicit_group_key_map_not_overridden_by_retry(tmp_path:
     data_cfg = {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                 "subject": "catkin", "auto_val": True,
                 "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is None  # the explicit map still collapses everything into one group
     assert data_cfg["split"]["resolved_group_by"] == "explicit_map"
 
@@ -353,7 +353,7 @@ def test_reserve_calibration_fraction_unset_is_byte_identical(tmp_path: Path):
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "test_ratio": 0.1, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["calibration_region"] == []
@@ -371,7 +371,7 @@ def test_reserve_calibration_fraction_adds_a_disjoint_calibration_region(tmp_pat
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     manifest = data_cfg["split"]["spatial_manifest"]
     assert manifest["calibration_region"]
@@ -503,7 +503,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     train_loader = DataLoader(train_ds, batch_size=2, collate_fn=task_collate("detection"))
     val_loader = DataLoader(val_ds, batch_size=2, collate_fn=task_collate("detection"))

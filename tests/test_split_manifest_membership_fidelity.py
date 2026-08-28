@@ -47,7 +47,7 @@ def _persisted_split(experiment_id: str, data_cfg: dict) -> dict:
     from tcip_mcp.experiments import create_experiment, read_split_manifest
     from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
 
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None, "the fixture must produce a real validation side"
     create_experiment(experiment_id, {})
     _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)

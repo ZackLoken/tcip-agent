@@ -106,6 +106,17 @@ operating point on exactly the data the shipped weights were picked to fit). It 
 `train_disjointness` in the validation row and floors `verify_stamp_binding` when a manifest-scoped
 reference carries none.
 
+For a run bound to a split manifest, the same check also names a calibration label that moved
+since the split was drawn: `labels_moved_draw_to_run` (a stem whose digest at the draw differs
+from its digest when the run bound), `labels_moved_run_to_now` (differs again between the bind
+and this calibration's own read of the labels directory, `null` when the calibration named none),
+`calibration_labels_moved` (the calibration-side stems among those two lists) and
+`manifest_redrawn` (the manifest directory was overwritten since the run bound). This is a
+disclosure, not a floor: the row still validates with the moved stems named on it, and
+`describe_review_validation` renders one sentence when `calibration_labels_moved` is non-empty. A
+run bound before this check existed, or one calibrated with no bound run under a caller-named
+manifest, seals all four keys `null`.
+
 ## Failure Triage
 
 When metrics are poor, investigate systematically:

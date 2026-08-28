@@ -310,7 +310,9 @@ def test_a_row_stating_split_manifest_dir_with_a_checked_no_leak_selection_disjo
         reference_identity={"stated_values": {"split_manifest_dir": "some/manifest"}},
         selection_disjointness={"applicable": True, "reason": None, "checked": True,
                                 "unresolvable": False, "leaked_groups": [], "leaked_stems": [],
-                                "group_check": "performed"},
+                                "group_check": "performed", "labels_moved_draw_to_run": None,
+                                "labels_moved_run_to_now": None, "calibration_labels_moved": None,
+                                "manifest_redrawn": None, "calibration_labels_dir": None},
     )
 
     assert _count_validity(pred_dir)["validated"] == "held_out_annotations"

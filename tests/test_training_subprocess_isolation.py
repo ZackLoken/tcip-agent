@@ -159,7 +159,7 @@ def test_worker_leaves_a_spatial_runs_identities_out_of_the_durable_config(tmp_p
             "resolved_group_by": "spatial_strip",
             "spatial_manifest": {"regions": {"r0": ["a"], "r1": ["b"]}},
         })
-        return None, None
+        return None, None, None
 
     class StopAfterSplit(Exception):
         pass

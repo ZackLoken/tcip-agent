@@ -525,6 +525,7 @@ def calibrate_classifier_operating_point(
         trait_name, calibration_items=cal_items, holdout_items=hold_items,
         experiment_id=experiment_id,
         calibration_date=manifest_date_key(annotation_date(calibration_gt_dir)),
+        calibration_labels_dir=calibration_gt_dir,
     )
 
     from tcip_mcp.project_paths import resolve_output_path

@@ -114,7 +114,7 @@ def _build_experiment(tmp_path: Path, *, reserve_frac: float = 0.15,
     }
     if plant_csv_paths:
         data_cfg["plant_csv_paths"] = plant_csv_paths
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     create_experiment(experiment_id, {"data": data_cfg})
     _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg)
@@ -1035,7 +1035,7 @@ def _build_attribute_scoped_experiment(
         "split": {"val_ratio": 0.2, "test_ratio": 0.15, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
     _subject, _attribute, recorded_id_map = _resolve_run_id_map("detection", data_cfg)
     data_cfg["id_map"] = dict(recorded_id_map)

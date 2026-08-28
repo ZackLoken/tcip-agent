@@ -109,7 +109,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
         "split": {"val_ratio": 0.2, "test_ratio": 0.1, "seed": 1,
                   "reserve_calibration_fraction": 0.15},
     }
-    train_ds, val_ds = _auto_train_val("detection", data_cfg, None)
+    train_ds, val_ds, _ = _auto_train_val("detection", data_cfg, None)
     assert val_ds is not None
 
     create_experiment("exp_four_way", {})
