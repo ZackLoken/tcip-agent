@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path, PurePosixPath
 
@@ -30,10 +29,13 @@ _SWEEP_STEM = "operating_point_sweep_"
 
 
 class _SweepArtifactLocator:
-    """One conf sweep per set of inputs, named for the digest of the inputs it was swept over.
+    """One conf sweep record per name, named for the digest of the record's own bytes
+    (:func:`confidence_sweep_identity`).
 
     The digest is in the filename rather than in a directory of its own, the same convention
-    the locked calibration/holdout split beside it uses.
+    the locked calibration/holdout split beside it uses. Under ``last_writer_wins``, only a
+    byte-identical rerun replaces what is already there; a calibration that differs in any byte
+    the count gate would run over writes under a different name.
     """
 
     def relative_path(self, scope: str, parts: tuple[str, ...]) -> PurePosixPath:
@@ -55,7 +57,7 @@ register_store(
     StoreDescriptor(
         name=CONFIDENCE_SWEEP_STORE,
         kind="record",
-        key_fields=("inputs_hash",),
+        key_fields=("record_digest",),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SweepArtifactLocator(),
@@ -63,27 +65,28 @@ register_store(
 )
 
 
-def confidence_sweep_key(inputs_hash: str) -> Key:
+def confidence_sweep_key(record_digest: str) -> Key:
     """The full confidence sweep one calibration produced.
 
-    ``last_writer_wins``: the name is the digest of every input the curve depends on, so the
-    same name is the same curve and a rerun writes what is already there.
+    ``record_digest`` is :func:`confidence_sweep_identity` over the record's own bytes, not a
+    digest of the run's inputs alone. ``last_writer_wins``: only a byte-identical rerun replaces
+    the record already under this key; a differing calibration keys a new record.
     """
-    if PurePosixPath(inputs_hash).name != inputs_hash or inputs_hash in ("", ".", ".."):
+    if PurePosixPath(record_digest).name != record_digest or record_digest in ("", ".", ".."):
         raise BadKey(
-            f"sweep identity {inputs_hash!r} is not a single name: an identity carrying a path "
+            f"sweep identity {record_digest!r} is not a single name: an identity carrying a path "
             "separator would address a record outside the artifact store"
         )
     from tcip_mcp.project_paths import project_root
 
-    return Key(CONFIDENCE_SWEEP_STORE, str(project_root().resolve()), (inputs_hash,))
+    return Key(CONFIDENCE_SWEEP_STORE, str(project_root().resolve()), (record_digest,))
 
 
-def confidence_sweep_path(inputs_hash: str) -> Path:
+def confidence_sweep_path(record_digest: str) -> Path:
     """Where that sweep lands on disk, for the provenance that names the file it was kept in."""
     from tcip_mcp.project_paths import project_root
 
-    key = confidence_sweep_key(inputs_hash)
+    key = confidence_sweep_key(record_digest)
     return project_root().joinpath(
         *_SweepArtifactLocator().relative_path(key.root, key.parts).parts
     )
@@ -100,11 +103,9 @@ def confidence_sweep_identity(body: dict) -> str:
     never truncated: a truncated key under ``last_writer_wins`` would let two legitimate bodies
     sharing a prefix overwrite each other.
     """
+    from tcip_mcp.model_registry import _sha256_of_bytes
+
     return _sha256_of_bytes(RECORD_JSON.encode(body))
-
-
-def _sha256_of_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _recorded_training_id_map(predictor) -> dict | None:
