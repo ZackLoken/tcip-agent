@@ -48,10 +48,10 @@ def test_create_experiment_records_identity_in_lineage(exp_dir):
 
 def test_update_lineage_cannot_change_or_backfill_identity(exp_dir):
     create_experiment("e1", {}, dataset_id="abc123", dataset_fingerprint="ff00")
-    # a recorded identity is immutable; a legitimate edge (model_weights) still updates
-    res = update_lineage("e1", dataset_fingerprint="DIFFERENT", model_weights="w.pt")
+    # a recorded identity is immutable; a legitimate edge (predictions) still updates
+    res = update_lineage("e1", dataset_fingerprint="DIFFERENT", predictions="w.pt")
     assert res["lineage"]["dataset_fingerprint"] == "ff00"
-    assert res["lineage"]["model_weights"] == "w.pt"
+    assert res["lineage"]["predictions"] == "w.pt"
     # a run that recorded None identity stays None, never silently backfilled
     create_experiment("e2", {})
     update_lineage("e2", dataset_fingerprint="sneaky")
@@ -70,10 +70,10 @@ def test_update_lineage_still_applies_legitimate_updates_when_identity_audit_fai
     monkeypatch.setattr("tcip_mcp.audit.record_event_or_raise", _boom)
 
     with pytest.raises(OSError):
-        update_lineage("e3", dataset_fingerprint="DIFFERENT", model_weights="w.pt")
+        update_lineage("e3", dataset_fingerprint="DIFFERENT", predictions="w.pt")
 
     # The legitimate update landed despite the identity-refusal's own audit line failing.
-    assert ts.read(exp.lineage_key("e3"))["model_weights"] == "w.pt"
+    assert ts.read(exp.lineage_key("e3"))["predictions"] == "w.pt"
     assert ts.read(exp.lineage_key("e3"))["dataset_fingerprint"] == "ff00"  # still not backfilled
 
 

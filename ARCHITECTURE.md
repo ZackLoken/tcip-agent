@@ -1348,10 +1348,14 @@ are listed here with the rest rather than taking numbers of their own.
   (1288), `reconstruct_run_status`, `experiments.py:771` (`def reconstruct_run_status(`),
   `resolve_experiment_dir_for_run` (`experiments.py:652`). `state` is terminal-locked once
   `"completed"`/`"failed"`.
-- `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (397) and
-  `update_lineage`, `experiments.py:1153`. Read by `get_experiment` (1288) and
-  `get_experiment_lineage`, `experiments.py:1491`.
-- `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397) and
+- `lineage.json` (`lineage_key`, line 164): written by `create_experiment` (397), `complete_run`,
+  `experiments.py:592` (`def complete_run(`, the run's own `model_weights`/`model_weights_sha256`
+  digest, sealed into the transaction that completes the run) and `update_lineage`,
+  `experiments.py:1191` (every other field; refuses `model_weights`/`model_weights_sha256` as
+  `complete_run`'s alone). Read by `get_experiment` (1288) and `get_experiment_lineage`,
+  `experiments.py:1491`.
+- `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397),
+  `complete_run` (592, the `model_weights` entry: `path`, `sha256`, `recorded`) and
   `record_artifact`, `experiments.py:1119`. Read by `get_experiment` (1288).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
   `log_metrics`, `experiments.py:856`. Read by `read_metrics`, `experiments.py:843`, which

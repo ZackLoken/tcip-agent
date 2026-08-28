@@ -83,6 +83,9 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(tmp_path)
     assert lineage["model_weights"].endswith("model_best.pt")
     artifacts = ts.read(artifacts_key("expE"))
     assert "model_weights" in artifacts
+    # The digest completion recorded is the same fact in both members: complete_run's one
+    # transaction takes one hash of the one file and writes it into both.
+    assert lineage["model_weights_sha256"] == artifacts["model_weights"]["sha256"]
 
 
 # --------------------------------------------------------------------------
@@ -121,6 +124,41 @@ def test_envelope_default_tag_with_no_override_fails_run_and_registers_nothing(t
     assert run.status == "failed"
     assert "final weights" in (run.error or "")
     assert ModelRegistry(str(tmp_path)).get_model("expF") is None
+    events = _audit_events(tmp_path)
+    assert [e["status"] for e in events] == ["running", "failed"]
+
+
+def _agent_train_declares_a_path_it_never_wrote(ctx):
+    """Declares its deliverable through set_final_weights at a path this loop never wrote."""
+    import os
+
+    ctx.set_final_weights(os.path.join(ctx.run.output_dir, "never_written.pt"))
+
+
+def test_envelope_declared_deliverable_never_written_fails_run_and_registers_nothing(tmp_path):
+    """The refusal partner of rail 16: a declared path this run cannot read is refused by
+    complete_run, and the envelope marks the run failed rather than completing with an
+    unrecorded digest, naming the path."""
+    from tcip_mcp.experiments import create_experiment, update_status
+    from tcip_mcp.model_registry import ModelRegistry
+
+    out = tmp_path / "out"
+    config = {
+        "model_source": {"builder": "x:y", "task": "detection", "in_chans": 3},
+        "training_source": f"{__name__}:_agent_train_declares_a_path_it_never_wrote",
+        "device": "cpu",
+    }
+    create_experiment("expUnwritten", config, data_source="imgs")
+    update_status("expUnwritten", "running")
+    run = create_run(config, str(out))
+
+    ctx = TrainContext(run=run, train_loader=None, val_loader=None, task="detection",
+                       experiment_id="expUnwritten")
+    run_training_envelope(ctx)
+
+    assert run.status == "failed"
+    assert "never_written.pt" in (run.error or "")
+    assert ModelRegistry(str(tmp_path)).get_model("expUnwritten") is None
     events = _audit_events(tmp_path)
     assert [e["status"] for e in events] == ["running", "failed"]
 

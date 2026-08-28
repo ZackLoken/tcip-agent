@@ -515,16 +515,32 @@ def _finalize_run(ctx: TrainContext) -> None:
             except AuditEntryNotWritten as exc:
                 _reconcile_unaudited_refusal(run, exp_id, exc)
             if "error" in result:
-                # completed is the last durable write of a run: a refusal here means the record
-                # was already terminal (e.g. the wall-clock watchdog raced it to failed first).
-                _reconcile_on_refusal(run, result)
-                logger.warning("Run %s: completion refused (%s); weights at %s stay on disk, "
-                               "unregistered.", run.run_id, result["error"], ctx.final_weights)
+                if "state" in result:
+                    # completed is the last durable write of a run: a refusal here means the
+                    # record was already terminal (a wall-clock watchdog race to failed first).
+                    _reconcile_on_refusal(run, result)
+                    logger.warning("Run %s: completion refused (%s); weights at %s stay on "
+                                   "disk, unregistered.", run.run_id, result["error"],
+                                   ctx.final_weights)
+                else:
+                    # final_weights could not be read: mark failed, as the phantom-deliverable
+                    # case below does, rather than completing with an unrecorded digest.
+                    logger.warning(
+                        "Run %s: completion refused (%s); marking failed instead of completing "
+                        "with an unrecorded digest.", run.run_id, result["error"])
+                    run.status = "failed"
+                    run.error = run.error or result["error"]
+                    try:
+                        _reconcile_on_refusal(run, update_status(exp_id, "failed"))
+                    except AuditEntryNotWritten as exc:
+                        _reconcile_unaudited_refusal(run, exp_id, exc)
             else:
                 from tcip_mcp.audit import record_event
 
                 try:
                     reg_result = register_model_from_experiment(exp_id, ctx.final_weights)
+                except AuditEntryNotWritten as exc:
+                    _reconcile_unaudited_refusal(run, exp_id, exc)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Run %s: model registration failed for weights at %s: %s",
                                    run.run_id, ctx.final_weights, exc)

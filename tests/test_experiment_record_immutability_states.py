@@ -91,20 +91,23 @@ def test_failed_run_artifact_pointer_is_frozen_while_a_new_name_still_records(tm
 def test_failed_run_populated_lineage_edge_is_frozen_while_an_empty_one_accepts_its_first_write(
     tmp_path,
 ):
+    """The additive lock, driven through the two fields ``update_lineage`` still admits
+    (``model_weights``/``model_weights_sha256`` are ``complete_run``'s alone, refused
+    unconditionally, so they cannot demonstrate the additive rule any more)."""
     from tcip_mcp.experiments import create_experiment, update_lineage, update_status
 
     eid = "exp-017-elderberry-umbel-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:umbel_det"}})
     update_status(eid, "running")
-    update_lineage(eid, model_weights="/runs/017/model_best.pt")
+    update_lineage(eid, predictions="/preds/017")
     update_status(eid, "failed", error="dataloader raised")
 
-    update_lineage(eid, predictions="/preds/017")
-    update_lineage(eid, model_weights="/runs/018/model_best.pt")
+    update_lineage(eid, data_source="/data/017")
+    update_lineage(eid, predictions="/preds/018")
 
     lineage = _record(tmp_path, eid, "lineage.json")
-    assert lineage["model_weights"] == "/runs/017/model_best.pt"
     assert lineage["predictions"] == "/preds/017"
+    assert lineage["data_source"] == "/data/017"
 
 
 def test_refused_mutations_on_a_failed_run_are_recorded_on_the_audit_log(tmp_path):
@@ -289,20 +292,31 @@ def test_pointer_frozen_names_a_populated_pointer_on_a_terminal_record(tmp_path)
 
 
 def test_complete_run_writes_the_pointer_and_completes_in_one_call(tmp_path):
+    import hashlib
+
     from tcip_mcp.experiments import create_experiment, update_status, complete_run
 
     eid = "exp-022-elderberry-umbel-det"
     create_experiment(eid, {"model_source": {"builder": "my_models:umbel_det"}})
     update_status(eid, "running")
 
-    result = complete_run(eid, "/runs/022/model_best.pt")
+    weights = tmp_path / "runs" / "022" / "model_best.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"022 weights")
+
+    result = complete_run(eid, str(weights))
     assert "error" not in result
     assert result["state"] == "completed"
+    assert result["model_weights_sha256"] == hashlib.sha256(weights.read_bytes()).hexdigest()
 
     status = _record(tmp_path, eid, "status.json")
     assert status["state"] == "completed" and status.get("ended")
     artifacts = _record(tmp_path, eid, "artifacts.json")
-    assert artifacts["model_weights"]["path"] == "/runs/022/model_best.pt"
+    assert artifacts["model_weights"]["path"] == str(weights)
+    assert artifacts["model_weights"]["sha256"] == result["model_weights_sha256"]
+    lineage = _record(tmp_path, eid, "lineage.json")
+    assert lineage["model_weights"] == str(weights)
+    assert lineage["model_weights_sha256"] == result["model_weights_sha256"]
 
 
 def test_complete_run_refuses_a_run_already_terminal_naming_the_weights_file(tmp_path):
@@ -316,26 +330,36 @@ def test_complete_run_refuses_a_run_already_terminal_naming_the_weights_file(tmp
     update_status(eid, "running")
     update_status(eid, "failed", error="killed by the wall-clock watcher")
 
-    result = complete_run(eid, "/runs/023/model_best.pt")
+    weights = tmp_path / "runs" / "023" / "model_best.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"023 weights")
+
+    result = complete_run(eid, str(weights))
     assert "error" in result
-    assert "/runs/023/model_best.pt" in result["error"]
+    assert repr(str(weights)) in result["error"]
 
     status = _record(tmp_path, eid, "status.json")
     assert status["state"] == "failed"
     artifacts = _record(tmp_path, eid, "artifacts.json")
     assert "model_weights" not in artifacts
+    lineage = _record(tmp_path, eid, "lineage.json")
+    assert lineage["model_weights_sha256"] is None
 
 
-def test_complete_run_transaction_names_artifacts_before_status(tmp_path, monkeypatch):
+def test_complete_run_transaction_names_artifacts_then_lineage_then_status(tmp_path, monkeypatch):
     """Structural: a probe on the transaction's key order, not a behavior it produces. A
     file-backend transaction applies its writes in named-key order and is not crash-atomic
-    across keys, so naming the pointer's key first is what keeps a crash mid-write detectably
-    stale (a pointer with no completed) rather than the reverse."""
+    across keys, so naming the pointer's key first, then the lineage digest, then status is what
+    keeps a crash mid-write detectably stale rather than the reverse."""
     import tcip_mcp.experiments as exp
 
     eid = "exp-024-black_locust-raceme-det"
     exp.create_experiment(eid, {"model_source": {"builder": "my_models:raceme_det"}})
     exp.update_status(eid, "running")
+
+    weights = tmp_path / "runs" / "024" / "model_best.pt"
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.write_bytes(b"024 weights")
 
     seen: list[tuple] = []
     real_transaction = exp.store.transaction
@@ -345,9 +369,10 @@ def test_complete_run_transaction_names_artifacts_before_status(tmp_path, monkey
         return real_transaction(*keys, **kwargs)
 
     monkeypatch.setattr(exp.store, "transaction", spy)
-    exp.complete_run(eid, "/runs/024/model_best.pt")
+    exp.complete_run(eid, str(weights))
 
     assert seen, "complete_run never opened a transaction"
     named = seen[0]
     assert named[0].parts[1] == "artifacts"
-    assert named[1].parts[1] == "status"
+    assert named[1].parts[1] == "lineage"
+    assert named[2].parts[1] == "status"

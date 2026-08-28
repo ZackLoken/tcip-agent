@@ -50,7 +50,7 @@ def test_experiment_list_compare_lineage(tmp_path, monkeypatch):
 
     create_experiment("e1", {"model_source": {"builder": "my_models:tv_resnet50_det"}}, data_source="imgs")
     log_metrics("e1", 1, {"map50": 0.6})
-    update_lineage("e1", model_weights="w.pt")
+    update_lineage("e1", predictions="w.pt")
     create_experiment("e2", {"model_source": {"builder": "my_models:fcos_det"}})
 
     assert {e["experiment_id"] for e in list_experiments()} == {"e1", "e2"}
@@ -62,7 +62,7 @@ def test_experiment_list_compare_lineage(tmp_path, monkeypatch):
     assert any("error" in c for c in cmp["experiments"])   # the missing experiment is reported
 
     lin = get_experiment_lineage("e1")
-    assert lin["lineage"]["model_weights"] == "w.pt"
+    assert lin["lineage"]["predictions"] == "w.pt"
     assert "error" in get_experiment_lineage("nope")
 
 

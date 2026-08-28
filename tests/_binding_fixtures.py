@@ -153,18 +153,31 @@ def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
     A delivered producer column is emitted only where something outside the prediction bucket
     corroborates the identity the stamp asserts: the experiment has to exist, and the checkpoint it
     recorded has to be the one the stamp names. A fixture that wants the populated case has to leave
-    both behind, which is what a completed training run leaves behind for itself.
+    both behind, which is what a completed training run leaves behind for itself: completion is
+    what records the digest now, so this fixture completes the run rather than writing the lineage
+    edge itself. Idempotent under a repeat call for the same ``experiment_id`` (some callers file
+    more than one bucket behind one producing run): a run completion cannot be repeated once
+    terminal, so a second call reads back the digest the first one already recorded rather than
+    completing a second time.
     """
-    from tcip_mcp.experiments import create_experiment, experiment_exists, update_lineage
-    from tcip_mcp.model_registry import checkpoint_sha256
+    from tcip_mcp.experiments import (
+        complete_run, create_experiment, experiment_exists, lineage_key, read_member, status_key,
+    )
 
     ckpt = Path(weights_dir) / "model_best.pt"
     ckpt.parent.mkdir(parents=True, exist_ok=True)
     ckpt.write_bytes(PRODUCER_WEIGHTS)
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
-    update_lineage(experiment_id, model_weights=str(ckpt))
-    return checkpoint_sha256(ckpt)
+    status = read_member(status_key(experiment_id), {})
+    if isinstance(status, dict) and status.get("state") == "completed":
+        lineage = read_member(lineage_key(experiment_id), {})
+        digest = lineage.get("model_weights_sha256") if isinstance(lineage, dict) else None
+        if digest:
+            return digest
+    completed = complete_run(experiment_id, str(ckpt))
+    assert "error" not in completed, completed
+    return completed["model_weights_sha256"]
 
 
 # --- the export doors: a stand-in run whose validated count they can actually earn a record for ---

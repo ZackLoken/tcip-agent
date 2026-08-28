@@ -17,12 +17,15 @@ def _stub_checkpoint_verification(monkeypatch):
     file's own digest when one exists (some assertions here check that hash) and a fixed stand-in
     otherwise.
     """
+    from pathlib import Path
+
     import tcip_mcp.model_registry as model_registry_mod
 
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     def _stub(path, *a, **kw):
-        sha = model_registry_mod.checkpoint_sha256(path) or "stub-sha256"
+        p = Path(path)
+        sha = model_registry_mod._sha256_of_bytes(p.read_bytes()) if p.is_file() else "stub-sha256"
         return stub_verified_checkpoint(str(path), sha256=sha)
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
@@ -68,9 +71,9 @@ def test_export_predictions_writes_json(tmp_path, monkeypatch):
     # COCO xywh (pixel) from pixel-xyxy box [10,10,30,30].
     assert anns[0]["bbox"] == pytest.approx([10.0, 10.0, 20.0, 20.0])
 
-    from tcip_mcp.model_registry import checkpoint_sha256
+    import hashlib
 
-    assert anns[0]["created_by"] == f"model:m@{checkpoint_sha256(ckpt)[:12]}"
+    assert anns[0]["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
 
 
 def test_export_predictions_forwards_split_manifest_dir_to_run_inference(tmp_path, monkeypatch):

@@ -11,12 +11,15 @@ def _stub_checkpoint_verification(monkeypatch):
     file's own digest when one exists (some assertions here check that hash) and a fixed stand-in
     otherwise.
     """
+    from pathlib import Path
+
     import tcip_mcp.model_registry as model_registry_mod
 
     from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
 
     def _stub(path, *a, **kw):
-        sha = model_registry_mod.checkpoint_sha256(path) or "stub-sha256"
+        p = Path(path)
+        sha = model_registry_mod._sha256_of_bytes(p.read_bytes()) if p.is_file() else "stub-sha256"
         return stub_verified_checkpoint(str(path), sha256=sha)
 
     monkeypatch.setattr(model_registry_mod, "load_registered_checkpoint", _stub)
@@ -98,15 +101,14 @@ def test_web_worker_uses_generic_predictor_and_writes_json(tmp_path, monkeypatch
     assert captured["checkpoint"] == str(ckpt)
     assert captured["tile"] is True                 # tile=True -> pipeline tiling
     assert captured["postprocess"] == "nmm"         # the GUI's tile-merge choice reaches inference
+    import hashlib
     import json
-
-    from tcip_mcp.model_registry import checkpoint_sha256
 
     obj = json.loads((out_dir / "img.json").read_text())["annotations"][0]
     assert obj["subject"] == "0"                     # no recorded id_map -> id 0 stringified honestly
     assert obj["score"] == pytest.approx(0.9)        # per-object confidence preserved
     assert obj["bbox"] == [10.0, 10.0, 20.0, 20.0]   # pixel COCO xywh from xyxy [10,10,30,30]
-    assert obj["created_by"] == f"model:m@{checkpoint_sha256(ckpt)[:12]}"
+    assert obj["created_by"] == f"model:m@{hashlib.sha256(ckpt.read_bytes()).hexdigest()[:12]}"
 
 
 def test_web_worker_resolves_id_map_from_predictor_config(tmp_path, monkeypatch):

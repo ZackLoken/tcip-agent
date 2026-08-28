@@ -11,6 +11,7 @@ def test_register_model_from_experiment_links_lineage_with_no_checkpoint_metrics
 ):
     monkeypatch.chdir(tmp_path)  # .tcip/experiments lives under cwd
     from tcip_mcp.experiments import (
+        complete_run,
         create_experiment,
         lineage_key,
         log_metrics,
@@ -26,6 +27,7 @@ def test_register_model_from_experiment_links_lineage_with_no_checkpoint_metrics
     # 0.81 above) describes a different epoch than this checkpoint, so it is never substituted.
     ckpt = tmp_path / "model_best.pt"
     ckpt.write_bytes(b"weights")
+    assert "error" not in complete_run("exp1", str(ckpt))
 
     with caplog.at_level(logging.WARNING):
         result = register_model_from_experiment("exp1", str(ckpt))
