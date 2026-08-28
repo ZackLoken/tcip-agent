@@ -11,6 +11,7 @@ record that already closed.
 
 from __future__ import annotations
 
+import pytest
 import tcip_store as ts
 from tcip_mcp import experiments as exp
 from tcip_mcp.audit import audit_log_key
@@ -156,6 +157,42 @@ def test_id_map_patch_refused_against_a_terminal_record(tmp_path):
 
     refusals = _refusals(tmp_path)
     assert refusals and refusals[0]["arguments"]["op"] == "patch_experiment_config_id_map"
+
+
+@pytest.mark.parametrize(
+    ("caller_name", "kwargs", "op"),
+    [
+        ("_patch_experiment_config_tiling", {"tiling_cfg": {"tile_size": 224}},
+         "patch_experiment_config_tiling"),
+        ("_patch_experiment_config_id_map",
+         {"subject": "catkin", "attribute": None, "id_map": {"catkin": 0}},
+         "patch_experiment_config_id_map"),
+        ("_patch_experiment_config_split",
+         {"split_cfg": {"manifest_binding": {"date": "2024-01-01"}}},
+         "patch_experiment_config_split"),
+    ],
+    ids=["tiling", "id_map", "split"],
+)
+def test_shared_patch_procedure_refuses_a_terminal_record_for_every_caller(
+        tmp_path, caller_name, kwargs, op):
+    """The three thin mutators all route through the one shared _patch_experiment_config
+    procedure; its terminal refusal, not a per-mutator copy of it, is what protects each."""
+    import tcip_mcp.pipelines.training.subprocess_worker as worker
+    from tcip_mcp.experiments import ExperimentTerminal, create_experiment, update_status
+
+    eid = f"exp-030-quince-{op}"
+    create_experiment(eid, {"model_source": {"builder": "my_models:quince_det"}, "data": {}})
+    update_status(eid, "running")
+    update_status(eid, "completed")
+    config_before = ts.read(exp.config_key(eid, root=tmp_path))
+
+    patch_fn = getattr(worker, caller_name)
+    with pytest.raises(ExperimentTerminal):
+        patch_fn(eid, **kwargs)
+
+    assert ts.read(exp.config_key(eid, root=tmp_path)) == config_before  # untouched
+    refusals = _refusals(tmp_path)
+    assert refusals and refusals[0]["arguments"]["op"] == op
 
 
 def test_split_write_raises_when_the_refusal_audit_append_fails(tmp_path, monkeypatch):
