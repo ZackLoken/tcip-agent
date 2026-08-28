@@ -211,8 +211,9 @@ def check_registry(root: Path, findings: list) -> None:
         ckpt = m.get("checkpoint_path", "")
         if "metrics_source" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
-                            "metrics_source (predates the field); re-register it through "
-                            "register_model"))
+                            "metrics_source (predates the field, and experiment_id with it); "
+                            "conform it with scripts/conform_registry_experiment_id.py, then "
+                            "re-register it through register_model"))
         if "experiment_id" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
                             "experiment_id (predates the producer-binding field); conform it "
