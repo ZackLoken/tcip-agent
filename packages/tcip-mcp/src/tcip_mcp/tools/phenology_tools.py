@@ -860,10 +860,11 @@ def compute_phenology(
     geometry and no explicit caller override refuses here, the same way an uncalibrated conf does.
     Buckets from untiled runs are never gated on it.
 
-    The delivered CSV's producer tail (``producer_model_sha256``, ``producer_experiment_id``,
-    ``validation_record``) is built from the bindings the reconciliation verified, so a bucket whose
-    validation claim no record answers for delivers those cells empty rather than carrying the names
-    it asserted for itself, and a delivery every bucket of which is bound names the records.
+    The delivered CSV's producer tail (``producer_model_sha256``, ``producing_experiment_id``,
+    ``produced_at``, ``validation_record``) is built from the bindings the reconciliation verified,
+    so a bucket whose validation claim no record answers for delivers those cells empty rather than
+    carrying the names it asserted for itself, and a delivery every bucket of which is bound names
+    the records.
 
     Returns a summary. Measurement-integrity guard: if no bucket, anywhere in the delivery, ever
     classified along the trait's positive-class axis, the positive fraction is not a valid measurement

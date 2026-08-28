@@ -237,10 +237,9 @@ def deliver_orthomosaic_plant_counts(
     recon = reconcile_operating_point_validity([predictions_dir], trait=trait)
     provenance = delivered_provenance(
         {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
-         "experiment_id": sidecar.get("experiment_id"),
-         "produced_at": sidecar.get("produced_at")},
+         "producing_experiment_id": sidecar.get("experiment_id")},
         recon["bindings"],
-        columns=("producer_model_sha256", "experiment_id", "produced_at", "validation_record"),
+        columns=("producer_model_sha256", "producing_experiment_id", "validation_record"),
     )
 
     try:
@@ -282,6 +281,6 @@ def deliver_orthomosaic_plant_counts(
         "n_unmapped": n_unmapped,
         "measurement_validated": validated_stamp,
         "checkpoint_sha256": provenance["producer_model_sha256"],
-        "experiment_id": provenance["experiment_id"],
+        "producing_experiment_id": provenance["producing_experiment_id"],
         "validation_record": provenance["validation_record"],
     }

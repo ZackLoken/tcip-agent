@@ -677,6 +677,6 @@ def test_golden_compute_phenology_delivers_when_both_validated(tmp_path: Path):
         rows = list(_csv.DictReader(f))
     assert rows
     assert all(row["producer_model_sha256"] == producer_checkpoint_sha256("exp-golden") for row in rows)
-    assert all(row["producer_experiment_id"] == "exp-golden" for row in rows)
+    assert all(row["producing_experiment_id"] == "exp-golden" for row in rows)
     # And the record that answered for the claim, so a reader can reach the evidence from the CSV.
     assert all(row["validation_record"] for row in rows)

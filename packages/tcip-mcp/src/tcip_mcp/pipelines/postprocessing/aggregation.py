@@ -195,7 +195,7 @@ _STRATEGIES = {
 }
 
 
-_PROVENANCE_COLUMNS = ["producer_model_sha256", "experiment_id", "produced_at",
+_PROVENANCE_COLUMNS = ["producer_model_sha256", "producing_experiment_id", "produced_at",
                        "measurement_validated", "validation_record"]
 
 def _unit_from_value_key(value_key: str) -> tuple[str, str] | None:
@@ -291,13 +291,14 @@ def export_aggregated_csv(
     Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
     authority for it: plant_id, crop, trait_name, value, units, value_key, measurement_document,
     scale_document, confidence, n_images, pipeline_version, plant_id_source,
-    plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256, experiment_id,
-    produced_at, measurement_validated, validation_record) so the final per-plant value is
-    traceable to the exact model that produced it and carries its own validity stamp. Those cells
-    are built by ``delivered_provenance`` from the verification the gate already ran, so a producer
-    this delivery cannot corroborate is reported unknown rather than repeated from the stamp that
-    asserted it, and ``validation_record`` names the record a reader can open to see what the claim
-    was earned against.
+    plant_id_distance_m_max, then ``_PROVENANCE_COLUMNS`` (producer_model_sha256,
+    producing_experiment_id, produced_at, measurement_validated, validation_record) so the final
+    per-plant value is traceable to the exact model that produced it and carries its own validity
+    stamp. Those cells are built by ``delivered_tail`` from the verification the gate already ran,
+    so a producer this delivery cannot corroborate is reported unknown rather than repeated from
+    the stamp that asserted it, ``produced_at`` is the write's own timestamp rather than one the
+    caller asserts, and ``validation_record`` names the record a reader can open to see what the
+    claim was earned against.
 
     The statement, and how the door reads it. Each result (``aggregate_per_plant``'s own output)
     states ``measurement_document``, which sidecar document answers for the measurement that
@@ -396,7 +397,7 @@ def export_aggregated_csv(
         VALIDATED_FALSE,
         binding_notes_text,
         check_delivery_gate,
-        delivered_provenance,
+        delivered_tail,
         record_delivery_binding_event,
         reconcile_claim_scope_validity,
         reconcile_operating_point_validity,
@@ -526,9 +527,8 @@ def export_aggregated_csv(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    stamp = delivered_provenance(provenance, measurement_recon["bindings"],
-                                 columns=_PROVENANCE_COLUMNS)
-    stamp["measurement_validated"] = gate.column_stamp("measurement")
+    stamp = delivered_tail(provenance, measurement_recon["bindings"], gate,
+                           columns=_PROVENANCE_COLUMNS)
     fieldnames = [
         "plant_id", "crop", "trait_name", "value", "units", "value_key",
         "measurement_document", "scale_document",

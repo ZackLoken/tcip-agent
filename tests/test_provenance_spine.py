@@ -231,12 +231,12 @@ def test_export_detection_csv_carries_provenance(tmp_path):
     export_detection_csv(
         [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
         trait=fx.COUNT_TRAIT,
-        provenance={"producer_model_sha256": sha, "experiment_id": "expE",
-                    "operating_point_conf": 0.42, "produced_at": "2026-07-19T00:00:00Z"},
+        provenance={"producer_model_sha256": sha, "producing_experiment_id": "expE",
+                    "operating_point_conf": 0.42},
         acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
-    assert rows[0]["experiment_id"] == "expE"
+    assert rows[0]["producing_experiment_id"] == "expE"
     assert rows[0]["operating_point_conf"] == "0.42"
 
 
@@ -254,12 +254,11 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
         [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
           "measurement_document": "operating_point"}],
         str(out), trait_name="stem_count",
-        provenance={"producer_model_sha256": sha, "experiment_id": "expA",
-                    "produced_at": "2026-07-19T00:00:00Z"},
+        provenance={"producer_model_sha256": sha, "producing_experiment_id": "expA"},
         measurement_validated="held_out_annotations", acknowledge_unvalidated=True)
     rows = list(__import__("csv").DictReader(out.open()))
     assert rows[0]["producer_model_sha256"] == sha
-    assert rows[0]["experiment_id"] == "expA"
+    assert rows[0]["producing_experiment_id"] == "expA"
 
 
 # ── R2: phenology CSV schema carries producing-model identity ─────────────────
@@ -270,5 +269,5 @@ def test_phenology_columns_include_producer_identity():
 
     columns = phenology_csv_columns(CATKIN)
     assert "producer_model_sha256" in columns
-    assert "producer_experiment_id" in columns
+    assert "producing_experiment_id" in columns
     assert "validation_record" in columns

@@ -647,6 +647,22 @@ def test_compute_phenology_acknowledged_tile_size_floors_the_csv_operating_point
     assert rows and all(r["operating_point_validated"] == "false" for r in rows)
 
 
+def test_compute_phenology_acknowledged_tile_size_floors_the_csv_classifier_stamp(
+    tmp_path: Path,
+) -> None:
+    """The classifier column has no less claim on the tile scale's floor than the count operating
+    point's own column does: a tile edge that only shipped through acknowledge_unvalidated must
+    not let a genuinely-validated classifier read as fully validated beside it."""
+    import csv
+
+    args = _tile_gate_fixture(tmp_path, _tiled("false"))
+    res = compute_phenology(**args, acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert res["positive_state_classifier_validated"] == "false"
+    rows = list(csv.DictReader(Path(args["output_csv_path"]).open(encoding="utf-8")))
+    assert rows and all(r["positive_state_classifier_validated"] == "false" for r in rows)
+
+
 def test_compute_phenology_refuses_unclassified_predictions(tmp_path: Path) -> None:
     # Predictions from a bare detector (no elongation axis at all) must refuse,
     # never report full coverage.
@@ -1748,7 +1764,7 @@ def test_compute_phenology_names_the_record_and_producer_a_bound_bucket_earned(t
         assert row["validation_record"] == _named_records(d1, d2)
         assert row["validation_record"] != ""
         assert row["producer_model_sha256"] == sha
-        assert row["producer_experiment_id"] == "exp-producer"
+        assert row["producing_experiment_id"] == "exp-producer"
 
 
 def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_producer_names(
@@ -1783,7 +1799,7 @@ def test_compute_phenology_delivers_a_forged_stamp_provisionally_with_no_produce
     assert rows
     for row in rows:
         assert row["producer_model_sha256"] == ""
-        assert row["producer_experiment_id"] == ""
+        assert row["producing_experiment_id"] == ""
         assert row["validation_record"] == ""
 
 

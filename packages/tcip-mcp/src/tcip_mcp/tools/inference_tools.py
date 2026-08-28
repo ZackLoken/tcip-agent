@@ -2278,9 +2278,8 @@ def tabulate_counts(
 
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
-        "experiment_id": result.get("experiment_id"),
+        "producing_experiment_id": result.get("experiment_id"),
         "operating_point_conf": op.get("conf"),
-        "produced_at": result.get("produced_at"),
     }
     # Read back off the bucket's own stamp, the same reconciliation the other bucket doors perform.
     csv_measurement_validated = gate.column_stamp("operating_point")
@@ -2304,6 +2303,8 @@ def tabulate_counts(
         # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
+        # The composite cell the written CSV actually carries, beside the raw per-dimension stamps.
+        "measurement_validated": csv_measurement_validated,
         "operating_point_validated": gate.stamp["operating_point"],
         "tile_size_validated": gate.stamp.get("tile_size"),
         "conf_source": result.get("conf_source"),

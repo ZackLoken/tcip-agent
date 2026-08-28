@@ -140,7 +140,8 @@ PROVENANCE_COLUMNS = [
     "positive_state_classifier_validated",
     # Producing-model identity, the exact checkpoint (content hash) + run behind the counts.
     "producer_model_sha256",
-    "producer_experiment_id",
+    "producing_experiment_id",
+    "produced_at",
     # Which experiment and row answered for the buckets' claims, empty when any read bucket is unbound.
     "validation_record",
     # The plant mapping this delivery attributed detections through, and what verify_mapping_inputs
@@ -149,30 +150,6 @@ PROVENANCE_COLUMNS = [
     "captures_unverified",
     "plant_csvs_unverified",
 ]
-
-
-def delivered_provenance_cells(asserted, bindings) -> dict:
-    """The producer tail's cells for a phenology delivery, from the bindings the reconciler verified.
-
-    ``_write_phenology_delivery``, the one writer both phenology delivery doors
-    (``compute_phenology``, the web ``export_csv``) share, calls this instead of writing a stamp's
-    self-declared names, so a bucket whose validation claim no record answers for cannot put
-    producer names into a delivered phenology CSV, and a delivery every bucket of which is bound
-    names the records that bound it.
-
-    The values come from ``resolution.delivered_provenance``, the one builder behind every delivered
-    producer column. Only the spelling differs: this schema calls the producing run
-    ``producer_experiment_id`` where the aggregate schemas call it ``experiment_id``, and it is the
-    same run, corroborated the same way, in both.
-    """
-    from tcip_mcp.pipelines.resolution import delivered_provenance
-
-    values = delivered_provenance(
-        asserted, bindings,
-        columns=("producer_model_sha256", "experiment_id", "validation_record"))
-    return {"producer_model_sha256": values["producer_model_sha256"],
-            "producer_experiment_id": values["experiment_id"],
-            "validation_record": values["validation_record"]}
 
 
 # The per-(plant, date) columns ``per_plant_series`` produces, before the provenance tail.
@@ -588,10 +565,11 @@ def _write_phenology_delivery(
     cannot prove the precondition itself.
 
     Composes every provenance cell the schema declares (the operating-point and classifier
-    validity columns through ``check_delivery_gate``'s own stamp, the producer tail through
-    ``delivered_provenance_cells``, and, when ``include_majority_marker`` is set, the trait's
-    majority-alias marker through ``majority_provisional_column``) and returns them, so a caller
-    fills its own response from what was actually written rather than re-deriving the same values.
+    validity columns, the producer tail and ``produced_at``, all through the shared
+    ``resolution.delivered_tail``, the one composition every delivered tail routes through, and,
+    when ``include_majority_marker`` is set, the trait's majority-alias marker through
+    ``majority_provisional_column``) and returns them, so a caller fills its own response from what
+    was actually written rather than re-deriving the same values.
     Records the delivery through ``record_delivery_binding_event`` after the file is written, under
     the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
     cannot exist without both the gate having run and the delivery having been recorded.
@@ -613,7 +591,9 @@ def _write_phenology_delivery(
             "because it is given a trait spec rather than a project to read from."
         )
     from tcip_mcp.operationalization import STATE_CROSSING_DATES
-    from tcip_mcp.pipelines.resolution import check_delivery_gate, record_delivery_binding_event
+    from tcip_mcp.pipelines.resolution import (
+        check_delivery_gate, delivered_tail, record_delivery_binding_event,
+    )
 
     gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
     if not gate.ok:
@@ -625,19 +605,15 @@ def _write_phenology_delivery(
             "phenology_delivery_flags must still include it."
         )
 
-    cells: dict = {
-        "operating_point_conf": operating_point_conf,
-        "operating_point_validated": gate.column_stamp(
-            "operating_point", own_column=("classifier",)),
-        "positive_state_classifier_validated": gate.stamp["classifier"],
-        **delivered_provenance_cells(
-            {"producer_model_sha256": producer.get("sha256"),
-             "experiment_id": producer.get("experiment_id")},
-            bindings),
-        "plant_mapping_sha256": plant_mapping["record_sha256"],
-        "captures_unverified": ";".join(plant_mapping["captures_unverified"]),
-        "plant_csvs_unverified": ";".join(plant_mapping["plant_csvs_unverified"]),
-    }
+    cells: dict = delivered_tail(
+        {"producer_model_sha256": producer.get("sha256"),
+         "producing_experiment_id": producer.get("experiment_id"),
+         "operating_point_conf": operating_point_conf,
+         "plant_mapping_sha256": plant_mapping["record_sha256"],
+         "captures_unverified": ";".join(plant_mapping["captures_unverified"]),
+         "plant_csvs_unverified": ";".join(plant_mapping["plant_csvs_unverified"])},
+        bindings, gate,
+        columns=tuple(PROVENANCE_COLUMNS))
     if include_majority_marker:
         provisional_column = majority_provisional_column(spec)
         if provisional_column:
