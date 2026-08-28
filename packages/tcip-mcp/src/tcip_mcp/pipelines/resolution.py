@@ -1982,6 +1982,7 @@ def record_delivery_binding_event(
     trait: str | None = None,
     delivery_kind: str | None = None,
     project_root: str | Path | None = None,
+    plant_mapping: dict | None = None,
 ) -> None:
     """Record what verification found for each bucket a delivery read, in that dataset's own log.
 
@@ -2013,6 +2014,11 @@ def record_delivery_binding_event(
     ``"resolve_scale"`` when the delivery also rests on a physical scale, ``None`` otherwise. Both
     are required, never defaulted, so a caller cannot silently omit what its own gate actually
     reconciled.
+
+    ``plant_mapping`` is the delivery's own plant-mapping binding (name, project and dataset
+    roots, the record's digest, its per-date capture identity, and the two unverified
+    disclosures), door-conditional: the phenology doors pass it, every other delivery door
+    passes ``None`` since none reads a mapping.
     """
     from tcip_mcp.audit import record_event
 
@@ -2043,6 +2049,7 @@ def record_delivery_binding_event(
             "output_path": output_path,
             "measurement_documents": list(measurement_documents),
             "scale_document": scale_document,
+            "plant_mapping": plant_mapping,
             "documents": {
                 bucket: {
                     "ok": b.ok, "claimed": b.claimed, "experiment_id": b.experiment_id,

@@ -298,6 +298,9 @@ export function ResultsTab() {
   const datasetRoot = dataset.dataset_root;
 
   const [mappingName, setMappingName] = useState("");
+  // Every mapping name already persisted under the open project, for the picker below; a name
+  // typed here that isn't in the list is a new mapping this build will create.
+  const [mappingNames, setMappingNames] = useState<string[]>([]);
   // True unless a computed run reported that its predictions carried no positive-state class.
   const [positiveClassUnassessed, setPositiveClassUnassessed] = useState(false);
 
@@ -330,6 +333,10 @@ export function ResultsTab() {
   // lacked on-disk backing, so the tables can say so instead of rendering a phenology date as "valid".
   const [provisional, setProvisional] = useState(false);
   const [validity, setValidity] = useState<Record<string, string>>({});
+  // What the mapping's own delivery-time check could not verify, shown beside the numbers rather
+  // than only in the exported CSV.
+  const [capturesUnverified, setCapturesUnverified] = useState<string[]>([]);
+  const [plantCsvsUnverified, setPlantCsvsUnverified] = useState<string[]>([]);
   const [unvalidatedRefusal, setUnvalidatedRefusal] = useState<string | null>(null);
 
   // Listed rather than selected: records are keyed by trait plus kind, including uncomputed kinds.
@@ -404,6 +411,18 @@ export function ResultsTab() {
         );
       });
   }, [projectRoot]);
+
+  const refreshMappingNames = useCallback(() => {
+    void resultsApi
+      .listPlantMappings()
+      .then((res) => setMappingNames(res.names))
+      .catch(() => setMappingNames([]));
+  }, []);
+
+  useEffect(() => {
+    if (!projectRoot) return;
+    refreshMappingNames();
+  }, [projectRoot, refreshMappingNames]);
 
   useEffect(() => {
     if (!projectRoot) return;
@@ -616,6 +635,7 @@ export function ResultsTab() {
       });
       setBuildSummary(res.summary);
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
+      refreshMappingNames();
     } catch (e) {
       useStore
         .getState()
@@ -654,6 +674,8 @@ export function ResultsTab() {
       // never render an unvalidated phenology measurement as though it were a delivery.
       setProvisional(curveRes.provisional);
       setValidity(curveRes.validated);
+      setCapturesUnverified(curveRes.captures_unverified ?? []);
+      setPlantCsvsUnverified(curveRes.plant_csvs_unverified ?? []);
       setUnvalidatedRefusal(null);
       const unclassified = curveRes.positive_class_assessed === false;
       setPositiveClassUnassessed(unclassified);
@@ -855,14 +877,20 @@ export function ResultsTab() {
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-1">
             <label className="tcip-label">
-              Mapping name (built here, or an existing one under this project to use)
+              Mapping name (pick one already built under this project, or type a new one)
             </label>
             <input
               className="tcip-input"
               value={mappingName}
               onChange={(e) => setMappingName(e.target.value)}
               placeholder="valley-2026"
+              list="plant-mapping-names"
             />
+            <datalist id="plant-mapping-names">
+              {mappingNames.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
             <label className="tcip-label mt-1">Plant CSV path(s), one per line</label>
             <textarea
               className="tcip-input h-16 font-mono text-[11px] leading-4"
@@ -1068,12 +1096,24 @@ export function ResultsTab() {
                     </button>
                   </div>
                 )}
+                {(capturesUnverified.length > 0 || plantCsvsUnverified.length > 0) && (
+                  <div className="text-[11px] text-tcip-muted border border-tcip-border rounded p-2">
+                    Not checked at delivery time:
+                    {capturesUnverified.length > 0 &&
+                      ` captures for ${capturesUnverified.join(", ")} (folder not found)`}
+                    {capturesUnverified.length > 0 && plantCsvsUnverified.length > 0 && ";"}
+                    {plantCsvsUnverified.length > 0 &&
+                      ` plant CSV(s) ${plantCsvsUnverified.join(", ")} (path not found)`}
+                  </div>
+                )}
                 <button
                   className="tcip-btn-primary"
                   onClick={() => void compute()}
                   disabled={loading}
                 >
-                  {loading ? "Computing…" : "Compute curves + milestone dates"}
+                  {loading
+                    ? "Verifying the mapping's captures…"
+                    : "Compute curves + milestone dates"}
                 </button>
                 <p className="text-[10px] text-tcip-muted">
                   One computed measurement in two shapes: every (plant, date) point, or the

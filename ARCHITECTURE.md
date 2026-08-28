@@ -672,7 +672,7 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping for phenology. |
+| `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
 | `update_trait_spec_fields` | `phenology_tools.py:109` | yes | Update one or more fields on an already-registered trait's spec. |
 | `calibrate_classifier_operating_point` | `phenology_tools.py:392` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
 | `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:561` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
@@ -847,12 +847,13 @@ registered at HEAD.
 | GET | `` (root) | `list_projects` | `routes/projects.py:100` |
 | POST | `/active` | `set_active_project` | `routes/projects.py:142` |  <!-- queued: P5-90 move-to-gui-or-automatic -->
 
-### routes/results.py, prefix `/api/results` (14 routes)
+### routes/results.py, prefix `/api/results` (15 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
 | POST | `/plant_mapping/build` | `build_plant_mapping` | `routes/results.py:178` |
 | POST | `/plant_mapping/load` | `load_plant_mapping` | `routes/results.py:236` |  <!-- queued: P5-129 delete -->
+| GET | `/plant_mapping/list` | `list_plant_mappings` | `routes/results.py:247` |
 | POST | `/per_plant_curves` | `per_plant_curves` | `routes/results.py:505` |  <!-- queued: P5-130 merge-or-split -->
 | POST | `/onset_dates` | `onset_dates` | `routes/results.py:538` |  <!-- queued: P5-131 merge-or-split -->
 | POST | `/export_csv` | `export_csv` | `routes/results.py:571` |

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AmbiguousImageStem", "BandGroupIncomplete", "BandGroupRef", "IMAGE_EXTS",
-    "crop_pad_tile", "image_dimensions", "list_logical_images", "load_image",
+    "capture_kind", "crop_pad_tile", "image_dimensions", "list_logical_images", "load_image",
     "load_multiband", "logical_image_name", "pad_tile", "pil_to_tensor",
     "place_logical_image", "resolve_image_source", "stem_of", "to_pil_if_faithful",
 ]
@@ -93,6 +93,19 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
             "standalone file(s), or the manifest, so each logical image has one unambiguous stem."
         )
     return result
+
+
+def capture_kind(source: "Path | BandGroupRef") -> str:
+    """The kind of capture ``list_logical_images`` enumerated a stem under: ``"band_group"`` for
+    a :class:`BandGroupRef`, ``"raster"`` for the suffixes ``load_multiband`` treats as an array
+    container (``raster_source.ARRAY_CONTAINER_EXTS``: ``.npy``/``.npz``/``.tif``/``.tiff``),
+    ``"image"`` for the rest (``.jpg``/``.jpeg``/``.png``/``.bmp``/``.heic``).
+    """
+    if isinstance(source, BandGroupRef):
+        return "band_group"
+    if Path(source).suffix.lower() in raster_source.ARRAY_CONTAINER_EXTS:
+        return "raster"
+    return "image"
 
 
 def resolve_image_source(images_dir: str | Path, stem: str) -> "Path | BandGroupRef":

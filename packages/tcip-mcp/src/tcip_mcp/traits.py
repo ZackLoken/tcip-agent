@@ -252,9 +252,13 @@ def _crops_vocab() -> set[str]:
 
 
 def registered_crops() -> set[str]:
-    """The crop names crops.yml's traits declare (each trait's own ``crops`` list), or an empty
-    set if it can't be read. The one place a caller reads a real crop word instead of spelling
-    one of its own: a fixture or a smoke script seeding ``register_dataset`` picks from here."""
+    """Every crop name crops.yml declares (the union of each trait's own ``crops`` list), or an
+    empty set if it can't be read.
+
+    The platform's registered crop vocabulary, not a test's: a fixture or a smoke script that
+    needs a real ``crop`` for ``register_dataset`` reads one from here rather than spelling one
+    of its own.
+    """
     return {c for t in _crops_traits() for c in t.get("crops", []) if isinstance(c, str)}
 
 

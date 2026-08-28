@@ -323,12 +323,11 @@ def test_registry_for_pred_dirs_resolves_the_registry_through_compute_phenologys
         )),
     )))
     mapping_name = "valley"
-    import tcip_store as ts
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+    from tests._binding_fixtures import write_plant_mapping
 
-    ts.replace(plant_mapping_key(tmp_path, mapping_name), {
+    write_plant_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "PLANT_A_2026-02-11", "plot_name": "P1", "accession_name": "acc-9"}],
-    })
+    }, dataset_root=ds_root)
 
     res = compute_phenology(
         trait=fx.CROSSING_TRAIT,

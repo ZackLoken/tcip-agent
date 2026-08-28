@@ -486,13 +486,12 @@ def registry_for_dataset_root(dataset_root: str | Path) -> ClassRegistry | None:
         return None
 
 
-def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> ClassRegistry | None:
-    """The registry for the single dataset every one of ``pred_dirs`` resolves under.
-
-    ``None`` when none of the directories resolves to a dataset root, or the one they do resolve
-    to carries no registry yet. Refuses (``RegistryError``) when the directories span more than one
-    dataset root: no delivery this platform ships mixes datasets, so that can only be a caller error,
-    never a case to silently resolve by picking one.
+def _distinct_dataset_root(pred_dirs: Sequence[str | Path]) -> Path | None:
+    """The single dataset root every one of ``pred_dirs`` resolves under, or ``None`` when none
+    do. Refuses (``RegistryError``) when the directories span more than one: no delivery this
+    platform ships mixes datasets, so that can only be a caller error, never a case to silently
+    resolve by picking one. The one computation ``registry_for_pred_dirs`` and
+    ``dataset_root_for_pred_dirs`` both build on, so the two cannot disagree about it.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -503,7 +502,36 @@ def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> ClassRegistry | N
             f"({sorted(str(r) for r in roots)}); no delivery this platform ships spans more than "
             "one dataset, so this cannot be reconciled to a single registry"
         )
-    if not roots:
+    return next(iter(roots), None)
+
+
+def dataset_root_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> Path:
+    """The single dataset root every one of ``pred_dirs`` resolves under.
+
+    Refuses (``RegistryError``) when the directories span more than one dataset root, the same
+    check ``registry_for_pred_dirs`` makes, and refuses by name when none resolves to a dataset
+    root at all: a plant-mapping delivery needs the dataset the buckets belong to, and buckets
+    under no dataset root cannot supply one.
+    """
+    root = _distinct_dataset_root(pred_dirs)
+    if root is None:
+        raise RegistryError(
+            f"none of the prediction directories {[str(d) for d in pred_dirs]} resolves to a "
+            "dataset root, so there is no dataset for a plant-mapping delivery to attribute "
+            "these predictions to"
+        )
+    return root
+
+
+def registry_for_pred_dirs(pred_dirs: Sequence[str | Path]) -> ClassRegistry | None:
+    """The registry for the single dataset every one of ``pred_dirs`` resolves under.
+
+    ``None`` when none of the directories resolves to a dataset root, or the one they do resolve
+    to carries no registry yet. Refuses (``RegistryError``) when the directories span more than one
+    dataset root: no delivery this platform ships mixes datasets, so that can only be a caller error,
+    never a case to silently resolve by picking one.
+    """
+    root = _distinct_dataset_root(pred_dirs)
+    if root is None:
         return None
-    (root,) = roots
     return registry_for_dataset_root(root)

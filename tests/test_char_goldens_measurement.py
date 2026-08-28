@@ -30,7 +30,6 @@ import tcip_store as ts  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as PH  # noqa: E402
-from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     coco_detection_metrics,
     gt_class_avg_size,
@@ -590,11 +589,13 @@ def _pheno_setup(tmp_path: Path, *, elongated: bool, op_validated: bool | None =
         # own validity isn't the thing under test: a bucket with no sidecar at all is the
         # "no operating_point.json" case, tested separately.
         pass
+    from tests._binding_fixtures import write_plant_mapping
+
     mapping_name = "valley"
-    ts.replace(plant_mapping_key(tmp_path, mapping_name), {
+    write_plant_mapping(tmp_path, mapping_name, {
         "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
         "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
-    })
+    }, dataset_root=root)
     return mapping_name, d1, d2
 
 

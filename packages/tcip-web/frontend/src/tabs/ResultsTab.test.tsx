@@ -21,6 +21,8 @@ const VALIDATED = {
   provisional: false,
   validity_detail: {},
   positive_class_assessed: true,
+  captures_unverified: [],
+  plant_csvs_unverified: [],
 };
 
 function setupDataset() {
@@ -237,6 +239,8 @@ describe("ResultsTab evidence gate", () => {
     provisional: true,
     validity_detail: {},
     positive_class_assessed: true,
+    captures_unverified: [],
+    plant_csvs_unverified: [],
   };
 
   function mockTree() {
@@ -720,6 +724,8 @@ describe("ResultsTab operationalization records", () => {
       provisional: false,
       validity_detail: {},
       positive_class_assessed: true,
+      captures_unverified: [],
+      plant_csvs_unverified: [],
     };
     vi.spyOn(api.dataset, "tree").mockResolvedValue({
       dataset_root: "C:/data",
@@ -1128,6 +1134,7 @@ describe("ResultsTab delivery events (read-only)", () => {
       },
     },
     produced_at: "2026-02-03T12:00:00+00:00",
+    plant_mapping: null,
   };
 
   it("lists what shipped, with real per-bucket verification evidence and no confirm/withdraw controls", async () => {

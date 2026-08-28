@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_mcp.tools.phenology_tools import compute_phenology
 
 CATKIN_SPEC = {
@@ -94,9 +93,11 @@ def _predictions(
         write_bound_sidecar(d, stamp, dataset_root=root, experiment_id=f"exp-op-{trait}-{date}",
                             producing_experiment_id="exp-1", trait=trait)
         dirs[date] = str(d)
-    ts.replace(plant_mapping_key(project_root, trait), {
+    from tests._binding_fixtures import write_plant_mapping
+
+    write_plant_mapping(project_root, trait, {
         date: [{"stem": "P1", "plot_name": "P1", "accession_name": "acc-9"}] for date in dirs
-    })
+    }, dataset_root=root)
     return trait, dirs
 
 

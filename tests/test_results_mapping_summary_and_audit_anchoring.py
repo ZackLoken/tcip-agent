@@ -78,6 +78,10 @@ def _capture_fixture(root: Path) -> dict:
     _write_image(images / "2026-02-11" / "c.jpg", "2026:02:11 09:02:00", 43.30000, -90.00030)
     _write_image(images / "2026-02-11" / "e.jpg", "2026:02:11 09:03:00")
     _write_image(images / "2026-02-25" / "d.jpg", "2026:02:25 09:00:00", 43.20000, -90.00030)
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.traits import registered_crops
+
+    register_dataset(str(root), crop=sorted(registered_crops())[0])
     # The mapping doors build for the project the GUI has open, the one these captures belong to.
     store.open_project(root.resolve())
     return {"name": "valley", "images_root": str(images), "plant_csv_paths": [str(csv_path)]}
@@ -124,9 +128,10 @@ def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_proj
 
     payload = _capture_fixture(tmp_path)
     resp = client.post("/api/results/plant_mapping/build", json=payload)
-    assert resp.status_code == 200
-    assert plant_mapping.load_mapping(tmp_path, payload["name"]).keys() == {
-        "2026-02-11", "2026-02-25"}
+    assert resp.status_code == 200, resp.text
+    build = plant_mapping.load_mapping(tmp_path, payload["name"])
+    assert build is not None
+    assert set(build.assignments.keys()) == {"2026-02-11", "2026-02-25"}
 
     page = tcip_store.read_log(audit_log_key(tmp_path))
     built = [r for r in page.records if r["tool"] == "gui_build_plant_mapping"]
@@ -139,25 +144,28 @@ def test_a_mapping_persisted_into_platform_state_is_audited_into_the_owning_proj
 def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     client: TestClient, tmp_path: Path,
 ) -> None:
-    """With prediction buckets whose evidence is fully in order, a mapping name holding no
-    assignments is refused by name at every door. Without that the doors would answer with a
-    phenology computed over no plants at all, which reads like a project with nothing to show."""
-    import tcip_store
-
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
+    """With prediction buckets whose evidence is fully in order, a mapping name that names
+    nothing at all is refused by name at every door: a legitimately-built mapping covering no
+    dates refuses the requested dates it does not cover, and a name never built refuses as
+    absent. Without either, the doors would answer with a phenology computed over no plants at
+    all, which reads like a project with nothing to show."""
+    from tests._binding_fixtures import write_plant_mapping
 
     body = _phenology_fixture(tmp_path, validated=True, detections=4)
     assert client.post("/api/results/onset_dates", json=body).status_code == 200
 
-    tcip_store.replace(plant_mapping_key(tmp_path, "empty"), {})
-    for mapping_name in ("empty", "not_written_yet"):
+    write_plant_mapping(tmp_path, "empty", {}, dataset_root=tmp_path / "ds")
+    for mapping_name, expected_status, expected_detail in (
+        ("empty", 400, "does not cover"),
+        ("not_written_yet", 404, "not_written_yet"),
+    ):
         broken = {**body, "mapping_name": mapping_name}
         for route in ("per_plant_curves", "onset_dates"):
             resp = client.post(f"/api/results/{route}", json=broken)
-            assert resp.status_code == 404, (route, mapping_name)
-            assert mapping_name in resp.json()["detail"], route
+            assert resp.status_code == expected_status, (route, mapping_name)
+            assert expected_detail in resp.json()["detail"], route
         resp = client.post(
             "/api/results/export_csv",
             json={**broken, "payload": "milestones", "filename": "x.csv"})
-        assert resp.status_code == 404
-        assert mapping_name in resp.json()["detail"]
+        assert resp.status_code == expected_status
+        assert expected_detail in resp.json()["detail"]

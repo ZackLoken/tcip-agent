@@ -60,6 +60,12 @@ RUN = "run"
 PREDICTION_BUCKET = "prediction_bucket"
 """One prediction bucket directory, where a run's operating-point stamps sit beside its output."""
 
+NAME_SEGMENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+"""A caller-chosen name's one legal shape (lowercase letters, digits, single hyphens between
+groups): ``workspace``'s own project-name segment rule. The store package depends on
+``filelock`` alone and cannot import ``tcip_mcp``, so this constant lives here and
+``workspace._SEGMENT_RE`` imports it, not the other way round."""
+
 LAYOUTS = (
     ROOT,
     STATE,
@@ -80,24 +86,29 @@ class PartPattern:
     """What one part of a store's key looks like across every entry the store holds.
 
     A part is either a constant the store's key constructor spells (``literal``), a varying
-    value with a fixed opening the constructor puts there (``starts_with``), or free. The
-    three are ordered by how much they say, which is how a file two stores' templates both
-    match is attributed to the store that says more about it.
+    value with a fixed opening the constructor puts there (``starts_with``), a varying value a
+    compiled expression fully matches (``regex``, for a caller-chosen name held to a shape,
+    e.g. :data:`NAME_SEGMENT`), or free. ``regex`` constrains a set of names the way ``literal``
+    constrains a single one, so it carries the same specificity: no other shipped claim contests
+    the paths a name-holding store's regex form covers.
     """
 
     literal: str | None = None
     starts_with: str = ""
+    regex: "re.Pattern[str] | None" = None
 
     def matches(self, part: str) -> bool:
         """Whether this part could belong to the store this pattern describes."""
         if self.literal is not None:
             return part == self.literal
+        if self.regex is not None:
+            return self.regex.fullmatch(part) is not None
         return part.startswith(self.starts_with)
 
     @property
     def specificity(self) -> int:
         """How much the pattern constrains, for choosing between two stores claiming one file."""
-        if self.literal is not None:
+        if self.literal is not None or self.regex is not None:
             return 2
         return 1 if self.starts_with else 0
 
@@ -222,7 +233,8 @@ def _anchors(segment: Segment) -> bool:
     """
     if isinstance(segment, Constant):
         return True
-    if segment.lead or segment.pattern.literal is not None or segment.pattern.starts_with:
+    if (segment.lead or segment.pattern.literal is not None or segment.pattern.starts_with
+            or segment.pattern.regex is not None):
         return True
     return bool(segment.tail) and not _BARE_EXTENSION.match(segment.tail)
 
@@ -298,7 +310,10 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
             ),
         ),
     ),
-    "plant_mapping": Claim(STATE, (_named(name="plant_mapping", suffix=".json"),)),
+    "plant_mapping": Claim(
+        STATE,
+        ((Constant("plant_mappings"), Patterned(PartPattern(regex=NAME_SEGMENT), tail=".json")),),
+    ),
     "review_verdicts": Claim(
         STATE,
         (
@@ -634,6 +649,7 @@ __all__ = [
     "EXPERIMENTS",
     "HPO_ROOT",
     "LAYOUTS",
+    "NAME_SEGMENT",
     "PLATFORM_CLAIMS",
     "PREDICTION_BUCKET",
     "PartPattern",

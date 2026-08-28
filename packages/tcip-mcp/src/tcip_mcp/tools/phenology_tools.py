@@ -4,7 +4,7 @@ Two composable steps over the canonical ``pipelines.postprocessing`` modules, so
 composes tools instead of scripting into the web backend (and a milestone date means exactly
 what it means in the web Results tab):
 
-    build_plant_mapping   geolocated images + plant CSVs → persisted plant_mapping.json
+    build_plant_mapping   geolocated images + plant CSVs → a named mapping under the project
     compute_phenology     that mapping + classified predictions → <phenology_prefix>_phenology.csv
 
 See the ``phenology`` skill for the whole pattern (isolate → detect → classify state →
@@ -55,36 +55,78 @@ def build_plant_mapping(
             plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
             explicit value is honored but still capped at that pitch-derived ceiling.
 
+    Refuses (a plain ``{"error": ...}``) naming ``register_dataset`` when ``images_root`` is not
+    a registered dataset's own ``images/`` directory, and naming ``init_project``/
+    ``set_active_project`` when the resolved project root carries no project record. A name
+    outside ``tcip_store.layout_claims.NAME_SEGMENT`` (lowercase letters, digits, single hyphens)
+    refuses at the door. A receipt that cannot be written fails the call naming the receipt: the
+    record it would have named is left on disk but :func:`~tcip_mcp.pipelines.postprocessing.
+    plant_mapping.load_mapping` refuses to read it until a rebuild replaces it.
+
     Returns a compact per-date summary (images, mapped count, avg GPS distance) plus totals,
-    the mapping's ``name`` and the resolved ``project_root``, not the full per-image mapping
+    the mapping's ``name``, the resolved ``project_root`` and ``dataset_root``, and
+    ``unreadable`` (per date, the captures PIL could not open), not the full per-image mapping
     (that lives in the persisted record).
     """
+    from tcip_store.layout_claims import NAME_SEGMENT
+
+    from tcip_mcp.audit import AuditEntryNotWritten
+    from tcip_mcp.dataset_layout import dataset_root_of, image_root, require_dataset_identity
+    from tcip_mcp.pipelines.data.splits import same_directory
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.project_paths import project_root as platform_project_root
+    from tcip_mcp.project_record import ProjectRecordMissing, read_record
 
-    root = Path(images_root)
-    if not root.is_dir():
+    if not NAME_SEGMENT.fullmatch(name):
+        return {"error": (
+            f"name {name!r} is not lowercase letters, digits and single hyphens "
+            f"({NAME_SEGMENT.pattern})")}
+
+    project_root = platform_project_root()
+    try:
+        read_record(project_root)
+    except ProjectRecordMissing as exc:
+        return {"error": str(exc)}
+
+    resolved_images_root = Path(images_root).resolve()
+    if not resolved_images_root.is_dir():
         return {"error": f"images_root not found: {images_root}"}
     missing = [p for p in plant_csv_paths if not Path(p).is_file()]
     if missing:
         return {"error": f"plant CSV(s) not found: {missing}"}
 
-    mapping = plant_mapping.build_mapping(
-        root,
-        [Path(p) for p in plant_csv_paths],
-        dates=dates,
-        nn_tolerance_m=nn_tolerance_m,
-    )
-    if not mapping:
+    candidate = dataset_root_of(resolved_images_root)
+    if candidate is None or not same_directory(image_root(candidate), resolved_images_root):
+        return {"error": (
+            f"{images_root} is not a dataset's own images/ root; build_plant_mapping maps a "
+            "registered dataset's image tree")}
+    try:
+        identity = require_dataset_identity(candidate)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    try:
+        build = plant_mapping.build_mapping(
+            resolved_images_root, [Path(p) for p in plant_csv_paths],
+            name=name, dataset_root=candidate, dataset_id=identity["id"],
+            project_root=project_root, built_by="build_plant_mapping",
+            dates=dates, nn_tolerance_m=nn_tolerance_m,
+        )
+    except AmbiguousImageStem as exc:
+        return {"error": str(exc)}
+    if not build.dates:
         return {"error": f"no date folders with images under {images_root}"}
 
-    project_root = platform_project_root()
-    plant_mapping.persist_mapping(mapping, project_root, name)
+    try:
+        plant_mapping.persist_mapping(build, project_root, name)
+    except AuditEntryNotWritten as exc:
+        return {"error": str(exc)}
 
     per_date: dict[str, dict] = {}
     total_images = 0
     total_mapped = 0
-    for date_str, assignments in mapping.items():
+    for date_str, assignments in build.assignments.items():
         n_images = len(assignments)
         n_mapped = sum(1 for a in assignments if a.plot_name)
         dists = [a.distance_m for a in assignments if a.distance_m is not None]
@@ -99,7 +141,9 @@ def build_plant_mapping(
     return {
         "name": name,
         "project_root": str(project_root),
-        "n_dates": len(mapping),
+        "dataset_root": str(candidate),
+        "unreadable": build.unreadable,
+        "n_dates": len(build.dates),
         "n_images": total_images,
         "n_mapped": total_mapped,
         "n_unmapped": total_images - total_mapped,
@@ -860,17 +904,47 @@ def compute_phenology(
 
     from tcip_store import StoreError
 
+    from tcip_mcp.class_registry import dataset_root_for_pred_dirs
+    from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.project_paths import project_root as platform_project_root
 
     project_root = platform_project_root()
     try:
-        mapping = plant_mapping.load_mapping_rows(project_root, mapping_name)
-    except StoreError as e:
-        return {"error": f"could not read mapping {mapping_name!r}: {e}"}
-    if not mapping:
+        mapping_build = plant_mapping.load_mapping(project_root, mapping_name)
+    except (StoreError, ValueError) as e:
+        return {"error": f"could not read mapping {mapping_name!r}: {e}", "n_plants": 0}
+    if mapping_build is None:
         return {"error": f"mapping not found: {mapping_name!r}; build one with "
-                         f"build_plant_mapping before computing phenology"}
+                         f"build_plant_mapping before computing phenology", "n_plants": 0}
+
+    missing_dates = [d for d in predictions_by_date if d not in mapping_build.dates]
+    if missing_dates:
+        return {"error": (
+            f"predictions_by_date names date(s) {missing_dates} the mapping {mapping_name!r} "
+            "does not cover; rebuild the mapping to cover them, or drop the date(s)"),
+            "n_plants": 0}
+
+    try:
+        delivered_root = dataset_root_for_pred_dirs(list(predictions_by_date.values()))
+    except RegistryError as e:
+        return {"error": str(e), "n_plants": 0}
+    try:
+        delivered_identity = require_dataset_identity(delivered_root)
+    except ValueError as e:
+        return {"error": str(e), "n_plants": 0}
+    if delivered_identity.get("id") != mapping_build.dataset_id:
+        return {"error": (
+            f"the predictions under {delivered_root} belong to a different dataset than the "
+            f"mapping {mapping_name!r} was built over (mapping dataset_root "
+            f"{mapping_build.dataset_root!r}, delivered dataset root {str(delivered_root)!r})"),
+            "n_plants": 0}
+
+    verified = plant_mapping.verify_mapping_inputs(mapping_build, mapping_build.dataset_root)
+    if "refusal" in verified:
+        return {"error": verified["refusal"], "n_plants": 0}
+
+    mapping = mapping_build.rows()
 
     positive_class_id, msg = _resolve_positive_class_id(trait, predictions_by_date)
     if positive_class_id is None:
@@ -1010,7 +1084,8 @@ def compute_phenology(
         "compute_phenology", rows, Path(output_csv_path), spec,
         flags=flags, acknowledge_unvalidated=acknowledge_unvalidated, basis=still_stated.basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=recon["bindings"],
-        pred_dirs=list(predictions_by_date.values()), project_root=platform_project_root())
+        pred_dirs=list(predictions_by_date.values()), project_root=platform_project_root(),
+        plant_mapping=mapping_build.delivery_disclosure(verified))
     # Per-milestone summary: report reached-counts for each milestone the spec actually declares.
     n_reached: dict[str, int] = {}
     for key in phenology._milestone_targets(spec):

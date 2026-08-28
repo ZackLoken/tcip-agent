@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
 from tcip_store import DecodeError, Key, StoreDescriptor, read, register_store, replace, text_codec
 from tcip_store.file_backend import RootedFileLocator
+from tcip_store.layout_claims import NAME_SEGMENT as _SEGMENT_RE
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +60,6 @@ def is_valid_name(name: str) -> bool:
     """True if ``name`` is a single, safe path segment usable as a project folder."""
     seg = (name or "").strip()
     return bool(seg) and not any(c in seg for c in ("/", "\\", ":")) and seg not in (".", "..")
-
-
-_SEGMENT = r"[a-z0-9]+(?:-[a-z0-9]+)*"
-_SEGMENT_RE = re.compile(rf"^{_SEGMENT}$")
 
 
 def format_project_name(crop: str, subject: str, phenotype: str) -> str:

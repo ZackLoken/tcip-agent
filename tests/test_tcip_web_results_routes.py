@@ -12,7 +12,6 @@ from tcip_annotation.state import Annotation, BBox
 
 import tcip_store
 from tcip_mcp.audit import audit_log_key
-from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_key
 from tcip_mcp.pipelines.resolution import read_operating_point_sidecar, write_sidecar
 from tcip_web.app import app
 from tcip_web.state import store
@@ -62,7 +61,11 @@ def test_list_traits_names_a_broken_spec_alongside_the_valid_one(
     assert "unicorn_horn_length" in body["invalid_specs"][0]["reason"]
 
 
-def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Path) -> None:
+def test_plant_mapping_build_requires_a_registered_dataset(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A directory that is not a registered dataset's own images/ root refuses, naming that,
+    rather than silently building an empty mapping over nothing."""
     store.open_project(tmp_path.resolve())
     resp = client.post(
         "/api/results/plant_mapping/build",
@@ -72,9 +75,8 @@ def test_plant_mapping_build_with_empty_images(client: TestClient, tmp_path: Pat
             "plant_csv_paths": [],
         },
     )
-    body = resp.json()
-    assert body["mapping"] == {}
-    assert body["summary"] == {}
+    assert resp.status_code == 400
+    assert "is not a dataset" in resp.json()["detail"]
 
 
 def test_plant_mapping_load_missing_returns_empty(client: TestClient, tmp_path: Path) -> None:
@@ -180,8 +182,10 @@ def _phenology_fixture(
     from tcip_mcp.dataset_layout import classes_path
 
     copy_registry(classes_path(tmp_path), classes_path(root))
+    from tests._binding_fixtures import write_plant_mapping
+
     mapping_name = "valley"
-    tcip_store.replace(plant_mapping_key(tmp_path, mapping_name), mapping)
+    write_plant_mapping(tmp_path, mapping_name, mapping, dataset_root=root)
     # The Results doors serve the project the GUI has open, the one this evidence belongs to.
     store.open_project(tmp_path.resolve())
     return {"project_root": str(tmp_path), "mapping_name": mapping_name,
@@ -259,10 +263,16 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
     # The ingest 'undated/' bucket (and any non-ISO folder) sorts to the (0,0,0) sentinel. It must
     # not crash interpolation or leak '0000-00-00' into a delivered date.
     body = _phenology_fixture(tmp_path, validated=True, fractions=(0.0, 1.0), detections=10)
-    key = plant_mapping_key(Path(body["project_root"]), body["mapping_name"])
-    mapping = tcip_store.read(key)
-    mapping["undated"] = mapping["2026-02-11"]
-    tcip_store.replace(key, mapping)
+    from tcip_mcp.pipelines.postprocessing import plant_mapping as pm
+
+    project_root = Path(body["project_root"])
+    build = pm.load_mapping(project_root, body["mapping_name"])
+    assert build is not None
+    build.assignments["undated"] = build.assignments["2026-02-11"]
+    build.dates = sorted([*build.dates, "undated"])
+    build.capture_identity["undated"] = build.capture_identity.get("2026-02-11", "0" * 16)
+    build.unreadable["undated"] = []
+    pm.persist_mapping(build, project_root, body["mapping_name"])
     body["predictions_by_date"]["undated"] = body["predictions_by_date"]["2026-02-11"]
     rows = client.post("/api/results/onset_dates", json=body).json()["rows"]
     for row in rows:
@@ -522,7 +532,11 @@ def test_exported_milestone_csv_carries_the_canonical_schema_and_its_provenance(
     assert cells["producer_experiment_id"] == "exp-1"
     assert cells["producer_model_sha256"] == producer_checkpoint_sha256("exp-1")
     assert cells["validation_record"] == _expected_validation_record(body)
-    assert [c for c, v in cells.items() if v == ""] == []
+    # plant_csvs_unverified is legitimately empty: the fixture's mapping names no plant CSV to
+    # check. captures_unverified is not: the fixture's dataset carries no images/ tree at all.
+    assert [c for c, v in cells.items() if v == "" and c != "plant_csvs_unverified"] == []
+    assert cells["plant_csvs_unverified"] == ""
+    assert cells["captures_unverified"] != ""
 
 
 def test_curve_and_milestone_doors_report_the_same_measurement(
@@ -698,7 +712,8 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     # fails on the delivered BYTES when the stamp is absent, not on a missing symbol.
     provenance = ["operating_point_conf", "operating_point_validated",
                   "positive_state_classifier_validated", "producer_model_sha256",
-                  "producer_experiment_id", "validation_record"]
+                  "producer_experiment_id", "validation_record", "plant_mapping_sha256",
+                  "captures_unverified", "plant_csvs_unverified"]
     body = _phenology_fixture(tmp_path, validated=True)
     resp = client.post("/api/results/export_csv",
                        json={**body, "payload": "curves", "filename": "c.csv"})
@@ -707,6 +722,8 @@ def test_the_curves_csv_carries_the_same_provenance_as_the_milestone_csv(
     assert header[-len(provenance):] == provenance
     cells = dict(zip(header, resp.text.splitlines()[1].split(",")))
     for col in provenance:
+        if col == "plant_csvs_unverified":
+            continue  # legitimately empty: the fixture's mapping names no plant CSV to check
         assert cells[col] != "", col
     assert cells["operating_point_validated"] == "held_out_annotations"
     assert cells["producer_experiment_id"] == "exp-1"

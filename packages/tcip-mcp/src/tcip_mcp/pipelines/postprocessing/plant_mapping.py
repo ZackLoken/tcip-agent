@@ -20,44 +20,64 @@ matched plant, honest, interpretable signals. It deliberately does not emit a
 fabricated (uncalibrated against any hand-checked assignment) and has been
 removed; use ``distance_m`` + ``source`` to judge a match (see the CLAUDE.md
 measurement-integrity invariant).
+
+A mapping is project state with a name, bound to the dataset it was built over and to its own
+build receipt: ``build_mapping`` produces a :class:`MappingBuild` (provenance plus assignments),
+``persist_mapping`` writes the record and then the receipt that binds it, and ``load_mapping``
+refuses a record no receipt names. ``verify_mapping_inputs`` is the delivery-time check: it
+re-reads the dates and plant CSVs the record names and refuses (never raises) when what is on
+disk now no longer matches what the build was made from.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import logging
 import math
 import statistics
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 import tcip_store
 from PIL import ExifTags, Image
 from tcip_store import RECORD_JSON, Key, StoreDescriptor, register_store
 from tcip_store.file_backend import RootedFileLocator
 
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+
 logger = logging.getLogger(__name__)
 
 EARTH_RADIUS_M = 6_378_137.0
-
-IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".bmp")
 
 NN_TOLERANCE_METERS = 10.0
 
 
 @dataclass
 class ImageStamp:
-    """Per-image metadata extracted from EXIF."""
+    """Per-capture metadata: EXIF for an ``image``, structural facts for a ``band_group`` or
+    ``raster`` (``image_utils.capture_kind``). ``name`` is the file name (with extension)
+    ``list_logical_images`` enumerated this stem under, ``readable`` is only meaningful for an
+    ``image`` (``null`` for the other two kinds, which carry no EXIF to fail reading), and
+    ``manifest_sha256``/``members`` only carry a value for a ``band_group``.
+    """
 
     path: str
     stem: str
     date_folder: str
+    kind: str
+    name: str
     timestamp: Optional[datetime]
     lat: Optional[float]
     lon: Optional[float]
     h_pos_err: Optional[float]
+    readable: Optional[bool]
+    manifest_sha256: Optional[str] = None
+    members: tuple[str, ...] = ()
 
 
 @dataclass
@@ -86,10 +106,85 @@ class Assignment:
     distance_m: Optional[float]  # GPS distance to the matched plant (m); None if unmapped
 
 
+@dataclass
+class MappingBuild:
+    """One build's provenance plus its per-date assignments: the whole persisted record, in
+    memory, before :func:`persist_mapping` writes it and the receipt behind it.
+
+    ``dataset_root``/``dataset_id`` are the door's own resolved facts (the dataset identity
+    record's minted id, so a moved-and-re-registered dataset still delivers through this
+    mapping); ``project_root``/``built_by``/``name`` are likewise the door's own facts, not
+    re-derived here.
+    """
+
+    name: str
+    project_root: str
+    dataset_root: str
+    dataset_id: str
+    built_by: str
+    built_at: str
+    dates_requested: Optional[list[str]]
+    dates: list[str]
+    nn_tolerance_m: dict
+    plant_csvs: list[dict]
+    capture_identity: dict[str, str]
+    unreadable: dict[str, list[str]]
+    assignments: dict[str, list[Assignment]] = field(default_factory=dict)
+    record_sha256: str = ""
+    """The digest ``load_mapping`` verified this record's receipt against; blank on a build not
+    yet read back through ``load_mapping`` (a fresh ``build_mapping`` result before persisting)."""
+
+    def to_record(self) -> dict:
+        """The exact document ``persist_mapping`` writes and ``load_mapping`` reads back."""
+        return {
+            "name": self.name,
+            "project_root": self.project_root,
+            "dataset_root": self.dataset_root,
+            "dataset_id": self.dataset_id,
+            "built_by": self.built_by,
+            "built_at": self.built_at,
+            "dates_requested": self.dates_requested,
+            "dates": self.dates,
+            "nn_tolerance_m": self.nn_tolerance_m,
+            "plant_csvs": self.plant_csvs,
+            "capture_identity": self.capture_identity,
+            "unreadable": self.unreadable,
+            "assignments": {
+                date: [a.__dict__ for a in assignments]
+                for date, assignments in self.assignments.items()
+            },
+        }
+
+    def rows(self) -> dict[str, list[dict]]:
+        """The assignments as plain per-date dict rows, the shape ``per_plant_phenology`` reads."""
+        return {date: [a.__dict__ for a in assignments]
+                for date, assignments in self.assignments.items()}
+
+    def delivery_disclosure(self, verified: dict) -> dict:
+        """The ``plant_mapping`` dict a phenology delivery carries: this build's own identity
+        plus ``verify_mapping_inputs``'s disclosure, the one composition every phenology door
+        (``compute_phenology``, both web phenology routes) builds through rather than each
+        assembling its own copy."""
+        return {
+            "name": self.name,
+            "project_root": self.project_root,
+            "dataset_id": self.dataset_id,
+            "dataset_root": self.dataset_root,
+            "built_at": self.built_at,
+            "record_sha256": self.record_sha256,
+            "capture_identity": self.capture_identity,
+            "captures_unverified": verified["captures_unverified"],
+            "plant_csvs_unverified": verified["plant_csvs_unverified"],
+        }
+
+
 # ── EXIF extraction ──────────────────────────────────────────────────────
 
-_GPS_TAG = next((k for k, v in ExifTags.TAGS.items() if v == "GPSInfo"), None)
-_DT_TAG = next((k for k, v in ExifTags.TAGS.items() if v == "DateTimeOriginal"), None)
+_DT_ORIGINAL_TAG = 0x9003
+# DateTimeOriginal: checked at the top level and in the Exif sub-IFD (0x8769) below, since a
+# fresh PIL.Image.Exif writes it at the top level while a camera's own JPEG nests it under 0x8769.
+_EXIF_IFD_TAG = 0x8769
+_GPS_IFD_TAG = 0x8825
 
 
 def _exif_dms_to_decimal(dms, ref: str) -> Optional[float]:
@@ -106,51 +201,105 @@ def _exif_dms_to_decimal(dms, ref: str) -> Optional[float]:
 
 
 def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
+    """One ``image`` capture's EXIF stamp.
+
+    The ``try`` covers ``Image.open`` alone: a capture PIL cannot open (a HEIC with no decoder
+    installed, a locked file) becomes a stamp with ``readable=False`` rather than being
+    swallowed into an indistinguishable all-``None`` stamp; an image that opens and carries no
+    EXIF (or an EXIF read through ``getexif()``, which the pinned Pillow defines for every
+    format, unlike the JPEG-only legacy ``_getexif()``) stays ``readable=True`` with ``None``
+    fields.
+    """
     stamp = ImageStamp(
-        path=str(path),
-        stem=path.stem,
-        date_folder=date_folder,
-        timestamp=None,
-        lat=None,
-        lon=None,
-        h_pos_err=None,
+        path=str(path), stem=path.stem, date_folder=date_folder, kind="image", name=path.name,
+        timestamp=None, lat=None, lon=None, h_pos_err=None, readable=True,
     )
     try:
-        with Image.open(path) as im:
-            exif = im._getexif() or {}
+        im = Image.open(path)
     except Exception:
+        stamp.readable = False
         return stamp
-
-    # DateTimeOriginal
-    if _DT_TAG is not None and _DT_TAG in exif:
-        try:
-            stamp.timestamp = datetime.strptime(str(exif[_DT_TAG]), "%Y:%m:%d %H:%M:%S")
-        except Exception:
-            pass
-
-    # GPS sub-dictionary
-    if _GPS_TAG is not None and _GPS_TAG in exif:
-        gps_raw = exif[_GPS_TAG]
-        gps = {ExifTags.GPSTAGS.get(k, k): v for k, v in gps_raw.items()}
-        stamp.lat = _exif_dms_to_decimal(gps.get("GPSLatitude"), str(gps.get("GPSLatitudeRef", "N")))
-        stamp.lon = _exif_dms_to_decimal(gps.get("GPSLongitude"), str(gps.get("GPSLongitudeRef", "E")))
-        hpe = gps.get("GPSHPositioningError")
-        if hpe is not None:
+    with im:
+        exif = im.getexif()
+        dt_raw = exif.get_ifd(_EXIF_IFD_TAG).get(_DT_ORIGINAL_TAG)
+        if dt_raw is None:
+            dt_raw = exif.get(_DT_ORIGINAL_TAG)
+        if dt_raw is not None:
             try:
-                stamp.h_pos_err = float(hpe)
+                stamp.timestamp = datetime.strptime(str(dt_raw), "%Y:%m:%d %H:%M:%S")
             except Exception:
                 pass
+
+        gps_raw = exif.get_ifd(_GPS_IFD_TAG)
+        if gps_raw:
+            gps = {ExifTags.GPSTAGS.get(k, k): v for k, v in gps_raw.items()}
+            stamp.lat = _exif_dms_to_decimal(gps.get("GPSLatitude"), str(gps.get("GPSLatitudeRef", "N")))
+            stamp.lon = _exif_dms_to_decimal(gps.get("GPSLongitude"), str(gps.get("GPSLongitudeRef", "E")))
+            hpe = gps.get("GPSHPositioningError")
+            if hpe is not None:
+                try:
+                    stamp.h_pos_err = float(hpe)
+                except Exception:
+                    pass
     return stamp
 
 
-def read_directory(date_dir: Path) -> list[ImageStamp]:
-    if not date_dir.is_dir():
-        return []
+def _read_date_stamps(logical: dict[str, "Path | BandGroupRef"], date_folder: str) -> list[ImageStamp]:
+    """A date's stamps for every logical capture ``list_logical_images`` enumerated: EXIF for an
+    ``image``, the manifest's own digest and member names for a ``band_group``, bare identity for
+    a ``raster`` (no EXIF to read for either)."""
+    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
+    from tcip_mcp.pipelines.image_utils import capture_kind
+
     stamps: list[ImageStamp] = []
-    for p in sorted(date_dir.iterdir()):
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
-            stamps.append(read_image_stamp(p, date_dir.name))
+    for stem in sorted(logical):
+        source = logical[stem]
+        kind = capture_kind(source)
+        if kind == "band_group":
+            assert isinstance(source, BandGroupRef)
+            manifest_sha256 = hashlib.sha256(source.manifest_path.read_bytes()).hexdigest()
+            members = tuple(sorted(p.name for p in source.bands.values()))
+            stamps.append(ImageStamp(
+                path=str(source.manifest_path), stem=stem, date_folder=date_folder, kind=kind,
+                name=source.manifest_path.name, timestamp=None, lat=None, lon=None,
+                h_pos_err=None, readable=None, manifest_sha256=manifest_sha256, members=members,
+            ))
+        elif kind == "raster":
+            p = source
+            assert isinstance(p, Path)
+            stamps.append(ImageStamp(
+                path=str(p), stem=stem, date_folder=date_folder, kind=kind, name=p.name,
+                timestamp=None, lat=None, lon=None, h_pos_err=None, readable=None,
+            ))
+        else:
+            assert isinstance(source, Path)
+            stamps.append(read_image_stamp(source, date_folder))
     return stamps
+
+
+def capture_identity(stamps: list[ImageStamp]) -> str:
+    """The sha256[:16] over every capture ``list_logical_images`` enumerated for one date.
+
+    An EXIF/manifest identity, never an image-content identity: it certifies the inputs the
+    assignment was made from, and no reader may cite it as provenance for the pixels a phenotype
+    was counted over (the prediction bucket's own stamps carry that). ``build_mapping`` calls
+    this once per date; the delivery's ``verify_mapping_inputs`` calls it again to detect a
+    changed input set.
+    """
+    rows: list[list[object]] = []
+    for s in sorted(stamps, key=lambda s: s.name):
+        if s.kind == "band_group":
+            rows.append([s.name, s.kind, s.manifest_sha256, list(s.members)])
+        elif s.kind == "raster":
+            rows.append([s.name, s.kind])
+        else:
+            rows.append([
+                s.name, s.kind,
+                s.timestamp.isoformat() if s.timestamp else None,
+                s.lat, s.lon, s.h_pos_err, s.readable,
+            ])
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=False).encode("utf-8")).hexdigest()
+    return digest[:16]
 
 
 # ── Plant CSV parsing ───────────────────────────────────────────────────
@@ -224,15 +373,8 @@ def _nearest_plant(
 # ── Sequence anchoring ─────────────────────────────────────────────────
 
 
-# Iglewicz & Hoaglin's modified z-score outlier test (Iglewicz, B. and Hoaglin, D. (1993), "How to
-# Detect and Handle Outliers", ASQC Quality Press), the standard median/MAD-based convention for
-# flagging an outlier in a small, possibly non-normal sample: a candidate row-transition jump must
-# clear this critical value on its modified z-score, computed in log-space (so "how many times
-# bigger" becomes an additive, mean/spread-comparable quantity) against the rest of the date's own
-# consecutive-gap ratios. 0.6745 is the constant that makes MAD a consistent estimator of the
-# standard deviation for a normally-distributed population; 3.5 is the convention's own published
-# cutoff, the same "cited statistical convention with a stated confidence level" shape as
-# ``operating_point._EQUIVALENCE_Z``, not a multiplier tuned to pass a fixture.
+# Iglewicz & Hoaglin's modified z-score outlier test (1993, ASQC Quality Press), tested in
+# log-space against the date's own consecutive-gap ratios; 3.5 is the convention's own cutoff.
 _ROW_BREAK_MODIFIED_Z = 3.5
 
 
@@ -252,11 +394,8 @@ def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
     if len(gaps) < 2:
         return None
     sorted_gaps = sorted(gaps)
-    # A near-zero gap (two images at essentially the same GPS fix, e.g. a duplicate/cached EXIF
-    # reading between two rapid captures) carries no walking-pace information: taking its log, or
-    # dividing by it, would make whatever value follows look like an infinitely large jump purely
-    # by construction, not because a row transition actually happened there. Excluded as a
-    # candidate split point entirely, rather than treated as an automatic winner.
+    # A near-zero gap carries no walking-pace information (its log/ratio would read as infinite);
+    # excluded as a candidate split rather than treated as an automatic winner.
     candidates = [
         (i, math.log(hi / lo)) for i, (lo, hi) in enumerate(zip(sorted_gaps, sorted_gaps[1:]))
         if lo > 1e-9
@@ -267,8 +406,7 @@ def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
 
     other_log_ratios = [r for i, r in candidates if i != best_i]
     if not other_log_ratios:
-        # Only one candidate split to look at: nothing to compare it against, so there's no basis
-        # to call it a genuine transition rather than noise.
+        # Only one candidate split to compare against: no basis to call it a genuine transition.
         return None
     median_other = statistics.median(other_log_ratios)
     mad = statistics.median([abs(r - median_other) for r in other_log_ratios])
@@ -277,9 +415,8 @@ def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
         if modified_z < _ROW_BREAK_MODIFIED_Z:
             return None
     elif best_log_ratio <= median_other:
-        # The rest of this date's own steps show no measured spread at all (identical, or equal up
-        # to floating-point precision): only a genuinely larger jump counts as a break, the modified
-        # z-score's own limiting behavior as MAD -> 0, not an unconditional pass on any candidate.
+        # No measured spread in the rest of this date's steps: only a genuinely larger jump
+        # counts, MAD's own limiting behavior as it -> 0, not an unconditional pass.
         return None
 
     return sorted_gaps[best_i] + (sorted_gaps[best_i + 1] - sorted_gaps[best_i]) / 2
@@ -321,7 +458,12 @@ def assign_plants(
     *,
     nn_tolerance_m: float = NN_TOLERANCE_METERS,
 ) -> list[Assignment]:
-    """Assign each image to a plant by sequence-anchored NN matching."""
+    """Assign each image to a plant by sequence-anchored NN matching.
+
+    A ``band_group``/``raster`` stamp carries no GPS fix (``lat``/``lon`` are always ``None``),
+    so it always falls through to the ``unmapped`` branch below, the same way an ``image`` with
+    no usable EXIF position does.
+    """
     out: list[Assignment] = []
     if not stamps or not plants:
         for s in stamps:
@@ -341,11 +483,7 @@ def assign_plants(
     ordered = _order_by_time(stamps)
     runs = _segment_runs(ordered)
 
-    # Path-aware assignment within a run: each image picks its nearest
-    # unclaimed plant, biasing toward plants close to the run's start/end
-    # anchors. For now, the first pass just uses nearest-neighbour but
-    # penalises duplicates; it degrades gracefully to NN when sequence
-    # signal is weak.
+    # Each image picks its nearest unclaimed plant; degrades to NN when sequence signal is weak.
     claimed: set[int] = set()
 
     for run in runs:
@@ -446,45 +584,99 @@ def build_mapping(
     images_root: Path,
     plant_csv_paths: list[Path],
     *,
+    name: str,
+    dataset_root: Path | str,
+    dataset_id: str,
+    project_root: Path | str,
+    built_by: str,
     dates: Optional[list[str]] = None,
     nn_tolerance_m: Optional[float] = None,
-) -> dict[str, list[Assignment]]:
-    """Build per-date plant assignments for every image under ``images_root``.
+) -> MappingBuild:
+    """Build one project's named plant mapping: per-date assignments plus the provenance that
+    binds the record to the inputs it was built from.
+
+    ``name``/``dataset_root``/``dataset_id``/``project_root``/``built_by`` are the caller's own
+    resolved facts (the door already checked the dataset identity and the project record before
+    calling here); this function does not re-derive them.
 
     ``nn_tolerance_m`` is derived from the plot's ``grid_pitch_m`` when the caller does not pin it
-    (not a pinned 10 m): pitch/6, so assign_plants' loosest 3x gate keeps the effective match radius
-    within half a grid cell. An explicit value is honored but still capped at that ceiling. No
-    derivable pitch (< 2 georeferenced plants) -> the honest ``NN_TOLERANCE_METERS`` fallback.
+    (not a pinned 10 m): pitch/6, so assign_plants' loosest 3x gate keeps the effective match
+    radius within half a grid cell. An explicit value is honored but still capped at that
+    pitch-derived ceiling; ``nn_tolerance_m`` on the record carries which of the four branches
+    (derived, capped, stated, fallback) produced the value.
+
+    A date's captures are enumerated through ``image_utils.list_logical_images``, so a band
+    raster or a band group ingested under a mapped date is a capture the identity sees. That
+    enumeration raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStem` when a
+    standalone file's stem collides with a band group's; this function lets it propagate, and
+    the calling door catches it and refuses in its own error shape.
     """
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+
+    plant_csv_paths = [Path(p) for p in plant_csv_paths]
     plants = read_plant_csvs(plant_csv_paths)
+    plant_csv_meta = [
+        {
+            "path": str(p),
+            "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+            "n_plants": len(read_plant_csvs([p])),
+        }
+        for p in plant_csv_paths if p.is_file()
+    ]
+
     # The ceiling: assign_plants' loosest gate is 3x nn_tolerance, so pitch/6 -> effective radius
     # <= pitch/2. Derive the tolerance from the layout in hand; only cap an explicit override.
     pitch = grid_pitch_m(plants)
     _cap = pitch / 6
+    tolerance_source: str
     if nn_tolerance_m is None:
-        nn_tolerance_m = _cap if pitch > 0 else NN_TOLERANCE_METERS
-        logger.info("nn_tolerance_m derived %.2f from grid pitch %.1f (effective radius <= pitch/2)",
-                    nn_tolerance_m, pitch)
+        if pitch > 0:
+            nn_tolerance_m, tolerance_source = _cap, "grid_pitch"
+        else:
+            nn_tolerance_m, tolerance_source = NN_TOLERANCE_METERS, "fallback"
+        logger.info("nn_tolerance_m derived %.2f (%s)", nn_tolerance_m, tolerance_source)
     elif pitch > 0 and nn_tolerance_m > _cap:
         logger.info("capping nn_tolerance_m %.1f -> %.2f (grid pitch %.1f: effective radius <= pitch/2)",
                     nn_tolerance_m, _cap, pitch)
-        nn_tolerance_m = _cap
-    result: dict[str, list[Assignment]] = {}
+        nn_tolerance_m, tolerance_source = _cap, "stated_capped"
+    else:
+        tolerance_source = "stated"
+
     images_root = Path(images_root)
-    if not images_root.is_dir():
-        return result
-    for date_dir in sorted(images_root.iterdir()):
-        if not date_dir.is_dir():
-            continue
-        if dates is not None and date_dir.name not in dates:
-            continue
-        stamps = read_directory(date_dir)
-        if not stamps:
-            result[date_dir.name] = []
-            continue
-        assignments = assign_plants(stamps, plants, nn_tolerance_m=nn_tolerance_m)
-        result[date_dir.name] = assignments
-    return result
+    dates_walked: list[str] = []
+    assignments: dict[str, list[Assignment]] = {}
+    capture_ids: dict[str, str] = {}
+    unreadable: dict[str, list[str]] = {}
+    if images_root.is_dir():
+        for date_dir in sorted(images_root.iterdir()):
+            if not date_dir.is_dir():
+                continue
+            if dates is not None and date_dir.name not in dates:
+                continue
+            date = date_dir.name
+            dates_walked.append(date)
+            logical = list_logical_images(date_dir)
+            stamps = _read_date_stamps(logical, date)
+            capture_ids[date] = capture_identity(stamps)
+            unreadable[date] = sorted(
+                s.name for s in stamps if s.kind == "image" and s.readable is False)
+            assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=nn_tolerance_m)
+
+    return MappingBuild(
+        name=name,
+        project_root=str(project_root),
+        dataset_root=str(dataset_root),
+        dataset_id=dataset_id,
+        built_by=built_by,
+        built_at=datetime.now(timezone.utc).isoformat(),
+        dates_requested=list(dates) if dates is not None else None,
+        dates=sorted(dates_walked),
+        nn_tolerance_m={"value": nn_tolerance_m, "source": tolerance_source},
+        plant_csvs=plant_csv_meta,
+        capture_identity=capture_ids,
+        unreadable=unreadable,
+        assignments=assignments,
+    )
 
 
 PLANT_MAPPING_STORE = "plant_mapping"
@@ -496,6 +688,7 @@ register_store(
         key_fields=("name",),
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
+        enumerable=True,
         locator=_MAPPING_DOC,
     )
 )
@@ -507,7 +700,8 @@ def plant_mapping_key(project_root: Path | str, name: str) -> Key:
     A mapping is project state: a dataset can be read by more than one project, and each
     project's mapping is its own. The key root is ``<project_root>/.tcip/state``; the document
     lives at ``plant_mappings/<name>.json`` under it (the same ``STATE``-scoped shape
-    ``delivery_events`` uses).
+    ``delivery_events`` uses, and the shape the layout claim in ``tcip_store.layout_claims``
+    declares for this store).
 
     ``last_writer_wins``: a mapping is assigned whole in memory and written in one call, and a
     later build under the same name is a fresh assignment replacing that one rather than a
@@ -517,13 +711,44 @@ def plant_mapping_key(project_root: Path | str, name: str) -> Key:
     return Key(PLANT_MAPPING_STORE, str(root), (name,))
 
 
-def persist_mapping(
-    mapping: dict[str, list[Assignment]], project_root: Path | str, name: str
-) -> None:
-    serialisable = {
-        date: [a.__dict__ for a in assignments] for date, assignments in mapping.items()
-    }
-    tcip_store.replace(plant_mapping_key(project_root, name), serialisable)
+def plant_mapping_names(project_root: Path | str) -> list[str]:
+    """Every mapping name persisted under this project, sorted.
+
+    Enumerated through the store's own key listing (the ``STATE``-scoped claim's
+    ``enumerable=True``), filtered by ``NAME_SEGMENT``: the listing is by locator and would
+    otherwise offer a stray, illegally-named file's stem as a name the door refuses.
+    """
+    from tcip_store.layout_claims import NAME_SEGMENT
+
+    root = str(Path(project_root).absolute() / ".tcip" / "state")
+    names = (key.parts[-1] for key in tcip_store.keys(PLANT_MAPPING_STORE, root))
+    return sorted(name for name in names if NAME_SEGMENT.fullmatch(name))
+
+
+def persist_mapping(build: MappingBuild, project_root: Path | str, name: str) -> None:
+    """Write the mapping record, then the receipt that binds it to this build.
+
+    The record is committed before the receipt (a log append cannot join a record transaction):
+    a receipt that cannot be written fails loudly (``AuditEntryNotWritten`` propagates, never
+    swallowed) and leaves a record no receipt names, which :func:`load_mapping` refuses to read
+    until a rebuild replaces it.
+    """
+    from tcip_mcp.audit import record_event_or_raise
+
+    record = build.to_record()
+    tcip_store.replace(plant_mapping_key(project_root, name), record)
+    record_sha256 = hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
+    record_event_or_raise(
+        "plant_mapping_built",
+        {
+            "name": name,
+            "project_root": str(project_root),
+            "dataset_root": build.dataset_root,
+            "built_at": build.built_at,
+            "record_sha256": record_sha256,
+        },
+        scope=project_root,
+    )
 
 
 def load_mapping_rows(project_root: Path | str, name: str) -> dict[str, list[dict]]:
@@ -533,35 +758,201 @@ def load_mapping_rows(project_root: Path | str, name: str) -> dict[str, list[dic
     gets the fields that reader fills in and the types it coerces, rather than whatever a
     particular writer happened to leave out. ``{}`` when no mapping is stored under ``name``.
     """
-    return {date: [a.__dict__ for a in assignments]
-            for date, assignments in load_mapping(project_root, name).items()}
+    build = load_mapping(project_root, name)
+    return build.rows() if build is not None else {}
 
 
-def load_mapping(project_root: Path | str, name: str) -> dict[str, list[Assignment]]:
-    """One project's named, persisted per-date plant assignments, or ``{}`` when nothing is
-    stored under that name.
+_REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
+    "name": str,
+    "project_root": str,
+    "dataset_root": str,
+    "dataset_id": str,
+    "built_by": str,
+    "built_at": str,
+    "dates_requested": (list, type(None)),
+    "dates": list,
+    "nn_tolerance_m": dict,
+    "plant_csvs": list,
+    "capture_identity": dict,
+    "unreadable": dict,
+    "assignments": dict,
+}
+_ASSIGNMENT_ROW_KEYS = (
+    "image_path", "stem", "date_folder", "plot_name", "accession_name", "source", "distance_m")
+_VALID_SOURCES = {"sequence", "nearest_neighbour", "unmapped"}
 
-    Read through the store the mapping was written to, so a build persisted under one backend is
-    found by the delivery that consumes it rather than reported missing.
+
+def _validated_record(raw: object, project_root: Path | str, name: str) -> dict:
+    """``raw`` as a plant-mapping record, or the ``ValueError`` naming the project, the name,
+    the field and the remedy (rebuild)."""
+    remedy = "rebuild with build_plant_mapping"
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"plant mapping {name!r} under {project_root} is not a record document "
+            f"(found {type(raw).__name__}); {remedy}")
+    for key, kind in _REQUIRED_TOP_KEYS.items():
+        if key not in raw:
+            raise ValueError(
+                f"plant mapping {name!r} under {project_root} is missing {key!r}; {remedy}")
+        if not isinstance(raw[key], kind):
+            raise ValueError(
+                f"plant mapping {name!r} under {project_root} carries {key!r} of the wrong type "
+                f"(found {type(raw[key]).__name__}); {remedy}")
+    for date, rows in raw["assignments"].items():
+        if not isinstance(rows, list):
+            raise ValueError(
+                f"plant mapping {name!r} under {project_root}: assignments[{date!r}] is not a "
+                f"list; {remedy}")
+        for row in rows:
+            if not isinstance(row, dict) or any(k not in row for k in _ASSIGNMENT_ROW_KEYS):
+                raise ValueError(
+                    f"plant mapping {name!r} under {project_root}: a row under "
+                    f"assignments[{date!r}] is missing one of {_ASSIGNMENT_ROW_KEYS}; {remedy}")
+            if row["source"] not in _VALID_SOURCES:
+                raise ValueError(
+                    f"plant mapping {name!r} under {project_root}: a row under "
+                    f"assignments[{date!r}] carries source {row['source']!r}, not one of "
+                    f"{sorted(_VALID_SOURCES)}; {remedy}")
+            dm = row["distance_m"]
+            if dm is not None and not (isinstance(dm, (int, float)) and math.isfinite(dm)):
+                raise ValueError(
+                    f"plant mapping {name!r} under {project_root}: a row under "
+                    f"assignments[{date!r}] carries a non-finite distance_m ({dm!r}); {remedy}")
+    return raw
+
+
+# Process-local memo for load_mapping's receipt check: a project's log cursor plus every
+# plant_mapping_built (name, record_sha256) seen; a miss re-reads once before refusing.
+_receipt_cursor: dict[str, str] = {}
+_receipt_seen: dict[str, dict[str, set[str]]] = {}
+
+
+def _scan_receipts(project_root: Path | str, root_key: str, *, after: Optional[str]) -> None:
+    from tcip_mcp.audit import audit_log_key
+
+    key = audit_log_key(project_root)
+    page = tcip_store.read_log(key, after=after)
+    if page.corrupt:
+        raise ValueError(
+            f"the audit log at {key} carries {len(page.corrupt)} undecodable "
+            f"entr{'y' if len(page.corrupt) == 1 else 'ies'}; repair the log before a "
+            "plant-mapping receipt can be trusted")
+    seen = _receipt_seen.setdefault(root_key, {})
+    for entry in page.records:
+        if entry.get("tool") != "plant_mapping_built":
+            continue
+        args = entry.get("arguments") or {}
+        entry_name, sha = args.get("name"), args.get("record_sha256")
+        if isinstance(entry_name, str) and isinstance(sha, str):
+            seen.setdefault(entry_name, set()).add(sha)
+    _receipt_cursor[root_key] = page.cursor
+
+
+def _require_receipt(project_root: Path | str, name: str, record_sha256: str) -> None:
+    """Refuse unless a ``plant_mapping_built`` event under ``name`` names ``record_sha256`` in
+    the project's own audit log. Any matching receipt admits, not only the latest: the record
+    write and the receipt append cannot be ordered across two concurrent legitimate builds of
+    one name, so a latest-receipt rule could wedge a name permanently after an honest race."""
+    root_key = str(Path(project_root).resolve())
+    if root_key not in _receipt_cursor:
+        _scan_receipts(project_root, root_key, after=None)
+    if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
+        _scan_receipts(project_root, root_key, after=_receipt_cursor.get(root_key))
+    if record_sha256 not in _receipt_seen.get(root_key, {}).get(name, set()):
+        raise ValueError(
+            f"plant mapping {name!r} under {project_root} carries no plant_mapping_built "
+            f"receipt naming record {record_sha256}: this record was not written by "
+            "build_plant_mapping or the web build route (a forged or hand-restored record, or "
+            "one whose receipt could not be written); rebuild with build_plant_mapping")
+
+
+def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
+    """One project's named, persisted plant-mapping build, or ``None`` when nothing is stored
+    under that name (the delivery's "build one first" refusal stands).
+
+    Validates the record's shape, then requires a matching receipt (see :func:`_require_receipt`)
+    before trusting it: a record shaped correctly but never built through the platform's own
+    writers is refused, a forgery naming the real inputs' identities included.
     """
     raw = tcip_store.read(plant_mapping_key(project_root, name), default=None)
     if raw is None:
-        return {}
-    out: dict[str, list[Assignment]] = {}
-    for date, rows in raw.items():
-        out[date] = []
-        for r in rows:
-            out[date].append(
-                Assignment(
-                    image_path=r.get("image_path", ""),
-                    stem=r.get("stem", ""),
-                    date_folder=r.get("date_folder", date),
-                    plot_name=r.get("plot_name"),
-                    accession_name=r.get("accession_name"),
-                    source=r.get("source", "unknown"),
-                    distance_m=(
-                        float(r["distance_m"]) if r.get("distance_m") is not None else None
-                    ),
-                )
+        return None
+    record = _validated_record(raw, project_root, name)
+    record_sha256 = hashlib.sha256(RECORD_JSON.encode(record)).hexdigest()
+    _require_receipt(project_root, name, record_sha256)
+    assignments: dict[str, list[Assignment]] = {}
+    for date, rows in record["assignments"].items():
+        assignments[date] = [
+            Assignment(
+                image_path=r["image_path"], stem=r["stem"], date_folder=r["date_folder"],
+                plot_name=r["plot_name"], accession_name=r["accession_name"],
+                source=r["source"], distance_m=r["distance_m"],
             )
-    return out
+            for r in rows
+        ]
+    return MappingBuild(
+        name=record["name"], project_root=record["project_root"],
+        dataset_root=record["dataset_root"], dataset_id=record["dataset_id"],
+        built_by=record["built_by"], built_at=record["built_at"],
+        dates_requested=record["dates_requested"], dates=record["dates"],
+        nn_tolerance_m=record["nn_tolerance_m"], plant_csvs=record["plant_csvs"],
+        capture_identity=record["capture_identity"], unreadable=record["unreadable"],
+        assignments=assignments, record_sha256=record_sha256,
+    )
+
+
+def verify_mapping_inputs(build: MappingBuild, dataset_root: Path | str) -> dict:
+    """Check a mapping's recorded inputs against what is on disk now, at delivery time.
+
+    Never raises: returns ``{"refusal": str}`` when a mapped date's captures changed since the
+    build, a capture's readability flipped, an ambiguous stem is found, or a plant CSV was
+    rewritten in place; otherwise ``{"captures_unverified": [date, ...], "plant_csvs_unverified":
+    [path, ...]}`` naming what could not be checked (a date folder archived after inference, a
+    CSV moved) without refusing.
+    """
+    from tcip_mcp.dataset_layout import image_dir
+    from tcip_mcp.pipelines.image_utils import AmbiguousImageStem, list_logical_images
+
+    captures_unverified: list[str] = []
+    for date in build.dates:
+        date_dir = image_dir(dataset_root, date)
+        if not date_dir.is_dir():
+            captures_unverified.append(date)
+            continue
+        try:
+            logical = list_logical_images(date_dir)
+        except AmbiguousImageStem as exc:
+            return {"refusal": str(exc)}
+        stamps = _read_date_stamps(logical, date)
+        was_unreadable = set(build.unreadable.get(date, []))
+        for s in stamps:
+            if s.kind != "image":
+                continue
+            if s.name in was_unreadable and s.readable:
+                return {"refusal": (
+                    f"{s.name} (date {date}) was unreadable when this mapping was built and its "
+                    "EXIF is available now: rebuild, since its assignment would differ")}
+            if s.name not in was_unreadable and s.readable is False:
+                return {"refusal": (
+                    f"{s.name} (date {date}) was readable when this mapping was built and "
+                    "could not be read now: retry, or rebuild if it is gone")}
+        new_identity = capture_identity(stamps)
+        if new_identity != build.capture_identity.get(date):
+            return {"refusal": (
+                f"the captures under date {date} changed since this mapping was built "
+                f"(recorded {build.capture_identity.get(date)!r}, now {new_identity!r}); "
+                "rebuild to cover the images actually on disk")}
+
+    plant_csvs_unverified: list[str] = []
+    for entry in build.plant_csvs:
+        p = Path(entry["path"])
+        if not p.is_file():
+            plant_csvs_unverified.append(entry["path"])
+            continue
+        digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        if digest != entry["sha256"]:
+            return {"refusal": (
+                f"plant CSV {entry['path']} was rewritten since this mapping was built; "
+                "rebuild")}
+
+    return {"captures_unverified": captures_unverified, "plant_csvs_unverified": plant_csvs_unverified}

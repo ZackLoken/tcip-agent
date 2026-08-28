@@ -191,6 +191,49 @@ def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
     return registered["sha256"]
 
 
+def write_plant_mapping(
+    project_root: str | Path, name: str, mapping: dict[str, list[dict]],
+    *, dataset_root: str | Path,
+) -> str:
+    """Persist a hand-composed ``{date: [assignment dict, ...]}`` mapping through the platform's
+    own producer (``persist_mapping``, record then receipt), and return the dataset id it minted.
+
+    A fixture's real interest is only ``mapping``; every other provenance field is a placeholder
+    a delivery's dataset-identity and receipt checks require but do not otherwise inspect.
+    ``dataset_root`` is registered (``register_dataset``) if it carries no identity yet, so a
+    delivery reading these predictions binds on a real minted id.
+    """
+    from datetime import datetime, timezone
+
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import Assignment, MappingBuild, persist_mapping
+    from tcip_mcp.tools.project_tools import register_dataset
+    from tcip_mcp.traits import registered_crops
+
+    def _row(row: dict, date: str) -> Assignment:
+        # Tolerant of a fixture's partial row (just the fields its own test cares about): the
+        # rest take the same honest defaults a real sequence-anchored match would carry.
+        return Assignment(
+            image_path=row.get("image_path", f"{row.get('stem', '')}.jpg"),
+            stem=row["stem"], date_folder=row.get("date_folder", date),
+            plot_name=row.get("plot_name"), accession_name=row.get("accession_name"),
+            source=row.get("source", "sequence"), distance_m=row.get("distance_m", 1.0),
+        )
+
+    root = Path(dataset_root)
+    root.mkdir(parents=True, exist_ok=True)
+    reg = register_dataset(str(root), crop=sorted(registered_crops())[0], project_root=str(project_root))
+    build = MappingBuild(
+        name=name, project_root=str(project_root), dataset_root=str(root), dataset_id=reg["id"],
+        built_by="build_plant_mapping", built_at=datetime.now(timezone.utc).isoformat(),
+        dates_requested=None, dates=sorted(mapping),
+        nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
+        capture_identity={d: "0" * 16 for d in mapping}, unreadable={d: [] for d in mapping},
+        assignments={d: [_row(row, d) for row in rows] for d, rows in mapping.items()},
+    )
+    persist_mapping(build, project_root, name)
+    return reg["id"]
+
+
 # --- the export doors: a stand-in run whose validated count they can actually earn a record for ---
 
 def calibrated_run_fields(

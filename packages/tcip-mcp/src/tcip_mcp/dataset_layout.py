@@ -357,6 +357,31 @@ def dataset_identity_key(dataset_root: str | Path) -> Key:
     return Key(DATASET_IDENTITY_STORE, str(dataset_root), _DATASET_IDENTITY_PARTS)
 
 
+def require_dataset_identity(dataset_root: str | Path) -> dict:
+    """The dataset's identity record (``{crop, id, fingerprint}``), or the refusal naming
+    ``register_dataset`` when it is absent.
+
+    Read through the store (``tcip_store.read_blob_versioned``), never a bare file check, which
+    the database backend would fail: a directory that merely ends in ``images`` is not a dataset
+    until ``register_dataset`` has minted an identity for it.
+    """
+    import tcip_store
+    from tcip_store import RECORD_JSON
+
+    stored = tcip_store.read_blob_versioned(dataset_identity_key(dataset_root), default=None)
+    if stored.value is None:
+        raise ValueError(
+            f"{dataset_root} carries no dataset identity record "
+            f"({dataset_identity_path(dataset_root)} absent); register it first with "
+            "register_dataset")
+    identity = RECORD_JSON.decode(stored.value)
+    if not isinstance(identity, dict) or not identity.get("id"):
+        raise ValueError(
+            f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
+            "identity; re-register with register_dataset")
+    return identity
+
+
 def image_status_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/.tcip/state/image_status.json``: the confirmed-negatives store.
 

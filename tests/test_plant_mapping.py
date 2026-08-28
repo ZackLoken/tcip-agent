@@ -11,6 +11,7 @@ import tcip_store
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
     ImageStamp,
+    MappingBuild,
     PlantRecord,
     _segment_runs,
     assign_plants,
@@ -30,10 +31,27 @@ def _stamp(
         path=path or f"/data/{stem}.JPG",
         stem=stem,
         date_folder="2-11-26",
+        kind="image",
+        name=f"{stem}.JPG",
         timestamp=datetime(2026, 2, 11, 9, 0, 0) + timedelta(seconds=seconds),
         lat=lat,
         lon=lon,
         h_pos_err=5.0,
+        readable=True,
+    )
+
+
+def _build(assignments: dict[str, list[Assignment]]) -> MappingBuild:
+    """A ``MappingBuild`` around hand-composed assignments, for testing the pipeline module's
+    own ``persist_mapping``/``load_mapping`` round trip: every other provenance field is a
+    placeholder these tests do not exercise."""
+    return MappingBuild(
+        name="mapping", project_root="/proj", dataset_root="/proj/ds", dataset_id="ds-1",
+        built_by="build_plant_mapping", built_at="2026-02-11T00:00:00+00:00",
+        dates_requested=None, dates=sorted(assignments),
+        nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
+        capture_identity={d: "0" * 16 for d in assignments}, unreadable={d: [] for d in assignments},
+        assignments=assignments,
     )
 
 
@@ -201,7 +219,7 @@ def test_read_plant_csvs(tmp_path: Path) -> None:
 
 
 def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
-    mapping = {
+    build = _build({
         "2-11-26": [
             Assignment(
                 image_path="/data/IMG.JPG",
@@ -213,23 +231,28 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
                 distance_m=1.2,
             )
         ]
-    }
-    persist_mapping(mapping, tmp_path, "mapping")
+    })
+    persist_mapping(build, tmp_path, "mapping")
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
     loaded = load_mapping(tmp_path, "mapping")
-    assert list(loaded.keys()) == ["2-11-26"]
-    assert loaded["2-11-26"][0].plot_name == "PLOT1"
-    assert loaded["2-11-26"][0].source == "sequence"
-    assert loaded["2-11-26"][0].distance_m == pytest.approx(1.2)
+    assert loaded is not None
+    assert list(loaded.assignments.keys()) == ["2-11-26"]
+    assert loaded.assignments["2-11-26"][0].plot_name == "PLOT1"
+    assert loaded.assignments["2-11-26"][0].source == "sequence"
+    assert loaded.assignments["2-11-26"][0].distance_m == pytest.approx(1.2)
 
 
 def test_build_mapping_empty_dir(tmp_path: Path) -> None:
-    mapping = build_mapping(tmp_path / "nope", [])
-    assert mapping == {}
+    build = build_mapping(
+        tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
+        dataset_id="ds-1", project_root=tmp_path, built_by="build_plant_mapping",
+    )
+    assert build.assignments == {}
+    assert build.dates == []
 
 
-def _one_assignment() -> dict[str, list[Assignment]]:
-    return {
+def _one_build() -> MappingBuild:
+    return _build({
         "2-11-26": [
             Assignment(
                 image_path="/data/IMG.JPG",
@@ -241,7 +264,7 @@ def _one_assignment() -> dict[str, list[Assignment]]:
                 distance_m=1.2,
             )
         ]
-    }
+    })
 
 
 def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(
@@ -252,10 +275,12 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
     The state directory of a fresh project has nothing in it, so a persist that required the
     location to exist already would refuse the very first build.
     """
-    persist_mapping(_one_assignment(), tmp_path, "mapping")
+    persist_mapping(_one_build(), tmp_path, "mapping")
 
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
-    assert load_mapping(tmp_path, "mapping")["2-11-26"][0].plot_name == "PLOT1"
+    loaded = load_mapping(tmp_path, "mapping")
+    assert loaded is not None
+    assert loaded.assignments["2-11-26"][0].plot_name == "PLOT1"
 
 
 def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
@@ -291,7 +316,7 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     try:
         assert holding.wait(30)
         with pytest.raises(StoreBusy):
-            persist_mapping(_one_assignment(), tmp_path, "mapping")
+            persist_mapping(_one_build(), tmp_path, "mapping")
         assert not out.exists()
     finally:
         release.set()

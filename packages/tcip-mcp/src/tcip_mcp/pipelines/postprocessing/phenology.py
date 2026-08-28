@@ -143,6 +143,11 @@ PROVENANCE_COLUMNS = [
     "producer_experiment_id",
     # Which experiment and row answered for the buckets' claims, empty when any read bucket is unbound.
     "validation_record",
+    # The plant mapping this delivery attributed detections through, and what verify_mapping_inputs
+    # could not check at delivery time (each a ";"-joined list, empty when nothing was unverified).
+    "plant_mapping_sha256",
+    "captures_unverified",
+    "plant_csvs_unverified",
 ]
 
 
@@ -560,6 +565,7 @@ def _write_phenology_delivery(
     bindings: dict,
     pred_dirs: list[str],
     project_root: str | Path | None,
+    plant_mapping: dict,
 ) -> dict:
     """Gate, compose and write one phenology delivery's provenance cells, then record the delivery.
 
@@ -584,6 +590,15 @@ def _write_phenology_delivery(
     Records the delivery through ``record_delivery_binding_event`` after the file is written, under
     the caller-stated ``door`` and the explicit ``project_root``, so a delivered phenology CSV
     cannot exist without both the gate having run and the delivery having been recorded.
+
+    ``plant_mapping`` is the mapping this delivery attributed detections through: ``{"name",
+    "project_root", "dataset_id", "dataset_root", "built_at", "record_sha256",
+    "capture_identity", "captures_unverified", "plant_csvs_unverified"}``, the caller's own
+    ``MappingBuild`` plus ``verify_mapping_inputs``'s disclosure. Required, never defaulted: a
+    phenology delivery always reads a mapping, so there is no legitimate case with nothing to
+    thread through. Its ``captures_unverified``/``plant_csvs_unverified`` fill the CSV's own
+    columns (``";"``-joined, empty when nothing was unverified) and the whole dict travels to
+    the delivery event unchanged.
     """
     if not isinstance(basis, OperationalizationBasis):
         raise ValueError(
@@ -614,6 +629,9 @@ def _write_phenology_delivery(
             {"producer_model_sha256": producer.get("sha256"),
              "experiment_id": producer.get("experiment_id")},
             bindings),
+        "plant_mapping_sha256": plant_mapping["record_sha256"],
+        "captures_unverified": ";".join(plant_mapping["captures_unverified"]),
+        "plant_csvs_unverified": ";".join(plant_mapping["plant_csvs_unverified"]),
     }
     if include_majority_marker:
         provisional_column = majority_provisional_column(spec)
@@ -632,7 +650,7 @@ def _write_phenology_delivery(
         door, str(out_path), list(pred_dirs), bindings,
         measurement_documents=["operating_point", "classifier_operating_point"],
         scale_document=None, trait=spec.name, delivery_kind=STATE_CROSSING_DATES,
-        project_root=project_root,
+        project_root=project_root, plant_mapping=plant_mapping,
     )
     return cells
 
@@ -651,6 +669,7 @@ def write_phenology_csv(
     bindings: dict,
     pred_dirs: list[str],
     project_root: str | Path | None,
+    plant_mapping: dict,
 ) -> dict:
     """Write per-plant milestone rows to the canonical delivery CSV, for the given trait's spec.
 
@@ -658,13 +677,14 @@ def write_phenology_csv(
     the composed provenance cells (including the trait's majority-provisional marker when the spec
     names one) and the recorded delivery event are all that function's, not a second copy of any of
     them. ``door`` is the name ``record_delivery_binding_event`` records the delivery under.
+    ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, phenology_csv_columns(spec),
         include_majority_marker=True, flags=flags,
         acknowledge_unvalidated=acknowledge_unvalidated, basis=basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=project_root)
+        pred_dirs=pred_dirs, project_root=project_root, plant_mapping=plant_mapping)
 
 
 def write_phenology_curve_csv(
@@ -681,16 +701,18 @@ def write_phenology_curve_csv(
     bindings: dict,
     pred_dirs: list[str],
     project_root: str | Path | None,
+    plant_mapping: dict,
 ) -> dict:
     """Write per-(plant, date) curve rows to the delivery CSV, for the given trait's spec.
 
     Emits exactly ``curve_csv_columns()`` through ``_write_phenology_delivery``, the same gate,
     provenance composition and delivery recording ``write_phenology_csv`` runs, minus the
     milestone-only majority-provisional marker: a curve names no crossing for one to qualify.
+    ``plant_mapping`` is ``_write_phenology_delivery``'s own required disclosure dict.
     """
     return _write_phenology_delivery(
         door, rows, out_path, spec, curve_csv_columns(),
         include_majority_marker=False, flags=flags,
         acknowledge_unvalidated=acknowledge_unvalidated, basis=basis,
         operating_point_conf=operating_point_conf, producer=producer, bindings=bindings,
-        pred_dirs=pred_dirs, project_root=project_root)
+        pred_dirs=pred_dirs, project_root=project_root, plant_mapping=plant_mapping)
