@@ -53,7 +53,6 @@ def test_image_event_aggregates(client: TestClient, tmp_path: Path) -> None:
             "session_seconds_delta": 12.0,
             "annotations_added_delta": 3,
             "final_annotation_count": 5,
-            "loaded_annotation_count": 2,
         },
     )
     # Another 6s, +2 boxes
@@ -73,7 +72,6 @@ def test_image_event_aggregates(client: TestClient, tmp_path: Path) -> None:
     assert img["session_seconds"] == 18.0
     assert img["annotations_added"] == 5
     assert img["final_annotation_count"] == 7
-    assert img["loaded_annotation_count"] == 2
     assert img["avg_seconds_per_annotation"] == round(18.0 / 5, 2)
     # Aggregates roll up
     assert s["total_annotations"] == 5

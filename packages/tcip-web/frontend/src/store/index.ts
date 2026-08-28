@@ -130,7 +130,6 @@ const EMPTY_CANVAS: CanvasState = {
 const EMPTY_SESSION_TRACKING: SessionTrackingState = {
   currentImageName: null,
   imageEnterTimeMs: null,
-  loadedAnnotationCount: 0,
   annotationsAddedDelta: 0,
   lastFlushedKey: null,
 };
@@ -204,8 +203,6 @@ interface SessionTrackingState {
   currentImageName: string | null;
   /** Epoch ms when the annotator entered this image. */
   imageEnterTimeMs: number | null;
-  /** Count loaded from disk on image entry. */
-  loadedAnnotationCount: number;
   /** Number of new annotations created during this image visit. */
   annotationsAddedDelta: number;
   /** Signature of the last flushed event to avoid duplicate emits. */
@@ -385,11 +382,7 @@ export interface AppState {
   setDraggingVertex: (v: [number, number, number] | null) => void;
 
   /** Per-image session telemetry helpers. */
-  startImageSessionTracking: (
-    imageName: string,
-    loadedAnnotationCount: number,
-    imageEnterTimeMs?: number,
-  ) => void;
+  startImageSessionTracking: (imageName: string, imageEnterTimeMs?: number) => void;
   incrementAnnotationsAdded: (delta?: number) => void;
   markSessionFlushed: (key: string) => void;
   clearSessionTracking: () => void;
@@ -708,13 +701,12 @@ export const useStore = create<AppState>()((set, get) => ({
   setDraggingVertex: (draggingVertex) =>
     set((s) => ({ annotateUi: { ...s.annotateUi, draggingVertex } })),
 
-  startImageSessionTracking: (imageName, loadedAnnotationCount, imageEnterTimeMs) =>
+  startImageSessionTracking: (imageName, imageEnterTimeMs) =>
     set((s) => ({
       sessionTracking: {
         ...s.sessionTracking,
         currentImageName: imageName,
         imageEnterTimeMs: imageEnterTimeMs ?? Date.now(),
-        loadedAnnotationCount: Math.max(0, loadedAnnotationCount),
         annotationsAddedDelta: 0,
         lastFlushedKey: null,
       },
@@ -745,7 +737,6 @@ export const useStore = create<AppState>()((set, get) => ({
         ...s.sessionTracking,
         currentImageName: null,
         imageEnterTimeMs: null,
-        loadedAnnotationCount: 0,
         annotationsAddedDelta: 0,
       },
     })),
