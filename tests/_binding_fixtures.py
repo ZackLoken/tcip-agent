@@ -144,14 +144,19 @@ def write_bound_sidecar(
 PRODUCER_WEIGHTS = b"the weights a producing run filed under the experiment its predictions name"
 
 
+def _producer_bytes(experiment_id: str) -> bytes:
+    """The per-experiment bytes :func:`record_producing_run` files and
+    :func:`producer_checkpoint_sha256` digests: ``PRODUCER_WEIGHTS`` plus the id, so two
+    producing runs never share one digest by construction."""
+    return PRODUCER_WEIGHTS + experiment_id.encode("utf-8")
+
+
 def producer_checkpoint_sha256(experiment_id: str) -> str:
-    """The digest :func:`record_producing_run` files for ``experiment_id``: per-experiment bytes
-    (``PRODUCER_WEIGHTS`` plus the id), so two producing runs never share one digest by
-    construction and a golden asserting the delivered cell can compute its own expectation without
-    re-running the fixture."""
+    """The digest :func:`record_producing_run` files for ``experiment_id``, so a golden asserting
+    the delivered cell can compute its own expectation without re-running the fixture."""
     from tcip_mcp.model_registry import _sha256_of_bytes
 
-    return _sha256_of_bytes(PRODUCER_WEIGHTS + experiment_id.encode("utf-8"))
+    return _sha256_of_bytes(_producer_bytes(experiment_id))
 
 
 def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
@@ -174,7 +179,7 @@ def record_producing_run(weights_dir: str | Path, experiment_id: str) -> str:
 
     ckpt = Path(weights_dir) / "model_best.pt"
     ckpt.parent.mkdir(parents=True, exist_ok=True)
-    ckpt.write_bytes(PRODUCER_WEIGHTS + experiment_id.encode("utf-8"))
+    ckpt.write_bytes(_producer_bytes(experiment_id))
     if not experiment_exists(experiment_id):
         create_experiment(experiment_id, {"note": "a producing run standing behind a delivery"})
     status = read_member(status_key(experiment_id), {})
