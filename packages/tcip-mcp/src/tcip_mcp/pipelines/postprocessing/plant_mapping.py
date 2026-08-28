@@ -1058,7 +1058,7 @@ def verify_mapping_inputs(
                     return {"refusal": (
                         f"{s.name} (date {date}) was readable when this mapping was built and "
                         "could not be read now: retry, or rebuild if it is gone")}
-            if verified_plants and row.plot_name and row.distance_m is not None:
+            if row.plot_name and row.distance_m is not None:
                 if s.lat is None or s.lon is None:
                     return {"refusal": (
                         f"{s.name} (date {date}) recorded a plant position when this mapping was "
@@ -1068,7 +1068,8 @@ def verify_mapping_inputs(
                     haversine_m(s.lat, s.lon, p.lat, p.lon)
                     for p in verified_plants if p.plot_name == row.plot_name
                 ]
-                if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
+                # Empty means the plant's own CSV is among plant_csvs_unverified, already disclosed.
+                if distances and not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
                     return {"refusal": (
                         f"{s.name} (date {date}) has moved since this mapping was built: no "
                         f"plant named {row.plot_name!r} is {row.distance_m} m away now; rebuild, "
