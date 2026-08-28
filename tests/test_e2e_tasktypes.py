@@ -285,12 +285,14 @@ def test_regression_e2e(tmp_path: Path):
     _assert_trained(run, tmp_path / "out")
 
 
-def test_ordinal_evaluate_model_e2e(tmp_path: Path):
+def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model must actually run for ordinal, not just build_dataset/train directly: it
     previously never threaded a CSV path into its own dataset build, so this failed before the
     fix (ds_kwargs stayed images_dir-only, OrdinalDataset's required csv_path was never set)."""
+    from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(6):
@@ -307,17 +309,23 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path):
     run = train(run, loader, val_loader=None, task="ordinal")
     _assert_trained(run, tmp_path / "out")
 
-    result = evaluate_model(
-        str(tmp_path / "out" / "model_best.pt"), str(images_dir), str(csv_path), task="ordinal")
+    ckpt_path = str(tmp_path / "out" / "model_best.pt")
+    reg = register_model(name="ordinal-model", checkpoint_path=ckpt_path, config={},
+                         project_path=str(tmp_path))
+    assert "error" not in reg, reg
+
+    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path), task="ordinal")
     assert "error" not in result, result
     assert "mae" in result
     assert "quadratic_weighted_kappa" in result
 
 
-def test_regression_evaluate_model_e2e(tmp_path: Path):
+def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model must actually run for regression, same fix as the ordinal case above."""
+    from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.training_tools import evaluate_model
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir = tmp_path / "images"
     rows = []
     for i in range(6):
@@ -333,8 +341,12 @@ def test_regression_evaluate_model_e2e(tmp_path: Path):
     run = train(run, loader, val_loader=None, task="regression")
     _assert_trained(run, tmp_path / "out")
 
-    result = evaluate_model(
-        str(tmp_path / "out" / "model_best.pt"), str(images_dir), str(csv_path), task="regression")
+    ckpt_path = str(tmp_path / "out" / "model_best.pt")
+    reg = register_model(name="regression-model", checkpoint_path=ckpt_path, config={},
+                         project_path=str(tmp_path))
+    assert "error" not in reg, reg
+
+    result = evaluate_model(ckpt_path, str(images_dir), str(csv_path), task="regression")
     assert "error" not in result, result
     assert "mae" in result
     assert "r_squared" in result

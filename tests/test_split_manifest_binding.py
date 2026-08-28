@@ -884,6 +884,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -897,7 +898,7 @@ def test_evaluate_model_under_the_manifest_scores_exactly_calibration_universe_f
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": SUBJECT}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
     captured: dict = {}
 
@@ -953,6 +954,10 @@ def test_evaluate_model_under_manifest_writes_and_reads_back_test_results(
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
     ckpt_path = Path(run.output_dir) / "model_best.pt"
     torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    from tcip_mcp.tools.model_tools import register_model
+
+    reg = register_model(name="split-binding-model", checkpoint_path=str(ckpt_path), config={})
+    assert "error" not in reg, reg
     monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
     monkeypatch.setattr(evaluation, "evaluate",
                         lambda *a, **k: {"loss": 0.1, "map50": 0.5, "precision": 0.4, "recall": 0.5})
@@ -980,6 +985,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.data_tools import split_manifest_key
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = tmp_path / "ds"
     write_registry(root / "classes.json", ClassRegistry(subjects=(Subject(name=SUBJECT),)))
@@ -1005,7 +1011,7 @@ def test_evaluate_model_reads_confirmed_negatives_under_the_universes_own_date(
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": SUBJECT}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
     captured: dict = {}
 
@@ -1040,8 +1046,12 @@ def test_evaluate_model_manifest_refuses_a_disagreeing_date(tmp_path: Path, monk
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": SUBJECT}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}},
-              str(Path(run.output_dir) / "model_best.pt"))
+    ckpt_path = str(Path(run.output_dir) / "model_best.pt")
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, ckpt_path)
+    from tcip_mcp.tools.model_tools import register_model
+
+    reg = register_model(name="split-binding-date-model", checkpoint_path=ckpt_path, config={})
+    assert "error" not in reg, reg
     monkeypatch.setattr(
         evaluation, "run_test_evaluation",
         lambda ckpt, loader, device, task, output_dir, **kw:
@@ -1070,6 +1080,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.data_tools import split_manifest_key
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -1093,7 +1104,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": SUBJECT}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
     monkeypatch.setattr(
         evaluation, "run_test_evaluation",
@@ -1114,6 +1125,7 @@ def test_evaluate_model_scores_a_one_foreground_group_calibration_side_the_door_
 def test_evaluate_model_manifest_refuses_a_subject_mismatch(tmp_path: Path):
     from tcip_mcp.tools.training_tools import evaluate_model
     from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -1123,7 +1135,7 @@ def test_evaluate_model_manifest_refuses_a_subject_mismatch(tmp_path: Path):
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": OTHER_SUBJECT}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path, filename="model_best.pt")
 
     result = evaluate_model(run.run_id, str(images_dir), str(labels_dir), task="detection",
                             split_manifest_dir=str(out))

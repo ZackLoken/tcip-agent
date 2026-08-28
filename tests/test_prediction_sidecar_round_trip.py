@@ -68,6 +68,7 @@ def _held_out_calibration(*, tiled: bool, tile_size: int | None = None,
 def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     from PIL import Image
 
@@ -81,9 +82,9 @@ def _export(tmp_path, monkeypatch, *, calibration, tile, tile_size=None):
                 "reference_inputs": {"label_dirs": {"calibration": str(images_dir)}}}
     monkeypatch.setattr(itools, "_calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
-    monkeypatch.setattr(predictor_mod, "build_predictor", lambda **kw: _BucketStub())
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda checkpoint, **kw: _BucketStub())
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
     result = itools.export_predictions(
         str(ckpt), images_dir=str(images_dir),
         output_dir=str(dataset_root / "predictions" / "baseline" / "2026-03-01"),
@@ -134,12 +135,15 @@ def test_the_validated_stamps_pointer_leads_to_a_record_that_answers_for_its_cla
     assert binding.note == ""
 
 
-def test_a_checkpoint_no_registry_knows_still_exports_and_earns_its_own_calibration_record(
+def test_a_registered_bespoke_checkpoint_exports_and_earns_its_own_calibration_record(
     tmp_path, monkeypatch,
 ):
-    """Producing predictions from a bespoke checkpoint is never refused, and a validated count from
-    one is earned against an experiment created for the calibration, with the producing run
-    recorded as absent rather than invented."""
+    """A bespoke checkpoint registered through the register_model tool's explicit mode, with no
+    experiment behind it, exports predictions and earns a validated count against an experiment
+    created for the calibration, with the producing run recorded as absent rather than invented.
+    An unregistered checkpoint is refused before any of this runs; that refusal is
+    test_export_predictions_refuses_an_unregistered_checkpoint_and_writes_nothing in
+    test_checkpoint_digest_rails.py."""
     from tcip_mcp.experiments import experiment_exists, find_validation
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
 

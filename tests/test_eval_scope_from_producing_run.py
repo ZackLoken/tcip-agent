@@ -46,12 +46,15 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": "leaf"}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path,
+                          filename="model_best.pt")
 
     captured: dict = {}
 
@@ -77,12 +80,15 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.training.generic_trainer import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     images_dir, labels_dir = _two_subject_dataset(tmp_path / "ds")
     run = create_run({"data": {"images_dir": str(images_dir), "labels_dir": str(labels_dir),
                                "subject": "leaf"}}, str(tmp_path / "runs"))
     Path(run.output_dir).mkdir(parents=True, exist_ok=True)
-    (Path(run.output_dir) / "model_best.pt").write_bytes(b"x")
+    registered_checkpoint(Path(run.output_dir), project_root=tmp_path,
+                          filename="model_best.pt")
 
     captured: dict = {}
 

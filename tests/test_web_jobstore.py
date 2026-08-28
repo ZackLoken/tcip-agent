@@ -288,15 +288,15 @@ def test_inference_cancel_endpoint_and_worker(tmp_path, monkeypatch):
 
     from tcip_web.routes._body_common import EmptyBodyPayload
     from tcip_web.routes.inference import InferenceJob, _register, _worker, cancel_job
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
-    ckpt = tmp_path / "m.pt"
-    ckpt.write_bytes(b"x")
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
 
     class FakePredictor:
-        def __init__(self, **kw):
+        def __init__(self, checkpoint_path=None, **kw):
             pass
 
         def predict_batch(self, paths, **kw):

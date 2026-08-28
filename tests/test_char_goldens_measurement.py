@@ -411,7 +411,7 @@ def test_golden_consolidated_operating_point_defaults():
     assert EV.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
 
 
-def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset():
+def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset(tmp_path, monkeypatch):
     """A signature-shape golden alone cannot see
     what a no-arg caller's max_dets actually resolves to per regime; without this, the golden set
     would ratify "the default is unspecified" rather than pin the two real behaviors (1000 on the
@@ -419,6 +419,7 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset():
     from tcip_mcp.pipelines import resolution as R
     from tcip_mcp.pipelines.training import evaluation as EV
     from tcip_mcp.tools import training_tools as TT
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     captured: dict = {}
 
@@ -435,29 +436,26 @@ def test_golden_evaluate_model_resolves_max_dets_per_regime_when_unset():
     try:
         EV.run_full_frame_evaluation = _fake_gate
         EV.run_test_evaluation = _fake_diagnostic
-        import tempfile
-        from pathlib import Path as _Path
 
         from PIL import Image
         from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, BBox
 
-        with tempfile.TemporaryDirectory() as td:
-            tmp = _Path(td)
-            images_dir, labels_dir = tmp / "images", tmp / "labels"
-            images_dir.mkdir()
-            labels_dir.mkdir()
-            Image.new("RGB", (64, 64)).save(images_dir / "a.png")
-            json_io.write_annotations(str(labels_dir / "a.json"),
-                                      [Annotation(subject="catkin", geometry=BBox(5, 5, 20, 20))],
-                                      64, 64)
-            ckpt = tmp / "m.pt"
-            ckpt.write_bytes(b"x")
+        tmp = tmp_path
+        images_dir, labels_dir = tmp / "images", tmp / "labels"
+        images_dir.mkdir()
+        labels_dir.mkdir()
+        Image.new("RGB", (64, 64)).save(images_dir / "a.png")
+        json_io.write_annotations(str(labels_dir / "a.json"),
+                                  [Annotation(subject="catkin", geometry=BBox(5, 5, 20, 20))],
+                                  64, 64)
+        monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp))
+        ckpt = registered_checkpoint(tmp, project_root=tmp)
 
-            TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                              subject="catkin", use_tiled_inference=True)
-            TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
-                              subject="catkin")
+        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                          subject="catkin", use_tiled_inference=True)
+        TT.evaluate_model(str(ckpt), str(images_dir), str(labels_dir), task="detection",
+                          subject="catkin")
     finally:
         EV.run_full_frame_evaluation = orig_gate
         EV.run_test_evaluation = orig_diag
