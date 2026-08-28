@@ -702,6 +702,77 @@ def test_run_test_evaluation_records_effective_iou_type(tmp_path, monkeypatch):
     assert r["iou_type"] == "bbox"  # explicit override still recorded as-is
 
 
+def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(tmp_path, monkeypatch):
+    """run_test_evaluation and run_full_frame_evaluation write through one shared
+    write_evaluation_result: both regimes' persisted records carry the same common identity
+    keys by name and presence, and neither carries the other's regime-specific fields."""
+    import tcip_store as ts
+    from PIL import Image
+
+    import tcip_mcp.pipelines.inference.predictor as predictor_mod
+    import tcip_mcp.pipelines.model_build as model_build
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.training.evaluation import (
+        evaluation_results_key, run_full_frame_evaluation,
+    )
+    from tcip_mcp.tools.model_tools import register_model
+    from tests._verified_checkpoint_fixtures import stub_verified_checkpoint
+
+    common_fields = {
+        "model_path", "task", "model_sha256", "experiment_id", "iou_type",
+        "iou_threshold", "conf_threshold", "max_dets", "tiled", "eval_regime",
+    }
+    test_only_fields = {"split_manifest_dir", "evaluated_stem_count"}
+    full_frame_only_fields = {
+        "tile_size", "tile_size_source", "overlap", "overlap_source", "scored_images",
+        "sample_counts", "n_excluded_incomplete_attribute", "contradicted_negatives",
+        "max_dets_cap_saturated_frac",
+    }
+
+    class _DummyModel:
+        def load_state_dict(self, state_dict):
+            pass
+
+        def to(self, device):
+            pass
+
+    ckpt_path = tmp_path / "model_best.pt"
+    torch.save({"model_source": {"builder": "x:y"}, "model_state_dict": {}}, str(ckpt_path))
+    monkeypatch.setattr(model_build, "build_model", lambda ckpt: _DummyModel())
+    monkeypatch.setattr(evaluation, "evaluate",
+                        lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
+    reg = register_model(name="row4-writer-check", checkpoint_path=str(ckpt_path), config={},
+                        project_path=str(tmp_path))
+    assert "error" not in reg, reg
+    checkpoint = load_registered_checkpoint(str(ckpt_path), project_path=str(tmp_path))
+    test_out = tmp_path / "test_eval"
+    run_test_evaluation(checkpoint, None, "cpu", "detection", str(test_out),
+                        split_manifest_dir=str(tmp_path / "manifest"), evaluated_stem_count=3)
+    test_result = ts.read(evaluation_results_key(test_out))
+
+    images_dir = tmp_path / "ff_images"
+    images_dir.mkdir()
+    Image.new("RGB", (32, 32)).save(images_dir / "a.png")
+
+    class _StubPredictor:
+        def predict_tiled(self, path, **kw):
+            return {"width": 32, "height": 32, "boxes": [], "scores": [], "labels": []}
+
+    monkeypatch.setattr(predictor_mod, "build_predictor", lambda *a, **kw: _StubPredictor())
+    ff_out = tmp_path / "ff_eval"
+    run_full_frame_evaluation(
+        stub_verified_checkpoint(str(tmp_path / "ff.pt")), str(images_dir),
+        str(tmp_path / "no_labels"), str(ff_out), tile_size=32, overlap=0.0)
+    ff_result = ts.read(evaluation_results_key(ff_out))
+
+    for field in common_fields:
+        assert field in test_result, f"{field} missing from the test-regime record"
+        assert field in ff_result, f"{field} missing from the full-frame-regime record"
+    assert not (test_only_fields & set(ff_result))
+    assert not (full_frame_only_fields & set(test_result))
+
+
 def test_a_written_result_carries_one_byte_per_line_ending(tmp_path, monkeypatch):
     """A result document holds the same bytes wherever it was produced.
 

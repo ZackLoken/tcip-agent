@@ -1273,6 +1273,31 @@ def _producer_identity(checkpoint) -> dict:
     return {"model_sha256": identity["sha256"], "experiment_id": identity["experiment_id"]}
 
 
+# Pinned by name and presence only; a regime's own fields travel in the writer's `extra` instead.
+_COMMON_EVAL_FIELDS = (
+    "model_path", "task", "model_sha256", "experiment_id", "iou_type",
+    "iou_threshold", "conf_threshold", "max_dets", "tiled", "eval_regime",
+)
+
+
+def write_evaluation_result(output_dir: Path | str, common: dict, extra: dict) -> dict:
+    """Write one evaluation-result record: the one place ``run_test_evaluation`` and
+    ``run_full_frame_evaluation`` call ``store.replace`` on ``evaluation_results_key``.
+
+    ``common`` carries the identity tuple both regimes share (``_COMMON_EVAL_FIELDS``);
+    ``experiment_id`` may legitimately be ``None``, but every key must be present, or this
+    refuses rather than write a result silently missing part of its own identity. ``extra``
+    carries this regime's own fields (metrics included) and is written through unmodified.
+    """
+    missing = [field for field in _COMMON_EVAL_FIELDS if field not in common]
+    if missing:
+        raise ValueError(
+            f"write_evaluation_result: common is missing required field(s): {missing}")
+    result = {**{field: common[field] for field in _COMMON_EVAL_FIELDS}, **extra}
+    store.replace(evaluation_results_key(output_dir), result)
+    return result
+
+
 def run_test_evaluation(
     checkpoint, loader, device, task: str, output_dir: str, *,
     conf_threshold: float = DEFAULT_CONF, iou_threshold: float = 0.5,  # report at the ship point
@@ -1307,19 +1332,20 @@ def run_test_evaluation(
                        iou_threshold=iou_threshold, iou_type=iou_type, max_dets=max_dets,
                        score_weights=score_weights, trait=trait)
     tiled = bool(tiling and tiling.get("enabled", True) and task == "detection")
-    result = {
-        **metrics,
+    producer = _producer_identity(checkpoint)
+    common = {
         "model_path": checkpoint.path, "task": task,
-        **_producer_identity(checkpoint),
+        "model_sha256": producer["model_sha256"], "experiment_id": producer["experiment_id"],
         "iou_type": effective_iou_type(task, iou_type),
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
         "tiled": tiled,
         "eval_regime": "tile-level" if tiled else "full-frame-single-pass",
     }
+    extra = dict(metrics)
     if split_manifest_dir is not None:
-        result["split_manifest_dir"] = split_manifest_dir
-        result["evaluated_stem_count"] = evaluated_stem_count
-    store.replace(evaluation_results_key(output_dir), result)
+        extra["split_manifest_dir"] = split_manifest_dir
+        extra["evaluated_stem_count"] = evaluated_stem_count
+    result = write_evaluation_result(output_dir, common, extra)
     result["results_path"] = str(evaluation_results_path(output_dir))
     return result
 
@@ -1476,24 +1502,23 @@ def run_full_frame_evaluation(
                                conf_threshold=conf_threshold, max_dets=max_dets)
     keys = ("map", "map50", "map75", "map_at_maxdets", "map50_at_maxdets",
             "precision", "recall", "f1", "tp", "fp", "fn", "n_images", "n_gt", "n_pred")
-    result = {
-        **{k: m[k] for k in keys},
-        # task: the predictor's own real task, a hardcoded "detection" would mislabel an
-        # instance_seg checkpoint's delivery artifact.
-        # iou_type stays the literal "bbox": this gate always computes a box-only metric by design
-        # (require_masks=False above), true regardless of task, see the docstring.
+    producer = _producer_identity(checkpoint)
+    # task: the predictor's own real task, never a hardcoded "detection". iou_type stays the
+    # literal "bbox": this gate always computes a box-only metric by design, see the docstring.
+    common = {
         "model_path": checkpoint.path, "task": getattr(predictor, "task", "detection"),
         "iou_type": "bbox",
-        **_producer_identity(checkpoint),
+        "model_sha256": producer["model_sha256"], "experiment_id": producer["experiment_id"],
         "iou_threshold": iou_threshold, "conf_threshold": conf_threshold, "max_dets": max_dets,
+        "tiled": True, "eval_regime": "full-frame-tiled-inference",
+    }
+    # scored_images/sample_counts/n_excluded_incomplete_attribute: which images this number was
+    # computed over and which were held out, so a reviewer can reconstruct the denominator.
+    extra: dict = {
+        **{k: m[k] for k in keys},
         "max_dets_cap_saturated_frac": _cap_saturated_frac(per_image),
         "tile_size": tile_size, "tile_size_source": tile_size_source,
         "overlap": overlap, "overlap_source": overlap_source,
-        "tiled": True, "eval_regime": "full-frame-tiled-inference",
-        # Which images this number was computed over, and which were held out for having no
-        # ground truth or incomplete attribute labeling, so a reviewer can reconstruct the
-        # denominator, not just the metric (an excluded-incomplete image is
-        # disclosed here, not silently scored against its labeled subset).
         "scored_images": len(per_image), "sample_counts": sample_counts,
         "n_excluded_incomplete_attribute": n_excluded_incomplete,
         # Names recorded negative whose label file now holds subject content; scored on that
@@ -1505,7 +1530,7 @@ def run_full_frame_evaluation(
     criterion = resolve_match_criterion(trait, per_image, iou_threshold=iou_threshold)
     if criterion["kind"] == "center_match":
         gc = governing_counts(per_image, criterion, conf_threshold=conf_threshold, max_dets=max_dets)
-        result.update({
+        extra.update({
             "governing_counts": gc, "governing_criterion": criterion,
             "map50_role": "comparability_only",
             "iou_tp": m["tp"], "iou_fp": m["fp"], "iou_fn": m["fn"],
@@ -1513,6 +1538,6 @@ def run_full_frame_evaluation(
             "tp": gc["tp"], "fp": gc["fp"], "fn": gc["fn"],
             "precision": gc["precision"], "recall": gc["recall"], "f1": gc["f1"],
         })
-    store.replace(evaluation_results_key(output_dir), result)
+    result = write_evaluation_result(output_dir, common, extra)
     result["results_path"] = str(evaluation_results_path(output_dir))
     return result
