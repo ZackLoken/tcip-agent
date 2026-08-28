@@ -232,7 +232,8 @@ def check_registry(root: Path, findings: list) -> None:
             model_dir = pred_root / model
             if not model_dir.is_dir():
                 continue
-            for bucket in sorted(p for p in model_dir.iterdir() if p.is_dir()):
+            buckets = [model_dir, *sorted(p for p in model_dir.iterdir() if p.is_dir())]
+            for bucket in buckets:
                 sha = (read_operating_point_sidecar(bucket) or {}).get("checkpoint_sha256")
                 if sha and sha not in registered_shas:
                     findings.append(("warn", f"{bucket.relative_to(root)}: prediction bucket's "

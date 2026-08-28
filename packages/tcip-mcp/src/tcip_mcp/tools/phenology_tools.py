@@ -635,6 +635,7 @@ def calibrate_ordinal_regression_operating_point(
     if disagreement:
         return {"error": disagreement}
 
+    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
     from tcip_mcp.pipelines.data.splits import cal_holdout_scope_root, resolve_locked_cal_holdout_split
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.predictor import build_predictor
@@ -649,6 +650,11 @@ def calibrate_ordinal_regression_operating_point(
         get_trait(trait_name)
     except TraitUnknownError as e:
         return {"error": str(e)}
+
+    try:
+        checkpoint = load_registered_checkpoint(checkpoint_path)
+    except UnregisteredCheckpoint as exc:
+        return {"error": str(exc)}
 
     shape = _ORDINAL_REGRESSION_TASKS[task]
     is_ordinal = task == "ordinal"
@@ -678,12 +684,6 @@ def calibrate_ordinal_regression_operating_point(
         return {"error": str(exc)}
     cal_stems, hold_stems = locked["calibration"], locked["holdout"]
 
-    from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
-
-    try:
-        checkpoint = load_registered_checkpoint(checkpoint_path)
-    except UnregisteredCheckpoint as exc:
-        return {"error": str(exc)}
     predictor = build_predictor(checkpoint)
     cal_pred = _scalar_predictions(predictor, logical, cal_stems, shape["suffix"])
     hold_pred = _scalar_predictions(predictor, logical, hold_stems, shape["suffix"])
