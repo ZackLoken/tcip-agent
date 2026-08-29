@@ -310,6 +310,141 @@ def test_unresolvable_proposal_engine_raises_valueerror():
         resolve_proposer("not_a_module.at_all:make")
 
 
+# -- rail: prioritize_review_queue marks a bound run's calibration-side candidates ------------
+
+
+def _bespoke_checkpoint_payload() -> dict:
+    from tcip_mcp.pipelines.model_build import build_model
+
+    src = {
+        "builder": "tests.bespoke_models:build_bespoke_detection",
+        "builder_kwargs": {"num_classes": 1, "min_size": 64, "max_size": 128},
+        "task": "detection",
+    }
+    model = build_model({"model_source": src})
+    return {"model_source": src, "model_state_dict": model.state_dict()}
+
+
+def _registered_checkpoint_from_experiment(tmp_path: Path, experiment_id: str) -> str:
+    """A real checkpoint completed and registered against ``experiment_id`` (``complete_run`` then
+    ``register_model_from_experiment``, experiment-mode registration), so
+    ``checkpoint.producer`` resolves to it the way a real trained run's own registration would;
+    never a hand-built registry entry."""
+    import torch
+
+    from tcip_mcp.experiments import complete_run, register_model_from_experiment
+
+    ckpt_path = tmp_path / f"{experiment_id}.pt"
+    torch.save(_bespoke_checkpoint_payload(), str(ckpt_path))
+    completed = complete_run(experiment_id, str(ckpt_path))
+    assert "error" not in completed, completed
+    registered = register_model_from_experiment(
+        experiment_id, str(ckpt_path), project_path=str(tmp_path))
+    assert "error" not in registered, registered
+    return str(ckpt_path)
+
+
+def _stub_scorer(monkeypatch) -> None:
+    """Scores every candidate 1.0 in order: the real scorer reads model logits, which this rail
+    has no need to exercise, since the calibration mark is computed from the candidate's own
+    path and the manifest, never from a score."""
+    import tcip_mcp.pipelines.active_learning.helpers as al_helpers
+
+    class _Scorer:
+        def score(self, sources, model, device):
+            return [(s, 1.0) for s in sources]
+
+    monkeypatch.setattr(al_helpers, "build_scorer", lambda method, task: _Scorer())
+
+
+def test_prioritize_review_queue_marks_a_bound_runs_calibration_side(tmp_path, monkeypatch):
+    """A checkpoint whose run was bound to a split manifest marks each ranked candidate against
+    that manifest's own calibration side; no mark exists at all before this family."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+
+    root = _dataset(tmp_path / "data")
+    manifest_dir = tmp_path / "manifest"
+    manifest = _draw(root, manifest_dir)
+    date = DATES[0]
+    calibration_stems = {
+        i.split("/", 1)[1] for i in manifest["splits"]["calibration"] if i.startswith(f"{date}/")
+    }
+    assert calibration_stems  # the fixture's own three-way ratio gives this date some
+
+    experiment_id = "exp-pq-marks"
+    _bind_run(root, manifest_dir, experiment_id, date=date)
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
+        strategy="informativeness", project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    for entry in r["queue"]:
+        stem = Path(entry["image"]).stem
+        assert entry["calibration_member"] == (stem in calibration_stems), entry
+    assert "marks_unresolved" not in r
+
+
+def test_prioritize_review_queue_unbound_run_carries_no_marks_or_reason(tmp_path, monkeypatch):
+    """A checkpoint with no registry-recorded producer has nothing bound to check against: no
+    ``calibration_member`` on any entry, and no ``marks_unresolved`` guessing at a reason."""
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.jpg").write_bytes(b"x")
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt, images_dir=str(images), strategy="informativeness",
+        project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert all("calibration_member" not in entry for entry in r["queue"])
+    assert "marks_unresolved" not in r
+
+
+def test_prioritize_review_queue_marks_unresolved_when_the_manifest_cannot_be_read(
+    tmp_path, monkeypatch,
+):
+    """A bound run whose named manifest can no longer be read serves the queue with no marks and
+    a stated ``marks_unresolved`` reason, never a guess at membership."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    import tcip_store as ts
+    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+    from tcip_mcp.tools.data_tools import split_manifest_key
+
+    root = _dataset(tmp_path / "data")
+    manifest_dir = tmp_path / "manifest"
+    manifest = _draw(root, manifest_dir)
+    date = DATES[0]
+
+    experiment_id = "exp-pq-unresolved"
+    _bind_run(root, manifest_dir, experiment_id, date=date)
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+
+    # Corrupted the same way read_split_manifest_dir's own refusal rail is tested: a required
+    # members-block key stripped, the record rewritten through the store, never a file deleted.
+    manifest["members"][date] = {
+        k: v for k, v in manifest["members"][date].items() if k != "label_digests"
+    }
+    ts.replace(split_manifest_key(manifest_dir), manifest)
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
+        strategy="informativeness", project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert all("calibration_member" not in entry for entry in r["queue"])
+    assert "marks_unresolved" in r
+    assert str(manifest_dir) in r["marks_unresolved"]
+
+
 def test_feedback_tools_register_in_manifest():
     from tcip_mcp.server import list_registered_tools
     names = list_registered_tools()
