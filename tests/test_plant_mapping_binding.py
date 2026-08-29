@@ -1180,8 +1180,20 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     stamps = _read_date_stamps(list_logical_images(images_root / date), date)
     assert capture_identity(stamps) == build.capture_identity[date]
 
+    # Not build.record_sha256: that came from load_mapping's own read of this same raw document,
+    # so comparing it back to record_digest(raw) would prove nothing.
+    from tcip_mcp.audit import audit_log_key
+
     raw = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
-    assert record_digest(raw) == build.record_sha256
+    recomputed = record_digest(raw)
+    page = ts.read_log(audit_log_key(tmp_path))
+    receipts = [
+        entry["arguments"]["record_sha256"] for entry in page.records
+        if entry.get("tool") == "plant_mapping_built"
+        and (entry.get("arguments") or {}).get("name") == "valley"
+    ]
+    assert receipts, "no plant_mapping_built receipt found for 'valley'"
+    assert receipts[-1] == recomputed
 
     out_csv = tmp_path / "out.csv"
     res = compute_phenology(

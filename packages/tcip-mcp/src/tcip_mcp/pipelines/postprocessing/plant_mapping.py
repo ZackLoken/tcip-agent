@@ -40,7 +40,7 @@ import json
 import logging
 import math
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Optional
@@ -136,31 +136,26 @@ class MappingBuild:
     capture_digests: dict[str, dict[str, str]]
     unreadable: dict[str, list[str]]
     assignments: dict[str, list[Assignment]] = field(default_factory=dict)
-    record_sha256: str = ""
+    record_sha256: str = field(default="", metadata={"persisted": False})
     """The digest ``load_mapping`` verified this record's receipt against; blank on a build not
-    yet read back through ``load_mapping`` (a fresh ``build_mapping`` result before persisting)."""
+    yet read back through ``load_mapping`` (a fresh ``build_mapping`` result before persisting).
+    Not one of :data:`_PERSISTED_FIELD_NAMES`: it names a fact about how this record was read,
+    never a fact ``to_record`` writes or ``load_mapping`` reads back from the document itself."""
 
     def to_record(self) -> dict:
-        """The exact document ``persist_mapping`` writes and ``load_mapping`` reads back."""
-        return {
-            "name": self.name,
-            "project_root": self.project_root,
-            "dataset_root": self.dataset_root,
-            "dataset_id": self.dataset_id,
-            "built_by": self.built_by,
-            "built_at": self.built_at,
-            "dates_requested": self.dates_requested,
-            "dates": self.dates,
-            "nn_tolerance_m": self.nn_tolerance_m,
-            "plant_csvs": self.plant_csvs,
-            "capture_identity": self.capture_identity,
-            "capture_digests": self.capture_digests,
-            "unreadable": self.unreadable,
-            "assignments": {
-                date: [a.__dict__ for a in assignments]
-                for date, assignments in self.assignments.items()
-            },
+        """The exact document ``persist_mapping`` writes and ``load_mapping`` reads back.
+
+        Built over :data:`_PERSISTED_FIELD_NAMES`, the dataclass's own field list minus
+        ``record_sha256``, so a field added to :class:`MappingBuild` needs its record shape
+        decided once here, never a second key list kept in step by hand.
+        """
+        record = {field_name: getattr(self, field_name) for field_name in _PERSISTED_FIELD_NAMES
+                  if field_name != "assignments"}
+        record["assignments"] = {
+            date: [a.__dict__ for a in assignments]
+            for date, assignments in self.assignments.items()
         }
+        return record
 
     def rows(self) -> dict[str, list[dict]]:
         """The assignments as plain per-date dict rows, the shape ``per_plant_phenology`` reads."""
@@ -834,6 +829,17 @@ def load_mapping_rows(project_root: Path | str, name: str) -> dict[str, list[dic
     return build.rows() if build is not None else {}
 
 
+_PERSISTED_FIELD_NAMES: tuple[str, ...] = tuple(
+    f.name for f in fields(MappingBuild) if f.metadata.get("persisted", True)
+)
+"""Every :class:`MappingBuild` field ``to_record``/``load_mapping`` carry to and from the
+document, derived from the dataclass's own fields (minus ``record_sha256``) so a field added
+there flows into the record shape and the constructor call without a second list to keep in
+step. ``_REQUIRED_TOP_KEYS`` still states each field's own type by hand (a runtime isinstance
+check needs a real type, not the string form ``from __future__ import annotations`` leaves an
+annotation as); the assertion below ties its key set back to this tuple, so the two cannot drift
+apart silently."""
+
 _REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
     "name": str,
     "project_root": str,
@@ -850,6 +856,8 @@ _REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
     "unreadable": dict,
     "assignments": dict,
 }
+assert set(_REQUIRED_TOP_KEYS) == set(_PERSISTED_FIELD_NAMES), (
+    "MappingBuild's own fields and _REQUIRED_TOP_KEYS's key set have drifted apart")
 _ASSIGNMENT_ROW_KEYS = (
     "image_path", "stem", "date_folder", "plot_name", "accession_name", "source", "distance_m")
 _VALID_SOURCES = {"sequence", "nearest_neighbour", "unmapped"}
@@ -871,6 +879,11 @@ def _validated_record(raw: object, project_root: Path | str, name: str) -> dict:
             raise ValueError(
                 f"plant mapping {name!r} under {project_root} carries {key!r} of the wrong type "
                 f"(found {type(raw[key]).__name__}); {remedy}")
+    for date in raw["capture_identity"]:
+        if not isinstance(raw["capture_digests"].get(date), dict):
+            raise ValueError(
+                f"plant mapping {name!r} under {project_root}: capture_identity names date "
+                f"{date!r} but capture_digests carries no digest map for it; {remedy}")
     for date, rows in raw["assignments"].items():
         if not isinstance(rows, list):
             raise ValueError(
@@ -910,6 +923,12 @@ def _scan_receipts(project_root: Path | str, root_key: str, *, after: Optional[s
             f"the audit log at {key} carries {len(page.corrupt)} undecodable "
             f"entr{'y' if len(page.corrupt) == 1 else 'ies'}; repair the log before a "
             "plant-mapping receipt can be trusted")
+    if page.version_refused:
+        raise ValueError(
+            f"the audit log at {key} carries {len(page.version_refused)} entr"
+            f"{'y' if len(page.version_refused) == 1 else 'ies'} at a schema_version this reader "
+            "does not know, not corruption; a plant-mapping receipt cannot be trusted while an "
+            "entry could be hiding behind it unread")
     seen = _receipt_seen.setdefault(root_key, {})
     for entry in page.records:
         if entry.get("tool") != "plant_mapping_built":
@@ -963,16 +982,9 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
             )
             for r in rows
         ]
-    return MappingBuild(
-        name=record["name"], project_root=record["project_root"],
-        dataset_root=record["dataset_root"], dataset_id=record["dataset_id"],
-        built_by=record["built_by"], built_at=record["built_at"],
-        dates_requested=record["dates_requested"], dates=record["dates"],
-        nn_tolerance_m=record["nn_tolerance_m"], plant_csvs=record["plant_csvs"],
-        capture_identity=record["capture_identity"],
-        capture_digests=record["capture_digests"], unreadable=record["unreadable"],
-        assignments=assignments, record_sha256=record_sha256,
-    )
+    kwargs = {field_name: record[field_name] for field_name in _PERSISTED_FIELD_NAMES
+              if field_name != "assignments"}
+    return MappingBuild(**kwargs, assignments=assignments, record_sha256=record_sha256)
 
 
 def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
