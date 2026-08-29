@@ -335,6 +335,17 @@ def _preflight(plan: AdoptionPlan) -> tuple[_Loaded, ...]:
     return tuple(loaded)
 
 
+def preflight_decode(plans: tuple[AdoptionPlan, ...]) -> None:
+    """Decode-check every entry across ``plans``, refusing on the first that will not decode.
+
+    The same read-and-decode :func:`adopt_root` runs before it publishes anything, exposed for a
+    caller that needs the refusal without building a database (the import door's file-backend
+    leg, which decodes every claimed file but adopts none of them into one).
+    """
+    for plan in plans:
+        _preflight(plan)
+
+
 def _log_lines(data: bytes) -> tuple[bytes, ...]:
     """One log file's entries, without the terminating newlines and without an empty tail."""
     return tuple(line for line in data.split(b"\n") if line)
@@ -426,5 +437,6 @@ __all__ = [
     "PlanEntry",
     "adopt_root",
     "plan_root",
+    "preflight_decode",
     "unaccounted_files",
 ]

@@ -11,7 +11,7 @@ import os
 
 from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, FileBackend
 from tcip_store.sqlite_backend import SqliteBackend
-from tcip_store.store import bind
+from tcip_store.store import _backend, bind
 
 BACKEND_ENV = "TCIP_STORE_BACKEND"
 """Names the backend to bind. Unset takes ``DEFAULT_BACKEND``."""
@@ -55,10 +55,21 @@ def bind_default(*, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> FileBacke
     return backend
 
 
+def is_database_backend() -> bool:
+    """Whether this process's currently bound backend is the database one.
+
+    Checks the actual bound instance, not the environment: a caller (a test, a door deciding
+    whether to build a database) may bind directly rather than through :func:`bind_default`, and
+    the two must never disagree about which backend is live.
+    """
+    return isinstance(_backend(), SqliteBackend)
+
+
 __all__ = [
     "BACKEND_ENV",
     "DEFAULT_BACKEND",
     "FILE_BACKEND",
     "SQLITE_BACKEND",
     "bind_default",
+    "is_database_backend",
 ]

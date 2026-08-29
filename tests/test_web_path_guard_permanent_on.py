@@ -148,6 +148,22 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     assert project.resolve() in roots
 
 
+def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
+    tmp_path: Path,
+) -> None:
+    """The import door stages a half-extracted project under ``<workspace>/.imports/<uuid>/``,
+    which sits under the workspace, an allowed root; a route resolving into it while the import
+    is in flight must still refuse, or a guarded route could read a project's confirmed
+    negatives before the accounting and adoption steps have judged them."""
+    workspace = tmp_path.parent
+    staged = workspace / ".imports" / "run-1" / "images" / "a.jpg"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="outside the allowed roots"):
+        assert_path_allowed(str(staged))
+
+
 def test_image_roots_stay_additive_on_top_of_the_derived_set(
     tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
