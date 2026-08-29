@@ -82,11 +82,12 @@ def deliver_orthomosaic_plant_counts(
     number with no confirmed meaning has nothing for a raster identity to attribute, so the
     precondition reports on its own rather than behind a refusal about the mosaic.
 
-    The producer identity this returns, and the one the CSV carries, is built by the shared
-    ``delivered_provenance`` from what verification confirmed of the bucket's stamp rather than
-    copied off the stamp: a bucket naming an experiment the store cannot answer for reports its
-    producer unknown, while a bespoke bucket carrying a real checkpoint hash and no experiment keeps
-    that hash. ``validation_record`` names the record behind a validated count, and is empty
+    The producer identity this returns is read back from the tail ``export_aggregated_csv`` itself
+    returns beside the CSV path, never re-derived here: a bucket naming an experiment the store
+    cannot answer for reports its producer unknown, while a bespoke bucket carrying a real
+    checkpoint hash and no experiment keeps that hash, the one shared derivation
+    (``delivered_tail``/``delivered_provenance``) behind both the CSV's own cells and this
+    response. ``validation_record`` names the record behind a validated count, and is empty
     otherwise.
 
     Args:
@@ -229,21 +230,18 @@ def deliver_orthomosaic_plant_counts(
                               value_key=_PER_PLANT_VALUE_KEY)
 
     from tcip_mcp.pipelines.resolution import (
-        delivered_provenance,
         record_delivery_binding_event,
         reconcile_operating_point_validity,
     )
 
     recon = reconcile_operating_point_validity([predictions_dir], trait=trait)
-    provenance = delivered_provenance(
-        {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
-         "producing_experiment_id": sidecar.get("experiment_id")},
-        recon["bindings"],
-        columns=("producer_model_sha256", "producing_experiment_id", "validation_record"),
-    )
+    # The raw asserted identity; export_aggregated_csv's own delivered_tail corroborates it, the
+    # one shared derivation, so nothing here re-derives that identity a second time.
+    provenance = {"producer_model_sha256": sidecar.get("checkpoint_sha256"),
+                 "producing_experiment_id": sidecar.get("experiment_id")}
 
     try:
-        csv_path = export_aggregated_csv(
+        csv_path, tail = export_aggregated_csv(
             agg, output_csv_path, trait_name=trait_name, crop=crop,
             pipeline_version=pipeline_version, provenance=provenance,
             pred_dirs=[predictions_dir],
@@ -264,14 +262,6 @@ def deliver_orthomosaic_plant_counts(
                                   measurement_documents=["operating_point"], scale_document=None,
                                   trait=trait, delivery_kind=delivery_kind)
 
-    # The CSV's own measurement_validated column is what export_aggregated_csv's gate actually
-    # stamped; read it back rather than re-deriving the same decision a second time here.
-    import csv as _csv
-
-    with open(csv_path, newline="") as csv_f:
-        rows = list(_csv.DictReader(csv_f))
-    validated_stamp = rows[0]["measurement_validated"] if rows else None
-
     return {
         "csv_path": csv_path,
         "n_plants": len(agg),
@@ -279,8 +269,8 @@ def deliver_orthomosaic_plant_counts(
         "n_detections": len(assignments),
         "n_mapped": len(mapped),
         "n_unmapped": n_unmapped,
-        "measurement_validated": validated_stamp,
-        "checkpoint_sha256": provenance["producer_model_sha256"],
-        "producing_experiment_id": provenance["producing_experiment_id"],
-        "validation_record": provenance["validation_record"],
+        "measurement_validated": tail["measurement_validated"],
+        "checkpoint_sha256": tail["producer_model_sha256"],
+        "producing_experiment_id": tail["producing_experiment_id"],
+        "validation_record": tail["validation_record"],
     }

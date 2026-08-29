@@ -508,7 +508,7 @@ def test_tabulate_counts_acknowledge_writes_flagged(tmp_path, monkeypatch):
                      pred_dirs=None, acknowledge_unvalidated=False):
         captured["measurement_validated"] = measurement_validated
         captured["acknowledge_unvalidated"] = acknowledge_unvalidated
-        return str(path)
+        return str(path), {"measurement_validated": measurement_validated}
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference)
     monkeypatch.setattr(itools, "export_detection_csv", _fake_export)
@@ -557,7 +557,8 @@ def _capture_csv_stamp(monkeypatch, itools, captured):
         itools, "export_detection_csv",
         lambda results, path, provenance=None, *, trait, measurement_validated=None,
         pred_dirs=None, acknowledge_unvalidated=False: (
-            captured.update(mv=measurement_validated, pred_dirs=pred_dirs) or str(path)))
+            captured.update(mv=measurement_validated, pred_dirs=pred_dirs) or
+            (str(path), {"measurement_validated": measurement_validated})))
 
 
 def test_tabulate_counts_ships_when_tile_size_has_a_real_basis(tmp_path, monkeypatch):

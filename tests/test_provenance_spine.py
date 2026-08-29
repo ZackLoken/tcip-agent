@@ -261,6 +261,77 @@ def test_export_aggregated_csv_carries_provenance(tmp_path):
     assert rows[0]["producing_experiment_id"] == "expA"
 
 
+def test_export_aggregated_csvs_produced_at_is_the_write_time_never_a_buckets_own(tmp_path):
+    """A bucket's own operating-point sidecar can carry a ``produced_at`` of its own (the run
+    that produced it stamped one); the delivered CSV's own ``produced_at`` column is always
+    ``delivered_tail``'s write-time timestamp, never that value, since it is computed fresh on
+    every delivery and never read off a bucket. Coverage, not a regression guard."""
+    from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
+    from tcip_mcp.pipelines.resolution import VALIDATED_HELD_OUT
+    from tests import _operationalization_fixtures as fx
+    from tests._binding_fixtures import write_bound_sidecar, write_prediction
+
+    fx.seed_delivery_traits(tmp_path)
+    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
+    root = tmp_path / "ds"
+    bucket = root / "predictions" / "preds"
+    write_prediction(bucket, "img_a")
+    stamp = {
+        "validated": True, "trait": fx.COUNT_TRAIT,
+        "operating_point": {"conf": {"value": 0.4, "requires_validation": True,
+                                     "validation_kind": "annotations",
+                                     "validated_against": VALIDATED_HELD_OUT}},
+        "produced_at": "2020-01-01T00:00:00+00:00",
+    }
+    write_bound_sidecar(bucket, stamp, dataset_root=root, experiment_id="exp-old-stamp")
+    out = tmp_path / "agg.csv"
+
+    export_aggregated_csv(
+        [{"plant_id": "p1", "value": 5, "observations": 2, "value_key": "count",
+          "measurement_document": "operating_point"}],
+        str(out), trait_name="stem_count", pred_dirs=[str(bucket)])
+
+    rows = list(__import__("csv").DictReader(out.open()))
+    assert rows[0]["produced_at"] != "2020-01-01T00:00:00+00:00"
+
+
+def test_export_detection_csvs_produced_at_is_present_and_iso_parseable(tmp_path):
+    """Coverage for the family's stated ``produced_at`` meaning: the detection CSV's own cell is
+    a real write-time timestamp, not merely a non-empty string."""
+    from datetime import datetime
+
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+    from tests import _operationalization_fixtures as fx
+
+    fx.seed_confirmed_count(tmp_path)
+    out = tmp_path / "counts.csv"
+
+    export_detection_csv(
+        [{"image": "a.jpg", "count": 3, "scores": [0.9, 0.8, 0.7]}], str(out),
+        trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+
+    rows = list(__import__("csv").DictReader(out.open()))
+    datetime.fromisoformat(rows[0]["produced_at"])
+
+
+def test_delivered_tail_treats_a_none_valued_produced_at_key_as_absent(tmp_path):
+    """A caller composing its own asserted dict over a sidecar carrying no ``produced_at`` of its
+    own (``{"produced_at": sidecar.get("produced_at")}``) carries the key with a ``None`` value,
+    never a caller-stated one; ``delivered_tail`` must not refuse that the way it refuses a
+    caller that actually asserts a ``produced_at``, matching ``corroborated_producer``'s own
+    absence convention two functions up."""
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, check_delivery_gate, delivered_tail
+
+    gate = check_delivery_gate({"measurement": VALIDATED_FALSE}, acknowledge_unvalidated=True)
+    columns = ("produced_at", "measurement_validated")
+
+    tail = delivered_tail({"produced_at": None}, {}, gate, columns=columns)
+    assert tail["produced_at"]  # the write's own timestamp, not refused
+
+    with pytest.raises(ValueError, match="produced_at"):
+        delivered_tail({"produced_at": "2020-01-01T00:00:00+00:00"}, {}, gate, columns=columns)
+
+
 # ── R2: phenology CSV schema carries producing-model identity ─────────────────
 
 def test_phenology_columns_include_producer_identity():

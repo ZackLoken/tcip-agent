@@ -285,7 +285,7 @@ def export_aggregated_csv(
     images_dir: str | None = None,
     scale_capture_id: str | None = None,
     acknowledge_unvalidated: bool = False,
-) -> str:
+) -> tuple[str, dict]:
     """Export per-plant aggregated results to a delivery CSV.
 
     Follows the per-plant CSV schema from the delivery skill, the ``fieldnames`` list below is the
@@ -390,7 +390,10 @@ def export_aggregated_csv(
         acknowledge_unvalidated: Write an unvalidated phenotype as a flagged provisional CSV.
 
     Returns:
-        Path to the written CSV file.
+        ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
+        ``delivered_tail`` composed and wrote into every row, so a caller that needs one of those
+        cells back reads the value actually written rather than re-deriving or re-asserting it a
+        second time.
     """
     from tcip_mcp.pipelines.resolution import (
         MEASUREMENT_DOCUMENTS,
@@ -563,7 +566,7 @@ def export_aggregated_csv(
                                   measurement_documents=[measurement_document],
                                   scale_document=scale_document,
                                   trait=trait, delivery_kind=delivery_kind)
-    return output_path
+    return output_path, stamp
 
 
 def _resolve_statement(

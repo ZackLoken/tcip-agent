@@ -2116,6 +2116,14 @@ def tabulate_counts(
     returns ``image_count`` and ``total_detections`` on its refusal paths as well as its success
     one, so a check placed after the pass would hand back the very numbers it refused to write.
 
+    The response's own ``checkpoint_sha256``/``experiment_id`` are the run's own asserted identity
+    (read off the resolved checkpoint and the caller's/best-effort-resolved ``experiment_id``),
+    never corroborated; the CSV's own ``producer_model_sha256``/``producing_experiment_id``
+    columns, and this response's ``measurement_validated``, are ``export_detection_csv``'s
+    returned tail, corroborated against what a record outside the stamp actually answers for, so
+    the two can legitimately differ (or the tail can read unknown where the asserted identity
+    does not) rather than that being read as drift between them.
+
     Args:
         checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
             project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
@@ -2283,7 +2291,7 @@ def tabulate_counts(
     }
     # Read back off the bucket's own stamp, the same reconciliation the other bucket doors perform.
     csv_measurement_validated = gate.column_stamp("operating_point")
-    csv_path = export_detection_csv(
+    csv_path, tail = export_detection_csv(
         result["results"], output_path, provenance=provenance, trait=trait,
         measurement_validated=csv_measurement_validated,
         pred_dirs=[str(bucket)] if bucket is not None else None,
@@ -2303,8 +2311,9 @@ def tabulate_counts(
         # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
-        # The composite cell the written CSV actually carries, beside the raw per-dimension stamps.
-        "measurement_validated": csv_measurement_validated,
+        # The cell export_detection_csv actually wrote, which its own gate can floor below the
+        # pre-write csv_measurement_validated reconciliation.
+        "measurement_validated": tail["measurement_validated"],
         "operating_point_validated": gate.stamp["operating_point"],
         "tile_size_validated": gate.stamp.get("tile_size"),
         "conf_source": result.get("conf_source"),

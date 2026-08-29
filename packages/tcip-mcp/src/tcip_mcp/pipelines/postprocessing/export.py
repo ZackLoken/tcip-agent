@@ -208,7 +208,7 @@ def export_detection_csv(
     measurement_validated: str | None = None,
     pred_dirs: list[str] | None = None,
     acknowledge_unvalidated: bool = False,
-) -> str:
+) -> tuple[str, dict]:
     """Export per-image detection counts to CSV.
 
     The count is the phenotype for count traits, so this is a delivery door: it refuses a *bare*
@@ -265,7 +265,10 @@ def export_detection_csv(
         acknowledge_unvalidated: Write an unvalidated count as a flagged provisional CSV.
 
     Returns:
-        Path to the written CSV file.
+        ``(path, tail)``: the path to the written CSV, and the ``_PROVENANCE_COLUMNS`` tail
+        ``delivered_tail`` composed and wrote into every row, so a caller that needs one of those
+        cells back (a response echoing the CSV's own ``measurement_validated``, say) reads the
+        value actually written rather than re-deriving or re-asserting it a second time.
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
@@ -345,4 +348,4 @@ def export_detection_csv(
                                   measurement_documents=[_MEASUREMENT_DOCUMENT],
                                   scale_document=None,
                                   trait=trait, delivery_kind=PER_IMAGE_COUNT)
-    return output_path
+    return output_path, stamp
