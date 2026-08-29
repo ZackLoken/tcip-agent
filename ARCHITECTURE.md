@@ -1012,8 +1012,8 @@ Package no-dependency claim, restated from phase0 and not re-derived this sessio
 states the same rule and is loaded automatically when reading files in the package.
 
 Names not re-exported in `__all__` but importable directly from their defining submodule
-(restated from phase0, not re-derived this session): `json_io.SCHEMA_VERSION`,
-`json_io.ANNOTATIONS_KEY`, `json_io.UNLABELED`, `json_io.target_class_id`,
+(restated from phase0, not re-derived this session): `json_io.ANNOTATIONS_KEY`,
+`json_io.UNLABELED`, `json_io.target_class_id`,
 `format_io.AnnotFormat`, `format_io.load_annotations`, `format_io.save_annotations`,
 `mask_contours.DEFAULT_EPSILON_FRAC`, `annotation_engine.Snapshot`,
 `annotation_engine.UNDO_DEPTH`, `review_engine.REVIEW_SHARD_DIRNAME`,

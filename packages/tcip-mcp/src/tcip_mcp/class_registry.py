@@ -191,11 +191,14 @@ def read_registry(path: str | Path) -> ClassRegistry:
     """Read ``classes.json`` into a :class:`ClassRegistry`.
 
     Absence and corruption are different answers: no registry raises ``FileNotFoundError``,
-    and a registry whose bytes are present but will not decode raises :class:`RegistryError`,
-    the same refusal a structurally invalid registry raises. Reading an undecodable registry
-    as an empty one would let every name-based label under it train as an unknown subject.
+    and a registry whose bytes are present but will not decode, or that carries a
+    ``schema_version`` this reader does not accept, raises :class:`RegistryError`, the same
+    refusal a structurally invalid registry raises. Reading an undecodable registry as an empty
+    one would let every name-based label under it train as an unknown subject.
     """
     import tcip_store
+
+    from tcip_mcp.dataset_layout import CLASS_REGISTRY_STORE
 
     try:
         data = tcip_store.read_blob_versioned(_registry_key(path)).value
@@ -205,6 +208,10 @@ def read_registry(path: str | Path) -> ClassRegistry:
         document = tcip_store.RECORD_JSON.decode(data)
     except ValueError as exc:
         raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
+    try:
+        tcip_store.check_schema_version(tcip_store.get_descriptor(CLASS_REGISTRY_STORE), document)
+    except tcip_store.SchemaVersionRefused as exc:
+        raise RegistryError(f"{path}: {exc}") from exc
     return registry_from_dict(document)
 
 

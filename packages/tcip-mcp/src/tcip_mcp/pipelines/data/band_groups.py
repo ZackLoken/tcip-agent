@@ -41,9 +41,12 @@ import tcip_store
 from tcip_store import (
     RECORD_JSON,
     Key,
+    SchemaVersionRefused,
     StoreDescriptor,
     Version,
     VersionConflict,
+    check_schema_version,
+    get_descriptor,
     register_store,
 )
 from tcip_store.file_backend import RootedFileLocator
@@ -59,6 +62,7 @@ register_store(
         name=BAND_GROUP_MANIFEST_STORE,
         kind="blob",
         key_fields=("stem",),
+        frozen=True,
         locator=_MANIFEST_FILE,
     )
 )
@@ -362,8 +366,12 @@ def groups_from_explicit_mapping(
 
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`. Raises ``ValueError`` on a
-    malformed manifest (missing/empty ``bands``)."""
+    malformed manifest (missing/empty ``bands``) or a schema_version this reader does not accept."""
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        check_schema_version(get_descriptor(BAND_GROUP_MANIFEST_STORE), data)
+    except SchemaVersionRefused as exc:
+        raise ValueError(f"{manifest_path}: {exc}") from exc
     bands_field = data.get("bands")
     if not isinstance(bands_field, dict) or not bands_field:
         raise ValueError(f"{manifest_path}: 'bands' must be a non-empty {{name: filename}} mapping")

@@ -31,7 +31,16 @@ from pathlib import Path
 from typing import Optional
 
 import tcip_store
-from tcip_store import RECORD_JSON, DecodeError, Key, StoreDescriptor, register_store
+from tcip_store import (
+    RECORD_JSON,
+    DecodeError,
+    Key,
+    SchemaVersionRefused,
+    StoreDescriptor,
+    check_schema_version,
+    get_descriptor,
+    register_store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 # Per-image JSON is the canonical on-disk label format; ``coco`` is the assembled dataset view of it.
@@ -186,6 +195,8 @@ register_store(
         name=IMAGERY_STORE,
         kind="blob",
         key_fields=("date", "filename"),
+        frozen=True,
+        cannot_carry_field="raw capture bytes (JPEG/PNG/TIFF/GeoTIFF/NPZ), nothing to version",
         path_readable=True,
         locator=_IMAGE_TREE,
     )
@@ -310,6 +321,7 @@ register_store(
         name=CLASS_REGISTRY_STORE,
         kind="blob",
         key_fields=("document",),
+        frozen=True,
         locator=_DATASET_DOC,
     )
 )
@@ -342,6 +354,7 @@ register_store(
         name=DATASET_IDENTITY_STORE,
         kind="blob",
         key_fields=("document",),
+        frozen=True,
         locator=_DATASET_DOC,
     )
 )
@@ -380,6 +393,10 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
             "identity; re-register with register_dataset")
+    try:
+        check_schema_version(get_descriptor(DATASET_IDENTITY_STORE), identity)
+    except SchemaVersionRefused as exc:
+        raise ValueError(f"{dataset_identity_path(dataset_root)}: {exc}") from exc
     return identity
 
 
@@ -406,6 +423,7 @@ register_store(
         name=IMAGE_STATUS_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
@@ -470,6 +488,7 @@ register_store(
         name=VIEW_COVERAGE_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=False,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
@@ -509,6 +528,7 @@ register_store(
         name=IMAGE_STATUS_DIGEST_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
@@ -547,6 +567,7 @@ register_store(
         name=REGION_COMPLETENESS_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
@@ -586,6 +607,7 @@ register_store(
         name=REGION_COMPLETENESS_DIGEST_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATE_DOC,
