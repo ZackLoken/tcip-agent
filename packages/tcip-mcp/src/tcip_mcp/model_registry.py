@@ -11,7 +11,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import tcip_store
-from tcip_store import RECORD_JSON, Key, StoreDescriptor, check_json_value, register_store
+from tcip_store import (
+    RECORD_JSON,
+    Key,
+    SchemaVersionRefused,
+    StoreDescriptor,
+    check_json_value,
+    check_schema_version,
+    get_descriptor,
+    register_store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 logger = logging.getLogger(__name__)
@@ -28,6 +37,7 @@ register_store(
         name=MODEL_REGISTRY_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_INDEX_DOC,
@@ -216,6 +226,12 @@ def load_registered_checkpoint(
             "path to read; a bespoke loop's own arbitrary state is outside the contract)."
         ) from exc
     payload = _require_dict_payload(payload, str(ckpt))
+    from tcip_mcp.pipelines.training.generic_trainer import RUN_CHECKPOINT_STORE
+
+    try:
+        check_schema_version(get_descriptor(RUN_CHECKPOINT_STORE), payload)
+    except SchemaVersionRefused as exc:
+        raise ValueError(f"{ckpt} (sha256 {digest}): {exc}") from exc
     return VerifiedCheckpoint(
         path=str(checkpoint_path), sha256=digest, payload=payload, entries=entries,
         producer=producer,

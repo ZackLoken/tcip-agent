@@ -49,12 +49,19 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Key, StoreDescriptor, Version, register_store
+from tcip_store import (
+    Key,
+    SchemaVersionRefused,
+    StoreDescriptor,
+    Version,
+    check_schema_version,
+    get_descriptor,
+    register_store,
+)
 from tcip_store.file_backend import RootedFileLocator
 
 from tcip_annotation.state import Annotation, BBox, Point, Polygon, bbox_of
 
-SCHEMA_VERSION = 2
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key; format_io.detect_format shares it
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
@@ -68,6 +75,7 @@ register_store(
         name=ANNOTATION_RECORDS_STORE,
         kind="blob",
         key_fields=("stem",),
+        frozen=True,
         path_readable=True,
         locator=_ANNOTATION_RECORD_LOCATOR,
     )
@@ -117,8 +125,11 @@ def parse_label_document(text: str, *, source: str) -> dict:
     """A per-image label document's parsed dict, from its raw text.
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON or that decodes to something other than a dict: neither is a document this schema can
-    read, and reading either as empty would train an unreadable file as an unannotated image.
+    JSON, that decodes to something other than a dict, or that carries a ``schema_version`` this
+    reader does not accept: none of the three is a document this schema can read, and reading any
+    of them as empty would train an unreadable file as an unannotated image. The one choke point
+    every reader of a label document's text shares, so ``load_label_document`` and
+    ``annotations_from_bytes`` cannot disagree about what a document means.
     """
     try:
         data = json.loads(text)
@@ -128,6 +139,10 @@ def parse_label_document(text: str, *, source: str) -> dict:
         raise UnreadableLabelDocument(
             f"{source} decodes to a {type(data).__name__}, not the object a label document is"
         )
+    try:
+        check_schema_version(get_descriptor(ANNOTATION_RECORDS_STORE), data)
+    except SchemaVersionRefused as exc:
+        raise UnreadableLabelDocument(f"{source}: {exc}") from exc
     return data
 
 

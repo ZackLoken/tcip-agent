@@ -498,6 +498,7 @@ register_store(
         name=LAUNCH_CONFIG_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_RUN_DOC,
@@ -1042,6 +1043,7 @@ register_store(
         name=SWEEP_MANIFEST_STORE,
         kind="record",
         key_fields=("study_name", "document"),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(suffix=".json"),
@@ -1054,6 +1056,7 @@ register_store(
         name=STUDY_RESULT_STORE,
         kind="record",
         key_fields=("study_name",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(suffix=".json"),
@@ -1066,6 +1069,7 @@ register_store(
         name=TRIAL_CONFIG_STORE,
         kind="record",
         key_fields=("trial", "document"),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(suffix=".json"),
@@ -1078,6 +1082,7 @@ register_store(
         name=TRIAL_METRICS_STORE,
         kind="log",
         key_fields=("trial", "document"),
+        frozen=True,
         codec=LOG_JSON,
         locator=RootedFileLocator(suffix=".jsonl"),
     )
@@ -1633,9 +1638,8 @@ def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     images_dir = data_cfg.get("images_dir")
     if not images_dir:
         return None, None
-    import json
 
-    from tcip_mcp.dataset_layout import dataset_identity_path, dataset_root_of
+    from tcip_mcp.dataset_layout import dataset_root_of, require_dataset_identity
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
     root = dataset_root_of(images_dir)
@@ -1650,12 +1654,10 @@ def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
         logger.warning("dataset_fingerprint failed for %s: %s", root, exc)
         fp = None
     ds_id = None
-    ident = dataset_identity_path(root)
-    if ident.is_file():
-        try:
-            ds_id = json.loads(ident.read_text(encoding="utf-8")).get("id")
-        except (OSError, ValueError):
-            ds_id = None
+    try:
+        ds_id = require_dataset_identity(root).get("id")  # the identity reader carries the version check
+    except ValueError:
+        ds_id = None
     return ds_id, fp
 
 
