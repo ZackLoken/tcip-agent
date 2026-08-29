@@ -7,6 +7,7 @@ from pathlib import Path
 
 import tcip_store
 from tcip_mcp.project_status import (
+    PROJECT_STATUS_STORE,
     project_status_key,
     project_status_path,
     read_project_status,
@@ -66,6 +67,25 @@ def test_read_project_status_non_dict_shape_is_flagged(tmp_path: Path):
     # Valid JSON, but not a dict: same shape guard as dataset_layout.normalize_status_store.
     tcip_store.replace(project_status_key(tmp_path), [1, 2, 3], expect=tcip_store.Version.ABSENT)
     assert read_project_status(tmp_path) == {"_corrupt": True}
+
+
+def test_read_project_status_version_refused_is_flagged_distinctly_from_corrupt(tmp_path: Path):
+    record_report(tmp_path)  # seed a real record so a poisoned one has somewhere to overwrite
+    poisoned = tcip_store.get_descriptor(PROJECT_STATUS_STORE).codec.encode(
+        {"reports_since_last_retrospective": 1, "schema_version": 99})
+    _damage_project_status(tmp_path, poisoned)
+    assert read_project_status(tmp_path) == {"_version_refused": True}
+
+
+def test_record_functions_are_best_effort_on_a_version_refused_file(tmp_path: Path):
+    # Unlike the corrupt case, a version-refused file is left untouched, not self-healed.
+    record_report(tmp_path)
+    poisoned = tcip_store.get_descriptor(PROJECT_STATUS_STORE).codec.encode(
+        {"reports_since_last_retrospective": 1, "schema_version": 99})
+    _damage_project_status(tmp_path, poisoned)
+
+    record_report(tmp_path)  # must not raise
+    assert read_project_status(tmp_path) == {"_version_refused": True}
 
 
 def test_record_report_increments_both_counters(tmp_path: Path):

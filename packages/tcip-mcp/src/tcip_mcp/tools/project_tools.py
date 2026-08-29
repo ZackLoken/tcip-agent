@@ -532,6 +532,9 @@ def _recent_activity(project_path: str) -> dict:
     from tcip_mcp.project_status import read_project_status
 
     activity = read_project_status(project_path)
+    if activity.get("_version_refused"):
+        return {"status_unavailable": "project_status.json is at a schema_version this "
+                                       "reader does not accept"}
     if activity.get("_corrupt"):
         return {"status_unavailable": "project_status.json exists but could not be read"}
     return activity
