@@ -23,23 +23,33 @@ from tcip_store.layout_claims import ROOT
 
 def test_a_record_above_its_stores_ceiling_refuses_at_the_seam(tmp_path):
     key = region_completeness_key(tmp_path)
-    ts.replace(key, {"schema_version": 99}, expect=ts.Version.ABSENT)
     with pytest.raises(Exception, match="above the 1 this reader knows"):
+        ts.replace(key, {"schema_version": 99}, expect=ts.Version.ABSENT)
         ts.read(key)
 
 
 def test_a_version_that_is_not_a_plain_integer_refuses_at_the_seam(tmp_path):
     key = region_completeness_key(tmp_path)
-    ts.replace(key, {"schema_version": "high"}, expect=ts.Version.ABSENT)
     with pytest.raises(Exception, match="not a version number"):
+        ts.replace(key, {"schema_version": "high"}, expect=ts.Version.ABSENT)
         ts.read(key)
 
 
 def test_a_log_line_above_the_ceiling_is_never_served_as_content(tmp_path):
     key = audit_log_key(str(tmp_path))
-    ts.append(key, {"event": "guard_probe", "schema_version": 99})
-    page = ts.read_log(key)
+    ts.bind(FileBackend())
+    try:
+        ts.append(key, {"event": "before"})
+        poisoned = ts.get_descriptor(key.store).codec.encode(
+            {"event": "guard_probe", "schema_version": 99})
+        with open(FileBackend().path_for(key), "ab") as handle:
+            handle.write(poisoned + b"\n")
+        ts.append(key, {"event": "after"})
+        page = ts.read_log(key)
+    finally:
+        ts.unbind()
     assert all(entry.get("schema_version") != 99 for entry in page.records)
+    assert [entry["event"] for entry in page.records] == ["before", "after"]
 
 
 def test_the_dataset_fingerprint_carries_its_formula_version(tmp_path):
@@ -57,13 +67,11 @@ def test_the_dataset_fingerprint_carries_its_formula_version(tmp_path):
 
 
 def test_adoptions_preflight_refuses_a_document_above_the_ceiling_naming_the_version(tmp_path):
-    ts.bind(FileBackend())
-    try:
-        ts.replace(
-            region_completeness_key(tmp_path), {"schema_version": 99}, expect=ts.Version.ABSENT
-        )
-    finally:
-        ts.unbind()
+    # Planted directly on disk: the seam's own writer now refuses this same document.
+    key = region_completeness_key(tmp_path)
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.get_descriptor(key.store).codec.encode({"schema_version": 99}))
 
     with pytest.raises(Exception, match="schema_version 99"):
         adopt_root(str(tmp_path), ROOT, report=lambda line: None)

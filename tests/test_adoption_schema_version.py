@@ -57,11 +57,9 @@ def test_a_version_one_document_adopts_through_the_platforms_own_writer(tmp_path
 
 
 def test_a_document_above_the_ceiling_refuses_the_root_naming_the_version(tmp_path):
-    ts.bind(FileBackend())
-    try:
-        ts.replace(_key(tmp_path), {"n": 1, "schema_version": 2})
-    finally:
-        ts.unbind()
+    path = FileBackend().path_for(_key(tmp_path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.RECORD_JSON.encode({"n": 1, "schema_version": 2}))
 
     with pytest.raises(ts.DecodeError) as raised:
         adopt_root(str(tmp_path), CONTRACT_LAYOUT, report=lambda line: None)

@@ -833,12 +833,27 @@ class _FileTxn:
 def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:
     """The value's bytes, or a refusal naming the entry and what would not encode.
 
+    Runs the same ``check_schema_version`` the read side runs, before a single byte is
+    produced: a caller's free-form document can carry a ``schema_version`` this store's own
+    reader would refuse, and writing it anyway would poison every later read of the entry,
+    including one passing ``default=``. The read-side message is kept inside this one,
+    since it already names the ceiling and the offending value; this one adds the store and
+    key a writer needs to find what it just tried to write.
+
     ``json.dumps`` names neither the store nor the key, and the canonical codec refuses a
     non-finite number and an unserializable object rather than fabricating a spelling for
     either, so the message has to say which record and which type before a caller can act
     on it.
     """
     assert descriptor.codec is not None
+    try:
+        check_schema_version(descriptor, value)
+    except SchemaVersionRefused as exc:
+        raise SchemaVersionRefused(
+            f"{key.store}{list(key.parts)} under {key.root} claims schema_version="
+            f"{value.get('schema_version')!r}, a version this store's writer does not "
+            f"produce: {exc}. Nothing was written."
+        ) from exc
     try:
         return descriptor.codec.encode(value)
     except (TypeError, ValueError) as exc:

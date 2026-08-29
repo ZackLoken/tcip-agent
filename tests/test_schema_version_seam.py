@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 import tcip_store as ts
-from tcip_store.file_backend import RootedFileLocator
+from tcip_store.file_backend import FileBackend, RootedFileLocator
 from tcip_store.layout_claims import ANY, Claim, Constant, Patterned
 from tcip_store.schema_version import check_schema_version
 
@@ -71,12 +71,38 @@ def test_absence_and_version_one_accept_through_the_platforms_own_writer(tmp_pat
     assert ts.read(key) == {"n": 2, "schema_version": 1}
 
 
-def test_a_version_above_the_ceiling_refuses_naming_the_document_ceiling_and_store(tmp_path):
+def test_the_write_side_refuses_a_document_above_the_ceiling_naming_store_and_key(tmp_path):
     key = _key(_RECORD, tmp_path)
-    ts.replace(key, {"n": 3, "schema_version": 2})
-
     with pytest.raises(ts.SchemaVersionRefused) as raised:
-        ts.read(key)
+        ts.replace(key, {"n": 3, "schema_version": 2})
+    message = str(raised.value)
+    assert _RECORD in message
+    assert "doc" in message
+    assert "above the 1 this reader knows" in message
+    assert ts.read(key, default=None) is None
+
+
+def test_the_write_side_refuses_a_log_line_above_the_ceiling(tmp_path):
+    key = _key(_LOG, tmp_path)
+    with pytest.raises(ts.SchemaVersionRefused):
+        ts.append(key, {"n": 1, "schema_version": 2})
+    assert ts.read_log(key).records == []
+
+
+def test_a_version_above_the_ceiling_refuses_naming_the_document_ceiling_and_store(tmp_path):
+    # Planted directly on disk: the write side now refuses this same document, so a document
+    # above the ceiling reaches a read only from a source other than this store's own writer.
+    key = _key(_RECORD, tmp_path)
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.RECORD_JSON.encode({"n": 3, "schema_version": 2}))
+
+    ts.bind(FileBackend())
+    try:
+        with pytest.raises(ts.SchemaVersionRefused) as raised:
+            ts.read(key)
+    finally:
+        ts.unbind()
     message = str(raised.value)
     assert _RECORD in message
     assert "2" in message
@@ -101,11 +127,17 @@ def test_an_unstable_or_cannot_carry_store_is_out_of_the_checks_scope():
 
 def test_read_log_reports_a_version_refused_line_separately_from_corrupt(tmp_path):
     key = _key(_LOG, tmp_path)
-    ts.append(key, {"n": 1})
-    ts.append(key, {"n": 2, "schema_version": 99})
-    ts.append(key, {"n": 3})
+    ts.bind(FileBackend())
+    try:
+        ts.append(key, {"n": 1})
+        poisoned = ts.get_descriptor(key.store).codec.encode({"n": 2, "schema_version": 99})
+        with open(FileBackend().path_for(key), "ab") as handle:
+            handle.write(poisoned + b"\n")
+        ts.append(key, {"n": 3})
 
-    page = ts.read_log(key)
+        page = ts.read_log(key)
+    finally:
+        ts.unbind()
     assert [r["n"] for r in page.records] == [1, 3]
     assert page.version_refused == (1,)
     assert page.corrupt == ()
@@ -113,11 +145,17 @@ def test_read_log_reports_a_version_refused_line_separately_from_corrupt(tmp_pat
 
 def test_a_transaction_read_is_refused_the_same_way_as_a_plain_read(tmp_path):
     key = _key(_RECORD, tmp_path)
-    ts.replace(key, {"n": 4, "schema_version": 5})
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.RECORD_JSON.encode({"n": 4, "schema_version": 5}))
 
-    with pytest.raises(ts.SchemaVersionRefused):
-        with ts.transaction(key) as txn:
-            txn.read(key)
+    ts.bind(FileBackend())
+    try:
+        with pytest.raises(ts.SchemaVersionRefused):
+            with ts.transaction(key) as txn:
+                txn.read(key)
+    finally:
+        ts.unbind()
 
 
 def test_the_registry_refuses_a_cannot_carry_declaration_on_a_store_that_is_not_frozen():
