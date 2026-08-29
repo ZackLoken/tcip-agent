@@ -28,7 +28,6 @@ def client() -> TestClient:
 
 def _payload(root: Path, image_path: str, shapes=None, **over) -> dict:
     body = {
-        "schema_version": 1,
         "project_root": str(root),
         "tab": "annotate",
         "image_path": image_path,
