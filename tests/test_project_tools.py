@@ -180,6 +180,25 @@ def test_inspect_project_surfaces_corrupt_status_honestly(tmp_path: Path, monkey
     assert status["initialized"] is True
 
 
+def test_inspect_project_surfaces_version_refused_status_distinctly_from_corrupt(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    from tcip_mcp.project_status import (
+        PROJECT_STATUS_STORE, project_status_key, record_report,
+    )
+
+    init_project(str(tmp_path), site="north orchard")
+    record_report(tmp_path)  # seed a real record so a poisoned one has somewhere to overwrite
+    poisoned = tcip_store.get_descriptor(PROJECT_STATUS_STORE).codec.encode(
+        {"reports_since_last_retrospective": 1, "schema_version": 99})
+    _damage_record(project_status_key(tmp_path), poisoned)
+
+    status = inspect_project(str(tmp_path))
+    assert "schema_version" in status["recent_activity"]["status_unavailable"]
+    assert status["initialized"] is True
+
+
 def test_set_active_project_folds_in_recent_activity(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path))
     import tcip_mcp.web_client as web_client

@@ -21,6 +21,7 @@ file is reported as corrupt, not silently treated as "no history yet."
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -29,12 +30,15 @@ from tcip_store import (
     RECORD_JSON,
     DecodeError,
     Key,
+    SchemaVersionRefused,
     StoreDescriptor,
     read,
     register_store,
     transaction,
 )
 from tcip_store.file_backend import RootedFileLocator
+
+logger = logging.getLogger(__name__)
 
 _STATUS_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
 """The status pointer, one document per project."""
@@ -77,10 +81,14 @@ def read_project_status(project_path: str | Path) -> dict[str, Any]:
     returns ``{}``; a file that exists but fails to decode, or decodes to something other than a
     dict (mirrors :func:`tcip_mcp.dataset_layout.normalize_status_store`'s shape guard), returns
     ``{"_corrupt": True}`` instead, so callers surface that honestly rather than silently reading a
-    permanent-fixture store as if it were a clean slate.
+    permanent-fixture store as if it were a clean slate. A file at a schema_version this reader
+    does not accept is a distinct fact, not corruption, so it returns ``{"_version_refused": True}``
+    instead: the bytes are a well-formed document from a newer writer, not garbage.
     """
     try:
         raw = read(project_status_key(project_path), default={})
+    except SchemaVersionRefused:
+        return {"_version_refused": True}
     except (OSError, DecodeError):
         # An unreadable pointer is reported as corrupt, not as absent: this store is a
         # permanent fixture, so "cannot be read" is never "no history yet".
@@ -116,6 +124,12 @@ def _update(project_path: str | Path, mutate: Callable[[dict[str, Any]], None]) 
             data.pop("_corrupt", None)
             mutate(data)
             txn.write(key, data)
+    except SchemaVersionRefused:
+        # A newer writer's pointer: left untouched rather than overwritten with counters that
+        # would erase whatever fields that writer added, unlike the corrupt-bytes case above.
+        logger.warning(
+            "project status pointer for %s is at a schema_version this reader does not "
+            "accept; its counters were left untouched", project_path)
     except Exception:
         pass
 
