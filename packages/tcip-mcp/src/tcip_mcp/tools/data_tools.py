@@ -680,6 +680,8 @@ def make_splits(
                          "bucket, or merge the colliding label entries into one."}
     try:
         _, id_map = _resolve_registry_id_map(date_dirs[0][1], subject, attribute)
+    except tcip_store.SchemaVersionRefused as exc:
+        return {"error": f"cannot resolve the class registry for the split: {exc}"}
     except ValueError as exc:
         return {"error": str(exc)}
 
@@ -815,10 +817,14 @@ def make_splits(
                          f"(attribute={attribute!r}): {admission_counts}. Searched {searched}."
                          f"{remedy} Annotate an instance or confirm a negative before splitting."}
 
+    try:
+        fingerprint = dataset_fingerprint(folder_path)
+    except tcip_store.SchemaVersionRefused as exc:
+        return {"error": f"cannot fingerprint the dataset for the split manifest: {exc}"}
     manifest: dict[str, Any] = {
         "seed": seed,
         "group_by": resolved_group_by,
-        "dataset_fingerprint": dataset_fingerprint(folder_path),
+        "dataset_fingerprint": fingerprint,
         "subject": subject,
         "attribute": attribute,
         "id_map": id_map,

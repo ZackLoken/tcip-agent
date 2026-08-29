@@ -173,6 +173,19 @@ def test_make_splits_basic(data_dir: Path, tmp_path: Path):
     assert set(manifest["splits"]) == {"train", "val", "calibration"}
 
 
+def test_make_splits_refuses_a_version_refused_class_registry_as_an_error(data_dir: Path, tmp_path: Path):
+    from tcip_mcp.dataset_layout import class_registry_key
+
+    _add_extra_catkin_groups(data_dir, 1)
+    ts.put_blob(
+        class_registry_key(data_dir), ts.RECORD_JSON.encode({"schema_version": 99})
+    )
+    result = make_splits(str(data_dir), output_path=str(tmp_path / "manifests"), subject="catkin",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" in result, result
+    assert "schema_version" in result["error"]
+
+
 def test_make_splits_stats_only_admits_a_nonzero_calibration_ratio(data_dir: Path):
     """A stats-only call (no output_path, no materialize) may pass any calibration_ratio; only a
     manifest write requires a non-zero one."""
