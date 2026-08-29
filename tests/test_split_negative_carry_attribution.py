@@ -236,7 +236,7 @@ def test_a_failed_carry_computation_writes_no_split_tree(tmp_path: Path, monkeyp
 
 def test_an_unreadable_confirmed_negative_persists_nothing(tmp_path: Path):
     """A confirmed negative whose label file will not read is caught by the admission's own read,
-    before any stem list, manifest or split tree is written: the call answers an error dict
+    before the split's own manifest or tree is written: the call answers an error dict
     naming the file, and nothing from this call is left on disk."""
     from tcip_mcp.tools.data_tools import split_manifest_key
 
