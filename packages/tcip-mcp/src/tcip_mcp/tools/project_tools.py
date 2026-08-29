@@ -671,14 +671,21 @@ def _extract_zip(zp: Path, staging: Path) -> int:
 
     ``staging`` is this run's own private directory (a fresh uuid under ``.imports``), so a
     zip-slip refusal here still leaves the destination untouched: nothing has been written there.
+    Escape is decided by containment (``Path.relative_to``), never a string prefix: a member
+    resolving to a sibling directory that merely shares ``staging``'s name as a prefix (e.g. an
+    entry naming ``../<staging.name>extra/evil.txt``) is outside ``staging`` and refuses, where a
+    prefix comparison would have read it as contained.
     """
     files_extracted = 0
     with zipfile.ZipFile(str(zp), "r") as zf:
+        staged = staging.resolve()
         for info in zf.infolist():
             target = staging / info.filename
             resolved = target.resolve()
-            if not str(resolved).startswith(str(staging.resolve())):
-                raise ValueError(f"Unsafe path in archive: {info.filename}")
+            try:
+                resolved.relative_to(staged)
+            except ValueError:
+                raise ValueError(f"Unsafe path in archive: {info.filename}") from None
         for info in zf.infolist():
             if info.is_dir():
                 (staging / info.filename).mkdir(parents=True, exist_ok=True)
@@ -791,7 +798,8 @@ def import_project(zip_path: str, destination: str) -> dict:
     workspace is not a workspace project and is not held to the scheme.
 
     A refusal at any step leaves the destination exactly as it was (absent, or its original empty
-    state); the staging tree this run made is always removed.
+    state); the staging tree this run made is removed whether the run refused, raised, or
+    succeeded (a success has already moved it onto ``destination``, so removal there is a no-op).
 
     The response carries per-root adopted counts, blob counts per class, ``database_built``
     (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the
@@ -835,9 +843,12 @@ def import_project(zip_path: str, destination: str) -> dict:
     result: dict = {}
     try:
         with path_lock(staging, timeout_s=DEFAULT_LOCK_TIMEOUT_S):
-            result = _run_import_into_staging(zp, staging, dest)
-            if "error" in result:
-                shutil.rmtree(staging, ignore_errors=True)
+            try:
+                result = _run_import_into_staging(zp, staging, dest)
+            finally:
+                # A success has already moved staging onto dest; rmtree is then a no-op.
+                if "error" in result or not result:
+                    shutil.rmtree(staging, ignore_errors=True)
     except _LockTimeout:
         return {"error": f"could not lock a fresh staging directory at {staging}"}
     finally:

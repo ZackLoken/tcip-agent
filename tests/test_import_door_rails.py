@@ -9,6 +9,8 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 import tcip_store as ts
 from tcip_mcp import dataset_layout
 from tcip_mcp.tools.project_tools import archive_project, import_project
@@ -249,6 +251,38 @@ def test_import_refuses_a_zip_slip_path(tmp_path):
     assert "error" in result
     assert "Unsafe path" in result["error"]
     assert not dest.exists()
+
+
+def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_prefix(tmp_path):
+    """A string-prefix escape check reads a member resolving to ``<staging.name>extra/`` as
+    contained, since that sibling's path literally starts with staging's own path; containment
+    by ``relative_to`` does not."""
+    from tcip_mcp.tools.project_tools import _extract_zip
+
+    staging = tmp_path / "abcd1234"
+    staging.mkdir()
+    evil_zip = tmp_path / "evil.zip"
+    with zipfile.ZipFile(str(evil_zip), "w") as zf:
+        zf.writestr(f"../{staging.name}extra/evil.txt", "escaped")
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        _extract_zip(evil_zip, staging)
+
+
+def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path):
+    root = _project(tmp_path / "source")
+    zip_path = tmp_path / "bundle.zip"
+    assert "error" not in archive_project(str(root), str(zip_path))
+    data = zip_path.read_bytes()
+    zip_path.write_bytes(data[: len(data) // 2])  # truncated: no longer a readable zip
+
+    dest = tmp_path / "dest"
+    result = import_project(str(zip_path), str(dest))
+
+    assert "error" in result
+    assert not dest.exists()
+    imports_root = dest.parent / ".imports"
+    assert not imports_root.is_dir() or not any(imports_root.iterdir())
 
 
 # ── rail 10: the file-backend leg ───────────────────────────────────────────────────────────
