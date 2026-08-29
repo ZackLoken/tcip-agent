@@ -41,7 +41,6 @@ import tcip_store
 from tcip_store import (
     RECORD_JSON,
     Key,
-    SchemaVersionRefused,
     StoreDescriptor,
     Version,
     VersionConflict,
@@ -366,12 +365,17 @@ def groups_from_explicit_mapping(
 
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`. Raises ``ValueError`` on a
-    malformed manifest (missing/empty ``bands``) or a schema_version this reader does not accept."""
+    malformed manifest (missing/empty ``bands``).
+
+    A ``schema_version`` this reader does not accept propagates as
+    :class:`tcip_store.SchemaVersionRefused`, uncaught, rather than wrapped as ``ValueError``: a
+    version refusal is a policy fact about a newer writer, never the same fact as a malformed
+    manifest, and a caller's ``except (OSError, ValueError)`` softener (both enumerators of a
+    directory's manifests) must not absorb it and silently dissolve the group into its
+    individual band files.
+    """
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    try:
-        check_schema_version(get_descriptor(BAND_GROUP_MANIFEST_STORE), data)
-    except SchemaVersionRefused as exc:
-        raise ValueError(f"{manifest_path}: {exc}") from exc
+    check_schema_version(get_descriptor(BAND_GROUP_MANIFEST_STORE), data)
     bands_field = data.get("bands")
     if not isinstance(bands_field, dict) or not bands_field:
         raise ValueError(f"{manifest_path}: 'bands' must be a non-empty {{name: filename}} mapping")
@@ -440,7 +444,7 @@ def detect_and_write_band_groups(
         try:
             ref = read_band_group_manifest(mp)
         except (OSError, ValueError):
-            continue
+            continue  # SchemaVersionRefused is neither: it propagates rather than dissolving the group
         already_claimed.update(p.name for p in ref.bands.values())
 
     candidates = [p for p in _candidate_single_band_files(d) if p.name not in already_claimed]

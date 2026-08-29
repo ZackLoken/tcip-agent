@@ -59,6 +59,11 @@ def list_logical_images(images_dir: str | Path) -> dict[str, "Path | BandGroupRe
     existing manifest never also appears as its own single-band entry. An unreadable/corrupt
     manifest is skipped (claims nothing), not raised: a directory listing must not fail whole
     because one manifest is bad; ``resolve_image_source`` is where a caller pays for its own stem.
+    A manifest whose ``schema_version`` this reader does not accept is a different fact, not
+    corruption, and is not skipped: :func:`~tcip_mcp.pipelines.data.band_groups.read_band_group_manifest`
+    raises :class:`tcip_store.SchemaVersionRefused` for it, uncaught here, so a newer-written
+    grouped capture refuses the enumeration rather than silently dissolving into its individual
+    band files.
 
     Raises :class:`AmbiguousImageStem` when a raw standalone file's stem collides with a
     manifest's own canonical stem (and that file isn't one of the manifest's own sibling bands):
