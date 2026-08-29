@@ -217,6 +217,35 @@ def test_get_sweep_serves_the_manifest_alone_when_the_study_result_is_absent(
     assert "all_trials" not in body["result"]
 
 
+def test_get_sweep_serves_the_manifest_result_for_a_rehydrated_completed_sweep(
+    client, hpo_root
+) -> None:
+    """The live registry a restart rehydrates carries status only, never a trial result
+    (:func:`tuning.rehydrate_for_current_root` never sets one); the disk manifest is what
+    survived the restart, and the live branch must fall back to it rather than serving the
+    still-registered job's empty result."""
+    from tcip_web.routes import tuning
+
+    _write_sweep(hpo_root, "hpo_rehydr01", status="completed",
+                 result={"best_params": {"lr": 0.01}, "best_value": None,
+                         "best_value_state": "nan", "n_trials": 2})
+
+    job = tuning.HPOJob(sweep_id="hpo_rehydr01", status="completed")
+    with tuning._lock:
+        tuning._sweeps[job.sweep_id] = job
+    tuning._persist()
+    tuning._sweeps.clear()
+    tuning.rehydrate_for_current_root()
+
+    try:
+        assert tuning._sweeps["hpo_rehydr01"].result == {}  # the rehydrated entry itself is bare
+        body = client.get("/api/tuning/sweeps/hpo_rehydr01").json()
+        assert body["result"]["best_params"] == {"lr": 0.01}
+        assert body["result"]["best_value_state"] == "nan"
+    finally:
+        tuning._sweeps.clear()
+
+
 def test_list_trials_reports_platform_trial_dirs_only(client, hpo_root) -> None:
     sweep = _write_sweep(hpo_root, "hpo_trials01")
     _write_trial(sweep, "aaa_00000", metrics=[{"epoch": 1}], params={"lr": 0.01})

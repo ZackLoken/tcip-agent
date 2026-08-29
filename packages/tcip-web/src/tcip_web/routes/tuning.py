@@ -166,6 +166,22 @@ def _enrich_with_study_result(response: dict, sweep_id: str, *, root: Optional[s
     return response
 
 
+def _terminal_response(job: HPOJob) -> dict:
+    """The live-registry response for a job already in a terminal status.
+
+    A job this process ran to completion itself carries its full result in memory; a job a
+    restart rehydrated carries none (the live registry persists status, not trial results), so
+    its result is read off the disk manifest instead, exactly as the disk-only branch of
+    :func:`get_sweep` would serve it.
+    """
+    result = job.result
+    if not result:
+        manifest = _read_manifest(job.sweep_id, root=job.platform_root)
+        if manifest is not None:
+            result = manifest.get("result") or {}
+    return {"sweep_id": job.sweep_id, "status": job.status, "error": job.error, "result": result}
+
+
 def _sweep_launch_root(sweep_id: str) -> Optional[str]:
     """The root this sweep's own live registry entry says it launched under, or ``None`` when
     the registry has forgotten it (never launched here, or launched before a restart), the
@@ -356,12 +372,10 @@ def get_sweep(sweep_id: str) -> dict:
     with _lock:
         j = jobstore.find_job(_sweeps, sweep_id)
     if j is not None:
-        response = {
-            "sweep_id": j.sweep_id,
-            "status": j.status,
-            "error": j.error,
-            "result": j.result,
-        }
+        response = (
+            _terminal_response(j) if j.status in jobstore.TERMINAL_STATUSES
+            else {"sweep_id": j.sweep_id, "status": j.status, "error": j.error, "result": j.result}
+        )
         return _enrich_with_study_result(response, sweep_id, root=j.platform_root)
     manifest = _read_manifest(sweep_id)
     if manifest is None:
