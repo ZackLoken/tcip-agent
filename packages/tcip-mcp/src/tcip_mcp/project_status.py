@@ -46,6 +46,7 @@ register_store(
         name=PROJECT_STATUS_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_STATUS_DOC,

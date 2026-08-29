@@ -388,6 +388,7 @@ register_store(
         name=RUN_CHECKPOINT_STORE,
         kind="blob",
         key_fields=("name",),
+        frozen=True,
         locator=RootedFileLocator(suffix=".pt"),
         path_readable=True,
     )

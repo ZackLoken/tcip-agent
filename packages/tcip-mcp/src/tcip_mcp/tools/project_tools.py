@@ -43,6 +43,7 @@ register_store(
         name=DATASET_REGISTRY_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_PROJECT_STATE_DOC,

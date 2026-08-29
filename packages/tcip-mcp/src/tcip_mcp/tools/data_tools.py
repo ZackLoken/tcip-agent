@@ -26,6 +26,7 @@ register_store(
         name=SPLIT_MANIFEST_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SPLIT_DOC,

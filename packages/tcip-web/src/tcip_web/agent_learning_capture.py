@@ -33,6 +33,7 @@ register_store(
         name=LEARNING_CAPTURE_STORE,
         kind="log",
         key_fields=("document",),
+        frozen=True,
         codec=LOG_JSON,
         locator=_CAPTURE_LOG,
     )

@@ -175,6 +175,7 @@ register_store(
         name=REVIEW_VERDICTS_STORE,
         kind="record",
         key_fields=("bucket", "image"),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         enumerable=True,
@@ -204,6 +205,7 @@ register_store(
         name=LABEL_BASELINES_STORE,
         kind="blob",
         key_fields=("stem",),
+        frozen=True,
         locator=RootedFileLocator(prefix=(BASELINE_DIRNAME,), suffix=".json"),
     )
 )

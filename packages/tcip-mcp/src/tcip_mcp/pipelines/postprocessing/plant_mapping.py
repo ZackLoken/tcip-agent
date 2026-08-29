@@ -747,6 +747,7 @@ register_store(
         name=PLANT_MAPPING_STORE,
         kind="record",
         key_fields=("name",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         enumerable=True,

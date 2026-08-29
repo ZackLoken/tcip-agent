@@ -54,6 +54,7 @@ register_store(
         name=ANNOTATION_STATS_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_ANNOTATION_STATS_DOC,

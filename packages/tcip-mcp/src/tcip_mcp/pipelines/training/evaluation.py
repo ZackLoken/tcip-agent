@@ -53,6 +53,7 @@ register_store(
         name=EVALUATION_RESULTS_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_RESULTS_DOC,

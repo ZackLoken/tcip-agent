@@ -922,6 +922,7 @@ register_store(
         name=CAL_HOLDOUT_LOCK_STORE,
         kind="record",
         key_fields=("identity_hash",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_CalHoldoutLockLocator(),

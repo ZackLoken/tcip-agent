@@ -58,6 +58,7 @@ register_store(
         name=CONFIDENCE_SWEEP_STORE,
         kind="record",
         key_fields=("record_digest",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SweepArtifactLocator(),
