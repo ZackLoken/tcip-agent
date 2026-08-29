@@ -278,6 +278,28 @@ def test_compare_experiments_refused_mutations_absent_when_the_page_reports_corr
     assert "refused_mutations" not in result["experiments"][0]
 
 
+def test_compare_experiments_refused_mutations_absent_when_the_page_reports_version_refused(
+    tmp_path, monkeypatch
+):
+    """A page carrying a version-refused entry is the same "can't trust this" fact as a corrupt
+    one: refused_mutations must be absent, not an incomplete list built from what did decode."""
+    monkeypatch.chdir(tmp_path)
+    import tcip_store
+    from tcip_store import LogPage
+    from tcip_mcp.experiments import compare_experiments, create_experiment
+
+    create_experiment("exp-log-version-refused",
+                       {"model_source": {"builder": "my_models:chestnut_burr_det"}})
+
+    def _version_refused_page(*a, **k):
+        return LogPage(records=[], cursor="", version_refused=(2,))
+
+    monkeypatch.setattr(tcip_store, "read_log", _version_refused_page)
+
+    result = compare_experiments(["exp-log-version-refused"])
+    assert "refused_mutations" not in result["experiments"][0]
+
+
 def test_compare_experiments_finds_a_refusal_under_the_pinned_root(tmp_path, monkeypatch):
     """Coverage of the one-root invariant: a refusal update_status itself records for an
     experiment under the platform root this process is pinned to appears in refused_mutations

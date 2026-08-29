@@ -270,6 +270,57 @@ def test_get_trial_metrics_returns_every_row(client, hpo_root) -> None:
     assert [row["val_loss"] for row in body["metrics"]] == [0.5, 0.4]
 
 
+def test_get_trial_metrics_reports_version_refused_rows_separately_from_corrupt(
+    client, hpo_root
+) -> None:
+    """A row at a schema_version this reader does not accept is excluded from the served
+    rows, the same as a corrupt one, but the endpoint still reports the trial as having
+    metrics: the run wrote something, this reader just cannot show it back."""
+    import tcip_store
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.training_tools import trial_metrics_key
+
+    tcip_store.bind(FileBackend())
+    sweep = _write_sweep(hpo_root, "hpo_metrics_version_refused")
+    trial = sweep / "trial_aaa_00000"
+    trial.mkdir(parents=True)
+    key = trial_metrics_key(sweep, trial.name)
+    tcip_store.append(key, {"epoch": 1, "val_loss": 0.5})
+    poisoned = tcip_store.get_descriptor(key.store).codec.encode(
+        {"epoch": 2, "schema_version": 99})
+    with open(FileBackend().path_for(key), "ab") as handle:
+        handle.write(poisoned + b"\n")
+
+    body = client.get(
+        "/api/tuning/sweeps/hpo_metrics_version_refused/trials/aaa_00000/metrics"
+    ).json()
+    assert body["exists"] is True
+    assert [row["epoch"] for row in body["metrics"]] == [1]
+
+
+def test_list_trials_has_metrics_true_for_a_trial_holding_only_a_version_refused_row(
+    client, hpo_root
+) -> None:
+    import tcip_store
+    from tcip_store.file_backend import FileBackend
+    from tcip_mcp.tools.training_tools import trial_metrics_key
+
+    tcip_store.bind(FileBackend())
+    sweep = _write_sweep(hpo_root, "hpo_trials_version_refused")
+    trial = sweep / "trial_aaa_00000"
+    trial.mkdir(parents=True)
+    key = trial_metrics_key(sweep, trial.name)
+    poisoned = tcip_store.get_descriptor(key.store).codec.encode(
+        {"epoch": 1, "schema_version": 99})
+    FileBackend().path_for(key).parent.mkdir(parents=True, exist_ok=True)
+    with open(FileBackend().path_for(key), "ab") as handle:
+        handle.write(poisoned + b"\n")
+
+    trials = client.get("/api/tuning/sweeps/hpo_trials_version_refused/trials").json()["trials"]
+    by_id = {t["trial_id"]: t for t in trials}
+    assert by_id["aaa_00000"]["has_metrics"] is True
+
+
 def test_trials_of_an_unknown_sweep_are_a_404(client, hpo_root) -> None:
     assert client.get("/api/tuning/sweeps/hpo_missing/trials").status_code == 404
 
