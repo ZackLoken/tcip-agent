@@ -116,19 +116,30 @@ def _detect_json_format(path: Path) -> AnnotFormat | None:
     (it is converted, not read), and raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument`,
     through the shared loader, for a *present* file that will not decode as a dict at all: a
     missing candidate is not evidence of a broken document, only an absent one, and stays
-    ``detect_format``'s own "cannot determine" refusal rather than an unreadable-document one."""
+    ``detect_format``'s own "cannot determine" refusal rather than an unreadable-document one.
+
+    Reads through :func:`~tcip_annotation.json_io.load_json_document`, not the version-checked
+    ``load_label_document``: the shape is not yet known when this decode happens, and this
+    platform's own version ceiling belongs to the per-image ``json`` shape alone, never to a
+    document that turns out COCO-shaped (interop, ``frozen=False``) or unrecognized. Only once
+    the shape resolves to ``"json"`` is :func:`~tcip_annotation.json_io.check_annotation_record_version`
+    applied.
+    """
     if not path.is_file():
         return None
-    from tcip_annotation.json_io import load_label_document
+    from tcip_annotation.json_io import check_annotation_record_version, load_json_document
 
-    data = load_label_document(path)
+    data = load_json_document(path)
     if "objects" in data:
         raise ValueError(
             f"{path} is the old 'objects' label schema, which is not read in place. Convert it "
             f"to the name-based per-image schema first; reading it as-is would yield zero "
             f"annotations and train on fabricated empty negatives."
         )
-    return _shape_markers(data)
+    shape = _shape_markers(data)
+    if shape == "json":
+        check_annotation_record_version(data, source=str(path))
+    return shape
 
 
 # ── COCO JSON parsing (names) ───────────────────────────────────────────────
@@ -139,11 +150,14 @@ def _parse_coco_json(path: str) -> dict:
 
     Raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` for a document that will not
     decode or does not parse as a dict, rather than a raw exception :func:`detect_format` (which
-    already admitted the same bytes through the same decode) would not have raised.
+    already admitted the same bytes through the same decode) would not have raised. Never applies
+    this platform's own per-image ``schema_version`` ceiling: COCO is interop (``frozen=False``
+    by its own row), so a legitimate external COCO document carrying its own ``schema_version``
+    key is read, not refused against a store it never claimed to be.
     """
-    from tcip_annotation.json_io import load_label_document
+    from tcip_annotation.json_io import load_json_document
 
-    return load_label_document(path)
+    return load_json_document(path)
 
 
 def _coco_categories(coco: dict) -> dict[int, str]:

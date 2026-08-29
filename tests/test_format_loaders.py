@@ -71,6 +71,25 @@ def test_build_dataset_coco_admits_a_byte_order_marked_document(tmp_path, task):
 
 
 @pytest.mark.parametrize("task", ["detection", "instance_seg"])
+def test_build_dataset_coco_admits_a_document_naming_its_own_schema_version(tmp_path, task):
+    """COCO is interop (frozen=False by its own row): a legitimate external COCO document
+    naming a schema_version this platform's own annotation_records store does not know must
+    still build a dataset, never refuse against a store it never claimed to be."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset
+    images_dir = tmp_path / "images"
+    _make_images(images_dir)
+    coco = {"images": [{"id": 1, "file_name": "img0.jpg", "width": 100, "height": 100}],
+            "annotations": [{"id": 1, "image_id": 1, "category_id": 0, "bbox": [10, 10, 40, 40]}],
+            "categories": [], "schema_version": 999}
+    coco_path = tmp_path / "ann.json"
+    coco_path.write_text(json.dumps(coco))
+
+    ds = build_dataset(task, images_dir=str(images_dir), labels_dir=str(images_dir),
+                       num_classes=1, label_format="coco", coco_json=str(coco_path))
+    assert list(ds.stems)
+
+
+@pytest.mark.parametrize("task", ["detection", "instance_seg"])
 def test_build_dataset_coco_refuses_an_undecodable_document(tmp_path, task):
     """A present COCO document that will not decode is a named refusal, not a raw parse error
     surfacing from whichever loader happens to touch it first."""
