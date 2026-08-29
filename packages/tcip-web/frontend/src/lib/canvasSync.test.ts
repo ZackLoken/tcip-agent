@@ -644,7 +644,6 @@ describe("createCanvasPusher", () => {
   afterEach(() => vi.useRealTimers());
 
   const body = (): CanvasStateBody => ({
-    schema_version: 1,
     project_root: "/p",
     tab: "annotate",
     image_path: "/p/img.jpg",
@@ -819,7 +818,6 @@ describe("canvas state request", () => {
       { debounceMs: 5000, maxWaitMs: 10000 },
     );
     const body = (): CanvasStateBody => ({
-      schema_version: 1,
       project_root: "/p",
       tab: "annotate",
       image_path: "/p/img.jpg",

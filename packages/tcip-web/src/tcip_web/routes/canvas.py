@@ -36,7 +36,6 @@ router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 
 
 class CanvasStatePayload(BaseModel):
-    schema_version: int = 1
     project_root: str
     tab: str  # "annotate" | "review"
     image_path: str
@@ -83,7 +82,6 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
         })
 
     replace(canvas_meta_key(project_root), {
-        "schema_version": payload.schema_version,
         "received_at": now,
         "received_at_iso": datetime.now(timezone.utc).isoformat(),
         "project_root": project_root,

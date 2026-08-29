@@ -457,7 +457,6 @@ export function AnnotateTab() {
     if (loadedPathsRef.current?.image !== imgPath) return null;
     const host = measureCanvasHost();
     return {
-      schema_version: 1,
       project_root: dataset.project_root,
       tab: "annotate",
       image_path: imgPath,

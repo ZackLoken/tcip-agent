@@ -51,7 +51,6 @@ export interface CanvasShape {
 }
 
 export interface CanvasStateBody {
-  schema_version: 1;
   project_root: string;
   tab: Extract<TabName, "annotate" | "review">;
   image_path: string;

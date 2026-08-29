@@ -416,7 +416,6 @@ export function ReviewTab() {
     if (useStore.getState().review.loading) return null;
     const host = measureCanvasHost();
     return {
-      schema_version: 1,
       project_root: dataset.project_root,
       tab: "review",
       image_path: imgPath,
