@@ -227,7 +227,8 @@ def write_plant_mapping(
         built_by="build_plant_mapping", built_at=datetime.now(timezone.utc).isoformat(),
         dates_requested=None, dates=sorted(mapping),
         nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
-        capture_identity={d: "0" * 16 for d in mapping}, unreadable={d: [] for d in mapping},
+        capture_identity={d: "0" * 16 for d in mapping},
+        capture_digests={d: {} for d in mapping}, unreadable={d: [] for d in mapping},
         assignments={d: [_row(row, d) for row in rows] for d, rows in mapping.items()},
     )
     persist_mapping(build, project_root, name)
