@@ -387,6 +387,35 @@ def _annotated_dataset(root: Path, n: int) -> None:
     )
 
 
+def test_a_splits_root_nested_under_a_curated_root_archives_and_round_trips(tmp_path):
+    """The producer chain the skills document: a curated dataset (materialize_review_dataset's
+    own output shape, a curated_manifest.json at its root) sits under a project, and make_splits
+    partitions it in place with no output_path, landing split_manifest.json under the curated
+    root rather than beside it. The cross-anchor constraint must admit that nesting rather than
+    refusing the whole project."""
+    from tcip_mcp.pipelines.feedback.materialize import curated_manifest_key
+    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+
+    project = tmp_path / "project"
+    curated = project / "curated"
+    _annotated_dataset(curated, 4)
+    ts.replace(curated_manifest_key(curated), {"source": "review verdicts"}, expect=ts.Version.ABSENT)
+
+    splits_result = make_splits(str(curated), subject="catkin", materialize=True,
+                                 train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+    assert "error" not in splits_result, splits_result
+
+    zip_path = tmp_path / "bundle.zip"
+    archived = archive_project(str(project), str(zip_path))
+    assert "error" not in archived, archived
+
+    dest = tmp_path / "dest"
+    imported = import_project(str(zip_path), str(dest))
+    assert "error" not in imported, imported
+    assert (dest / "curated" / "curated_manifest.json").is_file()
+    assert ts.read(split_manifest_key(dest / "curated" / "splits"))["subject"] == "catkin"
+
+
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
     """init_project, register_dataset, a confirmed operationalization, an experiment's members,
     an HPO sweep's members and a project-relative splits manifest, all through their own real

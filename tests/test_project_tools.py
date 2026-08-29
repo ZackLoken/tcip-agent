@@ -509,6 +509,56 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     assert any(n.endswith("manifest.json") for n in names)
 
 
+def test_archive_project_reports_checkpoints_excluded_by_default(tmp_path: Path):
+    """A checkpoint under .tcip/models/*.pt is dropped by include_models=False; left_behind
+    names that count separately from unaccounted and bookkeeping, rather than folding it in."""
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    (src / ".tcip" / "models" / "m.pt").write_bytes(b"weights")
+
+    result = archive_project(str(src), str(tmp_path / "export.zip"))
+
+    assert "error" not in result
+    assert result["left_behind"]["checkpoints_excluded"] == 1
+    assert result["left_behind"]["unaccounted"] == 0
+
+    result_included = archive_project(
+        str(src), str(tmp_path / "export2.zip"), include_models=True
+    )
+    assert result_included["left_behind"]["checkpoints_excluded"] == 0
+
+
+def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
+    """A project reached through a symlink must archive rather than raising ValueError out of
+    the door: archive_project resolves project_path once and uses that resolved root for both
+    member.relative_to and the include_models comparison."""
+    real = tmp_path / "real_project"
+    _make_dataset(real)
+    link = tmp_path / "linked_project"
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks not available on this machine: {exc}")
+
+    result = archive_project(str(link), str(tmp_path / "export.zip"))
+
+    assert "error" not in result
+    assert result["files_added"] > 0
+
+
+def test_archive_project_admits_a_relative_spelled_project(tmp_path: Path, monkeypatch):
+    """A relative project_path must archive rather than raising ValueError out of the door: the
+    resolved root, not the literal relative spelling, is what member paths are relative to."""
+    real = tmp_path / "rel_project"
+    _make_dataset(real)
+    monkeypatch.chdir(tmp_path)
+
+    result = archive_project("rel_project", str(tmp_path / "export.zip"))
+
+    assert "error" not in result
+    assert result["files_added"] > 0
+
+
 class _BarrierId(str):
     """A dataset id that parks at a barrier the first time it is rendered for the registry's sort.
 
