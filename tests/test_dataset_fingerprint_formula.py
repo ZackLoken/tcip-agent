@@ -69,3 +69,17 @@ def test_compare_experiments_forces_none_and_flags_a_bare_legacy_fingerprint(exp
     by_id = {c["experiment_id"]: c for c in result["experiments"]}
     assert by_id["e2"].get("fingerprint_formula_unrecorded") is True
     assert "fingerprint_formula_unrecorded" not in by_id["e1"]
+
+
+def test_compare_experiments_flags_a_non_current_formula_version_not_only_a_bare_value(
+    experiments_dir,
+):
+    # Not bare (fingerprint_formula_version parses it): must compare against the current formula.
+    exp.create_experiment("e1", {}, dataset_fingerprint="v1:aaaa")
+    exp.create_experiment("e2", {}, dataset_fingerprint="v2:aaaa")
+
+    result = exp.compare_experiments(["e1", "e2"])
+    assert result["same_dataset_fingerprint"] is None
+    by_id = {c["experiment_id"]: c for c in result["experiments"]}
+    assert by_id["e2"].get("fingerprint_formula_unrecorded") is True
+    assert "fingerprint_formula_unrecorded" not in by_id["e1"]
