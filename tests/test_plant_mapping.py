@@ -266,6 +266,72 @@ def test_load_mapping_refuses_an_older_record_missing_capture_digests(tmp_path: 
         load_mapping(tmp_path, "mapping")
 
 
+def test_load_mapping_refuses_a_date_capture_identity_names_but_capture_digests_omits(
+    tmp_path: Path,
+) -> None:
+    """capture_digests present as a dict but missing the entry for a date capture_identity
+    still names: verify_mapping_inputs' own .get(date, {}) would otherwise silently read that
+    date as having no digests at all, rather than the coverage gap it actually is."""
+    build = _build({
+        "2-11-26": [
+            Assignment(
+                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
+            )
+        ]
+    })
+    persist_mapping(build, tmp_path, "mapping")
+    key = plant_mapping_key(tmp_path, "mapping")
+    record = tcip_store.read(key)
+    del record["capture_digests"]["2-11-26"]
+    tcip_store.replace(key, record)
+
+    with pytest.raises(ValueError, match="capture_digests"):
+        load_mapping(tmp_path, "mapping")
+
+
+def test_scan_receipts_refuses_a_version_refused_log_line_not_as_corruption(
+    tmp_path: Path,
+) -> None:
+    """A version-refused audit line is a policy fact, not corruption: it must still block the
+    receipt scan (an entry could be hiding behind it unread), naming schema_version rather than
+    the corrupt-log wording."""
+    from tcip_mcp.audit import audit_log_key
+
+    build = _build({
+        "2-11-26": [
+            Assignment(
+                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
+            )
+        ]
+    })
+    persist_mapping(build, tmp_path, "mapping")
+    tcip_store.append(audit_log_key(tmp_path), {"tool": "a_future_tool", "schema_version": 99})
+
+    with pytest.raises(ValueError, match="schema_version"):
+        load_mapping(tmp_path, "mapping")
+
+
+def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines(
+    tmp_path: Path,
+) -> None:
+    build = _build({
+        "2-11-26": [
+            Assignment(
+                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
+            )
+        ]
+    })
+    persist_mapping(build, tmp_path, "mapping")
+
+    loaded = load_mapping(tmp_path, "mapping")
+
+    assert loaded is not None
+    assert loaded.assignments["2-11-26"][0].plot_name == "PLOT1"
+
+
 def test_build_mapping_empty_dir(tmp_path: Path) -> None:
     build = build_mapping(
         tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",

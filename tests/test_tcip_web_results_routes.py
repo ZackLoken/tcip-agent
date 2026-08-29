@@ -271,6 +271,7 @@ def test_onset_dates_ignores_undated_bucket(client: TestClient, tmp_path: Path) 
     build.assignments["undated"] = build.assignments["2026-02-11"]
     build.dates = sorted([*build.dates, "undated"])
     build.capture_identity["undated"] = build.capture_identity.get("2026-02-11", "0" * 16)
+    build.capture_digests["undated"] = build.capture_digests.get("2026-02-11", {})
     build.unreadable["undated"] = []
     pm.persist_mapping(build, project_root, body["mapping_name"])
     body["predictions_by_date"]["undated"] = body["predictions_by_date"]["2026-02-11"]
