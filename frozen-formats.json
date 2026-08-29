@@ -1,0 +1,377 @@
+{
+  "commitment": "Every store this platform registers, with its declared freeze classification and the schema_version ceiling its readers know. A frozen store's documents carry no version field until the store's first bump: absence means the frozen version 1, and the first writer of the field is whichever future change bumps a format. A cannot_carry_field entry states why that store's documents cannot hold the field at all. This manifest pins declared classifications and ceilings only; an undeclared shape change inside version 1 is caught by the stability table's producer-fed round trips and the review shape, never by this file.",
+  "stores": {
+    "annotation_records": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "annotation_stats": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "audit_log": {
+      "kind": "log",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "backend_port": {
+      "kind": "record",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "band_group_manifest": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "cal_holdout_split_lock": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "canvas_geometry": {
+      "kind": "record",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "canvas_meta": {
+      "kind": "record",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "class_registry": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "classifier_operating_point_sidecar": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "coco_documents": {
+      "kind": "blob",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "confidence_sweep": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "curated_manifest": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "dataset_identity": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "dataset_registry": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "a top-level JSON array of entries, with no object to hold the field; a future bump wraps this into {schema_version, entries}"
+    },
+    "delivery_events": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "evaluation_results": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_artifacts": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_config": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_env": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_lineage": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_metrics": {
+      "kind": "log",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_split": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_status": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "experiment_validations": {
+      "kind": "log",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "flat_image": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "raw placed-image bytes, the same raw-bytes nature as imagery"
+    },
+    "friction_reports": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "gui_snapshot": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "hpo_study_result": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "hpo_sweep_manifest": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "hpo_trial_config": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "hpo_trial_metrics": {
+      "kind": "log",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "image_status": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "image_status_digest": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "imagery": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "raw capture bytes (JPEG/PNG/TIFF/GeoTIFF/NPZ), nothing to version"
+    },
+    "job_registry": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "a top-level JSON array of entries, with no object to hold the field; a future bump wraps this into {schema_version, entries}"
+    },
+    "label_baselines": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "learning_capture": {
+      "kind": "log",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "model_registry": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "a top-level JSON array of entries, with no object to hold the field; a future bump wraps this into {schema_version, entries}"
+    },
+    "model_snapshot_file": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "a source file's raw bytes"
+    },
+    "model_snapshot_manifest": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "operating_point_sidecar": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "ordinal_operating_point_sidecar": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "plant_mapping": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "project_record": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "project_status": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "proposal_staging": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "ray_dashboard": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "region_completeness": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "region_completeness_digest": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "regression_operating_point_sidecar": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "resolve_scale_sidecar": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "retrospectives": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "retrospective markdown text, parsed by heading and section markers only"
+    },
+    "review_verdicts": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "run_checkpoint": {
+      "kind": "blob",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "run_launch_config": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "split_manifest": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "trait_operationalizations": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "trait_spec_statements": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "trait_specs": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "view_coverage": {
+      "kind": "record",
+      "frozen": false,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
+    "workspace_active_project": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": "a single project-name string"
+    }
+  }
+}
