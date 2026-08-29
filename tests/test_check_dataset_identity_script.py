@@ -13,7 +13,7 @@ from PIL import Image
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import dataset_identity_key, require_dataset_identity
-from tcip_mcp.tools.project_tools import register_dataset
+from tcip_mcp.tools.project_tools import register_dataset, upsert_dataset
 
 _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check_dataset_identity.py"
 
@@ -86,3 +86,74 @@ def test_a_real_content_change_still_reports_changed(tmp_path):
     assert completed.returncode == 2, completed.stdout
     assert "CHANGED" in completed.stdout
     assert "FORMULA-UNRECORDED" not in completed.stdout
+
+
+def test_a_version_refused_identity_reports_its_own_outcome_not_a_crash(tmp_path):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    _real_dataset(root)
+    result = register_dataset(str(root), "chestnut", str(root))
+    assert "error" not in result, result
+
+    identity = require_dataset_identity(root)
+    document = {**identity, "schema_version": 2}
+    ts.put_blob(dataset_identity_key(root), ts.RECORD_JSON.encode(document))
+
+    completed = _run_script(str(root))
+
+    assert completed.returncode == 5, completed.stdout + completed.stderr
+    assert "VERSION-REFUSED" in completed.stdout
+    assert "Traceback" not in completed.stderr
+
+
+def test_a_never_recorded_fingerprint_is_its_own_outcome_not_a_bare_value(tmp_path):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    result = register_dataset(str(root), "chestnut", str(root))
+    assert "error" not in result, result
+    assert result["fingerprint"] is None
+
+    # Real content shows up after the fingerprint-less registration: recorded stays None while
+    # a fresh recompute now finds real content, never-recorded rather than a bare legacy value.
+    _real_dataset(root)
+
+    completed = _run_script(str(root))
+
+    assert completed.returncode == 4, completed.stdout
+    assert "NEVER-RECORDED" in completed.stdout
+    assert "FORMULA-UNRECORDED" not in completed.stdout
+
+
+def test_a_moved_dataset_with_a_prefixed_registry_entry_is_reported_moved(tmp_path):
+    root = tmp_path / "dataset"
+    _real_dataset(root)
+    result = register_dataset(str(root), "chestnut", str(tmp_path))
+    assert "error" not in result, result
+
+    # The registry now names a different, no-longer-existing path for this same id/fingerprint,
+    # standing in for the dataset having been moved without ever touching root's own live files.
+    stale_path = str((tmp_path / "gone_now").resolve())
+    upsert_dataset(tmp_path, {"id": result["id"], "path": stale_path,
+                              "crop": "chestnut", "fingerprint": result["fingerprint"]})
+
+    completed = _run_script(str(root), "--project", str(tmp_path))
+
+    assert f"MOVED: id {result['id']}" in completed.stdout, completed.stdout
+
+
+def test_a_moved_dataset_with_a_bare_registry_entry_reports_formula_unrecorded_not_silence(
+    tmp_path,
+):
+    root = tmp_path / "dataset"
+    _real_dataset(root)
+    result = register_dataset(str(root), "chestnut", str(tmp_path))
+    assert "error" not in result, result
+    bare = result["fingerprint"].split(":", 1)[1]
+    stale_path = str((tmp_path / "gone_now").resolve())
+    upsert_dataset(tmp_path, {"id": result["id"], "path": stale_path,
+                              "crop": "chestnut", "fingerprint": bare})
+
+    completed = _run_script(str(root), "--project", str(tmp_path))
+
+    assert f"MOVED-FORMULA-UNRECORDED: id {result['id']}" in completed.stdout, completed.stdout
+    assert "  MOVED:" not in completed.stdout
