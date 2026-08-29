@@ -26,6 +26,13 @@ def _run(root: Path):
     return subprocess.run([PY_EXE, DOCTOR, str(root)], capture_output=True, text=True, env=env)
 
 
+def _plant(key: ts.Key, doc: dict) -> None:
+    """Place an above-ceiling document directly on disk: the seam's own writer refuses it."""
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.RECORD_JSON.encode(doc))
+
+
 def test_doctor_reports_but_does_not_refuse_on_an_unsupported_region_completeness_version(
     tmp_path,
 ):
@@ -33,10 +40,7 @@ def test_doctor_reports_but_does_not_refuse_on_an_unsupported_region_completenes
     (root / "images").mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
 
-    key = region_completeness_key(root)
-    path = FileBackend().path_for(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(ts.RECORD_JSON.encode({"schema_version": 2, "leaf/2024-01-01": {}}))
+    _plant(region_completeness_key(root), {"schema_version": 2, "leaf/2024-01-01": {}})
 
     res = _run(root)
 
@@ -51,19 +55,10 @@ def test_doctor_reports_the_digest_version_even_when_the_main_store_has_no_recog
     (root / "images").mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
 
-    ts.bind(FileBackend())
-    try:
-        # No recognized bucket at all: normalize_region_completeness_store(raw) reads as empty,
-        # so the digest file's own version finding must still be reachable, not short-circuited.
-        ts.replace(
-            region_completeness_key(root), {"leaf/2024-01-01": {}}, expect=ts.Version.ABSENT,
-        )
-        ts.replace(
-            region_completeness_digest_key(root), {"schema_version": 2},
-            expect=ts.Version.ABSENT,
-        )
-    finally:
-        ts.unbind()
+    # No recognized bucket at all: normalize_region_completeness_store(raw) reads as empty,
+    # so the digest file's own version finding must still be reachable, not short-circuited.
+    _plant(region_completeness_key(root), {"leaf/2024-01-01": {}})
+    _plant(region_completeness_digest_key(root), {"schema_version": 2})
 
     res = _run(root)
 
@@ -76,14 +71,8 @@ def test_doctor_reports_a_version_refused_trait_spec_as_a_warning_not_a_crash(tm
     root = tmp_path / "proj"
     (root / "images").mkdir(parents=True)
 
-    ts.bind(FileBackend())
-    try:
-        ts.replace(
-            trait_spec_key(trait_specs_dir(root), "sometrait"),
-            {"schema_version": 2, "name": "sometrait"}, expect=ts.Version.ABSENT,
-        )
-    finally:
-        ts.unbind()
+    _plant(trait_spec_key(trait_specs_dir(root), "sometrait"),
+           {"schema_version": 2, "name": "sometrait"})
 
     res = _run(root)
 
@@ -99,13 +88,7 @@ def test_doctor_unifies_check_negatives_with_check_status_tokens_on_a_version_re
     root = tmp_path / "proj"
     (root / "images").mkdir(parents=True)
 
-    ts.bind(FileBackend())
-    try:
-        ts.replace(
-            image_status_key(root), {"schema_version": 2}, expect=ts.Version.ABSENT,
-        )
-    finally:
-        ts.unbind()
+    _plant(image_status_key(root), {"schema_version": 2})
 
     res = _run(root)
 
