@@ -1615,12 +1615,36 @@ def get_experiment_lineage(experiment_id: str) -> dict[str, Any]:
     return {"experiment_id": experiment_id, "lineage": lineage}
 
 
-def read_split_manifest(experiment_id: str) -> dict[str, Any]:
-    """The run's persisted split manifest, or ``{}`` when it was never written.
+def read_split_manifest_checked(
+    experiment_id: str, *, root: Path | str | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """The run's persisted split manifest, and the decode failure behind an unreadable one.
 
-    The one reader of that record: the membership question and the spatial-region questions
-    a calibration path asks are answered from one parse, so a consumer never re-derives the
-    record's location or its key names.
+    Returns ``(manifest, decode_error)``. ``manifest`` is ``{}`` with ``decode_error`` ``None``
+    for a run that never wrote one: nothing to say. A record that exists but will not decode also
+    answers ``manifest={}``, but ``decode_error`` names why, so a caller that must not read a
+    bound run's corrupted record as an unbound one (a calibration-side mark that would otherwise
+    guess membership from a manifest that no longer exists) can tell the two apart.
+    ``root`` resolves the same project a caller's own checkpoint lookup used, so an explicit one
+    cannot pair one project's producer with another project's record.
     """
-    manifest = read_member(split_key(experiment_id), {})
-    return manifest if isinstance(manifest, dict) else {}
+    from tcip_store import DecodeError
+
+    try:
+        manifest = store.read(split_key(experiment_id, root=root), default={})
+    except DecodeError as exc:
+        return {}, str(exc)
+    return (manifest if isinstance(manifest, dict) else {}), None
+
+
+def read_split_manifest(experiment_id: str) -> dict[str, Any]:
+    """The run's persisted split manifest, or ``{}`` when it was never written or could not be
+    decoded.
+
+    Folds a decode failure onto the same ``{}`` an absent record answers: every consumer here
+    already treats a corrupt manifest the way it treats a missing one, and none needs the two
+    told apart. :func:`read_split_manifest_checked` is the one reader that keeps them apart, for
+    a caller that must not guess membership from a manifest that no longer exists.
+    """
+    manifest, _ = read_split_manifest_checked(experiment_id)
+    return manifest
