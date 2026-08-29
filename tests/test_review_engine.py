@@ -773,3 +773,30 @@ def test_a_shard_write_that_fails_to_land_is_refused_out_loud(
     assert len(persisted) == 1
     assert persisted[0]["action"] == "accepted"
     assert persisted[0]["det_status"] == "reviewed"
+
+
+def test_load_review_state_refuses_a_version_refused_shard_rather_than_skip_it(
+    tmp_path: Path,
+) -> None:
+    """A shard at a schema_version this reader does not accept holds a real human verdict, so
+    losing it the way an unrelated corrupt shard is dropped (logged and skipped) would silently
+    drop that verdict; it must propagate instead.
+    """
+    import tcip_store
+    from tcip_store import SchemaVersionRefused
+    from tcip_store.file_backend import FileBackend
+
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE, review_verdict_key
+
+    tcip_store.bind(FileBackend())
+    key = review_verdict_key(tmp_path, BUCKET, "IMG_0001.JPG")
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    poisoned = tcip_store.get_descriptor(REVIEW_VERDICTS_STORE).codec.encode(
+        {"bucket": BUCKET, "img_name": "IMG_0001.JPG", "state": {"accepted": True},
+         "schema_version": 2}
+    )
+    path.write_bytes(poisoned)
+
+    with pytest.raises(SchemaVersionRefused):
+        ReviewEngine(state_dir=tmp_path)
