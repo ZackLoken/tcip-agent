@@ -857,7 +857,8 @@ def make_splits(
     if materialize:
         from tcip_mcp.pipelines.image_utils import flat_image_key, place_logical_image
 
-        # Labels stay a raw file copy here; only the image placement below routes through the store.
+        # Labels are copied or symlinked directly here, mirroring copy_files; only the image
+        # placement below routes through the store.
         place_fn = shutil.copy2 if copy_files else os.symlink
         for split_name in kept_splits:
             split_stems = bare_parts[split_name]

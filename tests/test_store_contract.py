@@ -1965,13 +1965,32 @@ def test_put_blob_from_path_refuses_a_stale_expect_and_leaves_the_previous_bytes
     key = store.key(BLOB, "from-path-conflict")
     held = ts.put_blob(key, b"first", expect=ts.Version.ABSENT)
     ts.put_blob(key, b"second", expect=held)
-    source = store.root / "never-written.bin"
+    source = store.root / "third-attempt.bin"
     source.write_bytes(b"third attempt")
 
     with pytest.raises(ts.VersionConflict):
         ts.put_blob_from_path(key, source, expect=held)
     with ts.open_blob(key) as handle:
         assert handle.read() == b"second"
+
+
+def test_put_blob_from_path_refuses_a_missing_source_before_any_byte_moves(store):
+    """A source path that isn't there refuses before the destination is touched at all: the
+    version check ahead of it passes (there is nothing stale about it), and only then does the
+    missing source itself raise, leaving whatever the destination held untouched.
+
+    Coverage, not a fix: fsync-before-replace on a successful write is held by inspection of
+    ``put_blob_from_path``'s one implementation (``store.py``), never exercised by a test, since
+    there is no portable way to observe an fsync from outside the process that issued it.
+    """
+    key = store.key(BLOB, "from-path-missing-source")
+    held = ts.put_blob(key, b"prior", expect=ts.Version.ABSENT)
+    source = store.root / "does-not-exist.bin"
+
+    with pytest.raises(FileNotFoundError):
+        ts.put_blob_from_path(key, source, expect=held)
+    with ts.open_blob(key) as handle:
+        assert handle.read() == b"prior"
 
 
 def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(store):
