@@ -117,7 +117,9 @@ class MappingBuild:
     ``dataset_root``/``dataset_id`` are the door's own resolved facts (the dataset identity
     record's minted id, so a moved-and-re-registered dataset still delivers through this
     mapping); ``project_root``/``built_by``/``name`` are likewise the door's own facts, not
-    re-derived here.
+    re-derived here. ``capture_digests`` is ``capture_identity``'s per-capture counterpart
+    (:func:`capture_digests`, one entry per stem, derived from the same row builder), so a
+    whole-date identity mismatch can be narrowed to the capture that actually moved.
     """
 
     name: str
@@ -131,6 +133,7 @@ class MappingBuild:
     nn_tolerance_m: dict
     plant_csvs: list[dict]
     capture_identity: dict[str, str]
+    capture_digests: dict[str, dict[str, str]]
     unreadable: dict[str, list[str]]
     assignments: dict[str, list[Assignment]] = field(default_factory=dict)
     record_sha256: str = ""
@@ -151,6 +154,7 @@ class MappingBuild:
             "nn_tolerance_m": self.nn_tolerance_m,
             "plant_csvs": self.plant_csvs,
             "capture_identity": self.capture_identity,
+            "capture_digests": self.capture_digests,
             "unreadable": self.unreadable,
             "assignments": {
                 date: [a.__dict__ for a in assignments]
@@ -280,6 +284,28 @@ def _read_date_stamps(logical: dict[str, "Path | BandGroupRef"], date_folder: st
     return stamps
 
 
+def _capture_row(s: ImageStamp) -> list[object]:
+    """The fields one capture's identity commits to: a manifest's own digest and the member names
+    it claims for a ``band_group``, bare identity for a ``raster`` (neither carries EXIF), EXIF for
+    an ``image``. The one row shape :func:`capture_identity` (joined across a date) and
+    :func:`capture_digests` (kept per capture) both build from, so the two spellings cannot drift
+    apart.
+    """
+    if s.kind == "band_group":
+        return [s.name, s.kind, s.manifest_sha256, list(s.members)]
+    if s.kind == "raster":
+        return [s.name, s.kind]
+    return [
+        s.name, s.kind,
+        s.timestamp.isoformat() if s.timestamp else None,
+        s.lat, s.lon, s.h_pos_err, s.readable,
+    ]
+
+
+def _row_digest(row: list[object]) -> str:
+    return hashlib.sha256(json.dumps(row, sort_keys=False).encode("utf-8")).hexdigest()[:16]
+
+
 def capture_identity(stamps: list[ImageStamp]) -> str:
     """The sha256[:16] over every capture ``list_logical_images`` enumerated for one date.
 
@@ -290,20 +316,19 @@ def capture_identity(stamps: list[ImageStamp]) -> str:
     when the delivery read every capture the date has, to detect a changed input set at no added
     cost precisely when it can (see that function's own docstring for the case it can't).
     """
-    rows: list[list[object]] = []
-    for s in sorted(stamps, key=lambda s: s.name):
-        if s.kind == "band_group":
-            rows.append([s.name, s.kind, s.manifest_sha256, list(s.members)])
-        elif s.kind == "raster":
-            rows.append([s.name, s.kind])
-        else:
-            rows.append([
-                s.name, s.kind,
-                s.timestamp.isoformat() if s.timestamp else None,
-                s.lat, s.lon, s.h_pos_err, s.readable,
-            ])
-    digest = hashlib.sha256(json.dumps(rows, sort_keys=False).encode("utf-8")).hexdigest()
-    return digest[:16]
+    rows = [_capture_row(s) for s in sorted(stamps, key=lambda s: s.name)]
+    return _row_digest(rows)
+
+
+def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
+    """One digest per capture, keyed by stem, over that capture's own :func:`_capture_row` alone.
+
+    ``capture_identity``'s counterpart: the same row shape, kept apart per capture instead of
+    joined across the whole date, so a whole-date identity mismatch can be narrowed to the exact
+    capture that moved (a band group's manifest rewritten in place, most usefully, since nothing
+    else names that case) rather than only the date.
+    """
+    return {s.stem: _row_digest(_capture_row(s)) for s in stamps}
 
 
 # ── Plant CSV parsing ───────────────────────────────────────────────────
@@ -679,6 +704,7 @@ def build_mapping(
     dates_walked: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
     capture_ids: dict[str, str] = {}
+    capture_digests_by_date: dict[str, dict[str, str]] = {}
     unreadable: dict[str, list[str]] = {}
     if images_root.is_dir():
         for date_dir in sorted(images_root.iterdir()):
@@ -691,6 +717,7 @@ def build_mapping(
             logical = list_logical_images(date_dir)
             stamps = _read_date_stamps(logical, date)
             capture_ids[date] = capture_identity(stamps)
+            capture_digests_by_date[date] = capture_digests(stamps)
             unreadable[date] = sorted(
                 s.name for s in stamps if s.kind == "image" and s.readable is False)
             assignments[date] = assign_plants(stamps, plants, nn_tolerance_m=nn_tolerance_m)
@@ -707,6 +734,7 @@ def build_mapping(
         nn_tolerance_m={"value": nn_tolerance_m, "source": tolerance_source},
         plant_csvs=plant_csv_meta,
         capture_identity=capture_ids,
+        capture_digests=capture_digests_by_date,
         unreadable=unreadable,
         assignments=assignments,
     )
@@ -817,6 +845,7 @@ _REQUIRED_TOP_KEYS: dict[str, type | tuple[type, ...]] = {
     "nn_tolerance_m": dict,
     "plant_csvs": list,
     "capture_identity": dict,
+    "capture_digests": dict,
     "unreadable": dict,
     "assignments": dict,
 }
@@ -939,9 +968,25 @@ def load_mapping(project_root: Path | str, name: str) -> Optional[MappingBuild]:
         built_by=record["built_by"], built_at=record["built_at"],
         dates_requested=record["dates_requested"], dates=record["dates"],
         nn_tolerance_m=record["nn_tolerance_m"], plant_csvs=record["plant_csvs"],
-        capture_identity=record["capture_identity"], unreadable=record["unreadable"],
+        capture_identity=record["capture_identity"],
+        capture_digests=record["capture_digests"], unreadable=record["unreadable"],
         assignments=assignments, record_sha256=record_sha256,
     )
+
+
+def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
+    """Name one capture for a refusal message: its kind and file name when a fresh stamp for
+    ``stem`` was read this call, else the bare stem (a capture that vanished between the record
+    and this recompute, which the added/missing-stem checks above already refuse before this is
+    ever reached)."""
+    s = stamps_by_stem.get(stem)
+    if s is None:
+        return stem
+    if s.kind == "band_group":
+        return f"band group manifest {s.name!r}"
+    if s.kind == "raster":
+        return f"raster {s.name!r}"
+    return f"image {s.name!r}"
 
 
 def verify_mapping_inputs(
@@ -984,14 +1029,16 @@ def verify_mapping_inputs(
     When every mapped capture of a date was read (``missing_stems`` empty and ``read_set`` equal
     to the recorded stems whose row carries a truthy ``plot_name``), the whole date's identity
     (:func:`capture_identity`) is recomputed over every capture the date enumerates, the unmapped
-    ones (a raster, a band group) included, and compared against the record, refusing by name on a
+    ones (a raster, a band group) included, and compared against the record, refusing on a
     mismatch; a capture verified only this way is not also listed in ``captures_unverified``, since
-    the digest just re-checked it. Under a partial read, that digest does not run, so an in-place
-    EXIF timestamp or band-group manifest change on a read capture goes undetected whenever some
-    other mapped capture of the same date was not read: the position and readability checks above
-    catch a moved plant or a capture gone unreadable, never a same-position, same-readability
-    change in place. Catching that finer, per-capture identity change is deferred to the
-    version-field family.
+    the digest just re-checked it. The refusal names the capture(s) whose own
+    :func:`capture_digests` entry moved (a band group's manifest rewritten in place, most usefully,
+    since nothing else names that case), not only the date, by comparing the record's per-capture
+    digests against a fresh recompute over the same enumeration. Under a partial read, that digest
+    does not run, so an in-place EXIF timestamp or band-group manifest change on a read capture goes
+    undetected whenever some other mapped capture of the same date was not read: the position and
+    readability checks above catch a moved plant or a capture gone unreadable, never a
+    same-position, same-readability change in place.
 
     Never raises: returns ``{"refusal": str}`` for any of the above; otherwise
     ``{"captures_unverified": [...], "plant_csvs_unverified": [...]}``, entries in ``build.dates``
@@ -1105,9 +1152,17 @@ def verify_mapping_inputs(
             whole_date_stamps = _read_date_stamps(logical, date)
             new_identity = capture_identity(whole_date_stamps)
             if new_identity != build.capture_identity.get(date):
+                new_digests = capture_digests(whole_date_stamps)
+                recorded_digests = build.capture_digests.get(date, {})
+                stamps_by_stem = {s.stem: s for s in whole_date_stamps}
+                moved = sorted(
+                    _describe_capture(stamps_by_stem, stem)
+                    for stem in set(new_digests) | set(recorded_digests)
+                    if new_digests.get(stem) != recorded_digests.get(stem)
+                )
+                detail = ", ".join(moved) if moved else "a capture whose identity does not decompose"
                 return {"refusal": (
-                    f"the captures under date {date} changed since this mapping was built "
-                    f"(recorded {build.capture_identity.get(date)!r}, now {new_identity!r}); "
+                    f"date {date}: {detail} changed since this mapping was built; "
                     "rebuild to cover the images actually on disk")}
 
     return {"captures_unverified": captures_unverified, "plant_csvs_unverified": plant_csvs_unverified}
