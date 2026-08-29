@@ -73,9 +73,15 @@ def check_negatives(root: Path, findings: list) -> None:
         confirmed_negative_names_any_subject, is_confirmed_negative, normalize_status_store,
         read_image_status_store, resolve_image_name,
     )
+    from tcip_store import StoreError
 
     # Confirmations are dataset-native, and this check already assumes root == dataset_root.
-    by_bucket = normalize_status_store(read_image_status_store(root))
+    try:
+        by_bucket = normalize_status_store(read_image_status_store(root))
+    except StoreError as exc:
+        findings.append(("error", f"the image status store will not read ({exc}); negatives "
+                         "cannot be checked against it at all"))
+        return
     stems = _image_stems(root)
     ann_root = annotation_root(root)
     neg_names = confirmed_negative_names_any_subject(by_bucket)
@@ -170,12 +176,12 @@ def check_status_tokens(root: Path, findings: list) -> None:
     from tcip_annotation import json_io
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
-        annotation_path, annotations_hold_subject, bucket_subject_date, image_status_path,
-        status_confirmations, unreadable_status_entries,
+        IMAGE_STATUS_STORE, annotation_path, annotations_hold_subject, bucket_subject_date,
+        image_status_path, status_confirmations, unreadable_status_entries,
     )
 
     raw = _load(image_status_path(root))
-    _note_version(findings, str(image_status_path(root).relative_to(root)), "image_status", raw)
+    _note_version(findings, str(image_status_path(root).relative_to(root)), IMAGE_STATUS_STORE, raw)
     unreadable = unreadable_status_entries(raw)
     if unreadable:
         findings.append(("warn", f"{len(unreadable)} status entr{'y is' if len(unreadable) == 1 else 'ies are'} "
@@ -263,6 +269,7 @@ def check_provenance(root: Path, findings: list) -> None:
     from tcip_annotation.json_io import ANNOTATIONS_KEY, UnreadableLabelDocument, load_label_document
     from tcip_annotation.review_engine import BASELINE_DIRNAME
     from tcip_mcp.dataset_layout import annotation_root
+    from tcip_mcp.pipelines.model_build import SNAPSHOT_MANIFEST_STORE
 
     ann_root = annotation_root(root)
     unstamped = 0
@@ -298,7 +305,7 @@ def check_provenance(root: Path, findings: list) -> None:
             if not isinstance(manifest, dict):
                 continue
             _note_version(
-                findings, str(manifest_path.relative_to(root)), "model_snapshot_manifest", manifest
+                findings, str(manifest_path.relative_to(root)), SNAPSHOT_MANIFEST_STORE, manifest
             )
             missing = manifest.get("missing") or []
             errors = manifest.get("snapshot_errors") or []
@@ -309,6 +316,8 @@ def check_provenance(root: Path, findings: list) -> None:
 
 
 def check_state(root: Path, findings: list) -> None:
+    from tcip_annotation.review_engine import REVIEW_VERDICTS_STORE
+
     state = root / ".tcip" / "state"
     stems = _image_stems(root)
     shard_dir = state / "review"
@@ -317,7 +326,7 @@ def check_state(root: Path, findings: list) -> None:
         # that named no bucket.
         for shard in shard_dir.rglob("*.json"):
             payload = _load(shard) or {}
-            _note_version(findings, str(shard.relative_to(root)), "review_verdicts", payload)
+            _note_version(findings, str(shard.relative_to(root)), REVIEW_VERDICTS_STORE, payload)
             img = payload.get("img_name", shard.stem)
             if Path(img).stem not in stems:
                 findings.append(("warn", f"review shard {shard.name} references unknown image {img!r}"))
@@ -329,15 +338,16 @@ def check_region_completeness(root: Path, findings: list) -> None:
     an attested cell's stamped digest and its current annotation content."""
     from tcip_annotation.json_io import UnreadableLabelDocument
     from tcip_mcp.dataset_layout import (
-        bucket_subject_date, normalize_region_completeness_store,
-        region_completeness_digest_path, region_completeness_path,
-        unreadable_completeness_entries,
+        REGION_COMPLETENESS_DIGEST_STORE, REGION_COMPLETENESS_STORE, bucket_subject_date,
+        normalize_region_completeness_store, region_completeness_digest_path,
+        region_completeness_path, unreadable_completeness_entries,
     )
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
     raw = _load(region_completeness_path(root))
     _note_version(
-        findings, str(region_completeness_path(root).relative_to(root)), "region_completeness", raw
+        findings, str(region_completeness_path(root).relative_to(root)),
+        REGION_COMPLETENESS_STORE, raw,
     )
     unreadable = unreadable_completeness_entries(raw)
     if unreadable:
@@ -352,7 +362,7 @@ def check_region_completeness(root: Path, findings: list) -> None:
     _note_version(
         findings,
         str(region_completeness_digest_path(root).relative_to(root)),
-        "region_completeness_digest",
+        REGION_COMPLETENESS_DIGEST_STORE,
         digests,
     )
     if not isinstance(digests, dict):
