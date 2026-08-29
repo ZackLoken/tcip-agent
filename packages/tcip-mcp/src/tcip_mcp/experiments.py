@@ -889,6 +889,9 @@ def read_metrics(experiment_id: str, *, root: Path | str | None = None) -> list[
     if page.corrupt:
         logger.warning("experiment %s metrics log has %d undecodable entries",
                        experiment_id, len(page.corrupt))
+    if page.version_refused:
+        logger.warning("experiment %s metrics log has %d entries at a schema_version this "
+                       "reader does not accept", experiment_id, len(page.version_refused))
     return [dict(record) for record in page.records]
 
 
@@ -1039,6 +1042,9 @@ def read_validations(
     if page.corrupt:
         logger.warning("experiment %s validations log has %d undecodable entries",
                        experiment_id, len(page.corrupt))
+    if page.version_refused:
+        logger.warning("experiment %s validations log has %d entries at a schema_version "
+                       "this reader does not accept", experiment_id, len(page.version_refused))
     return [dict(record) for record in page.records]
 
 
@@ -1483,14 +1489,16 @@ def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[s
     by ``arguments.experiment_id``, from one scan of the platform audit log, the read
     :func:`compare_experiments` shares across every experiment it compares rather than repeating
     per experiment. ``None`` for the whole call when the log can't be read: the read itself
-    raised, or :func:`~tcip_store.read_log` reports corrupt entries (folded onto ``page.corrupt``
-    rather than raising, so an unreadable page would otherwise look like a page with nothing to
-    report). Either way every experiment's own field is then absent, never an empty list, so
-    "no refusals" and "couldn't read the log" are never confused for each other. An id present in
-    the index only when it has at least one entry; an id with none is absent from the index and
-    the caller reads that as an empty list, not as unreadable. A refusal line lands only under the
-    root that holds the record, which is the root this reader must be pinned to for the experiment
-    to resolve at all, so the one-root scan is complete for every experiment it can answer for.
+    raised, or :func:`~tcip_store.read_log` reports entries this reader could not use, corrupt
+    bytes on ``page.corrupt`` or an unsupported schema_version on ``page.version_refused``,
+    either kept from raising so an unreadable page would otherwise look like a page with
+    nothing to report. Either way every experiment's own field is then absent, never an empty
+    list, so "no refusals" and "couldn't read the log" are never confused for each other. An id
+    present in the index only when it has at least one entry; an id with none is absent from the
+    index and the caller reads that as an empty list, not as unreadable. A refusal line lands
+    only under the root that holds the record, which is the root this reader must be pinned to
+    for the experiment to resolve at all, so the one-root scan is complete for every experiment
+    it can answer for.
     """
     try:
         from tcip_store import read_log
@@ -1501,6 +1509,8 @@ def _index_refused_mutations(experiment_ids: list[str]) -> dict[str, list[dict[s
     except Exception:
         return None
     if page.corrupt:
+        return None
+    if page.version_refused:
         return None
     wanted = set(experiment_ids)
     index: dict[str, list[dict[str, Any]]] = {}

@@ -393,8 +393,9 @@ def get_sweep(sweep_id: str) -> dict:
 
 
 def _log_holds_anything(page) -> bool:
-    """Whether a metrics log holds anything at all: rows, a torn tail, or undecodable bytes."""
-    return bool(page.records or page.torn_tail or page.corrupt)
+    """Whether a metrics log holds anything at all: rows, a torn tail, undecodable bytes, or
+    entries at a schema_version this reader does not accept."""
+    return bool(page.records or page.torn_tail or page.corrupt or page.version_refused)
 
 
 @router.get("/sweeps/{sweep_id}/trials")
@@ -450,6 +451,9 @@ def get_trial_metrics(sweep_id: str, trial_id: str) -> dict:
     if page.corrupt:
         logger.warning("trial %s has %d metrics rows that do not decode",
                        trial_id, len(page.corrupt))
+    if page.version_refused:
+        logger.warning("trial %s has %d metrics rows at a schema_version this reader does "
+                       "not accept", trial_id, len(page.version_refused))
     rows = [dict(row) for row in page.records]
     return metrics_response(rows, exists=_log_holds_anything(page))
 
