@@ -186,14 +186,24 @@ def place_logical_image(
     materializing a band-grouped capture (a curated review tree, a train/val split) must place
     the whole group, never the manifest by itself. A plain path places just that one file.
 
+    ``dest_dir`` is absolutized once, here, at entry: the bands and plain images route through
+    the caller's own ``dest_key`` (already absolute, since ``flat_image_key`` absolutizes its own
+    directory argument), but the destination manifest's key is derived from ``dest_dir`` itself
+    below, and a relative caller-supplied one would otherwise reach that derivation unabsolutized
+    and refuse ``BadKey`` after the bands had already landed, half-placing the group.
+
     ``copy_files=True`` routes each band and plain image through the store under
     ``dest_key(filename)`` -- the caller's own key, since deriving one from ``dest_dir`` here
     would nest ``images/images/`` -- and the destination manifest through its own
     ``band_group_manifest_key(dest_dir, stem)``, so that store earns its row rather than
-    borrowing the imagery one. Each write is create-only (``expect=Version.ABSENT``); a caught
-    ``VersionConflict`` is the leave-alone answer, atomic under the key's lock, so calling this
-    once per split member for a group shared across members, or a re-run over an existing tree,
-    does no redundant work.
+    borrowing the imagery one. A cheap ``dst.exists()`` check in front of each store write skips
+    a destination already placed without reading or hashing its existing bytes; it is an
+    optimization only; the store's own create-only write (``expect=Version.ABSENT``) and a
+    caught ``VersionConflict`` are the leave-alone answer's actual correctness, atomic under the
+    key's lock, for the race the cheap check cannot see: a concurrent placer of the same file. On
+    POSIX a store-routed write also leaves a ``.lock`` sidecar beside its destination (the
+    store's own documented convention), so a placed tree carries the same sidecars an ingested
+    tree already does there.
 
     ``copy_files=False`` symlinks instead, a filesystem operation the store takes no part in: a
     destination is checked for presence with ``os.path.lexists`` (a dangling link reads as
@@ -201,13 +211,15 @@ def place_logical_image(
     whose ``FileExistsError`` is also caught, for idempotency against a concurrent placement of
     the same link.
     """
-    dest_dir = Path(dest_dir)
+    dest_dir = Path(dest_dir).absolute()
 
-    def _place_copy(src_path: Path, key: Key) -> None:
+    def _place_copy(src_path: Path, key: Key, dst: Path) -> None:
+        if dst.exists():
+            return  # already placed: a shared band group or a re-run over an existing tree
         try:
             tcip_store.put_blob_from_path(key, src_path, expect=Version.ABSENT)
         except VersionConflict:
-            pass  # already placed: a shared band group or a re-run over an existing tree
+            pass  # a concurrent placer won the race; the file is there either way
 
     def _place_symlink(src_path: Path, dst: Path) -> None:
         if os.path.lexists(dst):
@@ -220,17 +232,20 @@ def place_logical_image(
     if isinstance(source, BandGroupRef):
         for band_path in source.bands.values():
             if copy_files:
-                _place_copy(band_path, dest_key(band_path.name))
+                _place_copy(band_path, dest_key(band_path.name), dest_dir / band_path.name)
             else:
                 _place_symlink(band_path, dest_dir / band_path.name)
         if copy_files:
-            _place_copy(source.manifest_path, band_group_manifest_key(dest_dir, source.stem))
+            _place_copy(
+                source.manifest_path, band_group_manifest_key(dest_dir, source.stem),
+                dest_dir / source.manifest_path.name,
+            )
         else:
             _place_symlink(source.manifest_path, dest_dir / source.manifest_path.name)
         return source.manifest_path.name
 
     if copy_files:
-        _place_copy(source, dest_key(source.name))
+        _place_copy(source, dest_key(source.name), dest_dir / source.name)
     else:
         _place_symlink(source, dest_dir / source.name)
     return source.name

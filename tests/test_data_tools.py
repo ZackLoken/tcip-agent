@@ -142,8 +142,9 @@ def test_make_splits_materialize(data_dir: Path, tmp_path: Path):
         assert (out / split / "images").is_dir()
         assert (out / split / "labels").is_dir()
     assert not (out / "test").exists()
-    # Every image landed under exactly one split's images/ dir.
-    placed = sorted(p.stem for p in out.rglob("images/*") if p.is_file())
+    # Every image landed under exactly one split's images/ dir. Lock files outlive writes on
+    # POSIX; they are not a placed image and are excluded rather than read as one.
+    placed = sorted(p.stem for p in out.rglob("images/*") if p.is_file() and p.suffix != ".lock")
     assert placed == ["extra_000", "img_001", "img_002", "img_003"]
 
 
@@ -335,13 +336,91 @@ def test_make_splits_materialize_places_a_complete_band_group(tmp_path: Path):
                              calibration_ratio=0.25)
 
         assert "error" not in result, result
+        # Lock files outlive writes on POSIX; the placed tree's own contents are what is asserted.
         by_split = {
-            split: {p.name for p in (out / split / "images").glob("plotA*")}
+            split: {p.name for p in (out / split / "images").glob("plotA*")
+                    if p.suffix != ".lock"}
             for split in ("train", "val", "calibration")
         }
         holding = [split for split, names in by_split.items() if names]
         assert len(holding) == 1, by_split
         assert by_split[holding[0]] == {"plotA.bandgroup", "plotA_G.npy", "plotA_R.npy"}
+
+
+def test_make_splits_materialize_places_a_complete_band_group_under_a_relative_output_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A relative ``output_path`` used to refuse ``BadKey`` on the destination manifest's own key
+    after the bands had already landed, since the manifest key is derived from ``dest_dir``
+    itself inside ``place_logical_image`` while the per-band keys (``flat_image_key``) already
+    absolutized theirs; ``place_logical_image`` now absolutizes ``dest_dir`` once at entry."""
+    import numpy as np
+
+    from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / "2-11-26"
+    images_dir.mkdir(parents=True)
+    labels_dir = root / "annotations" / "2-11-26"
+    labels_dir.mkdir(parents=True)
+    band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
+    np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
+    np.save(band_r, np.zeros((4, 4), dtype=np.uint8))
+    write_band_group_manifest(images_dir, "plotA", {"G": band_g, "R": band_r})
+    json_io.write_annotations(
+        labels_dir / "plotA.json",
+        [Annotation(subject="leaf", geometry=BBox(4, 4, 12, 12))], 100, 80,
+    )
+    _add_extra_leaf_groups(images_dir, labels_dir, 3)
+    monkeypatch.chdir(tmp_path)
+
+    result = make_splits(str(root), output_path="m", materialize=True, subject="leaf",
+                         train_ratio=0.5, val_ratio=0.25, calibration_ratio=0.25)
+
+    assert "error" not in result, result
+    out = tmp_path / "m"
+    by_split = {
+        split: {p.name for p in (out / split / "images").glob("plotA*") if p.suffix != ".lock"}
+        for split in ("train", "val", "calibration")
+    }
+    holding = [split for split, names in by_split.items() if names]
+    assert len(holding) == 1, by_split
+    assert by_split[holding[0]] == {"plotA.bandgroup", "plotA_G.npy", "plotA_R.npy"}
+
+
+def test_place_logical_image_leaves_an_existing_destination_alone_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The leave-alone path is a cheap ``dst.exists()`` check in front of the store write, not a
+    read-and-hash of the whole existing destination: a destination already present is skipped
+    before ``put_blob_from_path`` is even attempted."""
+    from tcip_mcp.pipelines import image_utils
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    dest_dir = tmp_path / "dest"
+    dest_dir.mkdir()
+    source = src_dir / "img.jpg"
+    source.write_bytes(b"\xff\xd8\xff")
+    (dest_dir / "img.jpg").write_bytes(b"already there")
+
+    calls: list = []
+    real_put = image_utils.tcip_store.put_blob_from_path
+
+    def _spy(key, src_path, **kwargs):
+        calls.append(key)
+        return real_put(key, src_path, **kwargs)
+
+    monkeypatch.setattr(image_utils.tcip_store, "put_blob_from_path", _spy)
+
+    name = image_utils.place_logical_image(
+        source, dest_dir, copy_files=True,
+        dest_key=lambda filename: image_utils.flat_image_key(dest_dir, filename),
+    )
+
+    assert name == "img.jpg"
+    assert (dest_dir / "img.jpg").read_bytes() == b"already there"
+    assert calls == []
 
 
 def test_make_splits_stats_only_carries_dataset_hash(data_dir: Path):
