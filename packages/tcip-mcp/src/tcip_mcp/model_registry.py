@@ -168,8 +168,51 @@ class VerifiedCheckpoint:
 
 
 class UnregisteredCheckpoint(ValueError):
-    """A checkpoint the registry names no entry for, or whose registered entries disagree on
-    producer, or whose payload cannot be trusted to unpickle under ``weights_only=True``."""
+    """A checkpoint the registry names no entry for, whose registered entries disagree on
+    producer, whose payload cannot be trusted to unpickle under ``weights_only=True``, or whose
+    payload carries a ``schema_version`` this reader does not accept: whatever identity check
+    already passed (a registry-name match, or a completion's own recorded digest), none of these
+    is a payload this reader can act on."""
+
+
+def _load_verified_payload(data: bytes, *, source: str) -> dict:
+    """Unpickle already identity-verified checkpoint bytes, refusing a payload this reader
+    cannot act on.
+
+    The one implementation :func:`load_registered_checkpoint` (identity verified by a registry
+    name match) and ``experiments.register_model_from_experiment`` (identity verified by the
+    run's own recorded completion digest) both call, once their own identity check has passed,
+    so the unpickle discipline (``weights_only=True``) and the ``schema_version`` ceiling can
+    never drift between the two doors a checkpoint's bytes reach this platform's own reader
+    through. ``source`` names the checkpoint (path and digest) in every raised message.
+
+    Raises :class:`UnregisteredCheckpoint` for a payload that will not unpickle under
+    ``weights_only=True``, or that carries a ``schema_version`` this reader does not accept.
+    Raises a bare ``ValueError`` (:func:`~tcip_mcp.pipelines.inference.predictor._require_dict_payload`)
+    for a payload that does not unpickle to a dict, the same fact the kind sniff raises.
+    """
+    import torch  # local checkpoint an identity check already named; unpickling it is the point
+
+    from tcip_mcp.pipelines.inference.predictor import _require_dict_payload
+
+    try:
+        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
+    except Exception as exc:
+        raise UnregisteredCheckpoint(
+            f"{source} could not be loaded with weights_only=True ({exc}): registration "
+            "verifies identity, not payload shape, and this payload carries something outside "
+            "a platform-written deliverable checkpoint's contract (a resume checkpoint's "
+            "RNG/optimizer state is the trainer's own resume path to read; a bespoke loop's own "
+            "arbitrary state is outside the contract)."
+        ) from exc
+    payload = _require_dict_payload(payload, source)
+    from tcip_mcp.pipelines.training.generic_trainer import RUN_CHECKPOINT_STORE
+
+    try:
+        check_schema_version(get_descriptor(RUN_CHECKPOINT_STORE), payload)
+    except SchemaVersionRefused as exc:
+        raise UnregisteredCheckpoint(f"{source}: {exc}") from exc
+    return payload
 
 
 def load_registered_checkpoint(
@@ -187,19 +230,20 @@ def load_registered_checkpoint(
     and every entry whose ``sha256`` equals the digest is collected; none of them raises
     :class:`UnregisteredCheckpoint`, naming the path, the digest, the root searched, and the
     remedy. Several entries naming one digest must agree on producer or the load refuses (see
-    :func:`_resolve_producer`). Only once the registry has answered is the payload unpickled,
-    with ``weights_only=True``, a narrower sink than the ``weights_only=False`` sniff a predictor
-    build used to run: every deliverable checkpoint this platform's own trainer writes (a state
-    dict, JSON config, numeric metrics and the three stamps) loads under it; a payload that will
-    not (a periodic resume checkpoint's RNG/optimizer state, or a bespoke loop's own arbitrary
-    object) refuses naming the reason, since registration verifies identity, never payload shape.
-    A payload that does not unpickle to a dict raises the same ``ValueError`` a kind sniff raises
-    for the same fact. A missing file raises ``FileNotFoundError`` before any read.
+    :func:`_resolve_producer`). Only once the registry has answered is the payload unpickled and
+    version-checked, through :func:`_load_verified_payload`, a narrower sink than the
+    ``weights_only=False`` sniff a predictor build used to run: every deliverable checkpoint this
+    platform's own trainer writes (a state dict, JSON config, numeric metrics and the three
+    stamps) loads under it; a payload that will not (a periodic resume checkpoint's RNG/optimizer
+    state, or a bespoke loop's own arbitrary object), or that carries a ``schema_version`` this
+    reader does not accept, refuses naming the reason, since registration verifies identity,
+    never payload shape. A payload that does not unpickle to a dict raises the same ``ValueError``
+    a kind sniff raises for the same fact. A missing file raises ``FileNotFoundError`` before any
+    read.
 
     The digest and the load are over one immutable byte string, so no replacement of the file, in
     place or by rename, on either platform, can separate them.
     """
-    from tcip_mcp.pipelines.inference.predictor import _require_dict_payload
     from tcip_mcp.project_paths import project_root
 
     ckpt = Path(checkpoint_path)
@@ -212,26 +256,7 @@ def load_registered_checkpoint(
     if not entries:
         raise _unregistered_checkpoint_error(ckpt, digest, root)
     producer = _resolve_producer(entries, checkpoint_path=ckpt, digest=digest)
-
-    import torch  # local checkpoint the registry already named; unpickling it is the point
-
-    try:
-        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
-    except Exception as exc:
-        raise UnregisteredCheckpoint(
-            f"{ckpt} (sha256 {digest}) is registered but could not be loaded with "
-            f"weights_only=True ({exc}): registration verifies identity, not payload shape, and "
-            "this payload carries something outside a platform-written deliverable checkpoint's "
-            "contract (a resume checkpoint's RNG/optimizer state is the trainer's own resume "
-            "path to read; a bespoke loop's own arbitrary state is outside the contract)."
-        ) from exc
-    payload = _require_dict_payload(payload, str(ckpt))
-    from tcip_mcp.pipelines.training.generic_trainer import RUN_CHECKPOINT_STORE
-
-    try:
-        check_schema_version(get_descriptor(RUN_CHECKPOINT_STORE), payload)
-    except SchemaVersionRefused as exc:
-        raise ValueError(f"{ckpt} (sha256 {digest}): {exc}") from exc
+    payload = _load_verified_payload(data, source=f"{ckpt} (sha256 {digest})")
     return VerifiedCheckpoint(
         path=str(checkpoint_path), sha256=digest, payload=payload, entries=entries,
         producer=producer,

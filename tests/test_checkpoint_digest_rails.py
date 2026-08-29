@@ -575,6 +575,92 @@ def test_registration_digest_and_load_digest_agree(tmp_path, monkeypatch):
     assert checkpoint.sha256 == reg["sha256"]
 
 
+# The version field: register_model_from_experiment routes through the same unpickle+version
+# check load_registered_checkpoint uses, and the load-time refusal is a class doors catch.
+
+def test_register_model_from_experiment_applies_the_same_version_check_as_load_registered_checkpoint(
+    tmp_path, monkeypatch,
+):
+    """Before this fix, register_model_from_experiment ran its own torch.load(weights_only=False)
+    with no version check, so a payload above the ceiling would register with its real metrics.
+    Routed through the shared _load_verified_payload, this payload's metrics are read no
+    differently than any other payload this reader cannot act on: empty, never fabricated."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt, stamp={"schema_version": 999, "metrics": {"map": 0.9}})
+    create_experiment("exp-version", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("exp-version", str(ckpt))
+
+    reg = register_model_from_experiment("exp-version", str(ckpt))
+    assert "error" not in reg, reg
+    assert reg["metrics"] == {}
+    assert reg["metrics_source"] is None
+
+
+def test_register_model_from_experiment_reads_metrics_through_the_shared_verified_load(
+    tmp_path, monkeypatch,
+):
+    """The admitting half: an ordinary checkpoint (no schema_version key) still has its stamped
+    metrics read and registered, through the platform's own producers (complete_run,
+    register_model_from_experiment)."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.experiments import complete_run, create_experiment, register_model_from_experiment
+
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt, stamp={"metrics": {"map": 0.9}})
+    create_experiment("exp-plain", {"model_source": {"builder": "x:y"}})
+    assert "error" not in complete_run("exp-plain", str(ckpt))
+
+    reg = register_model_from_experiment("exp-plain", str(ckpt))
+    assert "error" not in reg, reg
+    assert reg["metrics"] == {"map": 0.9}
+    assert reg["metrics_source"] == "trainer"
+
+
+def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_key(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+
+    run = create_run({"data": {}}, str(tmp_path / "out"))
+    ctx = TrainContext(run=run, train_loader=None)
+
+    with pytest.raises(ValueError, match="schema_version"):
+        ctx.save_checkpoint({"model_state_dict": {}, "schema_version": 2})
+
+
+def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, monkeypatch):
+    """The admitting half: an ordinary bespoke state, through a real ctx.save_checkpoint call."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tcip_mcp.pipelines.training.generic_trainer import create_run
+
+    run = create_run({"data": {}}, str(tmp_path / "out"))
+    ctx = TrainContext(run=run, train_loader=None)
+
+    path = ctx.save_checkpoint({"model_state_dict": {}})
+    assert Path(path).is_file()
+
+
+def test_load_registered_checkpoints_version_refusal_is_caught_by_a_door(tmp_path, monkeypatch):
+    """The load-time version refusal is UnregisteredCheckpoint, the class every checkpoint door
+    already catches, not a bare ValueError that would surface as an unhandled 500."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    ckpt = tmp_path / "m.pt"
+    _bespoke_checkpoint(ckpt, stamp={"schema_version": 999})
+    _register(tmp_path, str(ckpt))
+    images_dir, _ = _images(tmp_path)
+
+    from tcip_mcp.tools.inference_tools import run_inference
+
+    r = run_inference(str(ckpt), images_dir=str(images_dir), device="cpu", tile=False)
+    assert "error" in r
+
+
 # Rail 3: a sweep record edited after the run is refused by _calibration_evidence through
 # export_predictions, naming both digests.
 
