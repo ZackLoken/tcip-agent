@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from tcip_mcp.dataset_layout import dataset_identity_path
-from tcip_mcp.pipelines.resolution import dataset_fingerprint
+from tcip_mcp.pipelines.resolution import dataset_fingerprint, fingerprint_formula_version
 from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
 
@@ -52,6 +52,11 @@ def main() -> int:
     if recorded == current:
         print(f"OK: {root} unchanged (id={ds_id} crop={stored.get('crop')} fingerprint={current})")
         status = 0
+    elif fingerprint_formula_version(recorded) is None:
+        print(f"FORMULA-UNRECORDED: {root} carries a bare fingerprint ({recorded!r}) from before "
+              f"the formula-version prefix; current={current} cannot be compared to it as same or "
+              "changed. Re-register with register_dataset to restamp under the current formula.")
+        status = 3
     else:
         print(f"CHANGED: {root} content differs from its recorded identity "
               f"(recorded={recorded} current={current}); a number reproduced from it is no longer valid")
