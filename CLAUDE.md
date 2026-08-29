@@ -97,12 +97,20 @@ silently corrupts results and compounds across sessions.
   caller blind-retry. Experiments are immutable: new run, never an overwritten record.
 - Confirm before destructive or outward actions (deleting labels, overwriting weights, exporting
   deliverables); approval for one does not extend to the next.
-- No backward compatibility while the platform has no users: delete migration paths, fallbacks
-  and "legacy" shims on sight (other tools' formats and browser APIs are interop, kept, not called
-  legacy). Existing dev state and the sample projects are conformed to a schema change by a
-  one-off operator script, never runtime migration logic. This rule expires the moment a breeder
-  holds a real project on a schema this platform later changes; whoever notices updates this
-  bullet.
+- Persisted formats are frozen. `frozen-formats.json`, generated from the store registry by
+  `scripts/generate_frozen_manifest.py` and held to it by `tests/test_frozen_manifest.py`, is the
+  commitment: every store's classification and version ceiling, total over the registry. The
+  version field is lazy (absence means the frozen version 1; the first writer of the field is
+  whichever change bumps a format), and the seam refuses, on read and on write, a version it
+  does not know. A bump is a deliberate change landed as its own reviewed family with its
+  obligations stated: the append-only audit log defines a new line shape without rewriting old
+  lines, a content-addressed document (a label, a checkpoint) states its digest-transition plan,
+  an array-topped store wraps into a versioned mapping. Unstable-by-design stores and interop
+  formats (COCO, other tools' formats, browser APIs) stay outside the freeze and are never
+  called legacy. Still no migration paths, fallbacks or shims at runtime: existing dev state and
+  the sample projects are conformed by one-off operator scripts. The manifest pins declarations
+  only; an undeclared shape change inside version 1 is caught by producer-fed round trips and
+  the review shape, not by the manifest.
 - Enumerate the consumers before deleting anything; an assertion with no new home was a fact.
 - When two code paths must agree, call one from the other; a second implementation of the
   agreement drifts silently and is this repo's most repeated defect. A consistency check whose
