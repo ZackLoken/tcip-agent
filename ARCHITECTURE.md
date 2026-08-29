@@ -573,12 +573,11 @@ f943c12d4693409bcf2a0c1a4229d26b61d34cc1.
 ## 1. MCP tools
 
 `packages/tcip-mcp/src/tcip_mcp/server.py:9` defines `mcp = MCPServer("tcip-pipeline")`.
-`python scripts/list_tools.py` (run this session) reports 57 registered tools, matching
-the 57 `@mcp.tool()` decorator sites found in `packages/tcip-mcp/src/tcip_mcp/tools/*.py`.
-Every one of the 57 `@mcp.tool()` sites is immediately followed by an `@audited` decorator
-(0 exceptions, verified by pairing each `@mcp.tool()` line with the line after it across
-all 15 tool modules; eleven of the sites read `@audited(scope_arg=...)`, so a check must match
-the decorator name rather than the whole line).
+`python scripts/list_tools.py` is the authority for the registered tool list and count; a
+count written here drifts, so none is. Every registered tool's name matches an `@mcp.tool()`
+decorator site in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` and each such site is
+immediately followed by an `@audited` decorator (some spelled `@audited(scope_arg=...)`, so a
+check must match the decorator name rather than the whole line).
 
 Tables below group by defining module. Column "line" is the `def`/`async def` line.
 Docstring is the function's docstring first line, verbatim.
