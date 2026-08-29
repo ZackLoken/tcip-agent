@@ -289,6 +289,9 @@ class ReviewEngine:
         for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(self.state_dir)):
             try:
                 stored = tcip_store.read_versioned(key)
+            except tcip_store.SchemaVersionRefused:
+                # A newer writer's verdict, not corruption: propagate rather than lose it.
+                raise
             except tcip_store.StoreError:
                 logger.exception("Could not load review shard %s", key.parts[-1])
                 continue
