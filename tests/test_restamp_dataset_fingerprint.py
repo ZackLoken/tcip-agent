@@ -83,6 +83,23 @@ def test_an_already_prefixed_fingerprint_is_left_alone(tmp_path):
     assert require_dataset_identity(root)["fingerprint"] == before
 
 
+def test_a_never_recorded_fingerprint_is_nothing_to_restamp(tmp_path):
+    root = tmp_path / "dataset"
+    root.mkdir()
+    _real_dataset(root)
+    result = register_dataset(str(root), "chestnut", str(root))
+    assert "error" not in result, result
+    identity = require_dataset_identity(root)
+    document = {**identity, "fingerprint": None}
+    ts.put_blob(dataset_identity_key(root), ts.RECORD_JSON.encode(document))
+
+    completed = _run_script(str(root), "--project", str(root))
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "never recorded a fingerprint" in completed.stdout
+    assert require_dataset_identity(root)["fingerprint"] is None  # nothing was written
+
+
 def test_a_bare_fingerprint_that_no_longer_matches_the_recompute_refuses_and_reports(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
