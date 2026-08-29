@@ -1596,9 +1596,17 @@ def compare_experiments(experiment_ids: list[str], *, stale_seconds: float = 600
         comparisons.append(summary)
 
     # Whether every compared run trained on the same dataset content, so a caller doesn't assume
-    # apples-to-apples; an unset fingerprint (bespoke/imageless) makes it unknown, not "same".
-    fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
-    same_dataset = None if (not fps or None in fps) else len(fps) == 1
+    # apples-to-apples; an unset or formula-unrecorded fingerprint makes it unknown, not "same".
+    from tcip_mcp.pipelines.resolution import fingerprint_formula_version
+
+    with_fp = [c for c in comparisons if "error" not in c]
+    for c in with_fp:
+        fp = c.get("dataset_fingerprint")
+        if fp is not None and fingerprint_formula_version(fp) is None:
+            c["fingerprint_formula_unrecorded"] = True
+    fps = {c.get("dataset_fingerprint") for c in with_fp}
+    any_unrecorded = any(c.get("fingerprint_formula_unrecorded") for c in with_fp)
+    same_dataset = None if (not fps or None in fps or any_unrecorded) else len(fps) == 1
     return {"experiments": comparisons, "count": len(comparisons), "same_dataset_fingerprint": same_dataset}
 
 

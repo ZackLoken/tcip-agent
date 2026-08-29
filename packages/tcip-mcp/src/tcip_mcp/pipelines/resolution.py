@@ -24,6 +24,7 @@ import csv
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -782,6 +783,26 @@ def _confirmations_term(dataset_root: Path) -> str:
     return h.hexdigest()[:16] if any_negatives else ""
 
 
+FINGERPRINT_FORMULA_VERSION = 1
+"""Bumped whenever the four terms :func:`dataset_fingerprint` hashes change (a new extension
+walked, a term added or dropped): the value each formula version stamps must never compare as
+same-or-different against a value another formula stamped, so the fingerprint carries this as
+a prefix rather than the bare hex Part 14 Q2 found silently reused across two formula shifts."""
+
+_FINGERPRINT_PATTERN = re.compile(r"^v(\d+):([0-9a-f]+)$")
+
+
+def fingerprint_formula_version(value: object) -> int | None:
+    """The formula version a stored fingerprint states, or ``None`` for anything that is not
+    the ``v<n>:<hex>`` shape: a bare legacy value from before this prefix existed, or a value
+    that is not a fingerprint at all. A non-``None`` result never says the formula matches the
+    version this code computes under; only equal integers do."""
+    if not isinstance(value, str):
+        return None
+    m = _FINGERPRINT_PATTERN.match(value)
+    return int(m.group(1)) if m else None
+
+
 def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     """Whole-dataset content identity: labels + image files + registry + confirmed negatives.
 
@@ -804,6 +825,12 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     other file) rather than a narrower photographic-only set, so a dataset holding one of those four
     extensions gets a new value and a multispectral-only dataset gets a real fingerprint instead of
     ``None``.
+
+    The return value carries its formula version as a ``v<n>:<hex>`` prefix
+    (:data:`FINGERPRINT_FORMULA_VERSION`), formula ``1`` being the four-term one this docstring
+    describes, so two values computed under different formulas can never read as equal or
+    unequal by accident: :func:`fingerprint_formula_version` names the formula a stored value
+    states, and a bare legacy value (from before this prefix existed) names none.
     """
     from tcip_mcp.dataset_layout import annotation_root, image_root
 
@@ -821,7 +848,7 @@ def dataset_fingerprint(dataset_root: str | Path) -> str | None:
     h.update(_registry_term(root).encode("utf-8"))
     h.update(b"\0confirmations:")
     h.update(_confirmations_term(root).encode("utf-8"))
-    return h.hexdigest()[:16]
+    return f"v{FINGERPRINT_FORMULA_VERSION}:{h.hexdigest()[:16]}"
 
 
 # --- the prediction bucket's provenance stamps (the delivery gate reads these, not a caller string) ---
