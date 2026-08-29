@@ -617,8 +617,8 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `materialize_review_dataset` | `feedback_tools.py:85` | yes | Build a curated detection dataset from human review verdicts. |
-| `prioritize_review_queue` | `feedback_tools.py:205` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
+| `materialize_review_dataset` | `feedback_tools.py:168` | yes | Build a curated detection dataset from human review verdicts. |
+| `prioritize_review_queue` | `feedback_tools.py:288` | yes | Order un-reviewed images for the next review batch. |  <!-- queued: P5-51 merge-or-split -->
 
 ### inference_tools.py (4 tools)
 
@@ -894,8 +894,8 @@ registered at HEAD.
 | GET | `/image_status` | `get_image_status` | `routes/review.py:1196` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:1249` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:1279` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1453` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1481` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1465` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1493` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
