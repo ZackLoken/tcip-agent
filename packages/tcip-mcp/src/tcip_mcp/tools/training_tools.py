@@ -1634,10 +1634,18 @@ def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     reproduce-a-number chain. The fingerprint is recomputed here (recompute-on-read is authority); the
     id comes from the dataset's ``dataset.json`` if it was registered. ``(None, None)`` for a bespoke /
     imageless run (no dataset_root), matching ``dataset_hash=None`` rather than fabricating identity.
+
+    A version-refused identity (``tcip_store.SchemaVersionRefused``) is a real, wrong identity a
+    delivered number could rest on, never the same fact as not-registered, so it propagates rather
+    than being caught here: this function's own caller already wraps the call in a best-effort
+    ``except Exception`` that logs and continues the run, instead of silently recording
+    ``(None, fp)`` as though the dataset were simply unregistered.
     """
     images_dir = data_cfg.get("images_dir")
     if not images_dir:
         return None, None
+
+    from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.dataset_layout import dataset_root_of, require_dataset_identity
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
@@ -1648,14 +1656,14 @@ def _dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     try:
         fp = dataset_fingerprint(root)
     except OSError as exc:
-        # A fingerprint read failure must not sink the whole experiment record (lineage,
-        # split.json, status) for a run that otherwise trains fine, degrade to an honest
-        # None, matching the bespoke/imageless case, rather than fabricating or propagating.
+        # A fingerprint read failure must not sink the whole experiment record; degrade to None.
         logger.warning("dataset_fingerprint failed for %s: %s", root, exc)
         fp = None
     ds_id = None
     try:
-        ds_id = require_dataset_identity(root).get("id")  # the identity reader carries the version check
+        ds_id = require_dataset_identity(root).get("id")
+    except SchemaVersionRefused:
+        raise
     except ValueError:
         ds_id = None
     return ds_id, fp

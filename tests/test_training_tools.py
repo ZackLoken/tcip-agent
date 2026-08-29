@@ -1174,3 +1174,40 @@ def test_an_ordinary_sweep_payload_still_runs_its_search(tmp_path, monkeypatch):
 
     assert result["best_params"] == {"lr": 0.01}
     assert seen == [{"lr": [0.1, 0.01]}]
+
+
+# _dataset_identity: a version-refused identity propagates rather than reading as unregistered.
+
+def test_dataset_identity_propagates_a_version_refused_identity(tmp_path, monkeypatch):
+    """``except ValueError: ds_id = None`` must not swallow a version refusal identically to
+    not-registered: the two are different facts, and this call's own caller already wraps it in a
+    best-effort ``except Exception`` that logs and continues the run, so propagating here
+    surfaces the fact rather than silently recording ``(None, fp)``."""
+    import tcip_store as ts
+    from tcip_store import SchemaVersionRefused
+
+    from tcip_mcp.dataset_layout import dataset_identity_key
+    from tcip_mcp.tools.training_tools import _dataset_identity
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    key = dataset_identity_key(tmp_path)
+    document = {"crop": "chestnut", "id": "abc123", "fingerprint": "v1:deadbeef",
+                "schema_version": 2}
+    ts.put_blob(key, ts.RECORD_JSON.encode(document))
+
+    with pytest.raises(SchemaVersionRefused):
+        _dataset_identity({"images_dir": str(images_dir)})
+
+
+def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path, monkeypatch):
+    """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
+    from tcip_mcp.tools.training_tools import _dataset_identity
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+
+    ds_id, fp = _dataset_identity({"images_dir": str(images_dir)})
+    assert ds_id is None
