@@ -49,6 +49,10 @@ def restamp(dataset_root: str, project_root: str | None = None) -> int:
         return 1
 
     recorded = identity.get("fingerprint")
+    if recorded is None:
+        print(f"OK: {root} never recorded a fingerprint; nothing to restamp. The next "
+              "register_dataset stamps the formula-versioned form.")
+        return 0
     if fingerprint_formula_version(recorded) is not None:
         print(f"OK: {root} already carries a formula-versioned fingerprint ({recorded!r}); "
               "nothing to restamp")
