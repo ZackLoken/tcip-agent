@@ -174,7 +174,7 @@ def test_rgb_nested_dataset_fingerprints_byte_identically_before_and_after_the_e
         tmp_path / "classes.json",
         ClassRegistry(subjects=(Subject(name="catkin", description="a hazelnut catkin"),)))
 
-    assert dataset_fingerprint(tmp_path) == "34c5da3fe6d87ed4"
+    assert dataset_fingerprint(tmp_path) == "v1:34c5da3fe6d87ed4"
 
 
 def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(tmp_path):
