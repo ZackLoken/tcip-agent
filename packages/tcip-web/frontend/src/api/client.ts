@@ -499,7 +499,6 @@ export const api = {
         total_candidates: number;
         reviewed_skipped: number;
         marks_unresolved: string | null;
-        calibration_ambiguous_stems: string[];
       }>(ROUTES.getReviewQueueByJobId(jobId)),
   },
 };
