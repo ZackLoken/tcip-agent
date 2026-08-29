@@ -178,15 +178,19 @@ def first_labels_json(labels_dir) -> Path | None:
     Raises :class:`~tcip_annotation.json_io.UnreadableLabelDocument` when that first file is
     present but will not read: trying the next file instead would read a directory as unlabeled
     that in fact holds a document nobody can make sense of, the opposite of what "the first" here
-    is supposed to name.
+    is supposed to name. Reads through the unchecked ``load_json_document``, not
+    ``load_label_document``: this directory's shape (json or a dataset-level COCO export) is not
+    yet decided here, only ``dir_label_format``'s own ``_detect_json_format`` call decides it, so
+    this precondition read must not apply the per-image version ceiling to a file that may turn
+    out COCO-shaped.
     """
-    from tcip_annotation.json_io import load_label_document, prediction_documents
+    from tcip_annotation.json_io import load_json_document, prediction_documents
 
     candidates = prediction_documents(labels_dir)
     if not candidates:
         return None
     jp = candidates[0]
-    load_label_document(jp)
+    load_json_document(jp)
     return jp
 
 
@@ -745,7 +749,9 @@ class DetectionDataset(BaseImageDataset):
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
             from tcip_annotation import json_io
 
-            self._coco = json_io.load_label_document(coco_json)
+            # An assembled dataset-level COCO document is interop, never checked against this
+            # platform's own per-image schema_version ceiling (see tcip_annotation.format_io).
+            self._coco = json_io.load_json_document(coco_json)
         # The single name→id map: resolved here for a direct-json build, else supplied by
         # build_dataset (which resolved it once for the COCO assembly). One derivation either way.
         if id_map is None and self.label_format == "json":
@@ -1150,7 +1156,9 @@ class InstanceSegDataset(BaseImageDataset):
                 raise ValueError("label_format='coco' requires coco_json (path to the COCO JSON).")
             from tcip_annotation import json_io
 
-            self._coco = json_io.load_label_document(coco_json)
+            # An assembled dataset-level COCO document is interop, never checked against this
+            # platform's own per-image schema_version ceiling (see tcip_annotation.format_io).
+            self._coco = json_io.load_json_document(coco_json)
         if id_map is None and self.label_format == "json":
             _reg, id_map = _resolve_registry_id_map(self.labels_dir, subject, attribute)
             self._num_classes = len(id_map)

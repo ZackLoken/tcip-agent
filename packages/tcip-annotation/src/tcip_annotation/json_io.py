@@ -121,15 +121,14 @@ class UnreadableLabelDocument(Exception):
     """
 
 
-def parse_label_document(text: str, *, source: str) -> dict:
-    """A per-image label document's parsed dict, from its raw text.
+def parse_json_document(text: str, *, source: str) -> dict:
+    """A JSON document's parsed dict, from its raw text: decode and dict-shape only.
 
     Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
-    JSON, that decodes to something other than a dict, or that carries a ``schema_version`` this
-    reader does not accept: none of the three is a document this schema can read, and reading any
-    of them as empty would train an unreadable file as an unannotated image. The one choke point
-    every reader of a label document's text shares, so ``load_label_document`` and
-    ``annotations_from_bytes`` cannot disagree about what a document means.
+    JSON or that decodes to something other than a dict. Carries no opinion on
+    ``schema_version``: a caller that has not yet decided whether ``source`` is this platform's
+    own per-image document or an interop shape (COCO, or an unrecognized one) reads through here
+    first, and applies :func:`check_annotation_record_version` itself only once it knows which.
     """
     try:
         data = json.loads(text)
@@ -139,10 +138,40 @@ def parse_label_document(text: str, *, source: str) -> dict:
         raise UnreadableLabelDocument(
             f"{source} decodes to a {type(data).__name__}, not the object a label document is"
         )
+    return data
+
+
+def check_annotation_record_version(data: dict, *, source: str) -> None:
+    """Refuse ``data`` when it carries a ``schema_version`` this platform's own per-image reader
+    (:data:`ANNOTATION_RECORDS_STORE`) does not accept.
+
+    Applies only once a caller has confirmed ``data`` is this platform's own annotation-records
+    document: an interop shape (a COCO document's own top-level ``schema_version``, should it
+    carry one) is never checked against this store's ceiling, since the two formats' version
+    fields name unrelated documents.
+    """
     try:
         check_schema_version(get_descriptor(ANNOTATION_RECORDS_STORE), data)
     except SchemaVersionRefused as exc:
         raise UnreadableLabelDocument(f"{source}: {exc}") from exc
+
+
+def parse_label_document(text: str, *, source: str) -> dict:
+    """A per-image label document's parsed dict, from its raw text.
+
+    Raises :class:`UnreadableLabelDocument`, naming ``source``, for text that does not decode as
+    JSON, that decodes to something other than a dict (:func:`parse_json_document`), or that
+    carries a ``schema_version`` this reader does not accept (:func:`check_annotation_record_version`):
+    none of the three is a document this schema can read, and reading any of them as empty would
+    train an unreadable file as an unannotated image. The one choke point every reader of *this
+    platform's own* per-image document shares, so ``load_label_document`` and
+    ``annotations_from_bytes`` cannot disagree about what a document means. A caller reading a
+    document whose format is not yet decided (format detection, an interop parse) reads through
+    :func:`parse_json_document` instead, applying this platform's version ceiling only once it
+    has confirmed the document is this store's own shape.
+    """
+    data = parse_json_document(text, source=source)
+    check_annotation_record_version(data, source=source)
     return data
 
 
@@ -178,6 +207,23 @@ def load_label_document(path: str | Path) -> dict:
     except OSError as exc:
         raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
     return parse_label_document(_decode_label_bytes(data, source=str(p)), source=str(p))
+
+
+def load_json_document(path: str | Path) -> dict:
+    """A JSON document's parsed dict, read from ``path``: decode and dict-shape only, no
+    ``schema_version`` check.
+
+    For a reader that has not yet decided whether ``path`` is this platform's own per-image
+    document or an interop shape (format detection, a COCO parse): see :func:`load_label_document`
+    for the version-checked per-image reader. Raises :class:`UnreadableLabelDocument`, naming
+    ``path``, for the same unopenable-file and undecodable-bytes cases that one raises for.
+    """
+    p = Path(path)
+    try:
+        data = p.read_bytes()
+    except OSError as exc:
+        raise UnreadableLabelDocument(f"{p} could not be opened: {exc}") from exc
+    return parse_json_document(_decode_label_bytes(data, source=str(p)), source=str(p))
 
 
 def annotations_from_bytes(data: bytes, *, source: str) -> list[Annotation]:
