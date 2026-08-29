@@ -13,13 +13,18 @@ image on disk, which a read tool must not do.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
 
-from tcip_mcp.dataset_layout import dataset_identity_path
-from tcip_mcp.pipelines.resolution import dataset_fingerprint, fingerprint_formula_version
+from tcip_store import SchemaVersionRefused
+
+from tcip_mcp.dataset_layout import require_dataset_identity
+from tcip_mcp.pipelines.resolution import (
+    FINGERPRINT_FORMULA_VERSION,
+    dataset_fingerprint,
+    fingerprint_formula_version,
+)
 from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
 
@@ -41,18 +46,25 @@ def main() -> int:
         print(f"no fingerprint for {root} (no images/labels, bespoke or empty)")
         return 0
 
-    ident_path = dataset_identity_path(root)
-    if not ident_path.is_file():
-        print(f"UNREGISTERED: {root} has no dataset.json (run register_dataset). current={current}")
+    try:
+        identity = require_dataset_identity(root)
+    except ValueError as exc:
+        if isinstance(exc.__cause__, SchemaVersionRefused):
+            print(f"VERSION-REFUSED: {exc}")
+            return 5
+        print(f"UNREGISTERED: {exc}")
         return 1
-    stored = json.loads(ident_path.read_text(encoding="utf-8"))
-    ds_id = stored.get("id")
-    recorded = stored.get("fingerprint")
+    ds_id = identity.get("id")
+    recorded = identity.get("fingerprint")
 
-    if recorded == current:
-        print(f"OK: {root} unchanged (id={ds_id} crop={stored.get('crop')} fingerprint={current})")
+    if recorded is None:
+        print(f"NEVER-RECORDED: {root} carries no recorded fingerprint yet; nothing to compare "
+              f"current={current} against. Register with register_dataset to stamp one.")
+        status = 4
+    elif recorded == current:
+        print(f"OK: {root} unchanged (id={ds_id} crop={identity.get('crop')} fingerprint={current})")
         status = 0
-    elif fingerprint_formula_version(recorded) is None:
+    elif fingerprint_formula_version(recorded) != FINGERPRINT_FORMULA_VERSION:
         print(f"FORMULA-UNRECORDED: {root} carries a bare fingerprint ({recorded!r}) from before "
               f"the formula-version prefix; current={current} cannot be compared to it as same or "
               "changed. Re-register with register_dataset to restamp under the current formula.")
@@ -63,7 +75,7 @@ def main() -> int:
         status = 2
 
     # Moved: the project registry knows this id at a different path, by identity rather than a
-    # stored-versus-passed spelling (a relatively-registered "." entry is not a move).
+    # stored-versus-passed spelling. Formula-aware: never bare string equality across formulas.
     project = args.project or root
     regs = read_datasets(project)
     same_id = [r for r in regs if r.get("id") == ds_id]
@@ -73,8 +85,16 @@ def main() -> int:
             same_as_root = os.path.samefile(entry_path, root)
         except OSError:
             same_as_root = False
-        if not same_as_root and r.get("fingerprint") == current:
+        if same_as_root:
+            continue
+        r_fp = r.get("fingerprint")
+        if r_fp == current:
             print(f"  MOVED: id {ds_id} is registered at {entry_path} but the same content is now at {root}")
+        elif r_fp is not None and fingerprint_formula_version(r_fp) != FINGERPRINT_FORMULA_VERSION:
+            print(f"  MOVED-FORMULA-UNRECORDED: id {ds_id} is registered at {entry_path} with a "
+                  f"fingerprint from before the formula-version prefix ({r_fp!r}); whether it is "
+                  f"the same content now at {root} (current={current}) cannot be told without "
+                  "re-registering that entry with register_dataset.")
     return status
 
 
