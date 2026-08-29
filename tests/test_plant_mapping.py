@@ -295,22 +295,32 @@ def test_scan_receipts_refuses_a_version_refused_log_line_not_as_corruption(
 ) -> None:
     """A version-refused audit line is a policy fact, not corruption: it must still block the
     receipt scan (an entry could be hiding behind it unread), naming schema_version rather than
-    the corrupt-log wording."""
+    the corrupt-log wording. Planted as bytes on the file backend's own log, since the seam's
+    writer refuses to append the line itself."""
     from tcip_mcp.audit import audit_log_key
+    from tcip_store.file_backend import FileBackend
 
-    build = _build({
-        "2-11-26": [
-            Assignment(
-                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
-                plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
-            )
-        ]
-    })
-    persist_mapping(build, tmp_path, "mapping")
-    tcip_store.append(audit_log_key(tmp_path), {"tool": "a_future_tool", "schema_version": 99})
+    tcip_store.bind(FileBackend())
+    try:
+        build = _build({
+            "2-11-26": [
+                Assignment(
+                    image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                    plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
+                )
+            ]
+        })
+        persist_mapping(build, tmp_path, "mapping")
+        key = audit_log_key(tmp_path)
+        poisoned = tcip_store.get_descriptor(key.store).codec.encode(
+            {"tool": "a_future_tool", "schema_version": 99})
+        with open(FileBackend().path_for(key), "ab") as handle:
+            handle.write(poisoned + b"\n")
 
-    with pytest.raises(ValueError, match="schema_version"):
-        load_mapping(tmp_path, "mapping")
+        with pytest.raises(ValueError, match="schema_version"):
+            load_mapping(tmp_path, "mapping")
+    finally:
+        tcip_store.unbind()
 
 
 def test_scan_receipts_still_admits_a_real_receipt_with_no_version_refused_lines(
