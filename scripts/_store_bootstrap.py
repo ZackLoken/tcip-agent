@@ -1,13 +1,11 @@
-"""The whole store catalogue in one import, and which roots a project's records live in.
+"""Operator-script entry point for the store catalogue and a project's own roots.
 
-A store is registered by importing the module that declares it, so a tool that has to reason
-about every store (writing a database back out as files, or decoding files into one) needs
-every owning module imported first. No single package's own import set covers them all: the
-web package owns the learning-capture log the MCP server never imports. This module is that
-one import set.
-
-Where each store's entries sit under a root is not here: that is :mod:`tcip_store.layout_claims`,
-which the conform rail reads without importing any owning module.
+The catalogue import itself (every module that registers a store) lives in
+``tcip_mcp.store_catalogue``, package-only so :func:`tcip_mcp.tools.bundle.account_for` reaches
+it without the repo root on ``sys.path``. This module re-exports :func:`bootstrapped_stores` from
+there, so the operator scripts that import it (``export_store.py``, ``adopt_store.py``) keep
+working unchanged, and adds :func:`project_roots`, which needs ``project_tools`` directly rather
+than the whole catalogue.
 """
 
 from __future__ import annotations
@@ -15,43 +13,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from tcip_store import registered_stores
 from tcip_store.layout_claims import EXPERIMENTS, ROOT, STATE
 
-from tcip_annotation import format_io, json_io, review_engine  # noqa: F401
-from tcip_mcp import (  # noqa: F401
-    audit,
-    dataset_layout,
-    experiments,
-    model_registry,
-    operationalization,
-    project_record,
-    project_status,
-    traits,
-    web_client,
-    workspace,
-)
-from tcip_mcp.pipelines import model_build, resolution  # noqa: F401
-from tcip_mcp.pipelines.data import band_groups, splits  # noqa: F401
-from tcip_mcp.pipelines.feedback import materialize  # noqa: F401
-from tcip_mcp.pipelines.postprocessing import plant_mapping  # noqa: F401
-from tcip_mcp.pipelines.training import evaluation, generic_trainer, hpo  # noqa: F401
-from tcip_mcp.tools import (  # noqa: F401
-    data_tools,
-    inference_tools,
-    meta_tools,
-    project_tools,
-    training_tools,
-    vision_tools,
-)
-from tcip_web import agent_learning_capture, jobstore  # noqa: F401
-from tcip_web import state as web_state  # noqa: F401
-from tcip_web.routes import canvas, sessions  # noqa: F401
-
-
-def bootstrapped_stores() -> tuple[str, ...]:
-    """Every store this module's imports register, which is every store the platform declares."""
-    return registered_stores()
+from tcip_mcp.store_catalogue import bootstrapped_stores  # noqa: F401
+from tcip_mcp.tools import project_tools
 
 
 def project_roots(project_root: str | Path) -> tuple[tuple[str, str], ...]:

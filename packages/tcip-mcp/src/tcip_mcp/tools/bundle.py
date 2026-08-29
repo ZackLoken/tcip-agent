@@ -260,11 +260,13 @@ def account_for(tree: str | Path) -> BundleAccounting:
     door that refuses on either.
 
     Attributing a file to a store needs that store's descriptor, so this imports
-    ``scripts._store_bootstrap`` first, the platform's one list of every module that registers
+    ``tcip_mcp.store_catalogue`` first, the platform's one list of every module that registers
     one: a running MCP server already has them all from its own tool imports, but a door called
-    on its own (a script, a focused test) must not silently see fewer stores than the server does.
+    on its own (a script, a focused test) must not silently see fewer stores than the server
+    does. Package-only, so this reaches the catalogue with no need for the repository's
+    ``scripts`` package, which exists only with the repo root on ``sys.path``.
     """
-    import scripts._store_bootstrap  # noqa: F401
+    import tcip_mcp.store_catalogue  # noqa: F401
 
     root = Path(tree).resolve()
     derived = derive_roots(root)
