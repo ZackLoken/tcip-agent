@@ -184,7 +184,9 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         crop: The crop this dataset's imagery is of (e.g. ``hazelnut``). Required; the expert's fact.
         project_root: Project to register the dataset under. Empty defaults to ``dataset_root``.
     """
-    from tcip_mcp.dataset_layout import dataset_identity_key, dataset_identity_path
+    from tcip_store import SchemaVersionRefused
+
+    from tcip_mcp.dataset_layout import decode_dataset_identity, dataset_identity_key
     from tcip_mcp.pipelines.resolution import dataset_fingerprint
 
     root = Path(dataset_root)
@@ -194,7 +196,10 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
         return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
 
     ident_key = dataset_identity_key(root)
-    fingerprint = dataset_fingerprint(root)
+    try:
+        fingerprint = dataset_fingerprint(root)
+    except SchemaVersionRefused as exc:
+        return {"error": f"{root}: {exc}"}
     # A conflict means another registration committed, so the loop only repeats while the
     # identity is actually changing under it and ends when this write is the one that lands.
     while True:
@@ -203,16 +208,13 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
             existing: dict = {}
         else:
             try:
-                decoded = RECORD_JSON.decode(stored.value)
+                existing = decode_dataset_identity(stored.value, dataset_root=root)
+            except SchemaVersionRefused as exc:
+                return {"error": f"{exc} Re-registering here would overwrite a newer writer's "
+                                 "identity document; nothing was written."}
             except ValueError as exc:
-                return {"error": f"{dataset_identity_path(root)} exists but does not decode ({exc}); "
-                                 "minting a fresh id over it would sever every record that cites "
-                                 "the old one"}
-            if not isinstance(decoded, dict):
-                return {"error": f"{dataset_identity_path(root)} is not an identity document; "
-                                 "minting a fresh id over it would sever every record that cites "
-                                 "the old one"}
-            existing = decoded
+                return {"error": f"{exc}; minting a fresh id over it would sever every record "
+                                 "that cites the old one"}
         candidate = {
             "crop": crop,
             "id": existing.get("id") or uuid.uuid4().hex[:12],  # minted once, then kept
