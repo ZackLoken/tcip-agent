@@ -38,6 +38,8 @@ register_store(
         kind="record",
         key_fields=("document",),
         frozen=True,
+        cannot_carry_field="a top-level JSON array of entries, with no object to hold the field; "
+                            "a future bump wraps this into {schema_version, entries}",
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_INDEX_DOC,
