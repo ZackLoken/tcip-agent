@@ -515,19 +515,6 @@ def _recent_activity(project_path: str) -> dict:
     return activity
 
 
-_TCIP_ARCHIVED_SUFFIXES = frozenset(
-    {".toml", ".jsonl", ".txt", ".yaml", ".yml", ".json", ".py", ".bandgroup", ".md"}
-)
-"""What a bundle carries out of ``.tcip``.
-
-``.py`` because a bespoke run's snapshotted model, training and dataset source live under
-``model_src/``, and a manifest describing code the bundle does not carry is not provenance.
-``.bandgroup`` and ``.md`` because a band-group manifest is an enumerated logical image and a
-retrospective is a document a human wrote. A store database is deliberately absent: an archive
-is a file bundle, and the files are what this list names.
-"""
-
-
 def _store_databases(root: Path) -> list[Path]:
     """Every store database under the tree an archive would bundle."""
     from tcip_store.file_backend import DATABASE_FILENAME
@@ -566,16 +553,25 @@ def _database_counters(root: Path) -> dict[tuple[str, str], int]:
 def archive_project(project_path: str, output_path: str = "", include_models: bool = False) -> dict:
     """Export an annotation project as a portable ZIP archive.
 
-    Scans the canonical dataset layout (see :mod:`tcip_mcp.dataset_layout`): images under
-    ``<root>/images/<date>/``, ground truth under ``<root>/annotations/<date>/<stem>.json``
-    (one file per image, all subjects), and the single nested registry ``<root>/classes.json``,
-    plus the ``.tcip`` config. Optionally includes trained checkpoints.
+    Composes the bundle from the shared membership accounting
+    (:func:`tcip_mcp.tools.bundle.account_for`), the same one ``import_project`` judges by: every
+    record or log a derived root of this tree claims (images under ``<root>/images/<date>/``,
+    ground truth under ``<root>/annotations/<date>/<stem>.json``, the nested registry
+    ``<root>/classes.json``, ``.tcip`` state, experiments, sweeps and their claimed manifests),
+    plus every recognized blob home. ``include_models`` narrows only the checkpoints under
+    ``.tcip/models/*.pt``; a bespoke run's ``model_src/`` snapshot travels regardless, since it is
+    one membership statement with one producer-side option, not two.
 
     Every database under the tree is exported to its loose files first, through the same
     :func:`tcip_store.export.export_root` ``scripts/export_store.py`` uses, so a project either
     creating door stood up (which writes the project record through a database) archives without
-    an operator having run that script by hand. The archive refuses only when that export fails
-    or a store becomes unreadable, never merely because it was behind.
+    an operator having run that script by hand. The archive refuses only when that export fails,
+    a store becomes unreadable, or a split/curated manifest sits somewhere the derivation
+    constraints exclude, never merely because a database was behind.
+
+    ``left_behind`` counts every file under the tree this door does not bundle (a render cache,
+    Ray's own experiment store, tensorboard events, any other stray), so the narrowing is
+    disclosed rather than silent.
 
     Args:
         project_path: Root directory of the project.
@@ -597,6 +593,13 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
         return {"error": f"a store database under {root} could not be exported before "
                          f"archiving, so the bundle cannot be vouched for: {exc}"}
 
+    from tcip_mcp.tools.bundle import AnchorMisplaced, account_for
+
+    try:
+        accounting = account_for(root)
+    except AnchorMisplaced as exc:
+        return {"error": str(exc)}
+
     if not output_path:
         output_path = str(root.parent / f"{root.name}.tcip.zip")
     else:
@@ -607,60 +610,18 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # The one set deciding what enumerates as a logical image, so a bundle cannot carry a
-    # narrower notion of "image" than the platform that reads it back.
-    from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+    models_dir = root / ".tcip" / "models"
+    members = [entry.path for plan in accounting.plans for entry in plan.entries]
+    members += [
+        p for p in accounting.blobs
+        if include_models or p.parent != models_dir or p.suffix != ".pt"
+    ]
 
-    image_exts = IMAGE_EXTS
-    label_exts = {".txt", ".xml", ".json"}
     files_added = 0
-
     with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-        # Canonical dataset trees.
-        from tcip_mcp.dataset_layout import annotation_root, image_root
-
-        for tree, exts in ((image_root(root), image_exts),
-                           (annotation_root(root), label_exts)):
-            if tree.is_dir():
-                for sub in tree.rglob("*"):
-                    if sub.is_file() and sub.suffix.lower() in exts:
-                        zf.write(sub, sub.relative_to(root))
-                        files_added += 1
-
-        # The single nested registry decodes the labels' subject/attribute names: without it the
-        # archived annotations are undecodable, so a self-contained bundle must carry it.
-        from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
-
-        registry = classes_path(root)
-        if registry.is_file():
-            zf.write(registry, registry.relative_to(root))
+        for member in sorted(members):
+            zf.write(member, member.relative_to(root))
             files_added += 1
-
-        # dataset.json: the dataset's identity ({crop, id, fingerprint}); identity is part of the
-        # data, so it travels with the registry it sits beside.
-        identity = dataset_identity_path(root)
-        if identity.is_file():
-            zf.write(identity, identity.relative_to(root))
-            files_added += 1
-
-        # .tcip config, experiments, audit: the project's working state. ``.py`` is included
-        # because snapshot_model_source (pipelines/model_build.py) writes a bespoke run's actual
-        # model/training/dataset source under model_src/ as .py files; without it here, the
-        # archive carries the run's provenance manifest but not the code it describes.
-        tcip_dir = root / ".tcip"
-        if tcip_dir.is_dir():
-            for f in tcip_dir.rglob("*"):
-                if f.suffix in _TCIP_ARCHIVED_SUFFIXES and f.is_file():
-                    zf.write(f, f.relative_to(root))
-                    files_added += 1
-
-        # Models (optional, can be large)
-        if include_models:
-            models_dir = tcip_dir / "models" if tcip_dir.is_dir() else root / "models"
-            if models_dir.is_dir():
-                for m in models_dir.glob("*.pt"):
-                    zf.write(m, m.relative_to(root))
-                    files_added += 1
 
     try:
         after = _database_counters(root)
@@ -685,6 +646,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
         "files_added": files_added,
         "size_bytes": out.stat().st_size,
         "include_models": include_models,
+        "left_behind": len(accounting.unaccounted),
     }
 
 
