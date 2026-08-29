@@ -655,6 +655,24 @@ class TestCompletenessRoute:
         store = ts.read(region_completeness_key(root))
         assert store[stray_bucket] == {"cells_complete": ["A1"]}
 
+    def test_toggle_refuses_over_a_non_dict_stored_document(self, client, dated_dataset):
+        """A list- or string-shaped stored document is not something the per-bucket unreadable
+        check names (it has no buckets to enumerate); the write must still refuse rather than
+        read it as an empty store and replace it wholesale."""
+        import tcip_store as ts
+        from tcip_mcp.dataset_layout import region_completeness_key
+
+        root, path = dated_dataset
+        ts.replace(region_completeness_key(root), ["not", "a", "dict"], expect=ts.Version.ABSENT)
+
+        grid = _grid(client, path, tile_size=64)
+        resp = self._toggle(client, path, grid, "A1")
+        assert resp.status_code == 400
+        assert "list" in resp.json()["detail"]
+
+        store = ts.read(region_completeness_key(root))
+        assert store == ["not", "a", "dict"]
+
     def test_a_stale_attestation_is_detected_on_read(self, client, dated_dataset):
         """A cell is attested complete, then an annotation is added inside it: the stamped
         digest no longer matches, so the attestation reads back as stale (see

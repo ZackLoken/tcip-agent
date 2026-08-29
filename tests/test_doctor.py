@@ -176,6 +176,26 @@ def test_doctor_flags_a_stale_region_completeness_attestation(tmp_path):
     assert "catkin" in res.stdout and "A1" in res.stdout
 
 
+def test_doctor_flags_an_unrecognized_region_completeness_entry(tmp_path):
+    """A region-completeness store entry with no {grid, cells_complete} shape would be dropped
+    by any merge, the exact state that blocks every attestation write; the doctor mirrors the
+    status-store sibling and reports it by count rather than reading the store as clean."""
+    from tcip_mcp.dataset_layout import region_completeness_key, status_bucket
+
+    date = "2026-03-04"
+    root = _layout_project(tmp_path, date)
+    import tcip_store as ts
+    from tcip_store.file_backend import FileBackend
+
+    ts.bind(FileBackend())
+    ts.replace(region_completeness_key(root),
+              {status_bucket("catkin", date): {"cells_complete": ["A1"]}},  # no "grid": unrecognized
+              expect=ts.Version.ABSENT)
+
+    res = _run(root, file_layout=True)
+    assert "1 region-completeness entry is in a shape this reader does not recognize" in res.stdout
+
+
 def test_doctor_flags_incomplete_source_snapshot(tmp_path):
     """A bespoke run's source snapshot that failed to capture a declared file is
     self-describing (``missing``/``snapshot_errors``); doctor.py surfaces it rather than the
