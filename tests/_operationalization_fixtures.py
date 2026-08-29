@@ -12,7 +12,6 @@ the many modules whose subject is a delivery rather than the precondition standi
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -97,10 +96,7 @@ def write_spec(project_root: Path, spec: TraitSpec) -> None:
     Compare-and-set against whatever is on file, so a test re-registering the same trait to
     simulate a spec that moved since it was read overwrites it rather than being refused.
     """
-    data = {
-        key: (list(value) if isinstance(value, tuple) else value)
-        for key, value in dataclasses.asdict(spec).items()
-    }
+    data = traits._encode_spec(spec)
     key = trait_spec_key(trait_specs_dir(str(project_root)), spec.name)
     current = read_versioned(key, default=None)
     validated, reason = traits._validate_and_write_spec(key, data, expect=current.version)
