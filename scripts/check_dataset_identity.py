@@ -41,17 +41,21 @@ def main() -> int:
     bind_default()
 
     root: Path = args.dataset_root
-    current = dataset_fingerprint(root)
+    try:
+        current = dataset_fingerprint(root)
+    except SchemaVersionRefused as exc:
+        print(f"VERSION-REFUSED: {exc}")
+        return 5
     if current is None:
         print(f"no fingerprint for {root} (no images/labels, bespoke or empty)")
         return 0
 
     try:
         identity = require_dataset_identity(root)
+    except SchemaVersionRefused as exc:
+        print(f"VERSION-REFUSED: {exc}")
+        return 5
     except ValueError as exc:
-        if isinstance(exc.__cause__, SchemaVersionRefused):
-            print(f"VERSION-REFUSED: {exc}")
-            return 5
         print(f"UNREGISTERED: {exc}")
         return 1
     ds_id = identity.get("id")
