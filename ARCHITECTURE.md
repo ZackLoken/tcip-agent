@@ -120,6 +120,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools, load, save, and evaluate name-based annotations via MCP. | 15 | 1 |  <!-- queued: P5-233 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | The shared membership accounting archive_project and import_project both compose from: derives every root a project tree is or holds and classifies each file into bookkeeping, a claimed record/log, a blob, or unaccounted. | 6 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: load datasets, validate quality, split data. | 12 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 11 | 2 |
@@ -380,6 +381,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/check_dataset_identity.py | Check a dataset's on-disk content against its recorded identity: detect changed / moved data. | 3 | 0 |
 | scripts/compute_disagreements.py | Summarize GT-vs-prediction disagreements per image at several conf thresholds. | 1 | 0 |
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
+| scripts/conform_dataset_registry_paths.py | Conform a project's dataset registry onto the relative-path row: rewrite each entry's stored path through the same identity-based rule `register_dataset` now uses. | 3 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 1 | 0 |
 | scripts/conform_project_site.py | Write or correct one project's authored site: the record ``init_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 1 | 0 |
 | scripts/conform_registry_experiment_id.py | Conform a project's registry entries to carry ``experiment_id``, for an entry registered before the producer-binding field existed. | 2 | 0 |
@@ -689,6 +691,18 @@ Docstring is the function's docstring first line, verbatim.
 | `inspect_project` | `project_tools.py:366` | yes | Get an overview of a TCIP project. |
 | `archive_project` | `project_tools.py:516` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
 | `import_project` | `project_tools.py:643` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+
+`tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
+`archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
+root a project tree is or holds (the fixed `.tcip` structure, plus every `split_manifest.json`/
+`curated_manifest.json` anchor under placement constraints that raise `AnchorMisplaced` when one
+sits at the tree root, under `.tcip`, under a blob home, or under/above another derived root),
+then classifies every file by precedence: bookkeeping, a record or log claimed by exactly one
+derived root's own layout (`tcip_store.adoption.plan_root`; two roots claiming one file is a
+`collisions` entry on the result, never a specificity tie), a recognized blob home, or
+unaccounted. `archive_project` bundles the record/log and blob classes; `import_project` refuses
+on any bookkeeping, collided, undecodable or unaccounted member before adopting or moving
+anything.
 
 ### scale_tools.py (1 tool)
 
@@ -1310,10 +1324,11 @@ mutation already on disk. Dataset-scoped entries carry a `scope` field naming th
 platform entries keep the original shape.
 
 Reader: no production code parses the log's entries. The only production consumer is
-`archive_project` (`tools/project_tools.py`), which copies the file into the archive by suffix
-without opening it. Rows are otherwise read only through the storage seam's `read_log`, which
-decodes each line into an opaque mapping, and by tests that access named keys, so a new
-per-entry field is additive for every existing consumer.
+`archive_project` (`tools/project_tools.py`), which bundles the file as a claimed ROOT-layout
+record through the shared membership accounting (`tcip_mcp.tools.bundle.account_for`) without
+opening it. Rows are otherwise read only through the storage seam's `read_log`, which decodes
+each line into an opaque mapping, and by tests that access named keys, so a new per-entry field
+is additive for every existing consumer.
 
 Seam S06 ("Append-only audit log .tcip/audit.jsonl"), verdict `one-side-only`,
 `phase0_implementation: mixed`: `tests/test_audit_experiments.py:25,57`,
@@ -1639,6 +1654,14 @@ Path: `<project_root>/.tcip/datasets.json`.
 Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:77`.
 
 Reader: `read_datasets`, `project_tools.py:67`.
+
+Shape: each entry's `path` is relative to `<project_root>` whenever the dataset sits under it by
+filesystem identity (`registry_path_for`, `project_tools.py`), the project's own tree becoming
+`"."`; absolute for a dataset outside it. Resolved on read through the one accessor,
+`dataset_entry_path`, `project_tools.py`, which every consumer of an entry's path calls rather
+than reading `path` off the entry directly. A project registered before this row is conformed by
+`scripts/conform_dataset_registry_paths.py`, a one-off operator script, never a runtime
+migration.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `.tcip/datasets.json` (distinct from
 `dataset.json`, format 4, which S26 covers).
