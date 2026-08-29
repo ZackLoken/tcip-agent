@@ -43,6 +43,7 @@ from tcip_store import (
     DecodeError,
     Key,
     NotFound,
+    SchemaVersionRefused,
     StoreDescriptor,
     VersionConflict,
     register_store,
@@ -441,6 +442,10 @@ def load_trait_specs_with_errors(
         except DecodeError as e:
             logger.warning("trait spec %s skipped: %s", filename, e)
             errors.append({"file": filename, "reason": str(e)})
+            continue
+        except SchemaVersionRefused as e:
+            logger.warning("trait spec %s skipped: %s", filename, e)
+            errors.append({"file": filename, "reason": str(e), "kind": "version_refused"})
             continue
         if not isinstance(data, dict):
             reason = "not a mapping"
