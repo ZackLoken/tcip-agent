@@ -6,7 +6,7 @@ import os
 import shutil
 import uuid
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import tcip_store
 from tcip_store import (
@@ -86,7 +86,10 @@ def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str
     exactly as the filesystem sees it. One implementation, called by :func:`register_dataset`
     and by ``scripts/conform_dataset_registry_paths.py``, the one-off script that carries an
     already-registered project onto this rule. Absolute (unchanged) whenever either side is not
-    an existing directory: there is nothing to compare a missing path against.
+    an existing directory: there is nothing to compare a missing path against. A relative form
+    is stored with POSIX separators (``as_posix()``), so a nested dataset's entry (a deeper
+    relative form than the project's own ``"."``) reads the same after a cross-machine move;
+    :func:`dataset_entry_path` resolves it back by posix parts.
     """
     dataset_root, project_root = Path(dataset_root), Path(project_root)
     if dataset_root.is_dir() and project_root.is_dir():
@@ -94,10 +97,25 @@ def registry_path_for(dataset_root: str | Path, project_root: str | Path) -> str
         for ancestor in (resolved, *resolved.parents):
             try:
                 if os.path.samefile(ancestor, project_root):
-                    return str(resolved.relative_to(ancestor))
+                    return resolved.relative_to(ancestor).as_posix()
             except OSError:
                 continue
+        return str(resolved)
     return str(dataset_root)
+
+
+def entry_is_external(entry: dict) -> bool:
+    """Whether this registry entry names a dataset outside the project's own tree.
+
+    An external dataset is the one kind :func:`registry_path_for` stores absolute; every other
+    entry is the project's own tree or a directory under it, stored relative. The one spelling
+    of this test, so a caller asking "is this dataset external" agrees with the writer's own
+    rule rather than re-deriving it.
+    """
+    path = entry.get("path")
+    if not path:
+        return False
+    return Path(path).is_absolute()
 
 
 def dataset_entry_path(project_root: str | Path, entry: dict) -> Path:
@@ -109,13 +127,16 @@ def dataset_entry_path(project_root: str | Path, entry: dict) -> Path:
     The one place a registry entry's location becomes a path: every reader of
     :func:`read_datasets` calls this rather than re-deriving the resolution, so a project's own
     relative entry and an external dataset's absolute one are handled identically wherever the
-    registry is read.
+    registry is read. A relative ``path`` is joined by its POSIX parts (``registry_path_for``'s
+    own storage form) rather than as a native path string, so a nested entry resolves the same
+    whichever platform wrote or reads it.
     """
     path = entry.get("path")
     if not path:
         raise ValueError(f"dataset registry entry {entry!r} carries no path")
-    p = Path(path)
-    return p if p.is_absolute() else Path(project_root) / p
+    if entry_is_external(entry):
+        return Path(path)
+    return Path(project_root).joinpath(*PurePosixPath(path).parts)
 
 
 def upsert_dataset(project_root: str | Path, entry: dict) -> None:
@@ -940,4 +961,4 @@ def _external_dataset_paths(project_root: Path) -> list[str]:
     """The imported project's own registered dataset entries that stay absolute (external),
     disclosed rather than silently kept: the door never rewrites any registry entry (2.3)."""
     entries = read_datasets(project_root)
-    return sorted(str(e["path"]) for e in entries if e.get("path") and Path(e["path"]).is_absolute())
+    return sorted(str(e["path"]) for e in entries if entry_is_external(e))
