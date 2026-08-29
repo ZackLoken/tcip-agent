@@ -569,9 +569,11 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     a store becomes unreadable, or a split/curated manifest sits somewhere the derivation
     constraints exclude, never merely because a database was behind.
 
-    ``left_behind`` counts every file under the tree this door does not bundle (a render cache,
-    Ray's own experiment store, tensorboard events, any other stray), so the narrowing is
-    disclosed rather than silent.
+    ``left_behind`` names what this door declined to bundle, per class: ``unaccounted`` (a
+    render cache, Ray's own experiment store, tensorboard events, any other stray no store or
+    blob home claims), ``bookkeeping`` (a live tree's own transient bookkeeping, e.g. a lock
+    file mid-write), and ``checkpoints_excluded`` (``.tcip/models/*.pt`` files dropped by
+    ``include_models=False``), so the narrowing is disclosed rather than silent.
 
     Args:
         project_path: Root directory of the project.
@@ -580,7 +582,7 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
             root, never the server process's cwd.
         include_models: Whether to include model checkpoints (can be large).
     """
-    root = Path(project_path)
+    root = Path(project_path).resolve()
     if not root.is_dir():
         return {"error": f"Project directory not found: {project_path}"}
 
@@ -618,10 +620,14 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     ]
 
     files_added = 0
-    with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
-        for member in sorted(members):
-            zf.write(member, member.relative_to(root))
-            files_added += 1
+    try:
+        with zipfile.ZipFile(str(out), "w", zipfile.ZIP_DEFLATED) as zf:
+            for member in sorted(members):
+                zf.write(member, member.relative_to(root))
+                files_added += 1
+    except BaseException:
+        out.unlink(missing_ok=True)
+        raise
 
     try:
         after = _database_counters(root)
@@ -641,12 +647,19 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
                          f"hold a mix of before and after: {'; '.join(moved)}. The incomplete "
                          "archive was removed; stop the writers and archive again."}
 
+    checkpoints_excluded = 0 if include_models else sum(
+        1 for p in accounting.blobs if p.parent == models_dir and p.suffix == ".pt"
+    )
     return {
         "output_path": str(out),
         "files_added": files_added,
         "size_bytes": out.stat().st_size,
         "include_models": include_models,
-        "left_behind": len(accounting.unaccounted),
+        "left_behind": {
+            "unaccounted": len(accounting.unaccounted),
+            "bookkeeping": len(accounting.bookkeeping),
+            "checkpoints_excluded": checkpoints_excluded,
+        },
     }
 
 
@@ -843,12 +856,12 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
     from tcip_store.errors import StoreError
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
 
-    from tcip_mcp.tools.bundle import AnchorMisplaced, account_for
+    from tcip_mcp.tools.bundle import AnchorMisplaced, account_for, blob_home
 
     try:
         files_extracted = _extract_zip(zp, staging)
-    except ValueError as exc:
-        return {"error": str(exc)}
+    except (ValueError, zipfile.BadZipFile) as exc:
+        return {"error": f"{zp} is not a readable ZIP archive: {exc}"}
 
     try:
         accounting = account_for(staging)
@@ -897,9 +910,8 @@ def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
 
     blob_classes: dict[str, int] = {}
     for blob in accounting.blobs:
-        blob_classes[blob.suffix.lower() or "(no suffix)"] = (
-            blob_classes.get(blob.suffix.lower() or "(no suffix)", 0) + 1
-        )
+        home = blob_home(tree, blob)
+        blob_classes[home] = blob_classes.get(home, 0) + 1
 
     dataset_paths_unresolved = _external_dataset_paths(dest)
 

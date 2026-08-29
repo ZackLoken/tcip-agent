@@ -224,7 +224,7 @@ def test_a_render_cache_ray_stray_and_hash_cache_are_not_bundled_and_are_counted
     assert not any("cache" in name for name in names)
     assert not any("experiment_state" in name for name in names)
     assert not any("an_unbundled_stray" in name for name in names)
-    assert result["left_behind"] >= 4
+    assert result["left_behind"]["unaccounted"] >= 4
 
 
 def test_the_tcip_bundle_carries_a_retrospective(tmp_path):

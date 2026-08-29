@@ -9,9 +9,11 @@ Roots are derived from the tree's own structure plus the anchored documents the 
 writers place (``split_manifest.json``, ``curated_manifest.json``); an anchor found somewhere
 the derivation constraints exclude (the tree root, under ``.tcip``, under a blob home, or under
 or above another derived root) raises :class:`AnchorMisplaced` naming the file, since a
-mislabelled anchor would recruit a directory that is something else. Classification of one file
-is by precedence, not disjointness: bookkeeping first, then a record or log claimed by exactly
-one derived root's own layout (two derived roots claiming the same file raises
+mislabelled anchor would recruit a directory that is something else. One nesting is admitted
+rather than excluded: a splits root sitting under a curated root, the shape ``make_splits``
+produces when it partitions a ``materialize_review_dataset`` output in place. Classification of
+one file is by precedence, not disjointness: bookkeeping first, then a record or log claimed by
+exactly one derived root's own layout (two derived roots claiming the same file raises
 :class:`CrossRootCollision`), then a recognized blob home, then everything else, unaccounted.
 """
 
@@ -80,6 +82,7 @@ def _is_at_or_under(candidate: Path, root: Path) -> bool:
 def _validate_anchor(
     tree: Path, directory: Path, filename: str, others: list[Path],
     image_root: Path, annotation_root: Path,
+    curated_dirs: frozenset[Path] = frozenset(), split_dirs: frozenset[Path] = frozenset(),
 ) -> None:
     member = directory / filename
     if directory == tree:
@@ -91,6 +94,11 @@ def _validate_anchor(
     if _is_at_or_under(directory, annotation_root):
         raise AnchorMisplaced(f"{member} sits under the annotation tree, which no {filename} may claim")
     for other in others:
+        # A curated dataset split in place: the one nesting the producer chain admits.
+        if directory in split_dirs and other in curated_dirs and _is_at_or_under(directory, other):
+            continue
+        if other in split_dirs and directory in curated_dirs and _is_at_or_under(other, directory):
+            continue
         if _is_at_or_under(directory, other) or _is_at_or_under(other, directory):
             raise AnchorMisplaced(f"{member} sits under or above another derived root, {other}")
 
@@ -128,13 +136,16 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
     split_dirs = _anchored_dirs(root, SPLIT_MANIFEST_NAME)
     curated_dirs = _anchored_dirs(root, CURATED_MANIFEST_NAME)
     every_anchor = [*split_dirs, *curated_dirs]
+    curated_set, split_set = frozenset(curated_dirs), frozenset(split_dirs)
     for directory in split_dirs:
         _validate_anchor(root, directory, SPLIT_MANIFEST_NAME,
-                          [d for d in every_anchor if d != directory], image_root, annotation_root)
+                          [d for d in every_anchor if d != directory], image_root, annotation_root,
+                          curated_dirs=curated_set, split_dirs=split_set)
         derived.append(DerivedRoot(directory, SPLITS))
     for directory in curated_dirs:
         _validate_anchor(root, directory, CURATED_MANIFEST_NAME,
-                          [d for d in every_anchor if d != directory], image_root, annotation_root)
+                          [d for d in every_anchor if d != directory], image_root, annotation_root,
+                          curated_dirs=curated_set, split_dirs=split_set)
         derived.append(DerivedRoot(directory, CURATED))
     return tuple(derived)
 
@@ -178,6 +189,48 @@ def _blob_files(tree: Path, claimed: frozenset[str]) -> tuple[Path, ...]:
         for f in models_dir.glob("*.pt"):
             _add(f)
     return tuple(found)
+
+
+BLOB_IMAGERY = "imagery"
+BLOB_LABELS = "labels"
+BLOB_CLASS_REGISTRY = "class_registry"
+BLOB_DATASET_IDENTITY = "dataset_identity"
+BLOB_MODEL_SRC = "model_src"
+BLOB_CHECKPOINTS = "checkpoints"
+BLOB_OTHER = "other"
+
+BLOB_HOMES = (
+    BLOB_IMAGERY, BLOB_LABELS, BLOB_CLASS_REGISTRY, BLOB_DATASET_IDENTITY, BLOB_MODEL_SRC,
+    BLOB_CHECKPOINTS, BLOB_OTHER,
+)
+"""Every home a blob :func:`account_for` finds can belong to, in the same terms
+:func:`_blob_files` finds them by, so a caller disclosing what it bundled or dropped names the
+same homes rather than re-deriving its own notion of what a blob is."""
+
+
+def blob_home(tree: Path, path: Path) -> str:
+    """Which recognized blob home ``path`` (already known to be one of ``account_for``'s blobs)
+    belongs to, in the same terms :func:`_blob_files` found it by."""
+    from tcip_mcp.dataset_layout import annotation_root as _annotation_root
+    from tcip_mcp.dataset_layout import classes_path, dataset_identity_path
+    from tcip_mcp.dataset_layout import image_root as _image_root
+
+    if path == classes_path(tree):
+        return BLOB_CLASS_REGISTRY
+    if path == dataset_identity_path(tree):
+        return BLOB_DATASET_IDENTITY
+    if _is_at_or_under(path, _image_root(tree)):
+        return BLOB_IMAGERY
+    if _is_at_or_under(path, _annotation_root(tree)):
+        return BLOB_LABELS
+    if path.parent == tree / ".tcip" / "models":
+        return BLOB_CHECKPOINTS
+    experiments = tree / ".tcip" / "experiments"
+    if _is_at_or_under(path, experiments):
+        rel = path.relative_to(experiments).parts
+        if len(rel) >= 2 and rel[1] == "model_src":
+            return BLOB_MODEL_SRC
+    return BLOB_OTHER
 
 
 def _cross_root_collisions(plans: tuple[AdoptionPlan, ...]) -> tuple[Path, ...]:
@@ -240,9 +293,18 @@ def account_for(tree: str | Path) -> BundleAccounting:
 
 __all__ = [
     "AnchorMisplaced",
+    "BLOB_CHECKPOINTS",
+    "BLOB_CLASS_REGISTRY",
+    "BLOB_DATASET_IDENTITY",
+    "BLOB_HOMES",
+    "BLOB_IMAGERY",
+    "BLOB_LABELS",
+    "BLOB_MODEL_SRC",
+    "BLOB_OTHER",
     "BundleAccounting",
     "CrossRootCollision",
     "DerivedRoot",
     "account_for",
+    "blob_home",
     "derive_roots",
 ]
