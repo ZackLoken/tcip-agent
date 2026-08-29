@@ -138,11 +138,16 @@ def test_no_mcp_tool_reaches_the_confirmation_writer() -> None:
 def test_author_and_update_persist_through_the_same_shared_write(tmp_path: Path) -> None:
     """``author_trait_spec`` (create) and ``write_trait_spec_fields`` (update) both delegate
     their validate-encode-write step to one shared entry now; this drives both in sequence and
-    reads the persisted record back through ``load_trait_specs`` rather than comparing in-memory
-    encodes, proving neither caller's own discipline (the carried-forward restriction, the cas
-    retry loop) was lost when the write itself became shared. Coverage for the unification, not
-    a regression guard: each writer already persisted correctly on its own before the two shared
-    this entry.
+    reads the persisted record back through ``get_trait_for`` (``load_trait_specs`` underneath)
+    rather than comparing in-memory encodes, proving both entry points persist through the
+    shared write and that what a fresh load sees is what each one wrote. Coverage for the
+    unification, not a regression guard: each writer already persisted correctly on its own
+    before the two shared this entry.
+
+    Not a test of either caller's own discipline: the carried-forward restriction is
+    ``test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver_fields_forward``
+    below; no test yet drives ``write_trait_spec_fields``'s own compare-and-set retry loop to
+    actually retry against a losing read.
     """
     _author(tmp_path, trait="leaf", delivers=("leaf_length",), holdout_match_quality_floor=0.4)
 
@@ -154,6 +159,43 @@ def test_author_and_update_persist_through_the_same_shared_write(tmp_path: Path)
     reloaded = traits.get_trait_for("leaf", str(tmp_path))
     assert reloaded.holdout_match_quality_floor == 0.6
     assert reloaded.delivers == ("leaf_length",)
+
+
+def test_a_restatement_over_an_existing_spec_carries_its_localization_and_sliver_fields_forward(
+    tmp_path: Path,
+) -> None:
+    """``author_trait_spec`` never accepts ``localization``/``localization_tolerance``/
+    ``localization_tolerance_frac``/``sliver_policy``/``sliver_frac``: a restatement over an
+    existing spec keeps whatever ``write_trait_spec_fields`` last set for them, changing only
+    the fields ``author_trait_spec`` itself authors. Coverage: the restriction is already the
+    baseline's own behavior, pinned here since no existing test asserted on these fields'
+    values after a restatement.
+    """
+    _author(tmp_path)
+    traits.write_trait_spec_fields(
+        "catkin_e2e",
+        {
+            "localization": traits.CENTER_MATCH,
+            "localization_tolerance": "fixed",
+            "localization_tolerance_frac": 0.25,
+            "sliver_policy": "fixed_fraction",
+            "sliver_frac": 0.1,
+        },
+        project_root=tmp_path,
+    )
+    scope = traits.trait_spec_statements_scope(tmp_path)
+    key = traits.trait_spec_statement_key(scope, "catkin_e2e")
+    ts.delete(key, expect=ts.read_versioned(key).version)
+
+    _author(tmp_path, positive_class_name="dormant")
+
+    reloaded = traits.get_trait_for("catkin_e2e", str(tmp_path))
+    assert reloaded.positive_class_name == "dormant"  # the restatement's own authored field moved
+    assert reloaded.localization == traits.CENTER_MATCH
+    assert reloaded.localization_tolerance == "fixed"
+    assert reloaded.localization_tolerance_frac == 0.25
+    assert reloaded.sliver_policy == "fixed_fraction"
+    assert reloaded.sliver_frac == 0.1
 
 
 def test_a_trait_authored_and_confirmed_through_this_surface_delivers_end_to_end(
