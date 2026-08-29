@@ -56,7 +56,8 @@ class BundleAccounting:
     log accounting, entries already de-duplicated within their own root by
     :func:`~tcip_store.adoption.plan_root`); ``blobs`` is every file under a recognized blob
     home that no plan already adopts; ``bookkeeping`` and ``unaccounted`` are class 1 and class 4
-    respectively, over every other file the tree holds.
+    respectively, over every other file the tree holds; ``collisions`` names any file two
+    different derived roots both adopted, which no shipped claim table can produce on its own.
     """
 
     tree: Path
@@ -65,6 +66,7 @@ class BundleAccounting:
     blobs: tuple[Path, ...]
     bookkeeping: tuple[Path, ...]
     unaccounted: tuple[Path, ...]
+    collisions: tuple[Path, ...]
 
 
 def _is_at_or_under(candidate: Path, root: Path) -> bool:
@@ -214,6 +216,7 @@ def account_for(tree: str | Path) -> BundleAccounting:
     root = Path(tree).resolve()
     derived = derive_roots(root)
     plans = tuple(plan_root(str(d.path), d.layout) for d in derived)
+    collisions = _cross_root_collisions(plans)
 
     claimed = frozenset(os.path.normcase(str(entry.path)) for plan in plans for entry in plan.entries)
     blobs = _blob_files(root, claimed)
@@ -231,6 +234,7 @@ def account_for(tree: str | Path) -> BundleAccounting:
     return BundleAccounting(
         tree=root, derived=derived, plans=plans, blobs=blobs,
         bookkeeping=tuple(sorted(bookkeeping)), unaccounted=tuple(sorted(unaccounted)),
+        collisions=collisions,
     )
 
 

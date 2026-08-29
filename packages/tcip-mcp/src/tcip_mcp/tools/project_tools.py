@@ -650,55 +650,271 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     }
 
 
+_IMPORTS_DIRNAME = ".imports"
+
+
+def _extract_zip(zp: Path, staging: Path) -> int:
+    """Extract every member of ``zp`` into ``staging``, refusing a path that would escape it.
+
+    ``staging`` is this run's own private directory (a fresh uuid under ``.imports``), so a
+    zip-slip refusal here still leaves the destination untouched: nothing has been written there.
+    """
+    files_extracted = 0
+    with zipfile.ZipFile(str(zp), "r") as zf:
+        for info in zf.infolist():
+            target = staging / info.filename
+            resolved = target.resolve()
+            if not str(resolved).startswith(str(staging.resolve())):
+                raise ValueError(f"Unsafe path in archive: {info.filename}")
+        for info in zf.infolist():
+            if info.is_dir():
+                (staging / info.filename).mkdir(parents=True, exist_ok=True)
+            else:
+                target = staging / info.filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                files_extracted += 1
+    return files_extracted
+
+
+def _sweep_free_locked_leftovers(imports_root: Path) -> None:
+    """Remove a crash leftover from an earlier run: a staging sibling whose lock this process
+    can take without blocking. A sibling still locked is a concurrent import's live work
+    (including one in its own rename window) and is left alone, its lock file included."""
+    from filelock import Timeout as _LockTimeout
+
+    from tcip_store.file_backend import lock_file_for, path_lock
+
+    if not imports_root.is_dir():
+        return
+    for entry in sorted(imports_root.iterdir()):
+        if not entry.is_dir():
+            continue
+        try:
+            with path_lock(entry, timeout_s=0):
+                shutil.rmtree(entry, ignore_errors=True)
+        except _LockTimeout:
+            continue
+        lock_file_for(entry).unlink(missing_ok=True)
+
+
+def _remove_staged_bookkeeping(staged: Path) -> None:
+    """Remove adoption's own transition-lock files left inside the staged tree.
+
+    Only the ``.lock`` sidecars: they linger only on POSIX (``filelock`` deletes its file on
+    release under Windows), and are bookkeeping the membership accounting would never bundle, but
+    the database file itself (``store.db``, just built) must ride the rename into the
+    destination, not be swept away as bookkeeping alongside its own lock.
+    """
+    for path in staged.rglob("*.lock"):
+        if path.is_file():
+            path.unlink(missing_ok=True)
+
+
+def _adopt_accounted_roots(accounting) -> dict[str, int]:
+    """Adopt every derived root whose plan has at least one entry; skip an empty one.
+
+    ``adopt_root`` has no empty-plan guard of its own and would install an empty database that
+    permanently refuses file-backend writes at that root, so the guard lives here. Returns the
+    adopted-entry count per root path, for the response.
+    """
+    from tcip_store.adoption import adopt_root
+
+    adopted: dict[str, int] = {}
+    for plan in accounting.plans:
+        if not plan.entries:
+            continue
+        result = adopt_root(plan.root, plan.layout, report=lambda _line: None)
+        adopted[plan.root] = sum(result.records.values()) + sum(result.log_entries.values())
+    return adopted
+
+
+def _move_staging_onto_destination(staged: Path, dest: Path, *, timeout_s: float) -> None:
+    """Rename the staged tree onto ``dest``, re-checking emptiness immediately before the rename.
+
+    Reuses the repo's own denial-retry helper (``tcip_store.file_backend.retry_while_denied``):
+    on Windows a transient handle from a scanner or indexer denies a bare ``os.rename``. Both the
+    empty-destination removal and the rename itself run under its budget, so a retry that lands
+    after another process's own removal does not try to remove an already-absent directory.
+    """
+    from tcip_store.file_backend import retry_while_denied
+
+    def _prepare_and_rename() -> None:
+        if dest.exists():
+            if any(dest.iterdir()):
+                raise StoreErrorRuntime(f"destination {dest} is no longer empty; refusing the move")
+            dest.rmdir()
+        os.rename(str(staged), str(dest))
+
+    retry_while_denied(_prepare_and_rename, timeout_s)
+
+
+class StoreErrorRuntime(RuntimeError):
+    """Raised inside the retried move body; caught once, outside the retry, as an ordinary
+    tool refusal rather than a second bespoke exception type callers must know about."""
+
+
 @mcp.tool()
 @audited
 def import_project(zip_path: str, destination: str) -> dict:
     """Import an annotation project from a ZIP archive.
 
-    Extracts into the destination directory, preserving the original structure. When
-    ``destination`` is directly under the workspace, its basename must fit
-    ``crop_subject_phenotype`` (``workspace.format_project_name``/``parse_project_name``);
-    a destination outside the workspace is not a workspace project and is not held to the
-    scheme.
+    Not a writer of any format: the door extracts into a private staging directory, classifies
+    every member through the shared bundle accounting
+    (:func:`tcip_mcp.tools.bundle.account_for`), refuses the whole import naming each bookkeeping,
+    cross-root-collided, undecodable or unaccounted member, then adopts what is left into a
+    database when this process is bound to the database backend (skipping any derived root whose
+    plan is empty) or leaves the loose layout as is under the file backend, and only then renames
+    the staged tree onto ``destination``. A root imported under the default backend is therefore
+    usable at once, with no operator ``scripts/adopt_store.py`` run; a root imported under the
+    file backend meets that script's own conform rail the same as any other unconformed layout.
+
+    ``destination`` must not already exist, or must be an empty directory: this door merges
+    nothing into a live project, since even adoption's supplement path would merge
+    archive-authored stores into state that never came from this archive. When ``destination`` is
+    directly under the workspace, its basename must fit ``crop_subject_phenotype``
+    (``workspace.format_project_name``/``parse_project_name``); a destination outside the
+    workspace is not a workspace project and is not held to the scheme.
+
+    A refusal at any step leaves the destination exactly as it was (absent, or its original empty
+    state); the staging tree this run made is always removed.
+
+    The response carries per-root adopted counts, blob counts per class, ``database_built``
+    (whether adoption ran or the file layout was kept), ``dataset_paths_unresolved`` (the
+    registered datasets whose absolute path stayed verbatim because they are outside the imported
+    tree), and ``files_extracted``.
 
     Args:
         zip_path: Path to the ``.tcip.zip`` archive.
         destination: Directory to extract into.
     """
+    from filelock import Timeout as _LockTimeout
+
+    from tcip_mcp import workspace
+    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, lock_file_for, path_lock
+
     zp = Path(zip_path)
     if not zp.is_file():
         return {"error": f"ZIP file not found: {zip_path}"}
 
     dest = Path(destination).expanduser().resolve()
-    from tcip_mcp import workspace
-
     if dest.parent == workspace.workspace_root():
         try:
             workspace.parse_project_name(dest.name)
         except ValueError as exc:
             return {"error": str(exc)}
-    dest.mkdir(parents=True, exist_ok=True)
 
-    files_extracted = 0
-    with zipfile.ZipFile(str(zp), "r") as zf:
-        # Validate paths: prevent zip slip
-        for info in zf.infolist():
-            target = dest / info.filename
-            resolved = target.resolve()
-            if not str(resolved).startswith(str(dest.resolve())):
-                return {"error": f"Unsafe path in archive: {info.filename}"}
+    if dest.exists():
+        if not dest.is_dir():
+            return {"error": f"destination {dest} exists and is not a directory"}
+        if any(dest.iterdir()):
+            return {"error": f"destination {dest} is not empty; import_project never writes "
+                             "into an existing project (a destination with state merges nothing; "
+                             "that stays operator work)"}
 
-        for info in zf.infolist():
-            if info.is_dir():
-                (dest / info.filename).mkdir(parents=True, exist_ok=True)
-            else:
-                target = dest / info.filename
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(info) as src, open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                files_extracted += 1
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    imports_root = dest.parent / _IMPORTS_DIRNAME
+    imports_root.mkdir(exist_ok=True)
+    _sweep_free_locked_leftovers(imports_root)
+
+    staging = imports_root / uuid.uuid4().hex
+    result: dict = {}
+    try:
+        with path_lock(staging, timeout_s=DEFAULT_LOCK_TIMEOUT_S):
+            result = _run_import_into_staging(zp, staging, dest)
+            if "error" in result:
+                shutil.rmtree(staging, ignore_errors=True)
+    except _LockTimeout:
+        return {"error": f"could not lock a fresh staging directory at {staging}"}
+    finally:
+        lock_file_for(staging).unlink(missing_ok=True)
+    return result
+
+
+def _run_import_into_staging(zp: Path, staging: Path, dest: Path) -> dict:
+    """Everything the import door does while it holds the staging lock: extract, account for,
+    decode-preflight, adopt (backend-conditional), then move. Returns the tool's own response
+    dict, an ``{"error": ...}`` on any refusal.
+    """
+    from tcip_store.adoption import preflight_decode, unaccounted_files
+    from tcip_store.binding import is_database_backend
+    from tcip_store.errors import DecodeError as StoreDecodeError
+    from tcip_store.errors import StoreError
+    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S
+
+    from tcip_mcp.tools.bundle import AnchorMisplaced, account_for
+
+    try:
+        files_extracted = _extract_zip(zp, staging)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    try:
+        accounting = account_for(staging)
+    except (AnchorMisplaced, StoreError) as exc:
+        return {"error": str(exc)}
+
+    tree = accounting.tree
+    if accounting.bookkeeping:
+        named = ", ".join(str(p.relative_to(tree)) for p in accounting.bookkeeping)
+        return {"error": f"the archive carries backend bookkeeping ({named}), which a file bundle "
+                         "never legitimately holds; refusing the whole import"}
+    if accounting.collisions:
+        named = ", ".join(str(p.relative_to(tree)) for p in accounting.collisions)
+        return {"error": f"{named} would be claimed by more than one derived root of this "
+                         "project at once; refusing rather than guessing which one owns it"}
+    if accounting.unaccounted:
+        named = ", ".join(str(p.relative_to(tree)) for p in accounting.unaccounted)
+        return {"error": f"the archive carries member(s) no store or blob home claims ({named}); "
+                         "refusing the whole import rather than silently dropping them"}
+
+    left_over = unaccounted_files(accounting.plans)
+    if left_over:
+        named = ", ".join(str(p.relative_to(tree)) for p in left_over)
+        return {"error": f"{named} matched a store's claim but resolved to no adoptable entry; "
+                         "refusing the whole import"}
+
+    try:
+        preflight_decode(accounting.plans)
+    except StoreDecodeError as exc:
+        return {"error": str(exc)}
+
+    database_built = False
+    adopted: dict[str, int] = {}
+    if is_database_backend():
+        try:
+            adopted = _adopt_accounted_roots(accounting)
+        except StoreError as exc:
+            return {"error": f"adoption refused: {exc}"}
+        database_built = True
+        _remove_staged_bookkeeping(staging)
+
+    try:
+        _move_staging_onto_destination(staging, dest, timeout_s=DEFAULT_LOCK_TIMEOUT_S)
+    except (OSError, StoreErrorRuntime) as exc:
+        return {"error": f"could not move the staged import onto {dest}: {exc}"}
+
+    blob_classes: dict[str, int] = {}
+    for blob in accounting.blobs:
+        blob_classes[blob.suffix.lower() or "(no suffix)"] = (
+            blob_classes.get(blob.suffix.lower() or "(no suffix)", 0) + 1
+        )
+
+    dataset_paths_unresolved = _external_dataset_paths(dest)
 
     return {
         "destination": str(dest),
         "files_extracted": files_extracted,
+        "database_built": database_built,
+        "adopted": adopted,
+        "blob_counts": blob_classes,
+        "dataset_paths_unresolved": dataset_paths_unresolved,
     }
+
+
+def _external_dataset_paths(project_root: Path) -> list[str]:
+    """The imported project's own registered dataset entries that stay absolute (external),
+    disclosed rather than silently kept: the door never rewrites any registry entry (2.3)."""
+    entries = read_datasets(project_root)
+    return sorted(str(e["path"]) for e in entries if e.get("path") and Path(e["path"]).is_absolute())
