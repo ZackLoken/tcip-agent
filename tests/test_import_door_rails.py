@@ -356,7 +356,33 @@ def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(tmp_
 # ── rail 7: the dataset registry travels ────────────────────────────────────────────────────
 
 
+def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
+    """The project's own dataset registers to itself, and that entry's ``path`` survives the
+    archive/import round trip as the project-relative ``"."`` rather than an absolute path baked
+    in before the move. Bound to the file backend throughout (rather than the ambient default),
+    so this reads what the door itself wrote on either side of the row that introduced the
+    relative form, with no unrelated database-conform refusal in between."""
+    from tcip_mcp.tools.project_tools import read_datasets, register_dataset
+
+    with bound(FileBackend()):
+        root = _project(tmp_path / "source")
+        registered = register_dataset(str(root), crop="hazelnut", project_root=str(root))
+        assert "error" not in registered
+
+        zip_path = tmp_path / "bundle.zip"
+        assert "error" not in archive_project(str(root), str(zip_path))
+        dest = tmp_path / "dest"
+        imported = import_project(str(zip_path), str(dest))
+
+        assert "error" not in imported
+        entries = read_datasets(dest)
+        assert entries[0]["path"] == "."
+        assert imported["dataset_paths_unresolved"] == []
+
+
 def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
+    """The accessor resolves the stored "." against wherever the project was actually
+    imported, so nothing about the registry needed rewriting for the move to survive."""
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets, register_dataset
 
     root = _project(tmp_path / "source")
@@ -370,9 +396,7 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
 
     assert "error" not in imported
     entries = read_datasets(dest)
-    assert entries[0]["path"] == "."
     assert dataset_entry_path(dest, entries[0]).resolve() == dest.resolve()
-    assert imported["dataset_paths_unresolved"] == []
 
 
 def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
