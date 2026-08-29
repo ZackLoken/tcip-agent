@@ -207,12 +207,13 @@ def test_delivery_admits_the_raster_the_bucket_was_produced_on(tmp_path, monkeyp
 def _aggregated(tmp_path, bucket: Path, *, name: str = "counts.csv"):
     from tcip_mcp.pipelines.postprocessing.aggregation import export_aggregated_csv
 
-    return export_aggregated_csv(
+    path, _tail = export_aggregated_csv(
         [{"plant_id": "plot0", "value": 3, "observations": 1, "value_key": "count",
           "measurement_document": "operating_point"}],
         str(tmp_path / name),
         trait_name="stem_count", measurement_validated=VALIDATED_HELD_OUT,
         pred_dirs=[str(bucket)])
+    return path
 
 
 def test_delivery_gate_ships_a_bucket_scoped_to_the_mosaic_it_was_produced_on(tmp_path):
