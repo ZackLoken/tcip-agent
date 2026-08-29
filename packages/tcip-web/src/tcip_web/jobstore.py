@@ -63,6 +63,8 @@ register_store(
         kind="record",
         key_fields=("registry",),
         frozen=True,
+        cannot_carry_field="a top-level JSON array of entries, with no object to hold the field; "
+                            "a future bump wraps this into {schema_version, entries}",
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_REGISTRY_DOC,
