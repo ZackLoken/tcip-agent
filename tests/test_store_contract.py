@@ -1419,7 +1419,7 @@ REGISTERED = {
             _review_state_dir(root), "predictions", "a_1.jpg"),
         ".tcip/state/review/predictions/a_1.jpg.json", root_of=_review_state_dir),
     "canvas_meta": Registered(
-        {"schema_version": 1, "tab": "annotate", "image": "ü.jpg"},
+        {"tab": "annotate", "image": "ü.jpg"},
         lambda root: canvas.canvas_meta_key(str(root)), ".tcip/state/canvas_live.json"),
     "canvas_geometry": Registered(
         {"image_path": "ü.jpg", "tab": "annotate", "shapes": []},
