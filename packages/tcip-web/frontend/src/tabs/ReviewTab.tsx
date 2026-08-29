@@ -267,7 +267,9 @@ export function ReviewTab() {
   const [pqModelPath, setPqModelPath] = useState("");
   const [pqJobId, setPqJobId] = useState<string | null>(null);
   const [pqStatus, setPqStatus] = useState<"idle" | "running" | "completed" | "failed">("idle");
-  const [pqQueue, setPqQueue] = useState<{ image: string; score: number }[] | null>(null);
+  const [pqQueue, setPqQueue] = useState<
+    { image: string; score: number; calibration_member?: boolean }[] | null
+  >(null);
   const [pqError, setPqError] = useState<string | null>(null);
   // Auto-enabled once a queue completes (that's clearly what computing one was for); the breeder
   // can turn it back off to browse in the ordinary (positional) order without discarding the queue.
@@ -347,6 +349,17 @@ export function ReviewTab() {
       .map((q) => indexByName.get(q.image.split(/[/\\]/).pop() ?? q.image))
       .filter((i): i is number => i !== undefined);
   }, [pqUseOrder, pqQueue, dataset.image_list]);
+
+  // calibration_member, keyed the same way priorityOrder maps queue names onto image_list.
+  const pqCalibrationByImage = useMemo(() => {
+    if (!pqQueue) return null;
+    const m = new Map<string, boolean>();
+    for (const q of pqQueue) {
+      if (q.calibration_member === undefined) continue;
+      m.set(q.image.split(/[/\\]/).pop() ?? q.image, q.calibration_member);
+    }
+    return m;
+  }, [pqQueue]);
 
   const nav = useImageNav({
     byImage: reviewNavByImage,
@@ -1325,6 +1338,14 @@ export function ReviewTab() {
             {imgName && (
               <span className="max-w-[150px] truncate font-mono text-tcip-fg" title={imgName}>
                 {imgName}
+              </span>
+            )}
+            {imgName && pqCalibrationByImage?.get(imgName) && (
+              <span
+                className="tcip-badge bg-tcip-warn/20 text-tcip-warn"
+                title="This image is on the bound run's calibration side; reviewing it edits a label inside that run's calibration universe, which its validation will disclose as moved"
+              >
+                Calibration
               </span>
             )}
             <button

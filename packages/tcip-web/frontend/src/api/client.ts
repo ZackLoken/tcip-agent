@@ -489,14 +489,17 @@ export const api = {
         body: JSON.stringify(body),
       }),
 
+    // calibration_member is present only when the run was bound to a manifest that could be read.
     priorityQueueJob: (jobId: string) =>
       call<{
         job_id: string;
         status: "pending" | "running" | "completed" | "failed";
         error: string | null;
-        queue: { image: string; score: number }[];
+        queue: { image: string; score: number; calibration_member?: boolean }[];
         total_candidates: number;
         reviewed_skipped: number;
+        marks_unresolved: string | null;
+        calibration_ambiguous_stems: string[];
       }>(ROUTES.getReviewQueueByJobId(jobId)),
   },
 };
