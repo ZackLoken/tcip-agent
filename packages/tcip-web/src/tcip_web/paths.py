@@ -122,14 +122,27 @@ def within(resolved: Path, root: Path) -> bool:
         return False
 
 
+def _staged_for_import(resolved: Path) -> bool:
+    """Whether ``resolved``'s ancestry passes through an ``.imports`` staging directory.
+
+    The import door's staging tree sits directly under a destination's parent (ordinarily the
+    workspace), which is itself an allowed root, so excluding it by name from the roots list
+    would exclude nothing: the parent it sits under is already admitted. This is the identity-
+    based negative check that closes that gap, so a half-extracted import is never resolvable
+    through a guarded route while it exists.
+    """
+    return ".imports" in resolved.parts
+
+
 def assert_path_allowed(path: str | Path) -> Path:
     """Resolve ``path`` and ensure it sits under an allowed root; return the resolved path.
 
     Callers use the returned path for every later read, write and audit, never the string they
     were given: re-resolving the raw string reopens the window between check and use. A path that
     does not exist yet (a file about to be written) is judged by its nearest existing ancestor.
-    Raises :class:`ValueError` naming the roots checked on refusal, and on any resolution or
-    comparison error, which is a refusal rather than a guess.
+    An ``.imports`` staging tree is never admitted, however it compares to the roots below (see
+    :func:`_staged_for_import`). Raises :class:`ValueError` naming the roots checked on refusal,
+    and on any resolution or comparison error, which is a refusal rather than a guess.
     """
     try:
         resolved = Path(path).resolve()
@@ -137,7 +150,7 @@ def assert_path_allowed(path: str | Path) -> Path:
     except (OSError, RuntimeError) as exc:
         raise ValueError(f"path {path!s} cannot be examined: {exc}") from exc
     roots = allowed_roots()
-    if anchor is not None:
+    if anchor is not None and not _staged_for_import(resolved):
         for root in roots:
             try:
                 if root.exists() and _contained(anchor, root):
