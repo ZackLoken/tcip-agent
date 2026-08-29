@@ -121,16 +121,13 @@ def _author_catkin_trait_spec(root: Path) -> None:
     door refuses a trait whose delivered number has no breeder-confirmed meaning, so this states
     one and confirms it through the same two writers a real project goes through.
     """
-    import dataclasses
-
     import tcip_store as ts
 
     from tcip_mcp import traits
     from tests._operationalization_fixtures import seed_confirmed_crossing
     from tests._trait_fixtures import CATKIN
 
-    data = {k: (list(v) if isinstance(v, tuple) else v)
-            for k, v in dataclasses.asdict(CATKIN).items()}
+    data = traits._encode_spec(CATKIN)
     key = traits.trait_spec_key(traits.trait_specs_dir(root), data["name"])
     spec, reason = traits._validate_and_write_spec(key, data, expect=ts.Version.ABSENT)
     if spec is None:
