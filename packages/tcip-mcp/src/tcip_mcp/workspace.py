@@ -136,6 +136,8 @@ register_store(
         name=ACTIVE_PROJECT_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
+        cannot_carry_field="a single project-name string",
         codec=text_codec(trailing_newline=True),
         concurrency="last_writer_wins",
         locator=_MARKER_DOC,

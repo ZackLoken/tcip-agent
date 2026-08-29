@@ -152,6 +152,8 @@ register_store(
         name=FLAT_IMAGE_STORE,
         kind="blob",
         key_fields=("filename",),
+        frozen=True,
+        cannot_carry_field="raw placed-image bytes, the same raw-bytes nature as imagery",
         locator=_FLAT_IMAGE_LOCATOR,
     )
 )

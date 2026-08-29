@@ -62,6 +62,7 @@ register_store(
         name=JOB_REGISTRY_STORE,
         kind="record",
         key_fields=("registry",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_REGISTRY_DOC,

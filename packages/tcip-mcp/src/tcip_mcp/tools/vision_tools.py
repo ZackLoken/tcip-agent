@@ -49,6 +49,7 @@ ts.register_store(
         name=PROPOSAL_STAGING_STORE,
         kind="record",
         key_fields=("date", "stem"),
+        frozen=True,
         codec=ts.RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_PROPOSAL_DOC,

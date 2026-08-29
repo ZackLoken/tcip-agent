@@ -196,6 +196,7 @@ register_store(
         name=OPERATIONALIZATIONS_STORE,
         kind="record",
         key_fields=("trait", "delivery_kind"),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="cas",
         enumerable=True,

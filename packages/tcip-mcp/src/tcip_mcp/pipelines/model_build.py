@@ -248,6 +248,7 @@ register_store(
         name=SNAPSHOT_MANIFEST_STORE,
         kind="record",
         key_fields=("experiment_id", "document"),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=_SnapshotManifestLocator(),
@@ -260,6 +261,8 @@ register_store(
         name=SNAPSHOT_FILE_STORE,
         kind="blob",
         key_fields=("content", "filename"),
+        frozen=True,
+        cannot_carry_field="a source file's raw bytes",
         locator=RootedFileLocator(prefix=_SNAPSHOT_DIR),
     )
 )

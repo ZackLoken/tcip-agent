@@ -208,6 +208,7 @@ register_store(
         name=RAY_DASHBOARD_STORE,
         kind="record",
         key_fields=("document",),
+        frozen=True,
         codec=RECORD_JSON,
         concurrency="last_writer_wins",
         locator=RootedFileLocator(prefix=(".tcip", "state"), suffix=".json"),

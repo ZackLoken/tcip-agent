@@ -46,6 +46,7 @@ register_store(
         name=COCO_DOCUMENTS_STORE,
         kind="blob",
         key_fields=("stem",),
+        frozen=False,
         locator=_COCO_DOCUMENT_LOCATOR,
     )
 )

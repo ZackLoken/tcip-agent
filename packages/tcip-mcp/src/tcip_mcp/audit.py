@@ -46,6 +46,7 @@ register_store(
         name=AUDIT_LOG_STORE,
         kind="log",
         key_fields=("document",),
+        frozen=True,
         codec=LOG_JSON,
         locator=_AUDIT_LOG,
     )
