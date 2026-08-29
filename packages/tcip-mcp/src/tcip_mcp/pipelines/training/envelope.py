@@ -318,7 +318,18 @@ class TrainContext:
         ``metrics_source`` this way ranks only on request (``select_best_model(...,
         include_unverified=True)``), never by default alongside the platform's own
         ``default_train`` runs.
+
+        Refuses (``ValueError``) a ``state`` carrying a ``schema_version`` key: that name is
+        reserved for this platform's own checkpoint-version field, read from the payload's
+        top-level namespace by the load-time version check, and a bespoke loop's own key of the
+        same name would collide with it silently.
         """
+        if "schema_version" in state:
+            raise ValueError(
+                f"ctx.save_checkpoint: state carries a 'schema_version' key "
+                f"({state['schema_version']!r}), reserved for this platform's own checkpoint "
+                "version field; name a bespoke loop's own field something else."
+            )
         from tcip_mcp.pipelines.model_build import stamp_model_ref
         from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, write_checkpoint
 

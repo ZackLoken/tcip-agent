@@ -20,7 +20,6 @@ being members of it (checkpoints, TensorBoard logs, a bespoke run's source snaps
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import logging
 from datetime import datetime, timezone
@@ -1293,7 +1292,11 @@ def register_model_from_experiment(
     this call's. Metrics are read, never fabricated: a checkpoint that carries no metrics dict, or
     that will not load at all, registers with an empty ``metrics`` and a ``metrics_source`` of
     ``None`` rather than substituting a different epoch's numbers (the run's own metrics log
-    describes a different model state than the checkpoint being registered).
+    describes a different model state than the checkpoint being registered). The unpickle and its
+    ``schema_version`` check are ``model_registry._load_verified_payload``, the same function
+    ``load_registered_checkpoint`` calls after its own registry-name identity check: this call's
+    identity check is the digest match above instead, but the payload rules (``weights_only=True``,
+    the version ceiling) are one implementation, never a second ``torch.load`` of its own.
 
     ``metrics_source`` records which path produced the numbers, not that anyone verified them:
     ``"trainer"`` when the run's config carries no ``training_source`` (the platform's own
@@ -1354,21 +1357,21 @@ def register_model_from_experiment(
 
     config = read_member(config_key(experiment_id), {})
 
-    # Metrics stored in the checkpoint describe the epoch it was saved at, so a best-checkpoint
-    # is never mislabelled with a later, worse epoch's numbers; read from the digested bytes.
+    # Metrics stored in the checkpoint describe the epoch it was saved at (never a later epoch's).
+    # Read through the same unpickle+version-check load_registered_checkpoint uses.
     final_metrics: dict[str, Any] = {}
     kind: str | None = None
-    payload = None
+    payload: dict | None = None
     try:
-        import torch  # local checkpoint the caller is registering deliberately
+        from tcip_mcp.model_registry import _load_verified_payload
 
-        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=False)
+        payload = _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
     except Exception as exc:
         logger.warning(
             "checkpoint %s would not load (%s); registering experiment %s with no metrics "
             "rather than substituting a different epoch's numbers.", ckpt, exc, experiment_id,
         )
-    if isinstance(payload, dict):
+    if payload is not None:
         kind = payload.get("kind")  # stamped by the trainer; None on older checkpoints
         stamped = payload.get("metrics")
         if isinstance(stamped, dict) and stamped:
