@@ -39,7 +39,9 @@ def test_a_plain_dataset_tree_is_all_blob_and_nothing_unaccounted(tmp_path: Path
     accounting = account_for(root)
 
     assert not accounting.unaccounted
-    assert not accounting.bookkeeping
+    # filelock keeps the released lock file under Unix and deletes it under Windows, so the
+    # producers' own lock residue is the one bookkeeping content a plain tree may carry.
+    assert all(entry.name.endswith(".lock") for entry in accounting.bookkeeping)
     assert not _plan_paths(accounting)
     blobs = {p.name for p in accounting.blobs}
     assert {"a_1.jpg", "a_1.json", "classes.json", "dataset.json"} <= blobs
