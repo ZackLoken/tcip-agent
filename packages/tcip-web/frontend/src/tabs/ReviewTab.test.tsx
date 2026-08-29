@@ -1204,11 +1204,13 @@ describe("ReviewTab priority queue", () => {
       status: "completed",
       error: null,
       queue: [
-        { image: "img2.jpg", score: 0.9 },
-        { image: "img1.jpg", score: 0.4 },
+        { image: "img2.jpg", score: 0.9, calibration_member: true },
+        { image: "img1.jpg", score: 0.4, calibration_member: false },
       ],
       total_candidates: 2,
       reviewed_skipped: 0,
+      marks_unresolved: null,
+      calibration_ambiguous_stems: [],
     });
 
     render(<ReviewTab />);
@@ -1235,6 +1237,45 @@ describe("ReviewTab priority queue", () => {
     expect((screen.getByLabelText(/Browse in priority order/) as HTMLInputElement).checked).toBe(
       true,
     );
+    // img1.jpg is the tab's initial current image (see the dataset fixture below); its own
+    // queue entry names calibration_member: false, so no badge for it.
+    expect(screen.queryByText("Calibration")).not.toBeInTheDocument();
+  });
+
+  it("badges the current image when its queue entry names it a calibration member", async () => {
+    vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
+      models: [{ name: "run-42", checkpoint_path: "C:/ckpts/run-42.pt" }],
+    });
+    vi.spyOn(api.review, "launchPriorityQueue").mockResolvedValue({
+      status: "launched",
+      job_id: "pq-3",
+    });
+    vi.spyOn(api.review, "priorityQueueJob").mockResolvedValue({
+      job_id: "pq-3",
+      status: "completed",
+      error: null,
+      queue: [
+        { image: "img1.jpg", score: 0.9, calibration_member: true },
+        { image: "img2.jpg", score: 0.4, calibration_member: false },
+      ],
+      total_candidates: 2,
+      reviewed_skipped: 0,
+      marks_unresolved: null,
+      calibration_ambiguous_stems: [],
+    });
+
+    render(<ReviewTab />);
+    await waitFor(() => expect(matchesSpy).toHaveBeenCalled());
+    openFilters();
+    await waitFor(() => expect(screen.getByText("run-42")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Priority-order model"), {
+      target: { value: "C:/ckpts/run-42.pt" },
+    });
+    fireEvent.click(
+      screen.getByTitle("Rank this date's images by how useful reviewing them would be"),
+    );
+
+    expect(await screen.findByText("Calibration")).toBeInTheDocument();
   });
 
   it("surfaces the tool's own refusal honestly, not a generic failure", async () => {
@@ -1252,6 +1293,8 @@ describe("ReviewTab priority queue", () => {
       queue: [],
       total_candidates: 0,
       reviewed_skipped: 0,
+      marks_unresolved: null,
+      calibration_ambiguous_stems: [],
     });
 
     render(<ReviewTab />);
