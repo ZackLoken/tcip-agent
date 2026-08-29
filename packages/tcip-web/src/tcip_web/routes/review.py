@@ -1328,10 +1328,9 @@ class PriorityQueueJob:
     queue: list[dict] = field(default_factory=list)
     total_candidates: int = 0
     reviewed_skipped: int = 0
-    # Set when the run was bound to a split manifest that could not be read: no entry above
+    # Set when the run's split record, or its named manifest, could not be read: no entry above
     # carries calibration_member, and this names why, rather than a guess.
     marks_unresolved: Optional[str] = None
-    calibration_ambiguous_stems: list[str] = field(default_factory=list)
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     # The platform root this job launched under, resolved on the request thread.
     platform_root: str = field(default_factory=_pq_current_root)
@@ -1347,7 +1346,6 @@ def _pq_summary(job: PriorityQueueJob) -> dict:
         "queue": job.queue, "total_candidates": job.total_candidates,
         "reviewed_skipped": job.reviewed_skipped, "platform_root": job.platform_root,
         "marks_unresolved": job.marks_unresolved,
-        "calibration_ambiguous_stems": job.calibration_ambiguous_stems,
     }
 
 
@@ -1409,7 +1407,6 @@ def rehydrate_for_current_root() -> None:
                 total_candidates=s.get("total_candidates", 0),
                 reviewed_skipped=s.get("reviewed_skipped", 0),
                 marks_unresolved=s.get("marks_unresolved"),
-                calibration_ambiguous_stems=s.get("calibration_ambiguous_stems") or [],
                 platform_root=s.get("platform_root") or root,
             )
         jobstore.evict_terminal(_pq_jobs, root)
@@ -1444,7 +1441,6 @@ def _pq_worker(job: PriorityQueueJob) -> None:
             job.total_candidates = result["total_candidates"]
             job.reviewed_skipped = result["reviewed_skipped"]
             job.marks_unresolved = result.get("marks_unresolved")
-            job.calibration_ambiguous_stems = result.get("calibration_ambiguous_stems") or []
     except Exception as exc:
         logger.exception("priority-queue job %s failed", job.job_id)
         job.status = "failed"
