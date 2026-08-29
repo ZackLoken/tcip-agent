@@ -79,8 +79,10 @@ def check_negatives(root: Path, findings: list) -> None:
     try:
         by_bucket = normalize_status_store(read_image_status_store(root))
     except StoreError as exc:
-        findings.append(("error", f"the image status store will not read ({exc}); negatives "
-                         "cannot be checked against it at all"))
+        # The same soft-rail posture check_status_tokens already takes on this file: a reporter
+        # names what it could not verify rather than blocking the whole run over it.
+        findings.append(("warn", f"the image status store will not read ({exc}); negatives "
+                         "cannot be verified against it"))
         return
     stems = _image_stems(root)
     ann_root = annotation_root(root)
@@ -355,9 +357,8 @@ def check_region_completeness(root: Path, findings: list) -> None:
                         f"{'y is' if len(unreadable) == 1 else 'ies are'} in a shape this reader "
                         f"does not recognize, starting with {unreadable[:3]}"))
 
-    store = normalize_region_completeness_store(raw)
-    if not store:
-        return
+    # Read and version-check the digest file before the no-recognized-bucket early return below,
+    # so a bumped digest shape is still reported even when the main store parses to nothing.
     digests = _load(region_completeness_digest_path(root))
     _note_version(
         findings,
@@ -365,6 +366,10 @@ def check_region_completeness(root: Path, findings: list) -> None:
         REGION_COMPLETENESS_DIGEST_STORE,
         digests,
     )
+
+    store = normalize_region_completeness_store(raw)
+    if not store:
+        return
     if not isinstance(digests, dict):
         digests = {}
     for bucket, record in store.items():
@@ -394,7 +399,10 @@ def check_trait_specs(root: Path, findings: list) -> None:
 
     _specs, errors = load_trait_specs_with_errors(project_root=root)
     for e in errors:
-        findings.append(("error", f"trait spec {e['file']} failed to load: {e['reason']}"))
+        # A version refusal is a soft-rail finding, the doctor's own posture; every other reason
+        # (malformed JSON, an invalid config) still blocks, unchanged from before this family.
+        level = "warn" if e.get("kind") == "version_refused" else "error"
+        findings.append((level, f"trait spec {e['file']} failed to load: {e['reason']}"))
 
 
 def check_trait_spec_statements(root: Path, findings: list) -> None:
