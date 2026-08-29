@@ -34,6 +34,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_NMS_IOU,
     DEFAULT_OVERLAP,
 )
+from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._body_common import EmptyBodyPayload
 
@@ -44,6 +45,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])
+
+INFERENCE_REGISTRY = jobstore.INFERENCE_JOBS
+"""The job registry this module persists its jobs to."""
 
 
 def _current_root() -> str:
@@ -125,7 +129,7 @@ def _persist() -> None:
     from tcip_web import jobstore
     with _job_lock:
         summaries = [_summary(j) for j in _jobs.values()]
-    jobstore.persist_grouped("inference_jobs", summaries)
+    jobstore.persist_grouped(INFERENCE_REGISTRY, summaries)
 
 
 def _register(job: InferenceJob) -> None:
@@ -167,7 +171,7 @@ def rehydrate_for_current_root() -> None:
 
     root = jobstore.current_root()
     with _job_lock:
-        for s in jobstore.load("inference_jobs"):
+        for s in jobstore.load(INFERENCE_REGISTRY):
             jid = s.get("job_id")
             if not jid or jid in _jobs:
                 continue

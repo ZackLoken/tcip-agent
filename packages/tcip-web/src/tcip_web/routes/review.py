@@ -47,6 +47,7 @@ from tcip_annotation.state import Annotation
 from tcip_annotation.verdicts import VerdictAction
 from tcip_mcp.dataset_layout import annotations_hold_subject, derive_status
 from tcip_mcp.pipelines.image_utils import image_dimensions, resolve_image_source
+from tcip_web import jobstore
 from tcip_web.identity import resolve_user, user_id
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
@@ -1303,6 +1304,10 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 # is a different, more consequential capability deliberately left agent-only for now.
 
 
+REVIEW_PRIORITY_REGISTRY = jobstore.REVIEW_PRIORITY_JOBS
+"""The job registry this module persists its priority-queue jobs to."""
+
+
 def _pq_current_root() -> str:
     from tcip_web import jobstore
     return jobstore.current_root()
@@ -1342,7 +1347,7 @@ def _pq_persist() -> None:
     from tcip_web import jobstore
     with _pq_lock:
         summaries = [_pq_summary(j) for j in _pq_jobs.values()]
-    jobstore.persist_grouped("review_priority_jobs", summaries)
+    jobstore.persist_grouped(REVIEW_PRIORITY_REGISTRY, summaries)
 
 
 def _pq_register(job: PriorityQueueJob) -> None:
@@ -1378,7 +1383,7 @@ def rehydrate_for_current_root() -> None:
 
     root = jobstore.current_root()
     with _pq_lock:
-        for s in jobstore.load("review_priority_jobs"):
+        for s in jobstore.load(REVIEW_PRIORITY_REGISTRY):
             jid = s.get("job_id")
             if not jid or jid in _pq_jobs:
                 continue

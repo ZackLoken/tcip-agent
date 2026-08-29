@@ -3,6 +3,20 @@
 import pytest
 
 
+def test_job_registry_documents_each_match_the_job_registry_claim():
+    """tcip-store cannot import tcip-web, so the ``job_registry`` claim in
+    ``tcip_store.layout_claims`` cannot enumerate ``JOB_REGISTRY_DOCUMENTS`` itself; this test
+    holds the agreement from this side, so a document added to the tuple without a matching
+    claim template fails here rather than going unclaimed by the conform rail."""
+    from tcip_store.layout_claims import PLATFORM_CLAIMS, matches_template
+    from tcip_web.jobstore import JOB_REGISTRY_DOCUMENTS
+
+    templates = PLATFORM_CLAIMS["job_registry"].templates
+    for name in JOB_REGISTRY_DOCUMENTS:
+        segments = (".tcip", "state", f"{name}.json")
+        assert any(matches_template(t, segments) for t in templates), name
+
+
 def test_evict_terminal_caps_and_keeps_running():
     from tcip_web.jobstore import evict_terminal
 
