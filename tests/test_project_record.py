@@ -306,22 +306,19 @@ def test_site_fields_names_a_root_the_store_refuses_to_read(tmp_path: Path):
 
 
 def test_site_fields_on_an_unadopted_root_names_adopt_store_py(tmp_path: Path):
-    """A root imported from an archive holds loose record files and no database: the state
-    ``scripts/adopt_store.py`` conforms. Built through the platform's own doors (init, archive,
-    import), never by hand-writing ``project.json``."""
+    """A root whose records are still loose files: ``scripts/adopt_store.py`` is the state it
+    conforms. The file backend legitimately produces that state (``import_project`` no longer
+    does: it adopts a fresh root under the database backend), so the unadopted root here is
+    built by writing through the file backend directly, through ``init_project``, never by
+    hand-writing ``project.json``."""
     from tcip_mcp.project_record import site_fields
-    from tcip_mcp.tools.project_tools import archive_project, import_project, init_project
+    from tcip_mcp.tools.project_tools import init_project
+
+    dest = tmp_path / "unadopted"
+    with bound(FileBackend()):
+        init_project(str(dest), site="north orchard")
 
     with bound(SqliteBackend()):
-        src = tmp_path / "src_project"
-        init_project(str(src), site="north orchard")
-        zip_path = tmp_path / "export.zip"
-        exported = archive_project(str(src), str(zip_path))
-        assert "error" not in exported
-        dest = tmp_path / "unadopted"
-        imported = import_project(str(zip_path), str(dest))
-        assert "error" not in imported
-
         fields = site_fields(str(dest))
 
     assert fields["site"] is None

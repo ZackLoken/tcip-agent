@@ -182,14 +182,15 @@ def test_a_file_written_after_this_backend_last_looked_still_refuses(tmp_path):
     assert not (tmp_path / ".tcip" / "store.db").exists()
 
 
-def test_a_restored_archive_is_refused_rather_than_read_as_an_empty_project(tmp_path, monkeypatch):
-    """An import extracts a project's files into a fresh directory, so its confirmed negatives
-    are files and nothing else. A database created beside them answers every one of them with
-    absence, which is an annotated image training as empty.
+def test_a_restored_archive_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
+    """An import extracts a project's files into a fresh directory and, bound to the database
+    backend, adopts them into a database itself: the root is usable at once, with no operator
+    scripts/adopt_store.py run between the two doors and no window where a confirmed negative
+    would otherwise read as absent.
 
     The two phases take separate platform roots. The archive and the import are audited calls
     that record under the root their process is pinned to, so one platform root written through
-    both backends would trip these same rails on the setup rather than on the case.
+    both backends would trip the conform rail on the setup rather than on the case.
     """
     from tcip_mcp import dataset_layout
     from tcip_mcp.tools.project_tools import archive_project, import_project
@@ -212,20 +213,15 @@ def test_a_restored_archive_is_refused_rather_than_read_as_an_empty_project(tmp_
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(platform_database))
     with bound(SqliteBackend()):
         # The order a long-lived process reaches a destination in: it answers about the root,
-        # then the bundle lands in it, then something writes.
+        # then the bundle lands in it, then something reads.
         restored.mkdir()
         assert ts.read(dataset_layout.image_status_key(restored), default=None) is None
-        assert "error" not in import_project(str(tmp_path / "bundle.zip"), str(restored))
+        imported = import_project(str(tmp_path / "bundle.zip"), str(restored))
+        assert "error" not in imported
+        assert imported["database_built"] is True
 
-        with pytest.raises(ts.StoreError) as raised:
-            ts.replace(
-                dataset_layout.image_status_key(restored), negative, expect=ts.Version.ABSENT
-            )
-
-    assert "scripts/adopt_store.py" in str(raised.value)
-    assert not (restored / ".tcip" / "store.db").exists()
-    with bound(FileBackend()):
         assert ts.read(dataset_layout.image_status_key(restored)) == negative
+    assert (restored / ".tcip" / "store.db").is_file()
 
 
 def test_a_file_that_is_not_a_database_at_the_database_path_refuses_by_name(tmp_path):

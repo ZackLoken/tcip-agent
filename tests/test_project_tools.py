@@ -746,29 +746,34 @@ def test_init_project_refuses_an_undecodable_record(tmp_path: Path, monkeypatch)
 
 
 def test_init_project_refuses_an_unadopted_root(tmp_path: Path, monkeypatch):
-    """A root imported from an archive holds loose record files and no database: the store's
-    conform rail refuses init_project's site write there until scripts/adopt_store.py has run,
-    the same rule every other record store under that root already obeys. Bound to the
-    database backend explicitly, since the loose-files-with-no-database state this proves is a
-    fact about that backend's conform rail, not about whichever backend the suite happens to
-    run this file on."""
+    """A root whose records are still loose files: the store's conform rail refuses
+    init_project's site write there until scripts/adopt_store.py has run, the same rule every
+    other record store under that root already obeys. The file backend legitimately produces
+    that state (import_project no longer does: it adopts a fresh root under the database
+    backend), so the unadopted root here is built by writing through the file backend directly
+    and then judged under the database backend."""
+    from tcip_store.file_backend import FileBackend
     from tcip_store.sqlite_backend import SqliteBackend
     from tcip_store.store import _backend
 
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "unused_workspace"))
+    dest = tmp_path / "unadopted"
     previous = _backend()
+    # init_project's own audit entry lands at the platform root, not dest; a throwaway root here
+    # keeps it off tmp_path, which stage two's own audit write below needs to find pristine.
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_platform_root"))
+    file_backend = FileBackend()
+    tcip_store.bind(file_backend)
+    try:
+        init_project(str(dest), site="north orchard")
+    finally:
+        tcip_store.bind(previous)
+        file_backend.close()
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     backend = SqliteBackend()
     tcip_store.bind(backend)
     try:
-        src = tmp_path / "src_project"
-        init_project(str(src), site="north orchard")
-        zip_path = tmp_path / "export.zip"
-        exported = archive_project(str(src), str(zip_path))
-        assert "error" not in exported
-        dest = tmp_path / "unadopted"
-        imported = import_project(str(zip_path), str(dest))
-        assert "error" not in imported
-
         result = init_project(str(dest), site="north orchard")
     finally:
         tcip_store.bind(previous)

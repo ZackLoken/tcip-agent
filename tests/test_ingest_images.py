@@ -642,31 +642,38 @@ def test_ingest_refuses_an_undecodable_record(tmp_path):
     assert "does not decode" in manifest["error"]
 
 
-def test_ingest_refuses_an_unadopted_root(tmp_path):
-    """A root imported from an archive holds loose record files and no database: the store's
-    conform rail refuses ingest_images's site write there until scripts/adopt_store.py has run.
-    Bound to the database backend explicitly, since the loose-files-with-no-database state this
-    proves is a fact about that backend's conform rail, not about whichever backend the suite
-    happens to run this file on."""
+def test_ingest_refuses_an_unadopted_root(tmp_path, monkeypatch):
+    """A root whose records are still loose files: the store's conform rail refuses
+    ingest_images's site write there until scripts/adopt_store.py has run. The file backend
+    legitimately produces that state (import_project no longer does: it adopts a fresh root
+    under the database backend), so the unadopted root here is built by writing through the
+    file backend directly, through init_project, and then judged under the database backend
+    explicitly, since that is a fact about that backend's conform rail, not about whichever
+    backend the suite happens to run this file on."""
     import tcip_store
+    from tcip_store.file_backend import FileBackend
     from tcip_store.sqlite_backend import SqliteBackend
     from tcip_store.store import _backend
 
-    from tcip_mcp.tools.project_tools import archive_project, import_project, init_project
+    from tcip_mcp.tools.project_tools import init_project
 
     previous = _backend()
+    dest = tmp_path / "unadopted"
+    # init_project's own audit entry lands at the platform root, not dest; a throwaway root here
+    # keeps it off tmp_path, which ingest_images's own audit write below needs pristine.
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "scratch_platform_root"))
+    file_backend = FileBackend()
+    tcip_store.bind(file_backend)
+    try:
+        init_project(str(dest), site="north orchard")
+    finally:
+        tcip_store.bind(previous)
+        file_backend.close()
+
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     backend = SqliteBackend()
     tcip_store.bind(backend)
     try:
-        src = tmp_path / "src_project"
-        init_project(str(src), site="north orchard")
-        zip_path = tmp_path / "export.zip"
-        exported = archive_project(str(src), str(zip_path))
-        assert "error" not in exported
-        dest = tmp_path / "unadopted"
-        imported = import_project(str(zip_path), str(dest))
-        assert "error" not in imported
-
         src2 = tmp_path / "raw2"
         _make_image(src2 / "b.jpg")
         manifest = ingest_images(
@@ -681,14 +688,12 @@ def test_ingest_refuses_an_unadopted_root(tmp_path):
 
 
 def test_ingest_after_import_and_adopt_admits_a_second_date(tmp_path, _isolate_workspace):
-    """The store's own standing rule surfaces one door earlier: an imported root extracts
-    loose files and no database, so ``ingest_images`` refuses there until
-    ``scripts/adopt_store.py`` has run, the same as every other record store under that root.
-    Import, adopt, ingest is the admit case. Bound to the database backend explicitly, since
-    adoption builds that backend's database and means nothing under the file backend."""
+    """The import door adopts a fresh root itself when the process is bound to the database
+    backend, so a project it lands is usable at once: no operator ``scripts/adopt_store.py``
+    run sits between ``import_project`` and ``ingest_images``. Import, ingest is the admit case.
+    Bound to the database backend explicitly, since that is what the door's own adoption step
+    is conditional on."""
     import tcip_store
-    from tcip_store.adoption import adopt_root
-    from tcip_store.layout_claims import ROOT
     from tcip_store.sqlite_backend import SqliteBackend
     from tcip_store.store import _backend
 
@@ -712,8 +717,7 @@ def test_ingest_after_import_and_adopt_admits_a_second_date(tmp_path, _isolate_w
         dest = _isolate_workspace / "proj_reopened_case"
         imported = import_project(str(zip_path), str(dest))
         assert "error" not in imported
-
-        adopt_root(str(dest.absolute()), ROOT, report=lambda line: None)
+        assert imported["database_built"] is True
 
         src2 = tmp_path / "raw2"
         _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")

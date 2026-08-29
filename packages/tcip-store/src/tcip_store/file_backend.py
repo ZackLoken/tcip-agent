@@ -505,7 +505,7 @@ class FileBackend:
         stranded temp file accumulates there for every failed write.
         """
         try:
-            _retry_while_denied(lambda: os.replace(temp, path), self.lock_timeout_s)
+            retry_while_denied(lambda: os.replace(temp, path), self.lock_timeout_s)
         except BaseException:
             _remove_quietly(temp)
             raise
@@ -526,7 +526,7 @@ class FileBackend:
             except FileNotFoundError:
                 return None
 
-        return _retry_while_denied(read, self.lock_timeout_s)
+        return retry_while_denied(read, self.lock_timeout_s)
 
     # ── records ─────────────────────────────────────────────────────────────────
 
@@ -741,7 +741,7 @@ class FileBackend:
     def open_blob(self, key: Key) -> Generator[BinaryIO]:
         path = self.path_for(key)
         try:
-            handle = _retry_while_denied(lambda: open(path, "rb"), self.lock_timeout_s)
+            handle = retry_while_denied(lambda: open(path, "rb"), self.lock_timeout_s)
         except FileNotFoundError:
             raise NotFound(f"{key.store}{list(key.parts)} has no blob under {key.root}") from None
         try:
@@ -913,7 +913,7 @@ def _remove_quietly(path: str) -> None:
         pass
 
 
-def _retry_while_denied(action: Callable[[], Any], budget_s: float) -> Any:
+def retry_while_denied(action: Callable[[], Any], budget_s: float) -> Any:
     """Run a filesystem action an atomic replace can transiently deny, then give up loudly.
 
     On Windows both sides of a replace are exposed to this: the rename is denied while any
