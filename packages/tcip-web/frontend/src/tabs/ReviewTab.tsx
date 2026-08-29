@@ -271,6 +271,9 @@ export function ReviewTab() {
     { image: string; score: number; calibration_member?: boolean }[] | null
   >(null);
   const [pqError, setPqError] = useState<string | null>(null);
+  // Set when the calibration side couldn't be marked (unreadable split record/manifest, or a
+  // root mismatch); no queue entry then carries calibration_member, and this names why.
+  const [pqMarksUnresolved, setPqMarksUnresolved] = useState<string | null>(null);
   // Auto-enabled once a queue completes (that's clearly what computing one was for); the breeder
   // can turn it back off to browse in the ordinary (positional) order without discarding the queue.
   const [pqUseOrder, setPqUseOrder] = useState(false);
@@ -292,6 +295,7 @@ export function ReviewTab() {
     setPqQueue(null);
     setPqError(null);
     setPqUseOrder(false);
+    setPqMarksUnresolved(null);
   }, [visKey]);
 
   useEffect(() => {
@@ -305,6 +309,7 @@ export function ReviewTab() {
           setPqStatus("completed");
           setPqQueue(body.queue);
           setPqUseOrder(true);
+          setPqMarksUnresolved(body.marks_unresolved ?? null);
         } else if (body.status === "failed") {
           setPqStatus("failed");
           setPqError(body.error ?? "The priority queue could not be computed.");
@@ -326,6 +331,7 @@ export function ReviewTab() {
     setPqStatus("running");
     setPqError(null);
     setPqQueue(null);
+    setPqMarksUnresolved(null);
     try {
       const res = await api.review.launchPriorityQueue({
         dataset_root: dataset.dataset_root,
@@ -1346,6 +1352,11 @@ export function ReviewTab() {
                 title="This image is on the bound run's calibration side; reviewing it edits a label inside that run's calibration universe, which its validation will disclose as moved"
               >
                 Calibration
+              </span>
+            )}
+            {imgName && !pqCalibrationByImage?.get(imgName) && pqQueue && pqMarksUnresolved && (
+              <span className="tcip-badge bg-tcip-warn/20 text-tcip-warn" title={pqMarksUnresolved}>
+                Calibration unknown
               </span>
             )}
             <button
