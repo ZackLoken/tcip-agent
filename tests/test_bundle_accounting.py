@@ -180,3 +180,30 @@ def test_a_checkpoint_directly_under_tcip_models_is_blob(tmp_path: Path):
 
     assert models / "m.pt" in accounting.blobs
     assert not accounting.unaccounted
+
+
+def test_account_for_works_with_only_the_package_on_sys_path(tmp_path: Path):
+    """Coverage: account_for's store-catalogue import must not need the repository's own
+    ``scripts`` package, which exists only with the repo root on sys.path; an installed
+    deployment never puts it there."""
+    import os
+    import subprocess
+    import sys
+
+    root = tmp_path / "proj"
+    _dataset_tree(root)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    src_dirs = [str(repo_root / "packages" / pkg / "src") for pkg in (
+        "tcip-store", "tcip-annotation", "tcip-mcp", "tcip-web",
+    )]
+    script = f"from tcip_mcp.tools.bundle import account_for; account_for({str(root)!r})"
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(src_dirs)
+
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=str(tmp_path), env=env,
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
