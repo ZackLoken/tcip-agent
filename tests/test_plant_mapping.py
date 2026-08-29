@@ -50,7 +50,8 @@ def _build(assignments: dict[str, list[Assignment]]) -> MappingBuild:
         built_by="build_plant_mapping", built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None, dates=sorted(assignments),
         nn_tolerance_m={"value": 10.0, "source": "fallback"}, plant_csvs=[],
-        capture_identity={d: "0" * 16 for d in assignments}, unreadable={d: [] for d in assignments},
+        capture_identity={d: "0" * 16 for d in assignments},
+        capture_digests={d: {} for d in assignments}, unreadable={d: [] for d in assignments},
         assignments=assignments,
     )
 
@@ -240,6 +241,29 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
     assert loaded.assignments["2-11-26"][0].plot_name == "PLOT1"
     assert loaded.assignments["2-11-26"][0].source == "sequence"
     assert loaded.assignments["2-11-26"][0].distance_m == pytest.approx(1.2)
+
+
+def test_load_mapping_refuses_an_older_record_missing_capture_digests(tmp_path: Path) -> None:
+    """A record built before capture_digests joined the required top-level keys (here, one this
+    same producer wrote, then stripped, standing in for that older shape honestly: the bytes a
+    pre-rider build actually left are gone) fails the required-keys read naming the missing key
+    and the rebuild remedy, rather than silently defaulting it."""
+    build = _build({
+        "2-11-26": [
+            Assignment(
+                image_path="/data/IMG.JPG", stem="IMG", date_folder="2-11-26",
+                plot_name="PLOT1", accession_name="A", source="sequence", distance_m=1.2,
+            )
+        ]
+    })
+    persist_mapping(build, tmp_path, "mapping")
+    key = plant_mapping_key(tmp_path, "mapping")
+    record = tcip_store.read(key)
+    del record["capture_digests"]
+    tcip_store.replace(key, record)
+
+    with pytest.raises(ValueError, match="capture_digests"):
+        load_mapping(tmp_path, "mapping")
 
 
 def test_build_mapping_empty_dir(tmp_path: Path) -> None:

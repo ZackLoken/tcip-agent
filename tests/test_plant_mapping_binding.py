@@ -286,7 +286,8 @@ def test_compute_phenology_refuses_a_record_with_provenance_and_no_receipt(
         "dataset_id": "whatever-id", "built_by": "build_plant_mapping",
         "built_at": "2026-02-11T00:00:00+00:00", "dates_requested": None, "dates": list(DATES),
         "nn_tolerance_m": {"value": 10.0, "source": "fallback"}, "plant_csvs": [],
-        "capture_identity": {d: "0" * 16 for d in DATES}, "unreadable": {d: [] for d in DATES},
+        "capture_identity": {d: "0" * 16 for d in DATES},
+        "capture_digests": {d: {} for d in DATES}, "unreadable": {d: [] for d in DATES},
         "assignments": {d: [] for d in DATES},
     }
     ts.replace(plant_mapping.plant_mapping_key(tmp_path, "forged"), record)
@@ -1138,6 +1139,97 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
         output_csv_path=str(out_csv), acknowledge_unvalidated=True)
     assert "error" in res
     assert DATES[0] in res["error"]
+    assert "aux.bandgroup" in res["error"]
+    assert not out_csv.exists()
+
+
+# ── the mapping rider: per-capture digests beside capture_identity ──────────────────────
+
+
+def test_build_mapping_persists_and_reads_back_capture_digests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A build through the platform's own producer carries one digest per capture, keyed by
+    stem, alongside the per-date capture_identity; both derive from the same row builder, so
+    capture_identity's own recompute (round-tripped here) agrees with capture_digests entry by
+    entry. The receipt still verifies over the new record shape: load_mapping would refuse
+    before returning anything if record_sha256, computed at persist over the whole record,
+    disagreed with the receipt written for it."""
+    from tcip_mcp.pipelines.image_utils import list_logical_images
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        _read_date_stamps,
+        capture_identity,
+        record_digest,
+    )
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    build = plant_mapping.load_mapping(tmp_path, "valley")
+    assert build is not None
+    date = DATES[0]
+    assert set(build.capture_digests) == set(build.dates)
+    recorded_stems = {a.stem for a in build.assignments[date]}
+    assert set(build.capture_digests[date]) == recorded_stems
+
+    stamps = _read_date_stamps(list_logical_images(images_root / date), date)
+    assert capture_identity(stamps) == build.capture_identity[date]
+
+    raw = ts.read(plant_mapping.plant_mapping_key(tmp_path, "valley"))
+    assert record_digest(raw) == build.record_sha256
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" not in res, res
+    assert out_csv.exists()
+
+
+def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_the_band_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The band group's own membership is unchanged (the same two files, the same stem), so the
+    added/missing-stem checks never fire; only the whole-date identity recompute catches a
+    manifest rewritten in place, and capture_digests now lets the refusal name the band group's
+    own manifest rather than only the date."""
+    from tcip_mcp.pipelines.data.band_groups import (
+        band_group_manifest_path,
+        detect_and_write_band_groups,
+    )
+
+    _init(tmp_path, monkeypatch)
+    dataset_root = _dataset(tmp_path)
+    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=[DATES[0]])
+    date_dir = images_root / DATES[0]
+    _write_geo_image(date_dir / "aux_b1.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 41))
+    _write_geo_image(date_dir / "aux_b2.jpg", 43.1968, -90.0581, datetime(2026, 2, 11, 9, 42))
+    grouped = detect_and_write_band_groups(
+        date_dir, explicit_groups={"aux": {"b1": "aux_b1.jpg", "b2": "aux_b2.jpg"}})
+    assert grouped["formed"], grouped
+
+    build_res = build_plant_mapping(
+        name="valley", images_root=str(images_root), plant_csv_paths=[str(plant_csv)])
+    assert "error" not in build_res, build_res
+    _seed_currant_bloom_trait(tmp_path)
+
+    manifest_path = band_group_manifest_path(date_dir, "aux")
+    # Same "bands" claimed (same members, same kind): a rewrite in place, not an added/removed
+    # capture, so only the whole-date identity recompute can catch it.
+    manifest_path.write_text(manifest_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    out_csv = tmp_path / "out.csv"
+    res = compute_phenology(
+        trait="currant_bloom", mapping_name="valley", predictions_by_date=preds_by_date,
+        output_csv_path=str(out_csv), acknowledge_unvalidated=True)
+    assert "error" in res
+    assert DATES[0] in res["error"]
+    assert "band group manifest" in res["error"]
     assert "aux.bandgroup" in res["error"]
     assert not out_csv.exists()
 
