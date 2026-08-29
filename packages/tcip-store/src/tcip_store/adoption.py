@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from tcip_store.errors import DecodeError, StoreError
+from tcip_store.errors import DecodeError, SchemaVersionRefused, StoreError
 from tcip_store.file_backend import (
     _remove_quietly,
     creation_temp_name,
@@ -50,6 +50,7 @@ from tcip_store.layout_claims import (
     layouts_in_play,
 )
 from tcip_store.registry import get_descriptor
+from tcip_store.schema_version import check_schema_version
 from tcip_store.sqlite_backend import (
     SCHEMA_DDL,
     SCHEMA_VERSION,
@@ -305,7 +306,11 @@ def _preflight(plan: AdoptionPlan) -> tuple[_Loaded, ...]:
     will not decode.
 
     A record decodes whole; a log decodes line by line, because one unreadable line in an
-    append-only file is the entry that would silently vanish from the database.
+    append-only file is the entry that would silently vanish from the database. This decode
+    runs below the storage seam's own (``codec.decode`` directly, not ``file_backend._decode``),
+    so it runs the schema_version check itself, reporting an unsupported version as the same
+    plan refusal an undecodable file gets, naming the version: a soft rail, since adoption reads
+    and reports rather than acting on the document's content.
     """
     loaded: list[_Loaded] = []
     for entry in plan.entries:
@@ -315,9 +320,15 @@ def _preflight(plan: AdoptionPlan) -> tuple[_Loaded, ...]:
         try:
             if descriptor.kind == "log":
                 for line in _log_lines(data):
-                    descriptor.codec.decode(line)
+                    check_schema_version(descriptor, descriptor.codec.decode(line))
             else:
-                descriptor.codec.decode(data)
+                check_schema_version(descriptor, descriptor.codec.decode(data))
+        except SchemaVersionRefused as exc:
+            raise DecodeError(
+                f"{entry.path} is {entry.store}{list(entry.parts)} but carries a schema_version "
+                f"this reader does not accept: {exc}. Nothing was written. Adopting it would "
+                "put a document into the database that no reader will accept back out."
+            ) from exc
         except Exception as exc:
             raise DecodeError(
                 f"{entry.path} is {entry.store}{list(entry.parts)} but does not decode: {exc}. "

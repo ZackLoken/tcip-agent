@@ -42,6 +42,15 @@ class DecodeError(StoreError):
     """
 
 
+class SchemaVersionRefused(StoreError):
+    """A document's ``schema_version`` is outside what this reader's descriptor accepts.
+
+    Deliberately not a ``DecodeError`` subclass: the bytes decoded perfectly well, and an
+    unsupported version is a policy fact about a document from a newer writer, never
+    corruption. A softener written to catch ``DecodeError`` must not absorb this by accident.
+    """
+
+
 class PolicyViolation(StoreError):
     """The write form is not one the store's concurrency policy allows."""
 

@@ -32,6 +32,7 @@ from tcip_store.errors import (
     BadKey,
     DecodeError,
     NotFound,
+    SchemaVersionRefused,
     StoreBusy,
     StoreError,
     TransactionMisuse,
@@ -48,6 +49,7 @@ from tcip_store.model import (
     canonical_path,
 )
 from tcip_store.registry import StoreDescriptor, get_descriptor
+from tcip_store.schema_version import check_schema_version
 
 _TEMP_SUFFIX = ".tmp"
 _LOCK_SUFFIX = ".lock"
@@ -679,9 +681,12 @@ class FileBackend:
         consumed = len(data) - (len(trailing) if torn else 0)
         records: list[Mapping[str, Any]] = []
         corrupt: list[int] = []
+        version_refused: list[int] = []
         for position, line in enumerate(lines):
             try:
                 records.append(_decode(descriptor, key, line))
+            except SchemaVersionRefused:
+                version_refused.append(position)
             except DecodeError:
                 corrupt.append(position)
         return LogPage(
@@ -689,6 +694,7 @@ class FileBackend:
             cursor=str(start + consumed),
             torn_tail=torn,
             corrupt=tuple(corrupt),
+            version_refused=tuple(version_refused),
         )
 
     # ── blobs ───────────────────────────────────────────────────────────────────
@@ -844,13 +850,21 @@ def _encode(descriptor: StoreDescriptor, key: Key, value: Any) -> bytes:
 
 
 def _decode(descriptor: StoreDescriptor, key: Key, data: bytes) -> Any:
+    """The record's decoded value, refusing an undecodable body or an unsupported version.
+
+    The one decode every backend and the transaction paths call: a version refusal raised here
+    is ``SchemaVersionRefused``, never ``DecodeError``, since the bytes decoded perfectly well
+    and a reader about to act on this document's content is the seam's hard-refusal point.
+    """
     assert descriptor.codec is not None
     try:
-        return descriptor.codec.decode(data)
+        value = descriptor.codec.decode(data)
     except Exception as exc:
         raise DecodeError(
             f"{key.store}{list(key.parts)} under {key.root} exists but does not decode: {exc}"
         ) from exc
+    check_schema_version(descriptor, value)
+    return value
 
 
 def _missing_record(key: Key) -> NotFound:

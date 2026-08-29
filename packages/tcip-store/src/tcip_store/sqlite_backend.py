@@ -42,6 +42,7 @@ from typing import Any, BinaryIO
 from tcip_store.errors import (
     BackendUnavailable,
     DecodeError,
+    SchemaVersionRefused,
     StoreBusy,
     StoreError,
     VersionConflict,
@@ -938,7 +939,9 @@ class SqliteBackend:
         The cursor is the last returned row's id, which autoincrement never reuses.
         ``torn_tail`` is structurally always False: an entry is a committed row or it is not
         there, so there is no partial tail to hold back. An entry that will not decode is
-        still reported through ``corrupt`` rather than skipped.
+        still reported through ``corrupt`` rather than skipped, and one that decodes but
+        carries a schema_version this reader does not know is reported through
+        ``version_refused`` instead.
         """
         descriptor = get_descriptor(key.store)
         start = int(after) if after else 0
@@ -953,14 +956,22 @@ class SqliteBackend:
             ).fetchall()
         records: list[Mapping[str, Any]] = []
         corrupt: list[int] = []
+        version_refused: list[int] = []
         cursor = start
         for position, (row_id, entry) in enumerate(rows):
             try:
                 records.append(_decode(descriptor, key, entry))
+            except SchemaVersionRefused:
+                version_refused.append(position)
             except DecodeError:
                 corrupt.append(position)
             cursor = row_id
-        return LogPage(records=records, cursor=str(cursor), corrupt=tuple(corrupt))
+        return LogPage(
+            records=records,
+            cursor=str(cursor),
+            corrupt=tuple(corrupt),
+            version_refused=tuple(version_refused),
+        )
 
     # ── blobs, which stay files ─────────────────────────────────────────────────
 
