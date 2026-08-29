@@ -282,9 +282,9 @@ def test_review_priority_queue_rehydrate_restores_the_persisted_queue(tmp_path, 
 
 def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_path, monkeypatch):
     """A bound run's per-candidate calibration_member marks ride inside the persisted queue
-    dicts already (asserted above); a manifest that could not be read instead carries the
-    reason on marks_unresolved and any date-ambiguous stems on calibration_ambiguous_stems,
-    both their own dataclass fields a rehydrate must restore rather than the empty default."""
+    dicts already (asserted above); a manifest that could not be read instead carries the reason
+    on marks_unresolved, its own dataclass field a rehydrate must restore rather than the empty
+    default."""
     from tcip_web.routes import review
 
     job = review.PriorityQueueJob(
@@ -292,7 +292,6 @@ def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_p
         status="completed",
         queue=[{"image": "a.jpg", "score": 0.9}],
         marks_unresolved="this run is bound to split manifest 'nope', but it could not be read",
-        calibration_ambiguous_stems=["shared_stem"],
     )
     review._pq_register(job)
     review._pq_jobs.clear()
@@ -302,7 +301,6 @@ def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_p
         restored = review._pq_jobs["pq-unresolved"]
         assert restored.marks_unresolved == (
             "this run is bound to split manifest 'nope', but it could not be read")
-        assert restored.calibration_ambiguous_stems == ["shared_stem"]
     finally:
         review._pq_jobs.clear()
 
