@@ -41,5 +41,5 @@ def test_doctor_reports_but_does_not_refuse_on_an_unsupported_region_completenes
 
     res = _run(root)
 
-    assert "schema_version" in res.stdout
+    assert "schema_version 2, above the 1 this reader knows" in res.stdout
     assert res.returncode != 2  # a raw-parse version finding is a warning, never a blocking error
