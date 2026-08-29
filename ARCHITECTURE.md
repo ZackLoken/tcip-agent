@@ -118,6 +118,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 0 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 19 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
+| packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store, package-only so account_for reaches it with no repo root on sys.path. | 35 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools, load, save, and evaluate name-based annotations via MCP. | 15 | 1 |  <!-- queued: P5-233 merge-or-split -->
 | packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | The shared membership accounting archive_project and import_project both compose from: derives every root a project tree is or holds and classifies each file into bookkeeping, a claimed record/log, a blob, or unaccounted. | 6 | 1 |
@@ -373,7 +374,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
-| scripts/_store_bootstrap.py | The whole store catalogue in one import, and which roots a project's records live in. | 33 | 2 |
+| scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 1 | 0 |
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 7 | 0 |
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
@@ -683,13 +684,13 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `register_dataset` | `project_tools.py:138` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
-| `init_project` | `project_tools.py:246` | yes | Initialise a TCIP project directory. |
-| `set_active_project` | `project_tools.py:280` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:369` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:416` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:553` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:760` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `register_dataset` | `project_tools.py:159` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
+| `init_project` | `project_tools.py:267` | yes | Initialise a TCIP project directory. |
+| `set_active_project` | `project_tools.py:301` | yes | Set the workspace's active project so the GUI opens it. |
+| `view_gui_state` | `project_tools.py:390` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:437` | yes | Get an overview of a TCIP project. |
+| `archive_project` | `project_tools.py:574` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:801` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 `tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
 `archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
@@ -1168,7 +1169,7 @@ read.
 Path: `<dataset_root>/dataset.json`.
 
 Writer: `tcip_mcp.tools.project_tools.register_dataset`,
-`packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:138`.
+`packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:159`.
 
 Reader: `tcip_mcp.pipelines.resolution.dataset_fingerprint` (recompute-on-read is the stated
 authority; the stored value is a cache),
@@ -1650,7 +1651,7 @@ check counts, and the promotion reads that same store.
 
 Path: `<project_root>/.tcip/datasets.json`.
 
-Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:121`.
+Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:142`.
 
 Reader: `read_datasets`, `project_tools.py:68`.
 
@@ -1911,7 +1912,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:104` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:385` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:406` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json  <!-- queued: P5-274 unify -->
