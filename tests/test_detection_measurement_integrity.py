@@ -1244,7 +1244,8 @@ def _tabulate_counts_over(monkeypatch, tmp_path, op, *, validated, captured=None
     monkeypatch.setattr(
         itools, "export_detection_csv",
         lambda results, path, provenance=None, *, trait, measurement_validated=None,
-        pred_dirs=None, acknowledge_unvalidated=False: str(path))
+        pred_dirs=None, acknowledge_unvalidated=False: (
+            str(path), {"measurement_validated": measurement_validated}))
     return itools.tabulate_counts(str(ckpt), str(tmp_path), str(tmp_path / "o.csv"),
                                   trait=fx.COUNT_TRAIT,
                                   calibration_labels_dir=str(tmp_path),

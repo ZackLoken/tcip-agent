@@ -1979,8 +1979,9 @@ def delivered_provenance(
     and is empty unless every bucket read is bound, since one cell cannot name a record for buckets
     that have none. ``producer_model_sha256`` and ``producing_experiment_id`` are corroborated
     through :func:`corroborated_producer`, preferring the identity the verified records carry over
-    the identity the stamps assert. ``measurement_validated`` is the delivery gate's own stamp and
-    is left to the door that ran it.
+    the identity the stamps assert. A ``measurement_validated`` named in ``columns`` passes
+    through whatever ``asserted`` carried for it, unchanged; :func:`delivered_tail` is what
+    actually stamps that column from the gate.
     """
     values = dict(asserted or {})
     bound = bool(bindings) and all(b.ok and b.claimed for b in bindings.values())
@@ -2019,15 +2020,19 @@ def delivered_tail(
 
     The one composition behind every delivered tail: producer identity and ``validation_record``
     come from :func:`delivered_provenance`; ``produced_at`` is this call's own write time, computed
-    once here rather than accepted from ``asserted``, which is refused when it carries one of its
-    own rather than silently overridden, since the column is this composition's own fact and a
-    second source pretending to it is exactly the drift this removes; and every validity column
-    ``columns`` actually carries (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``)
-    is stamped through ``gate.column_stamp``, with ``own_column`` derived from that same membership
-    check, so a dimension without a column of its own floors every column that does exist and no
-    door can drift into disagreeing about what a validated column means.
+    once here rather than accepted from ``asserted``, which is refused when it carries a real
+    (non-``None``) ``produced_at`` of its own rather than silently overridden, since the column is
+    this composition's own fact and a second source pretending to it is exactly the drift this
+    removes -- a ``None``-valued key (a caller that composed ``{"produced_at": x.get(...)}`` over
+    something carrying none) is absence, not an assertion, the same convention
+    :func:`corroborated_producer` uses; and every validity column ``columns`` actually carries
+    (``_DIMENSION_TO_COLUMN``'s owned columns present in ``columns``, ``measurement_validated``
+    included) is stamped through ``gate.column_stamp`` here, never left to ``delivered_provenance``,
+    with ``own_column`` derived from that same membership check, so a dimension without a column of
+    its own floors every column that does exist and no door can drift into disagreeing about what a
+    validated column means.
     """
-    if asserted and "produced_at" in asserted:
+    if asserted and asserted.get("produced_at") is not None:
         raise ValueError(
             "delivered_tail: asserted carries its own produced_at; produced_at is this "
             "composition's own write-time fact, never a caller-supplied one."

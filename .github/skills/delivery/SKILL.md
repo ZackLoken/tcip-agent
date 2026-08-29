@@ -118,9 +118,10 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   carries the same schema and the same composition. The MCP door alone can carry a caller-stated
   `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py:745`, `:882-886`),
   fields the web door has none for. The producer tail (`producer_model_sha256`,
-  `producing_experiment_id`, `produced_at`, `validation_record`) is filled from the verified
-  bindings, so a bucket whose claim no record answers for delivers those cells blank rather than
-  repeating the names its stamp asserted.
+  `producing_experiment_id`, `validation_record`) is filled from the verified bindings, so a
+  bucket whose claim no record answers for delivers those cells blank rather than repeating the
+  names its stamp asserted; `produced_at` is always the write's own timestamp, never blank and
+  never read from the bindings.
 - `tabulate_counts` gates the count operating point on the run's resolved bundle and hands
   `export_detection_csv` the already-reconciled state, plus the bucket it persisted when it was
   given a `predictions_dir` to persist one into.
