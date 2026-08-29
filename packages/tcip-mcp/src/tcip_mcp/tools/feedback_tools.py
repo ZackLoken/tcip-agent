@@ -62,27 +62,48 @@ def _load_or_refuse(checkpoint_path: str, project_path: str):
         return None, {"error": str(exc)}
 
 
-def _resolve_calibration_ids(checkpoint) -> tuple[set[str] | None, str | None]:
-    """The bound run's calibration-side member identities for ``checkpoint``, or the reason none
-    could be resolved. Returns ``(calibration_ids, marks_unresolved)``.
+def _resolve_calibration_ids(
+    checkpoint, images_dir: Path, *, project_path: str | None = None,
+) -> tuple[set[str] | None, str | None]:
+    """The bound run's calibration-side member stems, confirmed to be ``images_dir``'s own date,
+    or the reason none could be resolved. Returns ``(calibration_stems, marks_unresolved)``.
 
-    ``calibration_ids`` is ``None`` with ``marks_unresolved`` also ``None`` for an unbound run: no
-    registry-entry ``experiment_id`` at all (``checkpoint.producer``), or an experiment recorded
-    but never bound to a split manifest (its ``split.json`` carries no ``manifest_binding``).
-    There is nothing to mark and nothing to say about it. A bound run whose named manifest can no
-    longer be read gets ``calibration_ids=None`` with ``marks_unresolved`` naming why, never a
-    guess at membership.
+    ``calibration_stems`` is ``None`` with ``marks_unresolved`` also ``None`` for an unbound run:
+    no registry-entry ``experiment_id`` at all (``checkpoint.producer``), or an experiment
+    recorded but never bound to a split manifest (its ``split.json`` carries no
+    ``manifest_binding``). There is nothing to mark and nothing to say about it. A bound run's own
+    split record that cannot be read, or whose named manifest can no longer be read, gets
+    ``calibration_stems=None`` with ``marks_unresolved`` naming why, never a guess at membership.
+
+    A bound run's calibration side is scoped to the one capture date it bound to, never the whole
+    manifest (which may span other dates the run was never bound against): the same narrowing
+    :func:`~tcip_mcp.pipelines.data.splits.bind_manifest_stems` applies when it computes
+    ``calibration_bound``. Membership then turns on whether ``images_dir`` is the exact directory
+    the manifest recorded as that date's ``images_root`` (:func:`~tcip_mcp.pipelines.data.
+    splits.same_directory`, the one comparison :func:`~tcip_mcp.pipelines.data.
+    splits.refuse_if_images_root_moved` also uses): a candidate under a different root cannot be
+    that date's member by path shape, so a mismatch is disclosed under ``marks_unresolved`` rather
+    than guessed.
     """
     experiment_id = checkpoint.producer
     if not experiment_id:
         return None, None
-    from tcip_mcp.experiments import read_split_manifest
+    from tcip_mcp.project_paths import project_root
 
-    split = read_split_manifest(experiment_id)
+    root = project_path or str(project_root())
+    from tcip_mcp.experiments import read_split_manifest_checked
+
+    split, decode_error = read_split_manifest_checked(experiment_id, root=root)
+    if decode_error is not None:
+        return None, (
+            f"this run's split record could not be read to mark the queue's calibration-side "
+            f"candidates: {decode_error}"
+        )
     manifest_binding = split.get("manifest_binding")
     if not manifest_binding:
         return None, None
     manifest_dir = manifest_binding.get("manifest_dir")
+    date = manifest_binding.get("date")
     from tcip_mcp.tools.data_tools import read_split_manifest_dir
 
     try:
@@ -92,57 +113,34 @@ def _resolve_calibration_ids(checkpoint) -> tuple[set[str] | None, str | None]:
             f"this run is bound to split manifest {manifest_dir!r}, but it could not be read to "
             f"mark the queue's calibration-side candidates: {exc}"
         )
-    return set((manifest.get("splits") or {}).get("calibration") or []), None
+    from tcip_mcp.pipelines.data.splits import (
+        manifest_date_key, member_identity_parts, same_directory,
+    )
+
+    date_block = (manifest.get("members") or {}).get(manifest_date_key(date)) or {}
+    recorded_root = date_block.get("images_root")
+    if not same_directory(images_dir, recorded_root):
+        return None, (
+            f"images_dir={str(images_dir)!r} is not the bound run's recorded images root for "
+            f"date {date!r} ({recorded_root!r}): the queue's calibration-side candidates cannot "
+            "be marked against a different root."
+        )
+    calibration_ids = set((manifest.get("splits") or {}).get("calibration") or [])
+    this_date_calibration = {i for i in calibration_ids if member_identity_parts(i)[0] == date}
+    return {member_identity_parts(i)[1] for i in this_date_calibration}, None
 
 
-def _calibration_marks(
-    images_dir: Path, candidates: list, calibration_ids: set[str],
-) -> tuple[list[bool], list[str]]:
-    """``calibration_member`` for each of ``candidates``, in order, plus any bare stem flagged
-    ambiguous: it matches a manifest calibration member under more than one capture date, and
-    ``images_dir``'s own date could not be resolved to say which one a candidate is.
+def _calibration_marks(candidates: list, calibration_stems: set[str]) -> list[bool]:
+    """``calibration_member`` for each of ``candidates``, in order: True iff its stem is one of
+    the bound date's calibration-side members.
 
-    ``images_dir``'s own capture date is derived once, through the same
-    :func:`~tcip_mcp.dataset_layout.parse_image_path` a canonical dataset image resolves its own
-    date from (never re-derived per candidate; the probe path need not exist, since that resolver
-    only parses the path shape). A non-canonical ``images_dir`` (outside any ``<root>/images/``
-    tree) resolves no date at all, and membership then falls back to a bare-stem match against
-    every date the manifest's calibration side names that stem under: unambiguous when exactly one
-    date claims it, disclosed rather than guessed when more than one does.
+    Only meaningful once the caller (:func:`_resolve_calibration_ids`) has already confirmed
+    ``images_dir`` identifies with the manifest's own recorded root for that date, so every
+    candidate drawn from it already belongs to that date; membership then turns on the stem alone.
     """
-    from tcip_mcp.dataset_layout import parse_image_path
-    from tcip_mcp.pipelines.data.splits import member_identity, member_identity_parts
     from tcip_mcp.pipelines.image_utils import stem_of
 
-    images_date: str | None = None
-    date_resolved = True
-    try:
-        _, images_date, _ = parse_image_path(images_dir / "_.probe")
-    except ValueError:
-        date_resolved = False
-
-    stem_dates: dict[str, set[str | None]] = {}
-    if not date_resolved:
-        for identity in calibration_ids:
-            date, stem = member_identity_parts(identity)
-            stem_dates.setdefault(stem, set()).add(date)
-
-    marks: list[bool] = []
-    ambiguous: set[str] = set()
-    for source in candidates:
-        stem = stem_of(source)
-        if date_resolved:
-            marks.append(member_identity(images_date, stem) in calibration_ids)
-            continue
-        dates = stem_dates.get(stem)
-        if not dates:
-            marks.append(False)
-        elif len(dates) == 1:
-            marks.append(True)
-        else:
-            marks.append(False)
-            ambiguous.add(stem)
-    return marks, sorted(ambiguous)
+    return [stem_of(source) in calibration_stems for source in candidates]
 
 
 def _resolve_review_bucket(engine, bucket: str | None) -> tuple[str | None, str | None]:
@@ -311,15 +309,19 @@ def prioritize_review_queue(
 
     When ``checkpoint_path`` names a registry entry produced by a run bound to a split manifest
     (``manifest_binding`` on that run's ``split.json``), each ``informativeness`` ``queue`` entry
-    carries ``calibration_member: bool``, matched against the named manifest's ``splits.calibration``
-    members: reviewing that image edits a label inside the bound run's own calibration universe,
-    which a later validation of that run would then read as moved. An unbound run (no registry
-    producer, or a producer whose run was never bound to a manifest) carries no mark on any entry
-    and no reason: there is nothing to mark. A bound run whose named manifest can no longer be read
-    carries no mark either, but the response states why under ``marks_unresolved``, never a guess.
-    A candidate whose own capture date cannot be resolved and whose bare stem names a manifest
-    calibration member under more than one date is marked conservatively (not a member) and listed
-    under ``calibration_ambiguous_stems`` rather than guessed either way.
+    carries ``calibration_member: bool``, matched against the bound date's own
+    ``splits.calibration`` members only, never the whole manifest (which may span other dates the
+    run was never bound against): reviewing that image edits a label inside the bound run's own
+    calibration universe, which a later validation of that run would then read as moved.
+    Membership is decided by matching ``images_dir`` against the bound date's own recorded
+    ``images_root``, by filesystem identity, never by guessing a date from ``images_dir``'s path
+    shape: when they identify, a candidate is a member iff its stem is one of that date's
+    calibration members; when they do not, no candidate under ``images_dir`` can be a member of a
+    different root's date, and the response says so under ``marks_unresolved`` rather than mark
+    confident Falses. An unbound run (no registry producer, or a producer whose run was never
+    bound to a manifest) carries no mark on any entry and no reason: there is nothing to mark. A
+    bound run whose own split record, or whose named manifest, can no longer be read carries no
+    mark either, but the response states why under ``marks_unresolved``, never a guess.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring / predictions).
@@ -468,12 +470,11 @@ def prioritize_review_queue(
         return {"error": str(e)}
 
     scored = scorer.score(sources, predictor.model, predictor.device)[:budget]
-    calibration_ids, marks_unresolved = _resolve_calibration_ids(checkpoint)
-    ambiguous_stems: list[str] = []
+    calibration_stems, marks_unresolved = _resolve_calibration_ids(
+        checkpoint, images_path, project_path=project_path or None)
     marks: list[bool | None] = [None] * len(scored)
-    if calibration_ids is not None:
-        marks, ambiguous_stems = _calibration_marks(
-            images_path, [p for p, _ in scored], calibration_ids)
+    if calibration_stems is not None:
+        marks = _calibration_marks([p for p, _ in scored], calibration_stems)
     queue = []
     for (p, s), mark in zip(scored, marks):
         entry = {"image": str(p.manifest_path) if isinstance(p, BandGroupRef) else str(p),
@@ -492,6 +493,4 @@ def prioritize_review_queue(
     }
     if marks_unresolved is not None:
         result["marks_unresolved"] = marks_unresolved
-    if ambiguous_stems:
-        result["calibration_ambiguous_stems"] = ambiguous_stems
     return result

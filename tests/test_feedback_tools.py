@@ -445,6 +445,218 @@ def test_prioritize_review_queue_marks_unresolved_when_the_manifest_cannot_be_re
     assert str(manifest_dir) in r["marks_unresolved"]
 
 
+# -- rail: calibration marks are decided by the manifest's own record, never images_dir's shape -
+
+_FLAT_SUBJECT = "leaf"
+_FLAT_IMG = 32
+_FLAT_STEMS = ("a", "b", "c", "d", "e", "f")
+
+
+def _save_flat_png(path: Path) -> None:
+    from PIL import Image
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (_FLAT_IMG, _FLAT_IMG), color=(128, 128, 128)).save(path)
+
+
+def _write_flat_label(root: Path, date: str, stem: str) -> None:
+    from tcip_annotation import json_io
+    from tcip_annotation.state import Annotation, BBox
+
+    json_io.write_annotations(
+        str(root / "annotations" / date / f"{stem}.json"),
+        [Annotation(subject=_FLAT_SUBJECT, geometry=BBox(2, 2, 10, 10))], _FLAT_IMG, _FLAT_IMG,
+    )
+
+
+def _bucketed_labels_flat_images_dataset(root: Path, date: str, stems=_FLAT_STEMS) -> Path:
+    """Labels bucketed under one date; images in the flat ``images/`` root (no ``images/<date>/``
+    bucket), the layout whose split manifest records the flat root as that date's own
+    ``images_root``."""
+    for stem in stems:
+        _save_flat_png(root / "images" / f"{stem}.jpg")
+        _write_flat_label(root, date, stem)
+    return root
+
+
+def _mixed_two_date_dataset(
+    root: Path, canonical_date: str, flat_date: str, stems=_FLAT_STEMS,
+) -> Path:
+    """One date's images bucketed under ``images/<date>/`` (canonical); the other's labels are
+    bucketed the same way but its images sit in the flat ``images/`` root, no bucket of its own
+    (the same mismatch :func:`_bucketed_labels_flat_images_dataset` builds for one date, beside a
+    date that has no such mismatch)."""
+    for stem in stems:
+        _save_flat_png(root / "images" / canonical_date / f"{stem}.jpg")
+        _write_flat_label(root, canonical_date, stem)
+    for stem in stems:
+        _save_flat_png(root / "images" / f"{stem}.jpg")
+        _write_flat_label(root, flat_date, stem)
+    return root
+
+
+def _draw_flat(root: Path, out: Path, *, seed: int = 2) -> dict:
+    import tcip_store as ts
+    from tcip_mcp.tools.data_tools import make_splits, split_manifest_key
+
+    result = make_splits(str(root), output_path=str(out), subject=_FLAT_SUBJECT, seed=seed,
+                         train_ratio=0.4, val_ratio=0.3, calibration_ratio=0.3)
+    assert "error" not in result, result
+    return ts.read(split_manifest_key(out))
+
+
+def _bind_dataset_run(
+    root: Path, manifest_dir: Path, experiment_id: str, *, date: str, images_dir: Path,
+) -> None:
+    """A run bound to ``manifest_dir`` for ``date``, its own admission drawn against
+    ``images_dir``: the same sequence :func:`_registered_checkpoint_from_experiment`'s callers
+    use for the canonical dated layout, parameterized over which directory this date's images
+    actually live in."""
+    from tcip_mcp.experiments import create_experiment
+    from tcip_mcp.tools.training_tools import _auto_train_val, _persist_split_manifest
+
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(root / "annotations" / date),
+        "subject": _FLAT_SUBJECT, "attribute": None,
+        "split": {"manifest_dir": str(manifest_dir)},
+    }
+    train_ds, val_ds, label_digests = _auto_train_val("detection", data_cfg, None)
+    create_experiment(experiment_id, {})
+    _persist_split_manifest(experiment_id, train_ds, val_ds, data_cfg, label_digests=label_digests)
+
+
+def test_prioritize_review_queue_marks_a_flat_images_tree_dataset_correctly(tmp_path, monkeypatch):
+    """A dataset whose labels are bucketed by date but whose images live in the flat images/ root
+    (no images/<date>/ bucket) still marks its calibration side correctly: the manifest's own
+    recorded images_root for that date is the flat root, never a date guessed from images_dir's
+    path shape (which cannot tell a flat root apart from a dateless one)."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    date = "2026-03-01"
+    root = _bucketed_labels_flat_images_dataset(tmp_path / "data", date)
+    manifest_dir = tmp_path / "manifest"
+    manifest = _draw_flat(root, manifest_dir)
+    calibration_stems = {
+        i.split("/", 1)[1] for i in manifest["splits"]["calibration"] if i.startswith(f"{date}/")
+    }
+    assert calibration_stems  # the fixture's own three-way ratio gives this date some
+
+    experiment_id = "exp-pq-flat"
+    _bind_dataset_run(root, manifest_dir, experiment_id, date=date, images_dir=root / "images")
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images"),
+        strategy="informativeness", project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert "marks_unresolved" not in r
+    marked_true = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
+    assert marked_true == calibration_stems
+
+
+def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibration_side(
+    tmp_path, monkeypatch,
+):
+    """A manifest spanning two dates (one canonical, the other bucketed-labels-flat-images
+    like the single-date rail above), bound to the flat one, marks only that date's own
+    calibration side: a stem that is a calibration member under the other, canonical, unbound
+    date must never read as a member here, even though the same stem name recurs under both."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    canonical_date, flat_date = "2026-03-01", "2026-03-15"
+    root = _mixed_two_date_dataset(tmp_path / "data", canonical_date, flat_date)
+    manifest_dir = tmp_path / "manifest"
+    manifest = _draw_flat(root, manifest_dir)
+    bound_stems = {
+        i.split("/", 1)[1] for i in manifest["splits"]["calibration"]
+        if i.startswith(f"{flat_date}/")
+    }
+    other_stems = {
+        i.split("/", 1)[1] for i in manifest["splits"]["calibration"]
+        if i.startswith(f"{canonical_date}/")
+    }
+    assert bound_stems and other_stems
+    leaked = other_stems - bound_stems
+    assert leaked  # a stem calibration-only under the unbound date; the case that must not leak
+
+    experiment_id = "exp-pq-two-dates"
+    _bind_dataset_run(
+        root, manifest_dir, experiment_id, date=flat_date, images_dir=root / "images")
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images"),
+        strategy="informativeness", project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert "marks_unresolved" not in r
+    marked_true = {Path(e["image"]).stem for e in r["queue"] if e["calibration_member"]}
+    assert marked_true == bound_stems
+    assert not (marked_true & leaked)
+
+
+def test_prioritize_review_queue_a_root_mismatch_yields_marks_unresolved_not_false(
+    tmp_path, monkeypatch,
+):
+    """images_dir that is not the bound date's recorded images_root cannot be that date's
+    member by path shape; the response says so under marks_unresolved rather than mark every
+    candidate a confident non-member."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+
+    root = _dataset(tmp_path / "data")
+    manifest_dir = tmp_path / "manifest"
+    _draw(root, manifest_dir)
+    bound_date, other_date = DATES
+
+    experiment_id = "exp-pq-root-mismatch"
+    _bind_run(root, manifest_dir, experiment_id, date=bound_date)
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    _stub_scorer(monkeypatch)
+
+    # A real directory, just not the one the manifest recorded for the bound date.
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images" / other_date),
+        strategy="informativeness", project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert all("calibration_member" not in entry for entry in r["queue"])
+    assert "marks_unresolved" in r
+    assert bound_date in r["marks_unresolved"]
+
+
+def test_prioritize_review_queue_a_corrupted_split_record_yields_marks_unresolved_naming_it(
+    tmp_path, monkeypatch,
+):
+    """A bound run whose own split.json will not decode must not read as an unbound run: the
+    corruption is named under marks_unresolved rather than folded onto silence."""
+    monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
+    from tests._record_damage_fixtures import damage_record
+    from tests.test_selection_disjointness_label_movement import DATES, _bind_run, _dataset, _draw
+    from tcip_mcp.experiments import split_key
+
+    root = _dataset(tmp_path / "data")
+    manifest_dir = tmp_path / "manifest"
+    _draw(root, manifest_dir)
+    date = DATES[0]
+
+    experiment_id = "exp-pq-corrupt-split"
+    _bind_run(root, manifest_dir, experiment_id, date=date)
+    ckpt_path = _registered_checkpoint_from_experiment(tmp_path, experiment_id)
+    damage_record(split_key(experiment_id, root=str(tmp_path)), b"{not json at all")
+    _stub_scorer(monkeypatch)
+
+    r = prioritize_review_queue(
+        checkpoint_path=ckpt_path, images_dir=str(root / "images" / date),
+        strategy="informativeness", project_path=str(tmp_path))
+    assert "error" not in r, r
+    assert r["queue"], r
+    assert all("calibration_member" not in entry for entry in r["queue"])
+    assert "marks_unresolved" in r
+    assert "could not be read" in r["marks_unresolved"]
+
+
 def test_feedback_tools_register_in_manifest():
     from tcip_mcp.server import list_registered_tools
     names = list_registered_tools()
