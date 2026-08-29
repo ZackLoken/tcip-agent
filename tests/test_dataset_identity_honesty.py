@@ -37,7 +37,7 @@ def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):
     _dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
     assert before is not None
-    assert len(before) == 16
+    assert before.startswith("v1:") and len(before) == len("v1:") + 16
 
     for img in (tmp_path / "images" / _DATE).glob("*.png"):
         img.unlink()

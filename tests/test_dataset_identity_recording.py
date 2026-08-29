@@ -78,10 +78,10 @@ def test_update_lineage_still_applies_legitimate_updates_when_identity_audit_fai
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(exp_dir):
-    create_experiment("a", {}, dataset_id="1", dataset_fingerprint="ff")
-    create_experiment("b", {}, dataset_id="1", dataset_fingerprint="ff")
+    create_experiment("a", {}, dataset_id="1", dataset_fingerprint="v1:ff")
+    create_experiment("b", {}, dataset_id="1", dataset_fingerprint="v1:ff")
     assert compare_experiments(["a", "b"])["same_dataset_fingerprint"] is True
-    create_experiment("c", {}, dataset_id="2", dataset_fingerprint="ee")
+    create_experiment("c", {}, dataset_id="2", dataset_fingerprint="v1:ee")
     assert compare_experiments(["a", "c"])["same_dataset_fingerprint"] is False
 
 
