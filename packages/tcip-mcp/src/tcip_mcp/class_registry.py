@@ -187,31 +187,49 @@ def _registry_key(path: str | Path) -> "Key":
     return class_registry_key(Path(path).absolute().parent)
 
 
-def read_registry(path: str | Path) -> ClassRegistry:
-    """Read ``classes.json`` into a :class:`ClassRegistry`.
+def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
+    """The stored registry's decoded document, version-checked: the one implementation
+    :func:`read_registry` and :func:`replace_registry` both call, so an undecodable registry and
+    a version-refused one cannot read as two different facts depending which caller hit them.
 
-    Absence and corruption are different answers: no registry raises ``FileNotFoundError``,
-    and a registry whose bytes are present but will not decode, or that carries a
-    ``schema_version`` this reader does not accept, raises :class:`RegistryError`, the same
-    refusal a structurally invalid registry raises. Reading an undecodable registry as an empty
-    one would let every name-based label under it train as an unknown subject.
+    Raises :class:`RegistryError` for bytes that do not decode as JSON. Propagates
+    :class:`tcip_store.SchemaVersionRefused`, uncaught: a newer writer's document is a policy
+    fact, never the same fact as corruption, so a caller (:func:`replace_registry`'s
+    ``allow_removals`` repair path, ``resolution._registry_term``) that tolerates or folds
+    ``RegistryError`` away must not do the same to this.
     """
     import tcip_store
 
+    try:
+        document = tcip_store.RECORD_JSON.decode(data)
+    except ValueError as exc:
+        raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
     from tcip_mcp.dataset_layout import CLASS_REGISTRY_STORE
+
+    tcip_store.check_schema_version(tcip_store.get_descriptor(CLASS_REGISTRY_STORE), document)
+    return document
+
+
+def read_registry(path: str | Path) -> ClassRegistry:
+    """Read ``classes.json`` into a :class:`ClassRegistry`.
+
+    Absence and corruption are different answers: no registry raises ``FileNotFoundError``, and
+    a registry whose bytes are present but will not decode raises :class:`RegistryError`, the
+    same refusal a structurally invalid registry raises. Reading an undecodable registry as an
+    empty one would let every name-based label under it train as an unknown subject. A
+    ``schema_version`` this reader does not accept propagates as
+    :class:`tcip_store.SchemaVersionRefused`, uncaught, distinguishable from ``RegistryError``: a
+    newer writer's registry must refuse whatever reads it (``resolution._registry_term``'s own
+    fingerprint computation included), never fold into the "no registry" answer a genuinely
+    unregistered dataset gets.
+    """
+    import tcip_store
 
     try:
         data = tcip_store.read_blob_versioned(_registry_key(path)).value
     except tcip_store.NotFound as exc:
         raise FileNotFoundError(f"no class registry at {path}") from exc
-    try:
-        document = tcip_store.RECORD_JSON.decode(data)
-    except ValueError as exc:
-        raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
-    try:
-        tcip_store.check_schema_version(tcip_store.get_descriptor(CLASS_REGISTRY_STORE), document)
-    except tcip_store.SchemaVersionRefused as exc:
-        raise RegistryError(f"{path}: {exc}") from exc
+    document = _checked_registry_document(data, path=path)
     return registry_from_dict(document)
 
 
@@ -336,7 +354,12 @@ def replace_registry(
     attribute value the stored one declares, unless ``allow_removals`` is true, since labels and
     confirmations may still reference the dropped name. Stored bytes present but undecodable are
     likewise refused unless ``allow_removals`` is true, since replacing them is how such a
-    registry is repaired and a repair drops whatever the bytes held.
+    registry is repaired and a repair drops whatever the bytes held. A stored registry whose
+    ``schema_version`` this reader does not accept is a different fact, never a repair
+    candidate: the read routes through :func:`_checked_registry_document`, whose
+    :class:`tcip_store.SchemaVersionRefused` propagates uncaught here regardless of
+    ``allow_removals``, refusing the whole write rather than letting the repair path overwrite a
+    newer writer's document.
 
     ``expect`` is compare-and-set against the blob's actual version at write time
     (``tcip_store.VersionConflict`` on a mismatch, nothing written): pass the version the caller
@@ -362,7 +385,7 @@ def replace_registry(
     decode_warning: str | None = None
     if versioned.value is not None:
         try:
-            outgoing = registry_from_dict(tcip_store.RECORD_JSON.decode(versioned.value))
+            outgoing = registry_from_dict(_checked_registry_document(versioned.value, path=path))
         except ValueError as exc:
             if not allow_removals:
                 raise RegistryError(

@@ -734,7 +734,15 @@ def _registry_term(dataset_root: Path) -> str:
     """Digest over the canonical registry serialization in *declared order* (load-bearing in
     ``assign_class_ids``). Serialized via ``registry_to_dict`` rather than raw bytes, so a
     whitespace-only reformat of ``classes.json`` does not change identity but a value reorder/addition
-    does. Empty string when the dataset has no registry."""
+    does. Empty string when the dataset has no registry, or when ``read_registry`` refuses it as
+    undecodable/malformed (``OSError``/``ValueError``/``RegistryError``).
+
+    A ``schema_version`` this reader does not accept is a different fact from "no registry": it
+    is a wrong content identity a delivered number could rest on, not an absent one, so
+    ``read_registry``'s :class:`tcip_store.SchemaVersionRefused` is not in this except tuple and
+    propagates uncaught, refusing the whole fingerprint computation (:func:`dataset_fingerprint`)
+    rather than folding into the empty-string "no registry" answer.
+    """
     from tcip_mcp.class_registry import RegistryError, read_registry, registry_to_dict
     from tcip_mcp.dataset_layout import classes_path
 
