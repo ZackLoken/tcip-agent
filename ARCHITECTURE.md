@@ -1188,7 +1188,7 @@ Writers: `set_image_status`,
 `packages/tcip-web/src/tcip_web/routes/classes.py:305`; `set_image_status_bulk`,
 `routes/classes.py:336`; `tcip_mcp.tools.data_tools._apply_negative_carry`
 (split-materialized copy; every confirmed negative is read by the admission
-(`trainable_stems`) before the split's stem lists, manifest or file tree are written, then
+(`trainable_stems`) before the split's manifest or file tree is written, then
 attributed to a split by
 `negative_carry = _compute_negative_carry(label_map, bare_parts, image_map, subject, only_date)`
 `packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py:689`, then applied by

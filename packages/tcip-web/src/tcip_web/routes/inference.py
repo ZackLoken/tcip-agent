@@ -88,8 +88,8 @@ class InferenceJob:
     error: Optional[str] = None
     warning: Optional[str] = None
     results: list[dict] = field(default_factory=list)  # [{image, n_detections}]
-    # Detections dropped for a zero-extent box (a detector's own output clipped to nothing at an
-    # image edge): a box of nothing is no detection, so it is dropped rather than failing the run.
+    # Detections dropped for a zero-extent box: no detection, so dropped rather than failing the
+    # run. A rehydrated job's count is whatever the last persist wrote, never a live measurement.
     dropped_boxes: int = 0
     thread: Optional[threading.Thread] = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -161,11 +161,14 @@ def rehydrate_for_current_root() -> None:
     Called at startup and again after this process repins to another root: the worker
     threads behind a persisted non-terminal job are gone, so it is surfaced as
     ``interrupted``. Only the fields the API exposes are restored (the per-image results list
-    isn't persisted), so ``/preview`` comes back empty. Merges by job id rather than requiring
-    an empty registry first, so it never displaces a job still live from another root. Bounds
-    the dict afterwards the same way registering a job does, so adopting N roots without ever
-    registering a job here still keeps this process's memory bounded rather than growing by
-    ``MAX_JOBS`` for every root adopted.
+    isn't persisted), so ``/preview`` comes back empty. An interrupted job's ``done`` and
+    ``dropped_boxes`` are whatever the last persist wrote, not a live measurement: the worker
+    only persists at launch and once more when it finishes or dies, so a crash mid-run restores
+    the counts as of launch rather than the work actually done before the crash. Merges by job
+    id rather than requiring an empty registry first, so it never displaces a job still live
+    from another root. Bounds the dict afterwards the same way registering a job does, so
+    adopting N roots without ever registering a job here still keeps this process's memory
+    bounded rather than growing by ``MAX_JOBS`` for every root adopted.
     """
     from tcip_web import jobstore
 

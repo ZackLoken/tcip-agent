@@ -199,8 +199,9 @@ def image_key(dataset_root: str | Path, date: str, stem: str, ext: str) -> Key:
     read-modify-writes it. Path-readable because the readers open it through libraries that
     take a path (rasterio, PIL) rather than a file object.
 
-    ``date`` is required: an undated layout has imagery this key shape cannot address, on the
-    same terms as the undated annotation and prediction trees.
+    ``date`` is required: the ingest key is dated by design, with no undated form of its own. The
+    flat ``images/`` root (:func:`image_dir` with ``date=None``) is the undated imagery form,
+    addressed by path rather than through this key.
     """
     if not date:
         raise ValueError(

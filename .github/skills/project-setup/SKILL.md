@@ -125,7 +125,7 @@ the format cannot be determined, `read_annotations` returns an error rather than
 
 Create leakage-free train/val/calibration splits with `make_splits` (group-aware, keeps sibling
 tiles of one source image in the same split; there is no held-out test list, and no launch path
-honours one). Non-destructive by default (writes stem manifests + stats); pass
+honours one). Non-destructive by default (writes a manifest + stats); pass
 `materialize=True` to also lay out a `{train,val,calibration}/{images,labels}/` tree, with the
 platform's own per-image JSON labels (not YOLO's `.txt` format; `tcip-annotation` supports
 `{json, coco}` only). Writing a manifest requires `subject` and all three ratios stated non-zero:

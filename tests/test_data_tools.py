@@ -277,7 +277,7 @@ def _add_extra_leaf_groups(images_dir: Path, labels_dir: Path, count: int) -> No
 
 
 def test_make_splits_materialize_refuses_an_incomplete_band_group_before_writing(tmp_path: Path):
-    """A band group whose manifest names a missing sibling is refused before any stem list, the
+    """A band group whose manifest names a missing sibling is refused before the split's own
     manifest or a split tree is written, never a raise through the tool after they land."""
     import numpy as np
 
