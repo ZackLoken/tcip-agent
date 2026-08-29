@@ -35,7 +35,6 @@ from tcip_store import (
     RECORD_JSON,
     DecodeError,
     Key,
-    SchemaVersionRefused,
     StoreDescriptor,
     check_schema_version,
     get_descriptor,
@@ -371,16 +370,43 @@ def dataset_identity_key(dataset_root: str | Path) -> Key:
     return Key(DATASET_IDENTITY_STORE, str(dataset_root), _DATASET_IDENTITY_PARTS)
 
 
+def decode_dataset_identity(data: bytes, *, dataset_root: str | Path) -> dict:
+    """A dataset identity document's bytes, decoded and checked: the one implementation
+    :func:`require_dataset_identity` and ``register_dataset``'s own re-register read both call,
+    so a version-refused identity document reads the same fact whichever caller hits it.
+
+    Raises ``ValueError`` for bytes that do not decode, or that decode to something other than a
+    dict carrying an ``id``. Propagates :class:`tcip_store.SchemaVersionRefused`, uncaught, for a
+    ``schema_version`` this reader does not accept: a policy fact about a newer writer, never the
+    same fact as a malformed document, so a caller that tolerates a plain ``ValueError`` as
+    "nothing registered yet" must not fold this one in too.
+    """
+    try:
+        identity = RECORD_JSON.decode(data)
+    except ValueError as exc:
+        raise ValueError(
+            f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
+            f"identity ({exc}); re-register with register_dataset") from exc
+    if not isinstance(identity, dict) or not identity.get("id"):
+        raise ValueError(
+            f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
+            "identity; re-register with register_dataset")
+    check_schema_version(get_descriptor(DATASET_IDENTITY_STORE), identity)
+    return identity
+
+
 def require_dataset_identity(dataset_root: str | Path) -> dict:
     """The dataset's identity record (``{crop, id, fingerprint}``), or the refusal naming
     ``register_dataset`` when it is absent.
 
     Read through the store (``tcip_store.read_blob_versioned``), never a bare file check, which
     the database backend would fail: a directory that merely ends in ``images`` is not a dataset
-    until ``register_dataset`` has minted an identity for it.
+    until ``register_dataset`` has minted an identity for it. A present document's decode, shape
+    and version are checked through :func:`decode_dataset_identity`; its
+    :class:`tcip_store.SchemaVersionRefused` propagates uncaught, distinguishable from the plain
+    ``ValueError`` this function itself raises for absence or a malformed document.
     """
     import tcip_store
-    from tcip_store import RECORD_JSON
 
     stored = tcip_store.read_blob_versioned(dataset_identity_key(dataset_root), default=None)
     if stored.value is None:
@@ -388,16 +414,7 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
             f"{dataset_root} carries no dataset identity record "
             f"({dataset_identity_path(dataset_root)} absent); register it first with "
             "register_dataset")
-    identity = RECORD_JSON.decode(stored.value)
-    if not isinstance(identity, dict) or not identity.get("id"):
-        raise ValueError(
-            f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
-            "identity; re-register with register_dataset")
-    try:
-        check_schema_version(get_descriptor(DATASET_IDENTITY_STORE), identity)
-    except SchemaVersionRefused as exc:
-        raise ValueError(f"{dataset_identity_path(dataset_root)}: {exc}") from exc
-    return identity
+    return decode_dataset_identity(stored.value, dataset_root=dataset_root)
 
 
 def image_status_path(dataset_root: str | Path) -> Path:
