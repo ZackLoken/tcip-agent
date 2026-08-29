@@ -49,7 +49,31 @@ def manifest() -> dict[str, Any]:
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--check", action="store_true",
+                    help="compare the committed manifest against the live registry instead of "
+                         "writing; exit 1 on any drift, naming the stores that differ")
+    args = ap.parse_args()
+
     document = manifest()
+    if args.check:
+        committed = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        if committed == document:
+            print(f"OK: {MANIFEST_PATH.name} matches the registry "
+                  f"({len(document['stores'])} stores)")
+            return 0
+        drifted = sorted(
+            set(committed["stores"]) ^ set(document["stores"])
+            | {n for n in set(committed["stores"]) & set(document["stores"])
+               if committed["stores"][n] != document["stores"][n]}
+        )
+        print(f"DRIFT: {MANIFEST_PATH.name} no longer matches the registry "
+              f"({', '.join(drifted) or 'commitment text'}); regenerate with "
+              "python scripts/generate_frozen_manifest.py and commit the result with the "
+              "change that moved the registry")
+        return 1
     MANIFEST_PATH.write_text(
         json.dumps(document, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
