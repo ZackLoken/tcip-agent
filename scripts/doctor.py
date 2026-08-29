@@ -23,6 +23,21 @@ def _load(path: Path):
         return None
 
 
+def _note_version(findings: list, where: str, store: str, doc) -> None:
+    """Report, never refuse, a document whose schema_version this reader does not accept.
+
+    The doctor reads raw files and reports findings; it never acts on a document's content, so
+    an unsupported version is a finding here, not the hard refusal a reader about to train or
+    measure on the document would raise.
+    """
+    from tcip_store import SchemaVersionRefused, check_schema_version, get_descriptor
+
+    try:
+        check_schema_version(get_descriptor(store), doc)
+    except SchemaVersionRefused as exc:
+        findings.append(("warn", f"{where}: {exc}"))
+
+
 def _image_stems(root: Path) -> dict[str, str]:
     """stem -> file name for every image under images/ (any date bucket), over the platform's
     own extension set, so a capture the loaders admit is never reported as missing here."""
@@ -160,6 +175,7 @@ def check_status_tokens(root: Path, findings: list) -> None:
     )
 
     raw = _load(image_status_path(root))
+    _note_version(findings, str(image_status_path(root).relative_to(root)), "image_status", raw)
     unreadable = unreadable_status_entries(raw)
     if unreadable:
         findings.append(("warn", f"{len(unreadable)} status entr{'y is' if len(unreadable) == 1 else 'ies are'} "
@@ -281,6 +297,9 @@ def check_provenance(root: Path, findings: list) -> None:
             manifest = _load(manifest_path)
             if not isinstance(manifest, dict):
                 continue
+            _note_version(
+                findings, str(manifest_path.relative_to(root)), "model_snapshot_manifest", manifest
+            )
             missing = manifest.get("missing") or []
             errors = manifest.get("snapshot_errors") or []
             if missing or errors:
@@ -298,6 +317,7 @@ def check_state(root: Path, findings: list) -> None:
         # that named no bucket.
         for shard in shard_dir.rglob("*.json"):
             payload = _load(shard) or {}
+            _note_version(findings, str(shard.relative_to(root)), "review_verdicts", payload)
             img = payload.get("img_name", shard.stem)
             if Path(img).stem not in stems:
                 findings.append(("warn", f"review shard {shard.name} references unknown image {img!r}"))
@@ -316,6 +336,9 @@ def check_region_completeness(root: Path, findings: list) -> None:
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
     raw = _load(region_completeness_path(root))
+    _note_version(
+        findings, str(region_completeness_path(root).relative_to(root)), "region_completeness", raw
+    )
     unreadable = unreadable_completeness_entries(raw)
     if unreadable:
         findings.append(("warn", f"{len(unreadable)} region-completeness entr"
@@ -326,6 +349,12 @@ def check_region_completeness(root: Path, findings: list) -> None:
     if not store:
         return
     digests = _load(region_completeness_digest_path(root))
+    _note_version(
+        findings,
+        str(region_completeness_digest_path(root).relative_to(root)),
+        "region_completeness_digest",
+        digests,
+    )
     if not isinstance(digests, dict):
         digests = {}
     for bucket, record in store.items():
