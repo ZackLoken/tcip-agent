@@ -80,20 +80,22 @@ class StoreDescriptor:
     declares nothing here: one home per store.
 
     ``frozen`` states whether this store's format is stable at first release: every check that
-    needs the frozen set derives it from the registry rather than from a hand-kept list, so a
-    store no one classified is a registration refusal, not a silent omission. ``schema_version``
-    is the ceiling this reader knows for a frozen store's documents, the highest version the
-    seam accepts; it stays 1 until this store's own first bump. ``cannot_carry_field`` is set
-    only for a frozen store whose documents have no place to hold a version field at all (raw
-    bytes, a single text primitive, a markdown document parsed by heading alone) and names what
-    the document holds instead, so a version check that cannot apply says why rather than being
-    quietly skipped.
+    needs the frozen set derives it from the registry rather than from a hand-kept list. Every
+    store the platform itself registers states it explicitly; the default is ``False``
+    (conservative: an undeclared store's format is presumed still moving, never wrongly claimed
+    stable) so a store a test registers for some other reason (a locator refusal, a codec
+    exemption) does not have to take a position on freezing. ``schema_version`` is the ceiling
+    this reader knows for a frozen store's documents, the highest version the seam accepts; it
+    stays 1 until this store's own first bump. ``cannot_carry_field`` is set only for a frozen
+    store whose documents have no place to hold a version field at all (raw bytes, a single text
+    primitive, a markdown document parsed by heading alone) and names what the document holds
+    instead, so a version check that cannot apply says why rather than being quietly skipped.
     """
 
     name: str
     kind: Kind
     key_fields: tuple[str, ...]
-    frozen: bool
+    frozen: bool = False
     codec: Codec | None = None
     concurrency: Concurrency | None = None
     durable: bool = True
