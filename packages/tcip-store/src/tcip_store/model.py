@@ -74,13 +74,17 @@ class LogPage:
     this page including the undecodable ones, so entry 1 of (good, bad, good) is reported
     while ``records`` holds the two that decoded. An undecodable entry is reported rather
     than skipped: on a measurement platform, a metrics stream that drops a row and one that
-    says it dropped a row are different things.
+    says it dropped a row are different things. ``version_refused`` holds the positions of
+    entries that decoded fine but carry a ``schema_version`` this reader does not know, kept
+    apart from ``corrupt`` because a version a newer writer produced is a policy fact, not
+    corruption.
     """
 
     records: list[Mapping[str, Any]]
     cursor: str
     torn_tail: bool = False
     corrupt: tuple[int, ...] = ()
+    version_refused: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

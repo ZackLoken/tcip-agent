@@ -78,11 +78,22 @@ class StoreDescriptor:
     conform rail cannot tell this store's leftover files from anything else under a root, so
     every database operation on the store refuses. A store already in the platform table
     declares nothing here: one home per store.
+
+    ``frozen`` states whether this store's format is stable at first release: every check that
+    needs the frozen set derives it from the registry rather than from a hand-kept list, so a
+    store no one classified is a registration refusal, not a silent omission. ``schema_version``
+    is the ceiling this reader knows for a frozen store's documents, the highest version the
+    seam accepts; it stays 1 until this store's own first bump. ``cannot_carry_field`` is set
+    only for a frozen store whose documents have no place to hold a version field at all (raw
+    bytes, a single text primitive, a markdown document parsed by heading alone) and names what
+    the document holds instead, so a version check that cannot apply says why rather than being
+    quietly skipped.
     """
 
     name: str
     kind: Kind
     key_fields: tuple[str, ...]
+    frozen: bool
     codec: Codec | None = None
     concurrency: Concurrency | None = None
     durable: bool = True
@@ -93,6 +104,8 @@ class StoreDescriptor:
     true_parts_from_entry: Callable[[bytes], tuple[str, ...] | None] | None = None
     claim: "Claim | None" = None
     declared_in: str = ""
+    schema_version: int = 1
+    cannot_carry_field: str = ""
 
 
 _registry: dict[str, StoreDescriptor] = {}
@@ -157,6 +170,16 @@ def register_store(descriptor: StoreDescriptor) -> StoreDescriptor:
         raise ValueError(
             f"log store {descriptor.name!r} cannot relax durability: an append returns only "
             "once the entry will survive a crash, so the declaration would be ignored"
+        )
+    if descriptor.schema_version < 1:
+        raise ValueError(
+            f"store {descriptor.name!r} declares schema_version={descriptor.schema_version}, "
+            "but the ceiling a reader accepts starts at 1"
+        )
+    if descriptor.cannot_carry_field and not descriptor.frozen:
+        raise ValueError(
+            f"store {descriptor.name!r} declares cannot_carry_field but frozen=False: a "
+            "cannot-carry declaration only means something for a store whose format is frozen"
         )
     _check_canonical_codec(descriptor)
     _check_claim(descriptor)
@@ -239,6 +262,12 @@ def get_descriptor(store: str) -> StoreDescriptor:
 def registered_stores() -> tuple[str, ...]:
     """Every registered store name, sorted."""
     return tuple(sorted(_registry))
+
+
+def frozen_stores() -> tuple[str, ...]:
+    """Every store declared ``frozen=True``, sorted, derived from the registry rather than a
+    hand-kept list so a store nothing has classified cannot be missing from it."""
+    return tuple(sorted(name for name, d in _registry.items() if d.frozen))
 
 
 def validate_key(key: Key, *, expect_kind: Kind | tuple[Kind, ...], operation: str) -> StoreDescriptor:
