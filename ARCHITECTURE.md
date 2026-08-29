@@ -691,8 +691,8 @@ Docstring is the function's docstring first line, verbatim.
 | `set_active_project` | `project_tools.py:302` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:391` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:438` | yes | Get an overview of a TCIP project. |
-| `archive_project` | `project_tools.py:575` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
-| `import_project` | `project_tools.py:802` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
+| `archive_project` | `project_tools.py:578` | yes | Export an annotation project as a portable ZIP archive. |  <!-- queued: P5-07 demote-to-script -->
+| `import_project` | `project_tools.py:805` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 `tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
 `archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
@@ -939,12 +939,12 @@ registered at HEAD.
 | POST | `/launch` | `launch_hpo` | `routes/tuning.py:320` |
 | GET | `/sweeps` | `list_sweeps` | `routes/tuning.py:351` |
 | GET | `/sweeps/{sweep_id}` | `get_sweep` | `routes/tuning.py:369` |
-| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:401` |
-| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:434` |
-| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:458` |
-| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:544` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:561` |
-| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:575` |
+| GET | `/sweeps/{sweep_id}/trials` | `list_trials` | `routes/tuning.py:402` |
+| GET | `/sweeps/{sweep_id}/trials/{trial_id}/metrics` | `get_trial_metrics` | `routes/tuning.py:435` |
+| GET | `/ray-dashboard` | `get_ray_dashboard` | `routes/tuning.py:462` |
+| POST | `/sweeps/{sweep_id}/tensorboard` | `launch_sweep_tensorboard` | `routes/tuning.py:548` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
+| POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
 
 ### 11 routes with no located frontend caller
 
@@ -1097,7 +1097,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
-`packages/tcip-annotation/src/tcip_annotation/review_engine.py:845`;
+`packages/tcip-annotation/src/tcip_annotation/review_engine.py:848`;
 `tcip_mcp.prediction_buckets.stage_prediction_shapes`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
@@ -1359,8 +1359,8 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:72`
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 90
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
-  113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1407`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1518`.
+  113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1413`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1528`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
   `experiments.py:526` (`def update_status(`), `stamp_run_identity` (`experiments.py:667`),
   `_touch_heartbeat`, `experiments.py:863` (`def _touch_heartbeat(`). Read by `get_experiment`
@@ -1375,9 +1375,9 @@ are listed here with the rest rather than taking numbers of their own.
   `experiments.py:1597`.
 - `artifacts.json` (`artifacts_key`, line 187): written by `create_experiment` (397),
   `complete_run` (592, the `model_weights` entry: `path`, `sha256`, `recorded`) and
-  `record_artifact`, `experiments.py:1158`. Read by `get_experiment` (1288).
+  `record_artifact`, `experiments.py:1164`. Read by `get_experiment` (1288).
 - `metrics.jsonl` (`metrics_key`, line 254, append-only): written by
-  `log_metrics`, `experiments.py:895`. Read by `read_metrics`, `experiments.py:882`, which
+  `log_metrics`, `experiments.py:898`. Read by `read_metrics`, `experiments.py:882`, which
   `get_experiment` (1288, paginated) and `reconstruct_run_status` (770, last row only) go through.
 - `env.json` (`env_key`, line 210): the library versions, seed and model kind a run is
   reproducible from, written once by the training envelope,
@@ -1407,9 +1407,9 @@ are listed here with the rest rather than taking numbers of their own.
   the draw and now without the durable experiment config, a checkpoint's embedded config or a
   trial's resolved config ever carrying a per-stem digest.
 - `validations.jsonl` (`validations_key`, line 272, append-only): the claims earned against this
-  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:995`
+  run's evidence. Written only by the module-private `_append_validation`, `experiments.py:998`
   (no public raw appender; the storage seam's generic append remains reachable and is a stated
-  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:943`),
+  residual), which refuses a row missing any of `_VALIDATION_FIELDS` (`experiments.py:946`),
   `train_disjointness` among them: `{"checked": bool, "group_check": str | None}` for the four
   documents whose gate runs the check, `null` for `resolve_scale`. `selection_disjointness` is the
   parallel field for whether the calibration used to validate a checkpoint's own reference was kept
@@ -1604,15 +1604,15 @@ instead.
 ## 20. `.tcip/state/project_status.json`, per-project activity pointer
 
 Path: `<project_path>/.tcip/state/project_status.json`, addressed by `project_status_key`,
-`packages/tcip-mcp/src/tcip_mcp/project_status.py:57`, on the store `PROJECT_STATUS_STORE`,
-`project_status.py:42`; `project_status_path`, `project_status.py:67`, is the same address as a
+`packages/tcip-mcp/src/tcip_mcp/project_status.py:61`, on the store `PROJECT_STATUS_STORE`,
+`project_status.py:46`; `project_status_path`, `project_status.py:71`, is the same address as a
 path for a caller that needs one.
 
-Writers: `record_report`, `project_status.py:123`; `record_retrospective`,
-`project_status.py:139`; `record_distillation`, `project_status.py:159`; all via the shared
-locked read-modify-write `_update`, `project_status.py:93`.
+Writers: `record_report`, `project_status.py:137`; `record_retrospective`,
+`project_status.py:153`; `record_distillation`, `project_status.py:173`; all via the shared
+locked read-modify-write `_update`, `project_status.py:101`.
 
-Reader: `read_project_status`, `project_status.py:73`.
+Reader: `read_project_status`, `project_status.py:77`.
 
 No seam id in `seam-coverage.json`'s 67-entry inventory names `project_status.json`. S09 ("Web
 job registries persisted to .tcip/state/<name>.json") names a structurally similar but distinct
@@ -1631,14 +1631,14 @@ Real-world `state_dir` is `<dataset_root>/.tcip/state`, derived once by
 `verdict_count`, `prediction_buckets.py:144`, opens a `ReviewEngine` on that root rather than
 composing a state dir of its own.
 
-Writer: `ReviewEngine._save_image`, `review_engine.py:307`, called by `mark_image_reviewed`
-(`review_engine.py:353`), `unmark_image_reviewed` (`review_engine.py:395`),
-`record_detection_action` (`review_engine.py:662`), `check_image_review_complete`
-(`review_engine.py:799`); `save_review_state`, `review_engine.py:327`, flushes every shard.
+Writer: `ReviewEngine._save_image`, `review_engine.py:310`, called by `mark_image_reviewed`
+(`review_engine.py:356`), `unmark_image_reviewed` (`review_engine.py:398`),
+`record_detection_action` (`review_engine.py:665`), `check_image_review_complete`
+(`review_engine.py:802`); `save_review_state`, `review_engine.py:330`, flushes every shard.
 
 Readers: `ReviewEngine.load_review_state`, `review_engine.py:286`, which enumerates the store's
-keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:546`,
-and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:527`.
+keys (`review_engine.py:206`) at construction; `find_reviewed_entry`, `review_engine.py:549`,
+and its spatial-hash cache `_build_reviewed_lookup`, `review_engine.py:530`.
 
 Seam S16 ("ReviewEngine shard-store directory"), verdict `both-sides-restated`,
 `phase0_implementation: mixed`: `tests/test_review_channel.py:267-325`,
@@ -1898,7 +1898,7 @@ Phase 3 verdict: single.
 ## S08. metrics.jsonl row format
 
 Must agree: the writer's row shape is what the reader and the stream consumer expect.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:895` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:898` (`def log_metrics(`, the one writer; the trainer and the envelope hand rows to the context's epoch sink instead of opening the file).
 Side B: `packages/tcip-web/src/tcip_web/routes/training.py:259` and `routes/tuning.py:286` (each route reads its own log through the seam's `read_log` and answers in the one shape `_metrics_common.metrics_response` builds; the training route's incremental tail reads the same log from a cursor).
 Phase 3 verdict: single. An HPO trial with no experiment record still appends to its own trial log, one declared site in the epoch sink, pending the HPO store migration.
 
@@ -2061,7 +2061,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1656` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1666` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
@@ -2167,7 +2167,7 @@ Differs from phase0 record: phase0 cited a line inside the function's body rathe
 ## S45. Review verdicts promoted into a calibration reference
 
 Must agree: a breeder-confirmed sample reaches the operating-point sweep in the same record shape GT annotations do, and passes the same gate.
-Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:662` (`def record_detection_action(`, the one writer of a stored verdict entry).
+Side A: `packages/tcip-annotation/src/tcip_annotation/review_engine.py:665` (`def record_detection_action(`, the one writer of a stored verdict entry).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/feedback/verdicts.py:74` (`decode_verdict`, the one read of that entry, over the affirming actions declared at line 18), called by `pipelines/feedback/review_calibration.py:282` for the calibration reference and `pipelines/feedback/materialize.py:85` for the curated dataset. What each consumer then emits from the affirmed box (COCO xywh scaled by the image, pixel corners for a label file) stays its own.
 Phase 3 verdict: single.
 
