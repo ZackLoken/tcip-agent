@@ -626,8 +626,10 @@ def normalize_region_completeness_store(raw: object) -> dict[str, dict]:
     date bucket can hold many images). An entry :func:`_is_completeness_record` does not recognize
     is not a completeness record and is dropped, so a malformed store yields no attestations rather
     than a wrong one. A caller about to merge a write into this store asks
-    :func:`unreadable_completeness_entries` first, so an entry this drops is never one a merge
-    silently deletes.
+    :func:`unreadable_completeness_entries` first, so an unrecognized bucket entry is never one a
+    merge silently deletes; a raw document that is not a dict at all is a separate case that
+    function does not report (there is no bucket to name), and a merging writer must refuse on
+    that shape itself rather than let this function's own empty return read as an empty store.
     """
     if not isinstance(raw, dict):
         return {}

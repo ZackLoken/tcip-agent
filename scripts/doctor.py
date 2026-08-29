@@ -311,10 +311,18 @@ def check_region_completeness(root: Path, findings: list) -> None:
     from tcip_mcp.dataset_layout import (
         bucket_subject_date, normalize_region_completeness_store,
         region_completeness_digest_path, region_completeness_path,
+        unreadable_completeness_entries,
     )
     from tcip_mcp.pipelines.region_completeness import stale_cells
 
-    store = normalize_region_completeness_store(_load(region_completeness_path(root)))
+    raw = _load(region_completeness_path(root))
+    unreadable = unreadable_completeness_entries(raw)
+    if unreadable:
+        findings.append(("warn", f"{len(unreadable)} region-completeness entr"
+                        f"{'y is' if len(unreadable) == 1 else 'ies are'} in a shape this reader "
+                        f"does not recognize, starting with {unreadable[:3]}"))
+
+    store = normalize_region_completeness_store(raw)
     if not store:
         return
     digests = _load(region_completeness_digest_path(root))

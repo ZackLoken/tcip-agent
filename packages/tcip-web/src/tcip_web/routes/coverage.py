@@ -368,6 +368,11 @@ def post_completeness(payload: CompletenessTogglePayload) -> dict:
     # digest, so a stamp must never land after the attestation that points at it.
     with tcip_store.transaction(digest_key, completeness_key) as txn:
         raw_store = txn.read(completeness_key, default={})
+        if not isinstance(raw_store, dict):
+            raise HTTPException(
+                400,
+                f"the region-completeness store under {root} is a "
+                f"{type(raw_store).__name__}, not a dict; refusing to write over it")
         unreadable = unreadable_completeness_entries(raw_store)
         if unreadable:
             raise HTTPException(
