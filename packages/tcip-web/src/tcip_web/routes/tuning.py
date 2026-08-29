@@ -21,6 +21,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from tcip_web import jobstore
 from tcip_web.routes._body_common import EmptyBodyPayload
 from tcip_web.routes._metrics_common import metrics_response
 
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/api/tuning", tags=["tuning"])
 
 _TRIAL_DIR_PREFIX = "trial_"
 
-HPO_REGISTRY = "hpo_sweeps"
+HPO_REGISTRY = jobstore.HPO_SWEEPS
 """The job registry this module persists its sweeps to."""
 
 

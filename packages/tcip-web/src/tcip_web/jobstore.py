@@ -42,6 +42,20 @@ logger = logging.getLogger(__name__)
 _REGISTRY_DOC = RootedFileLocator(prefix=(".tcip", "state"), suffix=".json")
 """One registry document per job kind, one per platform root."""
 
+INFERENCE_JOBS = "inference_jobs"
+REVIEW_PRIORITY_JOBS = "review_priority_jobs"
+HPO_SWEEPS = "hpo_sweeps"
+
+JOB_REGISTRY_DOCUMENTS: tuple[str, ...] = (INFERENCE_JOBS, REVIEW_PRIORITY_JOBS, HPO_SWEEPS)
+"""Every document name a job registry persists under ``.tcip/state/<name>.json``.
+
+The one spelling of each name: routes/inference.py, routes/review.py and routes/tuning.py each
+hold their own registry constant from here rather than typing the string again. tcip-store
+cannot import tcip-web, so the ``job_registry`` claim in ``tcip_store.layout_claims`` cannot
+enumerate this tuple itself; a test asserts every name here matches one of that claim's own
+templates, holding the agreement from this side.
+"""
+
 JOB_REGISTRY_STORE = "job_registry"
 register_store(
     StoreDescriptor(
