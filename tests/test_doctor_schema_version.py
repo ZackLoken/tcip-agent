@@ -30,14 +30,10 @@ def test_doctor_reports_but_does_not_refuse_on_an_unsupported_region_completenes
     (root / "images").mkdir(parents=True)
     (root / ".tcip" / "state").mkdir(parents=True)
 
-    ts.bind(FileBackend())
-    try:
-        ts.replace(
-            region_completeness_key(root), {"schema_version": 2, "leaf/2024-01-01": {}},
-            expect=ts.Version.ABSENT,
-        )
-    finally:
-        ts.unbind()
+    key = region_completeness_key(root)
+    path = FileBackend().path_for(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(ts.RECORD_JSON.encode({"schema_version": 2, "leaf/2024-01-01": {}}))
 
     res = _run(root)
 
