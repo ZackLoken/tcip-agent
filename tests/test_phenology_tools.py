@@ -1478,7 +1478,7 @@ def test_calibrate_ordinal_regression_operating_point_ordinal_e2e(
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -1542,7 +1542,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
-    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
     from tests.test_e2e_tasktypes import _model_source, _save_png, _train_config, _write_csv
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
@@ -1591,7 +1591,7 @@ def test_calibrate_ordinal_regression_operating_point_regression_e2e(
 
 
 def test_calibrate_ordinal_regression_operating_point_unknown_task_returns_error(tmp_path: Path) -> None:
-    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
 
     result = calibrate_ordinal_regression_operating_point(
         trait_name="catkin", task="classification", checkpoint_path="m.pt",
@@ -1624,7 +1624,7 @@ def test_calibrate_ordinal_regression_operating_point_admits_a_loose_images_dire
         reconcile_ordinal_validity,
         verify_stamp_binding,
     )
-    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
 
     frames, out = tmp_path / "frames", tmp_path / "calib"
     frames.mkdir()
@@ -1683,7 +1683,7 @@ def test_calibrate_ordinal_regression_operating_point_refuses_a_dataset_root_its
 ) -> None:
     """The images directory places itself under a dataset root, so a stated root that disagrees
     would record the reference against a dataset it does not live under."""
-    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
 
     ds, stated = tmp_path / "ds", tmp_path / "elsewhere"
     (ds / "images").mkdir(parents=True)

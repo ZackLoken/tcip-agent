@@ -660,7 +660,7 @@ def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
     """force_redraw_cal_holdout_split(images_dir=...) must use the same labels-intersect-images
     scan calibrate_operating_point uses, not a second independent labels-only glob: a stem
     with no image on disk must not enter the redraw's stem universe."""
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
