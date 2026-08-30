@@ -379,6 +379,8 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
         DEFAULT_CONF, DEFAULT_MAX_DETS, read_operating_point_sidecar,
     )
 
+    import json
+
     ckpt, images_dir = _stub_predictor_for_conf_source(monkeypatch, tmp_path)
     out_dir = tmp_path / "out"
 
@@ -390,7 +392,9 @@ def test_web_worker_stamps_default_conf_and_max_dets_source_when_unstated(tmp_pa
     _worker(job)
 
     assert job.status == "completed"
-    assert job.results[0]["n_detections"] == 1  # the pass ran unchanged at the platform default
+    # The pass ran unchanged at the platform default: the one image's one detection landed.
+    persisted = json.loads((out_dir / "img.json").read_text())["annotations"]
+    assert len(persisted) == 1
     stamp = read_operating_point_sidecar(out_dir)
     assert stamp["operating_point"]["conf"]["source"] == "default"
     assert stamp["operating_point"]["max_dets"]["source"] == "default"
@@ -400,7 +404,8 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
     tmp_path, monkeypatch,
 ):
     """A box that collapses to zero width is dropped when the prediction file is written, so the
-    job's own reported n_detections must reflect the drop too, not the model's raw output count."""
+    job's own dropped-box counter and the persisted document must agree: one of the model's two
+    raw detections dropped, exactly one kept on disk, never the model's raw output count."""
     pytest.importorskip("fastapi")
     import json
 
@@ -439,6 +444,5 @@ def test_web_worker_n_detections_agrees_with_the_persisted_document_on_a_degener
 
     assert job.status == "completed"
     assert job.dropped_boxes == 1
-    assert job.results[0]["n_detections"] == 1
     persisted = json.loads((out_dir / "img.json").read_text())["annotations"]
     assert len(persisted) == 1

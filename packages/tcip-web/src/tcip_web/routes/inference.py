@@ -87,7 +87,6 @@ class InferenceJob:
     status: JobStatus = "pending"
     error: Optional[str] = None
     warning: Optional[str] = None
-    results: list[dict] = field(default_factory=list)  # [{image, n_detections}]
     # Detections dropped for a zero-extent box: no detection, so dropped rather than failing the
     # run. A rehydrated job's count is whatever the last persist wrote, never a live measurement.
     dropped_boxes: int = 0
@@ -160,11 +159,10 @@ def rehydrate_for_current_root() -> None:
 
     Called at startup and again after this process repins to another root: the worker
     threads behind a persisted non-terminal job are gone, so it is surfaced as
-    ``interrupted``. Only the fields the API exposes are restored; the per-image results list
-    isn't persisted and comes back empty. An interrupted job's ``done`` and
-    ``dropped_boxes`` are whatever the last persist wrote, not a live measurement: the worker
-    only persists at launch and once more when it finishes or dies, so a crash mid-run restores
-    the counts as of launch rather than the work actually done before the crash. Merges by job
+    ``interrupted``. Only the fields the API exposes are restored. An interrupted job's
+    ``done`` and ``dropped_boxes`` are whatever the last persist wrote, not a live measurement:
+    the worker only persists at launch and once more when it finishes or dies, so a crash mid-run
+    restores the counts as of launch rather than the work actually done before the crash. Merges by job
     id rather than requiring an empty registry first, so it never displaces a job still live
     from another root. Bounds the dict afterwards the same way registering a job does, so
     adopting N roots without ever registering a job here still keeps this process's memory
@@ -214,16 +212,6 @@ def _list_images(images_dir: Path) -> list[Path | BandGroupRef]:
 
     logical = list_logical_images(images_dir)
     return [logical[stem] for stem in sorted(logical)]
-
-
-def _display_name(src: Path | BandGroupRef) -> str:
-    """The filename to report for a job result / prediction filename stem: the manifest's own
-    name for a grouped capture (there is no single sibling file that names the logical image)."""
-    from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-
-    if isinstance(src, BandGroupRef):
-        return src.manifest_path.name
-    return src.name
 
 
 def _worker(job: InferenceJob) -> None:
@@ -386,7 +374,6 @@ def _worker(job: InferenceJob) -> None:
                 output_dir / f"{img.stem}.json", results[0],
                 created_by=prediction_producer(job.checkpoint_path, identity["sha256"]),
                 id_map=id_map)
-            job.results.append({"image": _display_name(img), "n_detections": results[0]["count"]})
             job.done += 1
 
         # Last, never beside where it is built: a stamp certifies the prediction files it sits with,
