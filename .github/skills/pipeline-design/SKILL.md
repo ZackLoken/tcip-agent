@@ -13,7 +13,8 @@ from the data in hand, and it is the decision this platform exists to have you m
 
 Derive it by measuring the dataset, not by classifying the trait:
 
-- `scan_dataset`: how many images, at what resolution, and which capture dates exist.
+- `python scripts/scan_dataset.py <folder_path>`: how many images, at what resolution, and which
+  capture dates exist.
 - `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object scale and elongation
   that actually occur here, rather than an assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts

@@ -43,7 +43,7 @@ state's age. Use it to comment on work-in-progress before the human saves.
 
 Goal: Verify annotation quality before training.
 
-1. `scan_dataset` → understand image inventory and format
+1. `python scripts/scan_dataset.py <folder_path>` → understand image inventory and format
 2. `visualize(source="dataset", path=folder_path, n=16)` → grid overview
 3. Read the grid with the client's image-capable read tool → assess overall annotation consistency
 4. For flagged images: `visualize(source="annotations", path=image_path)` → read the render
