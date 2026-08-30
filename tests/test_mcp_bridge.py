@@ -120,7 +120,7 @@ class TestMcpBridge:
         assert "result" in resp, f"tools/list failed: {resp}"
         tools = resp["result"].get("tools", [])
         tool_names = {t["name"] for t in tools}
-        assert "scan_dataset" in tool_names
+        assert "inspect_project" in tool_names
         assert len(tool_names) >= 10  # we have 40+ tools
 
 

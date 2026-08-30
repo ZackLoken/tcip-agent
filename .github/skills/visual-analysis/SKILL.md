@@ -21,7 +21,7 @@ The agent can visually inspect images with its own image-capable read tool after
 | `visualize(source="predictions", path=<image>)` | Render model predictions on a single image |
 | `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
 | `visualize(source="comparison", path=<image>)` | Overlay GT (green) vs predictions (red) with match stats |
-| `python scripts/render_failure_cases.py` | Grid of top-K failure cases |
+| `scripts/render_failure_cases.py` (logged script, run with python) | Grid of top-K failure cases |
 | `propose_annotations` | Engine-proposed candidate masks rendered with numbered overlay (`engine='sam'` default); `grid_cells=[...]` scopes the pass to a region instead of the whole frame |
 | `accept_proposals` | Stage classified candidates as predictions (created_by=<engine>) for human review |
 | `overlay_reference_grid` | Labeled reference-grid overlay (square native-pixel cells); echoes its grid geometry (`tile_size`, `overlap`, `cols`, `rows`, `width`, `height`) for `segment_prompt(grid_cells=...)` |
