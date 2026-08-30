@@ -327,8 +327,8 @@ def validate_data_quality(folder_path: str) -> dict:
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 
-    from tcip_annotation.format_io import detect_format, load_annotations
-    from tcip_annotation.json_io import UnreadableLabelDocument, load_json_document
+    from tcip_annotation.format_io import detect_format
+    from tcip_annotation.json_io import UnreadableLabelDocument, load_json_document, read_annotations
     from tcip_mcp.dataset_layout import (
         annotation_date, confirmed_negative_names_any_subject, normalize_status_store,
         read_image_status_store, resolve_image_name,
@@ -367,7 +367,7 @@ def validate_data_quality(folder_path: str) -> dict:
             if stem not in image_stems:
                 issues.append({"level": "error", "file": label_path, "message": "No matching image"})
             try:
-                anns = load_annotations(label_path, fmt="json")
+                anns = read_annotations(label_path)
             except UnreadableLabelDocument as exc:
                 issues.append({"level": "error", "file": label_path,
                               "message": f"label file will not read: {exc}"})
