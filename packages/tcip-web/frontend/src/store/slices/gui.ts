@@ -1,0 +1,218 @@
+import type { StateCreator } from "zustand";
+
+import {
+  datasetKey,
+  loadDatasetUi,
+  loadLastTab,
+  recordLastTab,
+  saveDatasetUi,
+} from "@/lib/datasetUiState";
+import type { AppState } from "@/store/appState";
+import { DEFAULT_REVIEW_STATUS } from "@/store/slices/registryStatus";
+import type {
+  DatasetSelection,
+  GuiState,
+  Mode,
+  ReviewFilters,
+  TabName,
+  ViewState,
+} from "@/store/types";
+
+const DEFAULT_REVIEW: ReviewFilters = {
+  iou_threshold: 0.5,
+  conf_threshold: 0.25,
+  filter_type: "all",
+  filter_class: "all",
+  detection_idx: 0,
+};
+
+const DEFAULT_DATASET: DatasetSelection = {
+  project_root: null,
+  dataset_root: null,
+  subject: null,
+  date: null,
+  image_list: [],
+  current_image_index: 0,
+  images_dir: null,
+  annotations_dir: null,
+  predictions_dir: null,
+};
+
+const DEFAULT_STATE: GuiState = {
+  active_tab: "annotate",
+  dataset: DEFAULT_DATASET,
+  view: { scale: 1, offset_x: 0, offset_y: 0 },
+  mode: "box",
+  active_subject: null,
+  review: DEFAULT_REVIEW,
+};
+
+/** True when two selections name a different (dataset_root, date, subject): the identity a
+ *  review-status fetch is scoped to, so a fact fetched for one never gates navigation in the
+ *  other. */
+function datasetIdentityChanged(
+  a: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
+  b: Pick<DatasetSelection, "dataset_root" | "date" | "subject">,
+): boolean {
+  return a.dataset_root !== b.dataset_root || a.date !== b.date || a.subject !== b.subject;
+}
+
+export interface GuiSlice {
+  /** Server-synchronized state (mirrors backend GuiState). */
+  gui: GuiState;
+  wsStatus: "disconnected" | "connecting" | "connected" | "error";
+  /** Highest backend state version applied; used to drop stale snapshot replays. */
+  wsVersion: number;
+
+  setGui: (next: GuiState) => void;
+  patchGui: (partial: Partial<GuiState>) => void;
+  /** Clear the dataset selection, returning the GUI to the project front door. */
+  clearDataset: () => void;
+  /** Persist the current dataset's UI state (position/filters) before switching away. Call
+   *  synchronously before the async /dataset/select so a broadcast can't move it mid-await. */
+  saveCurrentDatasetUi: () => void;
+  /** Adopt a new dataset selection, restoring its saved position/filters when the user has been
+   *  here before (else the selection's own values). Establishes the new identity locally so a
+   *  same-identity backend snapshot keeps the restored index instead of resetting it to 0. */
+  applyRestoredDataset: (sel: DatasetSelection) => void;
+  /**
+   * Apply a backend state snapshot with ownership-aware merge, not a wholesale
+   * replace: a wholesale replace would clobber unsaved edits, the active tab, and
+   * the scroll position. Backend owns the dataset selection; the browser owns
+   * navigation/view/mode/subject/review-filter state and keeps its own copy.
+   */
+  mergeSnapshot: (state: GuiState, version: number | null) => void;
+  setWsStatus: (s: "disconnected" | "connecting" | "connected" | "error") => void;
+  setActiveTab: (tab: TabName) => void;
+  setView: (view: ViewState) => void;
+  setMode: (mode: Mode) => void;
+  setActiveSubject: (subject: string | null) => void;
+}
+
+export const createGuiSlice: StateCreator<AppState, [], [], GuiSlice> = (set, get) => ({
+  gui: DEFAULT_STATE,
+  wsStatus: "disconnected",
+  wsVersion: 0,
+
+  setGui: (next) => set({ gui: next }),
+  patchGui: (partial) => set((s) => ({ gui: { ...s.gui, ...partial } })),
+  clearDataset: () =>
+    set((s) => ({
+      gui: { ...s.gui, dataset: DEFAULT_DATASET },
+      reviewStatus: DEFAULT_REVIEW_STATUS,
+    })),
+
+  saveCurrentDatasetUi: () => {
+    const s = get();
+    const key = datasetKey(s.gui.dataset);
+    if (!key) return;
+    saveDatasetUi(key, {
+      index: s.gui.dataset.current_image_index,
+      review: s.gui.review,
+      statusFilter: s.imageStatus.activeFilter,
+    });
+  },
+
+  applyRestoredDataset: (sel) =>
+    set((s) => {
+      const key = datasetKey(sel);
+      const restored = key ? loadDatasetUi(key) : null;
+      const index =
+        restored && sel.image_list.length
+          ? Math.max(0, Math.min(restored.index, sel.image_list.length - 1))
+          : sel.current_image_index;
+      return {
+        gui: {
+          ...s.gui,
+          // Land on the project's last-used tab; a project never opened before gets Annotate.
+          active_tab: loadLastTab(sel.project_root) ?? "annotate",
+          dataset: { ...sel, current_image_index: index },
+          review: restored?.review ?? s.gui.review,
+        },
+        imageStatus: {
+          ...s.imageStatus,
+          activeFilter: restored?.statusFilter ?? s.imageStatus.activeFilter,
+          // A stale mark names an image in the dataset it was computed for; carrying it into a
+          // newly selected dataset could flag a same-named image that was never checked.
+          staleMarks: [],
+        },
+        reviewStatus: datasetIdentityChanged(s.gui.dataset, sel)
+          ? DEFAULT_REVIEW_STATUS
+          : s.reviewStatus,
+      };
+    }),
+
+  mergeSnapshot: (rawIncoming, version) =>
+    set((s) => {
+      // pred_reference is gui_snapshot's frozen-format resident (state.py's GuiState); drop it here.
+      const { pred_reference: _predReference, ...incoming } = rawIncoming as GuiState & {
+        pred_reference?: unknown;
+      };
+      // Drop a stale replay (older backend version than one already applied),
+      // e.g. a reconnecting socket resending an old snapshot.
+      if (version != null && version < s.wsVersion) return s;
+      const nextVersion = version != null ? Math.max(s.wsVersion, version) : s.wsVersion;
+      const local = s.gui;
+      const inDs = incoming.dataset;
+
+      /** A null/empty backend dataset must never clobber a populated client one: this is what
+       *  lets the browser survive a backend restart (the restarted backend broadcasts an empty
+       *  state before it knows the project). */
+      if (!inDs || !inDs.dataset_root) {
+        return { wsVersion: nextVersion };
+      }
+
+      const identityChanged = datasetIdentityChanged(inDs, local.dataset);
+
+      // Boot hydration: no local dataset to protect, so adopt the persisted mode/filters/position;
+      // the tab is the client's per-project record (backend active_tab only moves on agent focus).
+      if (!local.dataset.dataset_root) {
+        return {
+          gui: {
+            ...incoming,
+            active_tab: loadLastTab(incoming.dataset.project_root) ?? "annotate",
+            active_subject: incoming.active_subject ?? null,
+          },
+          reviewStatus: DEFAULT_REVIEW_STATUS,
+          wsVersion: nextVersion,
+        };
+      }
+
+      if (identityChanged) {
+        // New dataset selection: adopt it wholesale (including its index) and drop
+        // the stale reviewStatus. The active tab stays put.
+        return {
+          gui: { ...local, dataset: inDs },
+          reviewStatus: DEFAULT_REVIEW_STATUS,
+          wsVersion: nextVersion,
+        };
+      }
+      /** Same dataset: accept backend-owned dataset fields (e.g. a changed model's prediction
+       *  dir) but keep the user's navigation position and the local image_list reference (same
+       *  identity => same list; reusing the ref avoids spuriously re-firing effects keyed on it,
+       *  like registry/status hydration). Everything else (active_tab / mode / active_subject /
+       *  view / review) is client-owned; keep local. */
+      return {
+        gui: {
+          ...local,
+          dataset: {
+            ...inDs,
+            image_list: local.dataset.image_list,
+            current_image_index: local.dataset.current_image_index,
+          },
+        },
+        wsVersion: nextVersion,
+      };
+    }),
+
+  setWsStatus: (wsStatus) => set({ wsStatus }),
+  setActiveTab: (active_tab) =>
+    set((s) => {
+      // Write-through so the next open of this project resumes on the tab last worked in.
+      if (s.gui.dataset.project_root) recordLastTab(s.gui.dataset.project_root, active_tab);
+      return { gui: { ...s.gui, active_tab } };
+    }),
+  setView: (view) => set((s) => ({ gui: { ...s.gui, view } })),
+  setMode: (mode) => set((s) => ({ gui: { ...s.gui, mode } })),
+  setActiveSubject: (active_subject) => set((s) => ({ gui: { ...s.gui, active_subject } })),
+});
