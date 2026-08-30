@@ -572,8 +572,12 @@ export const useStore = create<AppState>()((set, get) => ({
       };
     }),
 
-  mergeSnapshot: (incoming, version) =>
+  mergeSnapshot: (rawIncoming, version) =>
     set((s) => {
+      // pred_reference is gui_snapshot's frozen-format resident (state.py's GuiState); drop it here.
+      const { pred_reference: _predReference, ...incoming } = rawIncoming as GuiState & {
+        pred_reference?: unknown;
+      };
       // Drop a stale replay (older backend version than one already applied),
       // e.g. a reconnecting socket resending an old snapshot.
       if (version != null && version < s.wsVersion) return s;
