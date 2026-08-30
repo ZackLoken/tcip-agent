@@ -952,7 +952,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.training_tools import get_worst_predictions
+    from tcip_mcp.tools.vision_tools import get_worst_predictions
 
     preds = tmp_path / "preds"
     gts = tmp_path / "labels"

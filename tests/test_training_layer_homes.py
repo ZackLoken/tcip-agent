@@ -47,3 +47,13 @@ def test_split_construction_functions_have_one_home():
         _module_path("tools/training_tools.py"),
         _module_path("pipelines/data/split_construction.py"),
     )
+
+
+def test_get_worst_predictions_has_one_home():
+    """``get_worst_predictions`` moved out of ``training_tools.py`` into ``vision_tools.py``,
+    beside its one consumer, ``render_failure_cases``."""
+    _assert_one_home(
+        {"get_worst_predictions"},
+        _module_path("tools/training_tools.py"),
+        _module_path("tools/vision_tools.py"),
+    )
