@@ -589,9 +589,11 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     record or log a derived root of this tree claims (images under ``<root>/images/<date>/``,
     ground truth under ``<root>/annotations/<date>/<stem>.json``, the nested registry
     ``<root>/classes.json``, ``.tcip`` state, experiments, sweeps and their claimed manifests),
-    plus every recognized blob home. ``include_models`` narrows only the checkpoints under
-    ``.tcip/models/*.pt``; a bespoke run's ``model_src/`` snapshot travels regardless, since it is
-    one membership statement with one producer-side option, not two.
+    plus every recognized blob home. ``include_models`` narrows checkpoint blobs wherever
+    :func:`~tcip_mcp.tools.bundle.blob_home` recognizes one (a registry-named path, ``.tcip/models``,
+    or a ``.pt`` file shaped as a run's own under ``.tcip/experiments``); a bespoke run's
+    ``model_src/`` snapshot travels regardless, since ``blob_home`` classifies it before either
+    checkpoint clause, one membership statement with one producer-side option, not two.
 
     Every database under the tree is exported to its loose files first, through the same
     :func:`tcip_store.export.export_root` ``scripts/export_store.py`` uses, so a project either
@@ -603,8 +605,8 @@ def archive_project(project_path: str, output_path: str = "", include_models: bo
     ``left_behind`` names what this door declined to bundle, per class: ``unaccounted`` (a
     render cache, Ray's own experiment store, tensorboard events, any other stray no store or
     blob home claims), ``bookkeeping`` (a live tree's own transient bookkeeping, e.g. a lock
-    file mid-write), and ``checkpoints_excluded`` (``.tcip/models/*.pt`` files dropped by
-    ``include_models=False``), so the narrowing is disclosed rather than silent.
+    file mid-write), and ``checkpoints_excluded`` (every checkpoint blob ``blob_home`` recognizes,
+    dropped by ``include_models=False``), so the narrowing is disclosed rather than silent.
 
     Args:
         project_path: Root directory of the project.
