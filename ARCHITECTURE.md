@@ -954,8 +954,8 @@ registered at HEAD.
 | POST | `/backup_labels` | `backup_labels` | `routes/review.py:750` |
 | GET | `/image_statuses` | `image_statuses` | `routes/review.py:804` |
 | GET | `/generation_conf` | `get_generation_conf` | `routes/review.py:834` |
-| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:1003` |
-| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1031` |
+| POST | `/queue/launch` | `launch_priority_queue` | `routes/review.py:997` |
+| GET | `/queue/{job_id}` | `get_priority_queue_job` | `routes/review.py:1025` |
 
 ### routes/sessions.py, prefix `/api/sessions` (4 routes)
 
