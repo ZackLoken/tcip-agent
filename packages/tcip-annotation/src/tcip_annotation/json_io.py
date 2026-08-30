@@ -293,8 +293,14 @@ def _load(path: str) -> dict | None:
     return load_label_document(path)
 
 
-def _safe_score(x) -> float:
-    """A JSON-safe confidence: finite, rounded; non-finite (NaN/inf) collapses to 0.0."""
+def safe_score(x) -> float:
+    """A JSON-safe confidence: finite, rounded; non-finite (NaN/inf) collapses to 0.0.
+
+    The one quantization every writer of a score applies, on the way into a persisted prediction
+    document and again here for any caller (a CSV export averaging scores) that needs the same
+    persisted precision, never a re-spelled ``round(x, 4)`` that would diverge on a non-finite
+    score this collapses to 0.0.
+    """
     v = float(x)
     return round(v, 4) if math.isfinite(v) else 0.0
 
@@ -518,6 +524,19 @@ def read_annotations(path) -> list[Annotation]:
     return _annotations_of(_load(str(path)))
 
 
+def detection_annotations(path: str | Path) -> list[Annotation]:
+    """A prediction document's annotations narrowed to real detections, a ``Point`` excluded.
+
+    A ``Point`` records no detection (nothing a detector localized as a box or region), so
+    counting one would inflate whatever this feeds: a phenology curve's denominator, or a
+    per-image detection count. The one predicate ``count_by_class`` and a per-image count CSV's
+    bucket-regime reader share, extracted here so neither path can drift from the other about
+    what counts as a detection.
+    """
+    return [a for a in read_annotations(str(path))
+           if a.geometry is not None and not isinstance(a.geometry, Point)]
+
+
 def read_annotations_versioned(target: Key | str | Path) -> tuple[list[Annotation], Version]:
     """An image's annotations and the version of the document they came from, read together.
 
@@ -692,7 +711,7 @@ def _annotation_record(a: Annotation) -> dict | None:
     if a.attributes:
         rec["attributes"] = dict(a.attributes)
     if a.score is not None:
-        rec["score"] = _safe_score(a.score)
+        rec["score"] = safe_score(a.score)
     for k in _PROV_KEYS:
         v = getattr(a, k, None)
         if v is not None:
@@ -845,7 +864,7 @@ def to_coco_dataset(
                 rec["segmentation"] = [[round(float(c), 2) for xy in ring for c in xy]
                                        for ring in a.geometry.rings if len(ring) >= 3]
             if a.score is not None:
-                rec["score"] = _safe_score(a.score)
+                rec["score"] = safe_score(a.score)
             for k in _PROV_KEYS:
                 v = getattr(a, k, None)
                 if v is not None:
