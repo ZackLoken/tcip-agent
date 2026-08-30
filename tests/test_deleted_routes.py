@@ -19,6 +19,7 @@ DELETED_ROUTES = [
     ("GET", "/api/terminal/sessions"),
     ("GET", "/api/inference/jobs/{job_id}/preview"),
     ("GET", "/api/images/dimensions"),
+    ("GET", "/api/review/image_status"),
 ]
 
 

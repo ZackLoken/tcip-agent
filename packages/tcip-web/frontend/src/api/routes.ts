@@ -33,7 +33,6 @@ export const ROUTES = {
   getResultsTraitSpecStatements: "/api/results/trait-spec-statements",
   getResultsTraits: "/api/results/traits",
   getReviewGenerationConf: "/api/review/generation_conf",
-  getReviewImageStatus: "/api/review/image_status",
   getReviewImageStatuses: "/api/review/image_statuses",
   getReviewQueueByJobId: (jobId: string) => `/api/review/queue/${encodeURIComponent(jobId)}`,
   getRoot: "/",

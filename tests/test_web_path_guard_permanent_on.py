@@ -357,15 +357,15 @@ def test_review_routes_confine_the_dataset_root_and_the_label_files_they_read(
 ) -> None:
     inside = _project(tmp_path / "proj")
     image = _image(inside / "images" / "2026-02-11" / "a.jpg")
-    assert client.get("/api/review/image_status", params={
-        "dataset_root": str(outside), "image_name": "a.jpg"}).status_code == 403
+    assert client.get("/api/review/image_statuses", params={
+        "dataset_root": str(outside)}).status_code == 403
     assert client.post("/api/review/matches", json={
         "dataset_root": str(inside), "image_name": "a.jpg", "image_path": str(image),
         "gt_path": str(outside / "a.json")}).status_code == 403
     assert not (outside / ".tcip").exists()
 
-    assert client.get("/api/review/image_status", params={
-        "dataset_root": str(inside), "image_name": "a.jpg"}).status_code == 200
+    assert client.get("/api/review/image_statuses", params={
+        "dataset_root": str(inside)}).status_code == 200
     assert client.post("/api/review/matches", json={
         "dataset_root": str(inside), "image_name": "a.jpg", "image_path": str(image)}).status_code == 200
 
