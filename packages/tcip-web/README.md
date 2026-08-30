@@ -18,7 +18,7 @@ packages/tcip-web/
       annotate.py       # label CRUD, Annotate-tab commands
       canvas.py         # live canvas capture for the agent's visual-analysis loop
       classes.py        # subject/class CRUD
-      dataset.py        # tree + list + select + state snapshot
+      dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers
       images.py         # EXIF-oriented JPEG serving (+ downsample)
       inference.py      # SAHI-style tiled background jobs + progress WS

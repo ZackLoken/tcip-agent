@@ -2,8 +2,8 @@
 
 The frontend hits these to:
   * discover what's available under a project root,
-  * list images for a given (dataset_root, subject, date),
-  * read and persist the ``GuiState.dataset`` selection.
+  * read and persist the ``GuiState.dataset`` selection,
+  * persist the browser's current image position within that selection.
 
 Convention: the canonical layout (see :mod:`tcip_mcp.dataset_layout`):
 

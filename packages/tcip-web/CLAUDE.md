@@ -41,7 +41,7 @@ config.
 
 Each launch records what it ran: the session answers `launched` (the executable, `argv[0]`, and
 the version it declares to `--version`, probed once per process on the resolved CLI only and never
-on a `TCIP_TERMINAL_CMD` override) on the create, list and restart routes, with one
+on a `TCIP_TERMINAL_CMD` override) on the create and restart routes, with one
 `agent_terminal_started` platform audit line per launch. Which agent harness that program is comes
 from the harness's own MCP handshake, not from here. The child is spawned with
 `TCIP_TERMINAL_SESSION` set to the session id; the MCP server the agent launches reads it and stamps
