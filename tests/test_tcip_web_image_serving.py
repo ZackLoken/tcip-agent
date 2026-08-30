@@ -705,13 +705,13 @@ def test_a_build_request_joins_the_one_already_running_for_that_raster(
     path = tmp_path / "wide.tif"
     _wide_raster(path)
     running = images_route.OverviewJob(job_id="ovr-running", path=str(path), status="running")
-    images_route._overview_jobs[running.job_id] = running
+    images_route._overview_registry.jobs[running.job_id] = running
     try:
         joined = client.post("/api/images/overviews", json={"path": str(path)}).json()
         assert joined["job_id"] == "ovr-running"
         assert joined["status"] == "running"
     finally:
-        images_route._overview_jobs.pop(running.job_id, None)
+        images_route._overview_registry.jobs.pop(running.job_id, None)
 
 
 def test_a_build_on_an_unreadable_raster_reaches_a_terminal_failure(

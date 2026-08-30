@@ -389,6 +389,14 @@ def test_review_priority_queue_no_longer_defines_its_own_dict_and_lock():
     assert not stray, f"review.py still defines {sorted(stray)}"
 
 
+def test_images_overview_builds_no_longer_defines_its_own_dict_and_lock():
+    """images.py's overview-build registry moved onto jobstore.JobRegistry the same way."""
+    path = _web_module_path("routes/images.py")
+    assert path.is_file()
+    stray = {"_overview_jobs", "_overview_lock"} & set(_assign_name_counts(path))
+    assert not stray, f"images.py still defines {sorted(stray)}"
+
+
 def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shape():
     """jobstore.JobRegistry is the one home for the register/get/persist/rehydrate shape
     review.py's priority queue and images.py's overview builds used to restate around their own

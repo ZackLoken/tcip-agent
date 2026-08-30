@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from tcip_mcp.pipelines.display_bounds import DISPLAY_MAX_EDGE, DISPLAY_MAX_PIXELS
+from tcip_web import jobstore
 from tcip_web.paths import assert_path_allowed
 from tcip_web.routes._coverage_models import StatsSource
 
@@ -800,8 +801,10 @@ class OverviewJob:
     thread: "threading.Thread | None" = field(default=None, repr=False)
 
 
-_overview_jobs: "dict[str, OverviewJob]" = {}
-_overview_lock = threading.Lock()
+_overview_registry = jobstore.JobRegistry(None)
+"""The dict-plus-lock live registry for overview-build jobs (see ``jobstore.JobRegistry``); this
+one carries no root concept and persists nothing, unlike inference.py's, tuning.py's and
+review.py's priority queue, whose registries share the same home."""
 
 
 class OverviewBuildPayload(BaseModel):
@@ -851,16 +854,16 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
     One build per raster: a request naming a path a build is already running for joins that job
     rather than starting a second one over the same sidecar. Poll ``/overviews/status``.
     """
-    from tcip_web import jobstore
-
     src = _checked(payload.path)
-    with _overview_lock:
-        for existing in _overview_jobs.values():
+    # Scan-then-insert under one lock acquisition: two concurrent requests for the same path
+    # must not both pass the scan and both start a build.
+    with _overview_registry.lock:
+        for existing in _overview_registry.jobs.values():
             if existing.path == str(src) and existing.status in ("pending", "running"):
                 return _overview_summary(existing)
         job = OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src))
-        _overview_jobs[job.job_id] = job
-        jobstore.evict_terminal(_overview_jobs, None)  # this registry carries no root of its own
+        _overview_registry.jobs[job.job_id] = job
+        jobstore.evict_terminal(_overview_registry.jobs, None)  # no root concept of its own
     thread = threading.Thread(target=_overview_worker, args=(job,), daemon=True)
     job.thread = thread
     thread.start()
@@ -870,8 +873,7 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
 @router.get("/overviews/status")
 def get_overview_job(job_id: str = Query(...)) -> dict:
     """An overview build's status and completion fraction."""
-    with _overview_lock:
-        job = _overview_jobs.get(job_id)
+    job = _overview_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")
     return _overview_summary(job)
