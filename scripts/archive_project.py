@@ -6,6 +6,9 @@ one ZIP an ``import_project`` run can restore from elsewhere. Wraps
 ``tcip_mcp.tools.project_tools.archive_project`` with no MCP tool registration.
 
     python scripts/archive_project.py <project_path> [--output-path PATH] [--include-models]
+
+This run's audit line is recorded under ``<project_path>/.tcip``, the project being archived,
+not the process cwd.
 """
 
 from __future__ import annotations
@@ -13,17 +16,25 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from _script_root import pin_project_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("project_path", help="Root directory of the project.")
+    parser.add_argument("project_path", help="Root directory of the project. Also where this "
+                                              "run's audit line is recorded.")
     parser.add_argument("--output-path", default="",
                          help="Destination path for the ZIP file. Defaults to "
                               "<project_name>.tcip.zip beside the project.")
     parser.add_argument("--include-models", action="store_true",
                          help="Include registered model checkpoints (can be large).")
     args = parser.parse_args(argv)
+
+    pin_project_root(args.project_path)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

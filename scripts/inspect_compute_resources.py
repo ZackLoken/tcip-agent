@@ -7,7 +7,11 @@ call to whoever launches the next one. Wraps
 ``tcip_mcp.tools.training_tools.inspect_compute_resources`` with no MCP tool registration; run
 it before ``launch_training``/``run_hpo`` when compute headroom is the open question.
 
-    python scripts/inspect_compute_resources.py
+    python scripts/inspect_compute_resources.py --project <project_root>
+
+``--project`` (or an already-set ``$TCIP_PROJECT_ROOT``) names the project this run's active-run
+count and audit line resolve against; without it the answer resolves against the process cwd,
+which is wrong for a run count and silent about it.
 """
 
 from __future__ import annotations
@@ -15,11 +19,21 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from _script_root import pin_project_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args(argv)
+    parser.add_argument("--project", default="",
+                         help="Project root this run resolves against; falls back to "
+                              "$TCIP_PROJECT_ROOT.")
+    args = parser.parse_args(argv)
+
+    pin_project_root(args.project or None)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
