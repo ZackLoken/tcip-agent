@@ -265,6 +265,8 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/EmbeddedTool.tsx | A titled chrome bar over an iframe, for the tools the platform runs beside the app (TensorBoard, Ray's dashboard). | 0 | 3 |
 | packages/tcip-web/frontend/src/components/ErrorBoundary.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/ErrorBoundary.tsx | (none found) | 0 | 2 |
+| packages/tcip-web/frontend/src/components/HaloLabel.test.tsx | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/components/HaloLabel.tsx | A label with a blurred black halo behind the coloured fill, so a shape or detection name stays legible over any part of the underlying image; shared by the Annotate and Review canvases. | 0 | 1 |
 | packages/tcip-web/frontend/src/components/HelpOverlay.test.tsx | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/components/HelpOverlay.tsx | (none found) | 1 | 2 |
 | packages/tcip-web/frontend/src/components/ProjectBreadcrumb.test.tsx | (none found) | 3 | 0 |
@@ -282,6 +284,23 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/components/TerminalRail.tsx | The agent rail: the real Claude Code CLI, embedded. | 4 | 2 |
 | packages/tcip-web/frontend/src/components/Toasts.tsx | (none found) | 1 | 1 |
 | packages/tcip-web/frontend/src/components/TopBar.tsx | (none found) | 3 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/AnnotateLegend.tsx | Hover-triggered legend anchored lower-left of the Annotate canvas: one row per dataset subject plus the selected-shape colour, and in box mode an extra row explaining the dashed derived-box outline. | 2 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/AnnotationShapes.tsx | Memoized content layer of committed boxes, read-only derived polygon boxes, polygons and points, filtered by drawing mode and the active subject; does not re-render on cursor movement alone. | 7 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/AttributeEditors.tsx | One select per attribute declared for a subject, resolving an empty selection back to no value. | 1 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/AttributePanel.tsx | Floating panel for editing the selected shape's attributes plus geometry-less image-level ratings. | 3 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/BoxOverlay.tsx | Memoized single-box render with corner drag handles and an optional dashed read-only style, labeled through HaloLabel. | 2 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/InProgressPolygon.tsx | The polygon being drawn: its committed vertices plus a dashed rubber-band segment to the cursor. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/PointOverlay.tsx | A placed point rendered as four ticks converging on a filled core in the subject's colour, distinct from a small box or a bare polygon vertex handle. | 2 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/PolygonOverlay.tsx | Renders every ring of a polygon annotation in one shared stroke, with optional vertex handles and a single label for the whole shape. | 2 | 1 |
+| packages/tcip-web/frontend/src/components/annotate/SnapIndicator.tsx | A dashed ring drawn over the nearest polygon vertex within snap range of the cursor. | 1 | 1 |
+| packages/tcip-web/frontend/src/components/review/EditShapeOverlay.tsx | Renders the box or polygon currently being edited in place, with corner or vertex handles sized to the current canvas scale. | 2 | 1 |
+| packages/tcip-web/frontend/src/components/review/FilterChip.tsx | A small labeled chip for one review filter value, with an optional warning style. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/review/LegendRow.tsx | One legend row whose colour swatch is itself a button that opens that symbology colour for editing. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/review/ReviewLegend.tsx | Hover-opening, click-pinning legend of the Review tab's outcome colours; each row's swatch is editable. | 2 | 1 |
+| packages/tcip-web/frontend/src/components/review/ReviewLine.tsx | One closed polygon ring of a review detection, drawn solid or dashed in its outcome colour. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/review/ReviewOverlays.tsx | Memoized layer drawing every review detection by its own geometry kind (point, box or polygon), coloured by outcome and highlighting the focused detection. | 8 | 1 |
+| packages/tcip-web/frontend/src/components/review/ReviewPoint.tsx | A point annotation under review, drawn as the Annotate canvas' reticle mark in the detection's outcome colour. | 0 | 1 |
+| packages/tcip-web/frontend/src/components/review/ReviewRect.tsx | One review detection's box, drawn solid or dashed in its outcome colour. | 0 | 1 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.test.ts | (none found) | 3 | 0 |
 | packages/tcip-web/frontend/src/hooks/useActiveTabSync.ts | Mirror the active tab into the backend GUI state so view_gui_state reports the tab the human actually sees. | 3 | 2 |
 | packages/tcip-web/frontend/src/hooks/useBandSelection.test.ts | (none found) | 3 | 0 |
@@ -345,12 +364,27 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | packages/tcip-web/frontend/src/lib/runStatus.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/lib/runStatus.ts | Statuses a training run or a sweep never leaves, so a poll keyed on one can stop. | 1 | 3 |
 | packages/tcip-web/frontend/src/lib/statementFields.ts | Breeder-facing labels for every field a statement record carries. | 0 | 2 |
+| packages/tcip-web/frontend/src/lib/toolMode.test.ts | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/lib/toolMode.ts | Advances the Annotate toolbar's drawing-tool mode one step around its box -> polygon -> point cycle. | 1 | 1 |
 | packages/tcip-web/frontend/src/lib/viewGeometry.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/lib/viewGeometry.ts | Shared view math for the canvas: fit the view to a pixel rect and clamp pan offsets. | 2 | 7 |
 | packages/tcip-web/frontend/src/main.tsx | (none found) | 1 | 0 |
+| packages/tcip-web/frontend/src/store/appState.ts | The composed store state type: one slice interface per labelled group, combined into the type every slice's StateCreator is checked against. | 11 | 1 |
+| packages/tcip-web/frontend/src/store/exportSurface.test.ts | (none found) | 1 | 0 |
 | packages/tcip-web/frontend/src/store/guiStateShape.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/store/index.ts | (none found) | 3 | 54 |  <!-- queued: P5-238 merge-or-split -->
 | packages/tcip-web/frontend/src/store/mergeSnapshot.test.ts | (none found) | 3 | 0 |
+| packages/tcip-web/frontend/src/store/slices/agentActivity.ts | Holds the last agent-pushed panel event from the /ws/panel subscription, sequenced so an effect can react to each new one. | 1 | 3 |
+| packages/tcip-web/frontend/src/store/slices/bandSelection.ts | Holds the breeder's chosen band composite per band-set signature, one entry per distinct band set seen this session. | 2 | 2 |
+| packages/tcip-web/frontend/src/store/slices/banners.ts | Holds the latest agent-pushed banner per tab plus the set of dismissed banner event ids, since the backend replays its whole per-panel event ring on reconnect. | 1 | 3 |
+| packages/tcip-web/frontend/src/store/slices/canvas.ts | Holds the per-image draft canvas state (boxes, polygons, points, image-level ratings, undo/redo stacks, dirty tracking) not synced to the backend until save. | 2 | 3 |
+| packages/tcip-web/frontend/src/store/slices/gui.ts | Holds the server-synchronized GUI state (dataset selection, view, mode, active subject, review filters) plus the ownership-aware snapshot merge that keeps backend- and browser-owned fields apart. | 4 | 2 |
+| packages/tcip-web/frontend/src/store/slices/pendingTerminalMessage.ts | Holds a request staged for the agent terminal until the terminal rail sends it and clears it, so a component can hand the agent a task without exposing the raw control. | 1 | 2 |
+| packages/tcip-web/frontend/src/store/slices/registryStatus.ts | Holds the dataset's subject registry, per-image annotation status, per-image review status, Annotate tab UI flags, and per-image session-timing telemetry. | 3 | 3 |
+| packages/tcip-web/frontend/src/store/slices/review.ts | Holds the Review tab's fetched matches, loading state, and the agent's one-shot focus-detection request. | 3 | 2 |
+| packages/tcip-web/frontend/src/store/slices/terminalOpen.ts | Holds whether the agent terminal rail is open; always closed on a fresh session since the server-side terminal session survives closing it. | 1 | 2 |
+| packages/tcip-web/frontend/src/store/slices/toasts.ts | Holds the transient toast stack (API failures and the like), capped so a failing poll cannot flood the screen. | 1 | 3 |
+| packages/tcip-web/frontend/src/store/slices/user.ts | Holds the current annotator/reviewer identity, persisted to localStorage and stamped as created_by/accepted_by on what this person authors. | 1 | 2 |
 | packages/tcip-web/frontend/src/store/store.test.ts | (none found) | 2 | 0 |
 | packages/tcip-web/frontend/src/store/tabRestore.test.ts | (none found) | 4 | 0 |
 | packages/tcip-web/frontend/src/store/terminalOpenPolicy.test.ts | (none found) | 1 | 0 |
