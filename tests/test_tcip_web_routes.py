@@ -379,14 +379,6 @@ def test_images_etag_revalidation(client: TestClient, dataset_root: Path) -> Non
     assert variant.headers["etag"] != etag
 
 
-def test_images_dimensions(client: TestClient, dataset_root: Path) -> None:
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    resp = client.get("/api/images/dimensions", params={"path": str(img_path)})
-    body = resp.json()
-    assert body["width"] == 100
-    assert body["height"] == 80
-
-
 def test_images_not_found(client: TestClient, tmp_path: Path) -> None:
     resp = client.get("/api/images", params={"path": str(tmp_path / "does_not_exist.jpg")})
     assert resp.status_code == 404

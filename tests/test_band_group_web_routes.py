@@ -214,27 +214,6 @@ def test_serve_image_stale_group_returns_409(client: TestClient, grouped_dataset
     assert resp.status_code == 409
 
 
-def test_get_dimensions_route_reads_a_grouped_captures_real_frame(client: TestClient, grouped_dataset: Path):
-    """GET /api/images/dimensions routes through resolve_image_source + image_dimensions rather
-    than the bare channel-blind get_image_dimensions used by its sibling routes
-    (review.py/annotate.py's own _image_dims): a bare PIL header read on a .bandgroup manifest
-    (not a real image file) would misread or fail, whereas routing through reads the group's
-    real stacked frame."""
-    manifest = grouped_dataset / "images" / "2026-05-01" / "cap_001.bandgroup"
-    resp = client.get("/api/images/dimensions", params={"path": str(manifest)})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert (body["width"], body["height"]) == (24, 20)
-
-
-def test_get_dimensions_route_unchanged_for_a_plain_photo(client: TestClient, grouped_dataset: Path):
-    plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
-    resp = client.get("/api/images/dimensions", params={"path": str(plain)})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert (body["width"], body["height"]) == (24, 20)
-
-
 # ── routes/inference.py ──────────────────────────────────────────────────────────────────
 
 

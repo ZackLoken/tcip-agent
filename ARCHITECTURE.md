@@ -752,12 +752,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 86 (5 on `app.py` plus 81 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 85 (5 on `app.py` plus 80 across the 16 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 84) includes any websocket route it lists, since
+heading's own route count (and their sum, 83) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 16 modules hold the 81 HTTP routes counted here.
+those three, the 16 modules hold the 80 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -830,15 +830,14 @@ registered at HEAD.
 |---|---|---|---|
 | GET | `/list` | `list_dir` | `routes/fs.py:108` |
 
-### routes/images.py, prefix `/api/images` (5 routes)
+### routes/images.py, prefix `/api/images` (4 routes)
 
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `` (root) | `serve_image` | `routes/images.py:499` |
-| GET | `/dimensions` | `get_dimensions` | `routes/images.py:714` |
-| GET | `/bands` | `get_bands` | `routes/images.py:734` |
-| POST | `/overviews` | `build_image_overviews` | `routes/images.py:867` |
-| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:891` |
+| GET | `/bands` | `get_bands` | `routes/images.py:714` |
+| POST | `/overviews` | `build_image_overviews` | `routes/images.py:847` |
+| GET | `/overviews/status` | `get_overview_job` | `routes/images.py:871` |
 
 ### routes/inference.py, prefix `/api/inference` (3 HTTP + 1 WS)
 
@@ -945,9 +944,9 @@ registered at HEAD.
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
 
-### 8 routes with no located frontend caller
+### 7 routes with no located frontend caller
 
-Per phase0's `web-surface.md`, these 8 registered backend routes had no caller found
+Per phase0's `web-surface.md`, these 7 registered backend routes had no caller found
 under `packages/tcip-web/frontend/src/` by literal-path grep. Not re-derived this
 session; restated from phase0 as the brief instructs, with each route's line verified
 above against HEAD.
@@ -958,7 +957,6 @@ above against HEAD.
 | GET | `/` | loaded by the browser's own navigation, not via fetch/XHR from app code |
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
 | GET | `/api/state` | no caller found |
-| GET | `/api/images/dimensions` | no caller found |  <!-- queued: P5-72 delete -->
 | GET | `/api/review/image_status` | singular form; no caller found (plural `/api/review/image_statuses` is called) |  <!-- queued: P5-141 delete -->
 | POST | `/api/review/save_gt` | no caller found; `api.review` has no `saveGt` function |  <!-- queued: P5-139 delete -->
 | POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function |  <!-- queued: P5-111 delete -->
