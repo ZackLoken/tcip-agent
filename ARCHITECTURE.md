@@ -62,6 +62,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/active_learning/selector.py | Active learning selector: pick next images to annotate. | 1 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/band_stats.py | Display band statistics, the 8-bit stretch every band render goes through, and the RGB composite it stacks into. | 2 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py | Block-aware calibration/holdout: validate a detection operating point directly against a mosaic's own reserved calibration/test bands (see ``split_construction.spatial_single_source_split``'s four-way split, ``reserve_calibration_fraction``), for a raster training source too large or too singular to hold whole images out from. | 15 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/calibration.py | The calibration-sweep pair every inference door shares: resolve a per-dataset operating point from a labeled split, and its compact, response-safe summary. | 11 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/__init__.py | Components sub-package: composable ML primitives. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/backbones.py | ``BackboneWrapper``: the interface a backbone must expose to the necks and detectors here. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/components/detectors.py | 2D object-detector builders: plain torchvision detector factories. | 0 | 0 |
@@ -128,18 +129,19 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/tools/__init__.py | Tool sub-package: each module registers tools with the MCP server. | 0 | 0 |
 | packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py | Annotation tools: load, save, and evaluate name-based annotations via MCP. | 12 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/bundle.py | The shared membership accounting archive_project and import_project both compose from: derives every root a project tree is or holds and classifies each file into bookkeeping, a claimed record/log, a blob, or unaccounted. | 6 | 1 |
+| packages/tcip-mcp/src/tcip_mcp/tools/calibration_tools.py | Calibration-administration tools: redrawing a locked cal/holdout split, and calibrating a scalar (ordinal-rank or continuous-value) trait against a disjoint held-out split. | 14 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/data_tools.py | Data management tools: load datasets, validate quality, split data. | 12 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/tools/experiment_tools.py | Experiment tracking MCP tools: create, log, compare, and trace experiments. | 4 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/feedback_tools.py | Review -> retrain feedback MCP tools. | 11 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/gui_tools.py | GUI-driving tools: push data to a panel, or drive the live Annotate/Review tab to a frame. | 9 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run models on images, export results. | 22 | 4 |  <!-- queued: P5-225 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py | Inference MCP tools: run_inference, export_predictions and tabulate_counts, sharing one verified body (``_run_inference_verified``) so the firewalled operating point (conf/NMS/tiling/max_dets) resolves identically for every door that runs a model over images. | 21 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/ingest_tools.py | Image ingestion: turn a raw folder of photos into a structured TCIP project. | 8 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/meta_tools.py | Meta-loop tools for self-improvement. | 4 | 4 |
 | packages/tcip-mcp/src/tcip_mcp/tools/model_tools.py | Model management tools, registry, listing, comparison. | 7 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/tools/operationalization_tools.py | The agent's statement tool for trait operationalizations; it can state, never confirm. | 4 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/trait_spec_authoring_tools.py | The agent's authoring tool for a trait spec that does not yet exist; it can author, never confirm. | 3 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/orthomosaic_tools.py | Orthomosaic MCP tools: per-plant delivery from a persisted whole-raster prediction bucket plus a plant-locations CSV. | 12 | 1 |
-| packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline. | 19 | 4 |  <!-- queued: P5-235 merge-or-split -->
+| packages/tcip-mcp/src/tcip_mcp/tools/phenology_tools.py | Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline: plant mapping, the positive-state classifier's own calibration gate, and compute_phenology. | 19 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py | Project management tools. | 10 | 7 |
 | packages/tcip-mcp/src/tcip_mcp/tools/proposal_tools.py | Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for canvas review. | 20 | 1 |
 | packages/tcip-mcp/src/tcip_mcp/tools/scale_tools.py | Physical per-pixel scale calibration: the delivery-gating producer for ``resolve_scale.json``. | 10 | 1 |
@@ -680,14 +682,20 @@ Docstring is the function's docstring first line, verbatim.
 | `push_panel_data` | `gui_tools.py:37` | yes | Push structured data to a TCIP GUI panel via the tcip-web backend. |
 | `focus` | `gui_tools.py:71` | yes | Drive the live GUI to a (subject, date) frame, the Annotate tab or the Review tab. |
 
-### inference_tools.py (4 tools)
+### inference_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `force_redraw_cal_holdout_split` | `inference_tools.py:506` | yes | Deliberately redraw a locked calibration/holdout split. |
-| `run_inference` | `inference_tools.py:707` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1764` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:2070` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `run_inference` | `inference_tools.py:192` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1251` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1557` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+
+### calibration_tools.py (2 tools)
+
+| tool | line | audited | docstring first line |
+|---|---|---|---|
+| `force_redraw_cal_holdout_split` | `calibration_tools.py:24` | yes | Deliberately redraw a locked calibration/holdout split. |
+| `calibrate_ordinal_regression_operating_point` | `calibration_tools.py:255` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
 
 ### ingest_tools.py (1 tool)
 
@@ -718,11 +726,12 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `state_trait_operationalization` | `operationalization_tools.py:19` | yes | Record what this trait's delivered number means, in the breeder's terms, for one delivery. |
 
-### trait_spec_authoring_tools.py (1 tool)
+### trait_spec_authoring_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `author_trait_spec` | `trait_spec_authoring_tools.py:18` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
+| `author_trait_spec` | `trait_spec_authoring_tools.py:21` | yes | Register a trait that does not yet exist, and record why, in the breeder's terms. |
+| `update_trait_spec_fields` | `trait_spec_authoring_tools.py:126` | yes | Update one or more fields on an already-registered trait's spec. |
 
 ### orthomosaic_tools.py (1 tool)
 
@@ -730,15 +739,13 @@ Docstring is the function's docstring first line, verbatim.
 |---|---|---|---|
 | `deliver_orthomosaic_plant_counts` | `orthomosaic_tools.py:36` | yes | Per-plant detection counts from a persisted orthomosaic prediction bucket + plant CSV(s). |
 
-### phenology_tools.py (5 tools)
+### phenology_tools.py (3 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `build_plant_mapping` | `phenology_tools.py:27` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
-| `update_trait_spec_fields` | `phenology_tools.py:156` | yes | Update one or more fields on an already-registered trait's spec. |
-| `calibrate_classifier_operating_point` | `phenology_tools.py:435` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
-| `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:605` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
-| `compute_phenology` | `phenology_tools.py:804` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
+| `build_plant_mapping` | `phenology_tools.py:31` | yes | Assign each geolocated image to a plant, then persist the mapping under this project. |
+| `calibrate_classifier_operating_point` | `phenology_tools.py:397` | yes | Calibrate and validate the trait's positive-class classifier against held-out GT. |
+| `compute_phenology` | `phenology_tools.py:537` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
 ### project_tools.py (5 tools)
 
@@ -1855,8 +1862,8 @@ given: the manifest's own `calibration` side under a manifest-restricted draw, t
 directory otherwise; the lock's own field names do not change with the source.
 
 Readers: six callers draw a lock through this one function -
-`inference_tools._calibrate_operating_point`, `inference_tools.force_redraw_cal_holdout_split`,
-`phenology_tools.calibrate_ordinal_regression_operating_point`,
+`pipelines.calibration.calibrate_operating_point`, `calibration_tools.force_redraw_cal_holdout_split`,
+`calibration_tools.calibrate_ordinal_regression_operating_point`,
 `measurement.scale_calibration.resolve_physical_scale`,
 `scripts/calibrate_operating_point.py`, and `feedback.review_calibration.
 resolve_operating_point_from_review` - each answering its own identity's lock, so a whole-directory
