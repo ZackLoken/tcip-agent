@@ -400,6 +400,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
 | scripts/generate_frozen_manifest.py | Render the store registry's freeze classifications into the shipped frozen-formats.json; --check holds CI to the committed edition. | 2 | 0 |
+| scripts/import_project.py | Import an annotation project from a ZIP archive, through the demoted `import_project` function. | 1 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
 | scripts/inspect_compute_resources.py | Report the host's current compute headroom, through the demoted `inspect_compute_resources` function. | 1 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
@@ -687,7 +688,7 @@ Docstring is the function's docstring first line, verbatim.
 | `calibrate_ordinal_regression_operating_point` | `phenology_tools.py:605` | yes | Calibrate and validate a trait's ordinal-rank or continuous-value prediction against a |
 | `compute_phenology` | `phenology_tools.py:804` | yes | Per-plant phenology milestones from classified predictions + a plant mapping. |  <!-- queued: P5-43 unify -->
 
-### project_tools.py (6 tools)
+### project_tools.py (5 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
@@ -696,7 +697,6 @@ Docstring is the function's docstring first line, verbatim.
 | `set_active_project` | `project_tools.py:306` | yes | Set the workspace's active project so the GUI opens it. |
 | `view_gui_state` | `project_tools.py:395` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
 | `inspect_project` | `project_tools.py:442` | yes | Get an overview of a TCIP project. |
-| `import_project` | `project_tools.py:809` | yes | Import an annotation project from a ZIP archive. |  <!-- queued: P5-08 demote-to-script -->
 
 `tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
 `archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
@@ -738,7 +738,7 @@ anything.
 | `capture_live_canvas` | `vision_tools.py:1081` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1211` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
-8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 6 + 1 + 7 + 1 + 5 = 55 tools across 16 modules.
+8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 5 + 1 + 7 + 1 + 5 = 54 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 

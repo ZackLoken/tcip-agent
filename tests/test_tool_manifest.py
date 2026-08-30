@@ -153,6 +153,7 @@ def test_consolidated_tools_present_and_removed_absent():
         # Demoted to scripts under the admission standard (packages/tcip-mcp/CLAUDE.md): each
         # function stays importable, only the tool registration is gone.
         "scan_dataset", "inspect_compute_resources", "render_failure_cases", "archive_project",
+        "import_project",
         "evaluate_detections", "evaluate_dataset", "split_dataset",
         "log_metrics", "record_artifact", "get_training_metrics_path",
         # collapse to model_source-only: the menu/composer/spec tools are gone.

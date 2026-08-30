@@ -805,10 +805,12 @@ class StoreErrorRuntime(RuntimeError):
     tool refusal rather than a second bespoke exception type callers must know about."""
 
 
-@mcp.tool()
 @audited
 def import_project(zip_path: str, destination: str) -> dict:
     """Import an annotation project from a ZIP archive.
+
+    Not an MCP tool: run through ``scripts/import_project.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Not a writer of any format: the door extracts into a private staging directory, classifies
     every member through the shared bundle accounting

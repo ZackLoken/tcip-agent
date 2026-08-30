@@ -27,8 +27,9 @@ Projects live under the workspace (`TCIP_WORKSPACE`, default `~/tcip-projects/`)
 folder per project. The shape is declared once, in `workspace.format_project_name`/
 `parse_project_name`: three lowercase segments joined by underscores, hyphens allowed
 within a segment. Neither function checks a segment against a vocabulary (provisional,
-per the owner's naming ruling); `ingest_images`, `init_project` and `import_project`
-refuse a non-conforming name when the directory they create lands under the workspace.
+per the owner's naming ruling); `ingest_images`, `init_project` and
+`scripts/import_project.py` refuse a non-conforming name when the directory they create lands
+under the workspace.
 
     black-locust_tree_trunk-diameter
 
@@ -163,9 +164,9 @@ Adopt the project with `set_active_project` before doing project work. Adoption 
 active marker *and* repins the platform-state root to `<workspace>/<project>`, so from then on
 the `@audited` log, the experiment store, and the model registry all live under that one
 project's `.tcip/` alongside its data (self-contained and portable; `python
-scripts/archive_project.py` bundles everything; `import_project` restores that ZIP into a
-destination dir, round-tripping back to a `inspect_project`-visible project). After adoption,
-`inspect_project`, `select_best_model`, `list_registered_models`,
+scripts/archive_project.py` bundles everything; `python scripts/import_project.py` restores that
+ZIP into a destination dir, round-tripping back to a `inspect_project`-visible project). After
+adoption, `inspect_project`, `select_best_model`, `list_registered_models`,
 and `register_model` all default (`project_path=""`) to that project, and a
 training run auto-registers there, so the model you trained is the one you retrieve. Pass an
 explicit `project_path` only to reach a *different* project's registry: that holds for
