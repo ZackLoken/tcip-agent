@@ -1,10 +1,11 @@
-"""Structural (AST-only, no import of the modules under test): the training-layer reshape's
-one-home guarantees. Each assertion is three-sided: the old module no longer defines the name,
-the new module defines it exactly once, and no other module under either package's source tree
-defines it either. Nested definitions count (a def tucked inside another function, a class body,
-or a conditional block is not invisible), and the old/new paths themselves are asserted to exist
-before anything is scanned, so a typo'd or renamed path reads as a failure rather than a vacuous
-pass.
+"""Structural (AST-only, no import of the modules under test): one-home guarantees for every
+module reshape a move commit claims, across the training layer, the label-store/data-library
+query functions, the proposal-engine tools, and the GUI-driving tools. Each assertion is
+three-sided: the old module no longer defines the name, the new module defines it exactly once,
+and no other module under any of the platform's source trees defines it either. Nested
+definitions count (a def tucked inside another function, a class body, or a conditional block is
+not invisible), and the old/new paths themselves are asserted to exist before anything is
+scanned, so a typo'd or renamed path reads as a failure rather than a vacuous pass.
 """
 
 import ast
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import tcip_annotation
 import tcip_mcp
+import tcip_web
 
 
 def _src_root() -> Path:
@@ -24,9 +26,18 @@ def _module_path(rel: str) -> Path:
 
 
 def _package_roots() -> tuple[Path, Path]:
-    """The two packages a moved training-layer/tools name could still be hiding in: the platform
-    package the reshape happened in, and the one engine package it imports from."""
+    """The two packages a moved training-layer/tools name could still be hiding in as a real
+    duplicate: the platform package the reshape happened in, and the one engine package it
+    imports from. Deliberately excludes the GUI package's route modules from the default
+    elsewhere-scan: a route handler commonly carries the same bare REST-ish name
+    (``get_run``, ``list_runs``) as an unrelated domain function without being a duplicate of
+    it, so that scan only widens per-check, via ``extra_roots``, for a name where a real inline
+    copy was found (``_logical_image_names``, below)."""
     return _src_root(), Path(tcip_annotation.__file__).resolve().parent
+
+
+def _tcip_web_root() -> Path:
+    return Path(tcip_web.__file__).resolve().parent
 
 
 def _def_name_counts(
@@ -56,6 +67,7 @@ def _def_name_counts(
 def _assert_one_home(
     names: set[str], old_path: Path, new_path: Path,
     node_types: tuple[type, ...] = (ast.FunctionDef, ast.AsyncFunctionDef),
+    extra_roots: tuple[Path, ...] = (),
 ) -> None:
     assert old_path.is_file(), f"{old_path} does not exist"
     assert new_path.is_file(), f"{new_path} does not exist"
@@ -71,7 +83,7 @@ def _assert_one_home(
     assert not duplicated, f"{new_path.name} defines {sorted(duplicated)} more than once"
 
     elsewhere: dict[str, set[str]] = {}
-    for root in _package_roots():
+    for root in (*_package_roots(), *extra_roots):
         for py_file in root.rglob("*.py"):
             if py_file in (old_path, new_path):
                 continue
@@ -234,12 +246,28 @@ def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
 
 def test_vision_side_proposal_tools_have_one_home():
     """``propose_annotations`` and ``stage_accepted_proposals`` (renamed from
-    ``accept_proposals``) moved out of ``vision_tools.py`` into ``tools/proposal_tools.py``,
-    beside the annotation-side pair below."""
+    ``accept_proposals``), plus the staging primitives beneath them
+    (``proposal_staging_key``, ``_staging_key_for``, ``_unresolvable_staging_source``,
+    ``_region_rect_from_cells``, ``_write_region_crop``, ``_offset_candidates``), moved out of
+    ``vision_tools.py`` into ``tools/proposal_tools.py``, beside the annotation-side pair below.
+    ``StagingAddress`` (checked separately below, it is a class) moved with them."""
     _assert_one_home(
-        {"propose_annotations", "stage_accepted_proposals"},
+        {"propose_annotations", "stage_accepted_proposals", "proposal_staging_key",
+         "_staging_key_for", "_unresolvable_staging_source", "_region_rect_from_cells",
+         "_write_region_crop", "_offset_candidates"},
         _module_path("tools/vision_tools.py"),
         _module_path("tools/proposal_tools.py"),
+    )
+
+
+def test_staging_address_class_has_one_home():
+    """``StagingAddress`` moved out of ``vision_tools.py`` into ``tools/proposal_tools.py``,
+    beside the staging functions it addresses (checked above)."""
+    _assert_one_home(
+        {"StagingAddress"},
+        _module_path("tools/vision_tools.py"),
+        _module_path("tools/proposal_tools.py"),
+        node_types=(ast.ClassDef,),
     )
 
 
@@ -256,12 +284,17 @@ def test_annotation_side_proposal_tools_have_one_home():
 def test_gui_driving_tools_have_one_home():
     """``push_panel_data``, ``focus`` and their private drivers ``_focus_annotate``/
     ``_focus_review`` moved out of ``annotation_tools.py`` into ``tools/gui_tools.py``, with the
-    helpers only they used (``_subject_task``, ``_logical_image_names``)."""
+    helpers only they used (``_subject_task``, ``_logical_image_names``). The elsewhere-scan
+    widens to ``tcip_web`` for this one check, not the default two packages: the GUI's own route
+    modules are where a by-name reader most plausibly re-derives image naming inline instead of
+    calling the shared one, the way ``routes/dataset.py`` once did before it was pointed at the
+    same primitive gui_tools calls."""
     _assert_one_home(
         {"push_panel_data", "focus", "_focus_annotate", "_focus_review",
          "_subject_task", "_logical_image_names"},
         _module_path("tools/annotation_tools.py"),
         _module_path("tools/gui_tools.py"),
+        extra_roots=(_tcip_web_root(),),
     )
 
 
@@ -318,3 +351,22 @@ def test_checkpoint_marker_keys_have_one_home():
                 for n in ast.walk(tree)
             )
             assert imported, f"{name} reads {const_name} without importing it from model_build"
+
+
+def test_accept_proposals_is_absent_from_package_source():
+    """The rename's structural half: the retired name ``accept_proposals`` is gone from every
+    package's shipped source, not just from the live MCP registry the manifest test checks (a
+    registry lookup only fires for an ``@mcp.tool()``-decorated name, so an undecorated
+    back-compat alias or shim under the old name would pass that check unnoticed). Text search,
+    not an AST identifier scan: a shim could just as easily be a string key or an alias
+    assignment as a def. ``tests/`` deliberately keeps the old spelling (the manifest's removed
+    set, this file's own history) and is out of scope by construction, since it sits outside
+    every package's own source tree.
+    """
+    import tcip_store
+
+    roots = (*_package_roots(), _tcip_web_root(), Path(tcip_store.__file__).resolve().parent)
+    for root in roots:
+        for py_file in root.rglob("*.py"):
+            text = py_file.read_text(encoding="utf-8")
+            assert "accept_proposals" not in text, f"{py_file} still names accept_proposals"

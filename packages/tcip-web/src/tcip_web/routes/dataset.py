@@ -37,7 +37,7 @@ from tcip_mcp.dataset_layout import (
     prediction_root,
     subjects_with_labels,
 )
-from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
+from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
 from tcip_web.label_annotations_cache import cached_label_annotations
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import DatasetSelection, store
@@ -52,15 +52,6 @@ def _guarded(path: str) -> Path:
     except ValueError as exc:
         raise HTTPException(403, str(exc)) from exc
 
-
-def _logical_image_names(date_dir: Path) -> list[str]:
-    """Every logical image's display name under ``date_dir``: a plain file's own name, or (for a
-    ``.bandgroup``-grouped capture) its manifest's filename. Folds sibling band files into one
-    grouped entry per capture so the GUI's gallery shows 16 composites, not 64 grayscale frames."""
-    return sorted(
-        src.manifest_path.name if isinstance(src, BandGroupRef) else src.name
-        for src in list_logical_images(date_dir).values()
-    )
 
 # Whether this server process has selected a dataset yet. Resuming the persisted image index
 # is helpful within a running session, but a fresh process opening a project should start at
@@ -220,7 +211,11 @@ async def select_dataset(req: SelectionRequest) -> dict:
     if req.date:
         date_dir = image_dir(root, req.date)
         if date_dir.is_dir():
-            image_list = _logical_image_names(date_dir)
+            # Sorted display names, band groups folded to one entry per capture, through the
+            # one naming primitive gui_tools' own by-name callers resolve the same capture under.
+            image_list = sorted(
+                logical_image_name(src) for src in list_logical_images(date_dir).values()
+            )
 
     # Canonical layout (see tcip_mcp.dataset_layout): the single source of truth shared with the
     # agent tools, so agent writes land where the GUI reads. The browser composes none of these.
