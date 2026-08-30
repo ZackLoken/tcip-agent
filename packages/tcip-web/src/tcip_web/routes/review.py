@@ -848,15 +848,10 @@ def get_generation_conf(pred_dir: str) -> GenerationConfResponse:
 
 
 # ── Active-learning priority queue for review ───────────────────────────────
-#
-# prioritize_review_queue's own ranking (packages/tcip-mcp .../tools/feedback_tools.py) never
-# reached the breeder-facing Review tab: the only path was the agent manually calling
-# focus(tab='review', ...) once per ranked image, which doesn't scale. This surfaces the same
-# tool (never a second implementation of its scoring/filtering) as a browsable queue: launch on a
-# background thread (checkpoint loading + a forward pass per candidate image can be slow), poll
-# for the result. Scoped to strategy="informativeness" only: the tool's other strategy,
-# confidence_triage, can auto-accept predictions as GT above a breeder-confirmed threshold; that
-# is a different, more consequential capability deliberately left agent-only for now.
+
+# prioritize_review_queue's own ranking (feedback_tools.py) never reached the breeder-facing Review tab, so this surfaces the same tool, never reimplemented, as a browsable queue on a background thread (a forward pass per image can be slow), polled for the result.
+
+# Its sibling tool, triage_predictions, can auto-accept predictions as GT above a breeder-confirmed threshold, a different and more consequential capability deliberately left agent-only for now.
 
 
 REVIEW_PRIORITY_REGISTRY = jobstore.REVIEW_PRIORITY_JOBS
@@ -969,7 +964,6 @@ def _pq_worker(job: PriorityQueueJob) -> None:
             checkpoint_path=job.checkpoint_path,
             images_dir=job.images_dir,
             dataset_root=job.dataset_root,
-            strategy="informativeness",
             method=job.method,
             budget=job.budget,
             project_path=job.platform_root,
