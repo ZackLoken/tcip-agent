@@ -445,12 +445,6 @@ class ReviewEngine:
                 statuses[name] = status
         return statuses
 
-    def image_status_across_buckets(self, img_name: str) -> str:
-        """``img_name``'s furthest review status across every bucket, for the caller that asks
-        about an image without naming a bucket. The single-image counterpart of
-        :meth:`get_all_image_statuses`, sharing its precedence rule by calling it."""
-        return self.get_all_image_statuses().get(img_name, "not_started")
-
     # ── Bounding-box helpers ──────────────────────────────────────────────
 
     @staticmethod
