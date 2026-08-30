@@ -125,7 +125,7 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     from tcip_store import read_log
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tests.tiny_trainer_fixtures import ConstantImageDataset
 

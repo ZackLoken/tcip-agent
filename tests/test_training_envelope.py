@@ -211,7 +211,8 @@ def test_envelope_records_resume_provenance_in_env_json(tmp_path, monkeypatch):
     from PIL import Image
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import train
+    from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run as gt_create_run
     from tcip_mcp.experiments import create_experiment, update_status
 

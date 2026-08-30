@@ -14,7 +14,8 @@ import pytest
 torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader
 
-from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+from tcip_mcp.pipelines.training.generic_trainer import train
+from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.run_registry import create_run
 from tests.tiny_trainer_fixtures import ConstantImageClassDataset, ConstantImageDataset
 

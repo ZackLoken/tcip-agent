@@ -1204,9 +1204,10 @@ def _run_hpo_trial(config: dict, report, base_config: dict, trial_dir: str) -> N
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
     from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.generic_trainer import (
-        _improves, resolve_selection_metric, task_collate, seeded_loader_kwargs,
+        _improves, resolve_selection_metric, seeded_loader_kwargs,
         stamp_effective_data_geometry,
     )
+    from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
@@ -1744,7 +1745,7 @@ def _one_real_batch(task: str, config: dict, n: int = 2):
     data_cfg = config.get("data") or {}
     try:
         from tcip_mcp.pipelines.data.datasets import build_dataset
-        from tcip_mcp.pipelines.training.generic_trainer import task_collate
+        from tcip_mcp.pipelines.training.collation import task_collate
 
         transforms = None
         if config.get("augmentation"):
@@ -2023,7 +2024,8 @@ def evaluate_model(
     import torch
     from torch.utils.data import DataLoader
 
-    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import checkpoint_key
+    from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.run_registry import get_run
     from tcip_mcp.pipelines.training.evaluation import (
         run_full_frame_evaluation, run_test_evaluation,

@@ -70,6 +70,16 @@ def test_run_registry_functions_have_one_home():
     )
 
 
+def test_collation_functions_have_one_home():
+    """``task_collate``, ``_detection_collate`` and ``_stack_collate`` moved out of
+    ``generic_trainer.py`` into ``pipelines/training/collation.py``."""
+    _assert_one_home(
+        {"task_collate", "_detection_collate", "_stack_collate"},
+        _module_path("pipelines/training/generic_trainer.py"),
+        _module_path("pipelines/training/collation.py"),
+    )
+
+
 def test_train_run_class_has_one_home():
     old_defs = {
         node.name for node in ast.parse(

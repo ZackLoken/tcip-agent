@@ -205,7 +205,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.collation import task_collate
 
     images_dir, labels_dir = _det_dataset(tmp_path)
     ds = build_dataset("detection", images_dir=str(images_dir), labels_dir=str(labels_dir),
