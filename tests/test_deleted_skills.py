@@ -19,7 +19,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 THIS_FILE = Path(__file__).resolve()
-DELETED_SKILL = ".github/skills/visual-analysis"
+# The bare slug, not the full directory path: every real reference before this merge (CLAUDE.md,
+# packages/tcip-web/README.md) named the skill this way, never spelling out ``.github/skills/...``.
+DELETED_SKILL = "visual-analysis"
 LIVE_SKILL_REFERENCE = ".github/skills/annotation"
 
 # Skipped even in the no-git fallback below, so it never inflates the walk.
