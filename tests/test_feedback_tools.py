@@ -198,6 +198,22 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     assert "error" in r  # early guard, no torch import needed
 
 
+def test_prioritize_review_queue_skips_what_the_dataset_s_own_store_holds(tmp_path):
+    """Coverage of the ranking door's own dataset_root/skip_reviewed/bucket forwarding through
+    _prepare_queue_sources: both reviewed images drop out before any scorer runs, the same
+    plumbing triage_predictions shares."""
+    dataset_root, images = _setup(tmp_path)
+    ckpt = tmp_path / "m.pt"
+    ckpt.write_bytes(b"stub")
+
+    r = prioritize_review_queue(
+        checkpoint_path=str(ckpt), images_dir=str(images), dataset_root=str(dataset_root),
+        skip_reviewed=True, bucket=BUCKET)
+    assert r["reviewed_skipped"] == 2
+    assert r["total_candidates"] == 0
+    assert r["queue"] == []
+
+
 def test_triage_predictions_skips_what_the_dataset_s_own_store_holds(tmp_path):
     """The dataset root is enough to find the verdicts: both reviewed images drop out of the queue.
 
@@ -283,6 +299,68 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     assert r["review_images"] == ["a.jpg"]
     assert r["unscoreable_images"] == ["a.jpg"]
     assert r["auto_accepted_images"] == []
+
+
+def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], **kwargs):
+    """triage_predictions against a real registered checkpoint with predict_batch stubbed to a
+    fixed set of confidence-bearing and unscoreable predictions, one call site both door-level
+    triage tests share."""
+    from types import SimpleNamespace
+
+    import tcip_mcp.pipelines.inference.predictor as predmod
+    from tcip_mcp.tools.feedback_tools import triage_predictions
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, project_root=tmp_path)
+    images = tmp_path / "images"
+    images.mkdir()
+    for pred in predictions:
+        (images / pred["image"]).write_bytes(b"x")
+    monkeypatch.setattr(
+        predmod, "build_predictor",
+        lambda *a, **k: SimpleNamespace(predict_batch=lambda sources: predictions))
+
+    return triage_predictions(
+        checkpoint_path=str(ckpt), images_dir=str(images), project_path=str(tmp_path), **kwargs)
+
+
+def test_triage_predictions_auto_threshold_none_refuses_with_zero_auto_accepts(tmp_path, monkeypatch):
+    """Coverage of the door's own auto-accept refusal (absent since the re-point moved this
+    door's tests onto the ranking door): no threshold means zero auto-accepts and the refusal
+    named, while the confident, mid-confidence and unscoreable predictions are still routed
+    honestly rather than silently dropped."""
+    predictions = [
+        {"image": "high.jpg", "scores": [0.9]},
+        {"image": "mid.jpg", "scores": [0.5]},
+        {"image": "unscoreable.jpg", "head0_values": [0.42]},
+    ]
+    r = _stubbed_triage_predictions(tmp_path, monkeypatch, predictions)
+    assert r["total_images"] == 3
+    assert r["auto_accepted"] == 0
+    assert r["auto_accepted_images"] == []
+    assert "auto_accept_refused" in r
+    assert r["needs_review"] == 2
+    assert r["review_images"] == ["mid.jpg", "unscoreable.jpg"]
+    assert r["unscoreable_images"] == ["unscoreable.jpg"]
+
+
+def test_triage_predictions_explicit_auto_threshold_stamps_breeder_confirmation(tmp_path, monkeypatch):
+    """Coverage of the door's own breeder-confirmation stamp (absent since the re-point): an
+    explicit auto_threshold accepts exactly the predictions that clear it and carries the
+    confirmation-required stamp, with the review/unscoreable routing unchanged by its presence."""
+    predictions = [
+        {"image": "high.jpg", "scores": [0.9]},
+        {"image": "mid.jpg", "scores": [0.5]},
+        {"image": "unscoreable.jpg", "head0_values": [0.42]},
+    ]
+    r = _stubbed_triage_predictions(tmp_path, monkeypatch, predictions, auto_threshold=0.85)
+    assert r["total_images"] == 3
+    assert r["auto_accepted"] == 1
+    assert r["auto_accepted_images"] == ["high.jpg"]
+    assert "auto_accept_requires_breeder_confirmation" in r
+    assert r["needs_review"] == 2
+    assert r["review_images"] == ["mid.jpg", "unscoreable.jpg"]
+    assert r["unscoreable_images"] == ["unscoreable.jpg"]
 
 
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
@@ -669,6 +747,18 @@ def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
     assert "low" not in params
     assert "high" not in params
     assert "auto_threshold" not in params
+
+
+def test_triage_predictions_signature_carries_the_triage_only_parameters():
+    """The door that gained the confidence-triage capability carries its own parameters."""
+    import inspect
+
+    from tcip_mcp.tools.feedback_tools import triage_predictions
+
+    params = inspect.signature(triage_predictions).parameters
+    assert "low" in params
+    assert "high" in params
+    assert "auto_threshold" in params
 
 
 def test_feedback_tools_register_in_manifest():
