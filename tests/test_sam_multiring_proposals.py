@@ -2,7 +2,7 @@
 
 ``state.Polygon`` is multi-ring because an occlusion-split object (a catkin behind a branch) is
 genuinely more than one region. The prediction-export path honored that; the human-in-the-loop
-bootstrapping path (SAM proposal -> ``accept_proposals``) had its own contour extractor that kept only
+bootstrapping path (SAM proposal -> ``stage_accepted_proposals``) had its own contour extractor that kept only
 the largest contour, so the same object was whole as a prediction and truncated as SAM-assisted GT,
 and that GT is what a dataset rasterizes and a model learns from. Both paths now call
 ``tcip_annotation.mask_contours.mask_to_polygon_rings``.
@@ -191,19 +191,19 @@ def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: 
     """The whole point: a two-lobe SAM proposal reaches disk as one annotation with both lobes.
 
     The SAM path used to drop every region but the largest while extracting the contour, before
-    ``accept_proposals`` ever saw the candidate, so the staged shape was silently a fragment of the
+    ``stage_accepted_proposals`` ever saw the candidate, so the staged shape was silently a fragment of the
     object a breeder then confirmed.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon, bbox_of
-    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations
 
     img = str(sam_project / "images" / "occluded.jpg")
     proposed = propose_annotations(image_path=img, engine_params={"model_type": "hiera_t"})
     assert "error" not in proposed, proposed
     assert proposed["candidate_count"] == 1
 
-    accepted = accept_proposals(image_path=img,
+    accepted = stage_accepted_proposals(image_path=img,
                                 assignments=[{"candidate_id": 0, "subject": "catkin"}])
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1

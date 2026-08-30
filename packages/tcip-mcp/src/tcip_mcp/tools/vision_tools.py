@@ -2,8 +2,8 @@
 
 Each tool saves a rendered image to .tcip/artifacts/viz/ and returns the path so the agent
 can call its client's own image-capable read tool on it to visually inspect it. The
-proposal-workflow tools (propose_annotations, accept_proposals, segment_prompt, stage_proposals)
-live in proposal_tools.py; this module keeps the renderers.
+proposal-workflow tools (propose_annotations, stage_accepted_proposals, segment_prompt,
+stage_proposals) live in proposal_tools.py; this module keeps the renderers.
 """
 
 from __future__ import annotations

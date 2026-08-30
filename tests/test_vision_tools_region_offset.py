@@ -2,7 +2,7 @@
 
 `propose_annotations(grid_cells=...)` hands the engine a crop and translates what comes back
 into the source image's own coordinates. Every consumer downstream reads that geometry as
-full-frame: the overlay the agent looks at, and the mask `accept_proposals` stages for a
+full-frame: the overlay the agent looks at, and the mask `stage_accepted_proposals` stages for a
 breeder to confirm. A bbox that is translated while its mask rings are not writes a polygon
 that sits where no object is, under a bbox that looks right.
 """
@@ -82,9 +82,9 @@ def _propose_over_the_region(image: Path) -> dict:
 
 def test_accept_refuses_an_image_no_run_staged_proposals_for(patched_frame: Path) -> None:
     """Nothing staged is a refusal naming the tool to run, never an empty acceptance."""
-    from tcip_mcp.tools.proposal_tools import accept_proposals
+    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
 
-    accepted = accept_proposals(image_path=str(patched_frame),
+    accepted = stage_accepted_proposals(image_path=str(patched_frame),
                                 assignments=[{"candidate_id": 0, "subject": "leaf"}])
     assert accepted["error"] == "No proposals found for region. Run propose_annotations first."
 
@@ -96,10 +96,10 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     saw. The region rect starts well inside the frame on both axes, so an untranslated ring
     lands somewhere else entirely."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.proposal_tools import accept_proposals
+    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals
 
     _propose_over_the_region(patched_frame)
-    accepted = accept_proposals(image_path=str(patched_frame),
+    accepted = stage_accepted_proposals(image_path=str(patched_frame),
                                 assignments=[{"candidate_id": 0, "subject": "leaf"}])
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1

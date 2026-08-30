@@ -9,8 +9,8 @@ description: "Annotation and review workflows for TCIP's native per-image JSON l
 
 The on-disk default for both GT and predictions is one per-image, COCO-shaped `.json`
 (`tcip_annotation.json_io`), carrying `created_by` / `created_at` / `accepted_by` /
-`accepted_at` provenance per object. `stage_proposals` and `accept_proposals` write this
-schema without reading any label document (`accept_proposals` reads back the proposal
+`accepted_at` provenance per object. `stage_proposals` and `stage_accepted_proposals` write this
+schema without reading any label document (`stage_accepted_proposals` reads back the proposal
 record `propose_annotations` staged in a prior run, not a label file); `export_predictions` reads it only
 when it calibrates a confidence operating point, through `run_inference`. A dataset-level
 COCO training set is assembled from these per-image files (`tcip_annotation.json_io`'s
@@ -118,16 +118,16 @@ Full workflow:
    this stages the run (`staged: true`) keyed by the dataset, capture date and stem, alongside the
    content identity of the pixels the engine ran on; on a path outside any dataset's `images/`
    tree the render and candidates still come back (`staged: false`, naming why), but there is
-   nothing for `accept_proposals` to read back later
+   nothing for `stage_accepted_proposals` to read back later
 2. Agent reads the overlay with its own image-capable read tool → identifies and classifies each candidate
-3. `accept_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → reads
+3. `stage_accepted_proposals(image_path, assignments=[{candidate_id: 0, subject: "leaf"}, ...])` → reads
    the proposals staged for that image's content, refusing if the image has changed since that
    run, then stages accepted candidates as predictions (`created_by=<engine>`) in the predictions
    tree for human review on the Review canvas, never writes GT directly, and through the
    verdict-guarded staging helper so a re-run never orphans recorded verdicts
 4. Agent reads the staged result with its own image-capable read tool → visual QA pass
 
-Visual QA is not optional: read what each tool actually leaves. `accept_proposals` stages
+Visual QA is not optional: read what each tool actually leaves. `stage_accepted_proposals` stages
 predictions and returns a box render (each accepted polygon's bounding box, not its mask outline)
 to read before moving to the next image, catching a wrong class or a badly placed box.
 `segment_prompt` writes nothing itself; its returned rings become annotations only once
@@ -157,7 +157,7 @@ Grid cell system:
 | Tool | Role | Phase |
 |------|------|-------|
 | `propose_annotations` | Propose candidate masks with a chosen engine, whole-frame or `grid_cells`-scoped | Discovery |
-| `accept_proposals` | Stage classified candidates as predictions | Classification |
+| `stage_accepted_proposals` | Stage classified candidates as predictions | Classification |
 | `overlay_reference_grid` | Spatial reference for corrections | Correction |
 | `segment_prompt(grid_cells=...)` | Targeted segmentation | Correction |
 | Agent's own image-capable read tool | Agent visual review | All phases |

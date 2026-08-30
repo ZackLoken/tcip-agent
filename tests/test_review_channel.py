@@ -313,7 +313,7 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 class _FakeMultiRingEngine:
     """An engine whose one object always splits into the same two disjoint pixel rings, for both
     the prompted-segment seam (``segment_prompt``) and the whole-image proposal seam
-    (``propose_annotations``/``accept_proposals``)."""
+    (``propose_annotations``/``stage_accepted_proposals``)."""
 
     _RINGS = [[(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
               [(100.0, 100.0), (140.0, 100.0), (120.0, 140.0)]]
@@ -353,7 +353,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
     """The admit case is the platform's own segmenter's actual return, not a hand-built shape."""
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.annotation_tools import read_annotations
-    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations, segment_prompt
+    from tcip_mcp.tools.proposal_tools import stage_accepted_proposals, propose_annotations, segment_prompt
 
     monkeypatch.setitem(proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine())
 
@@ -389,7 +389,7 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
     proposed = propose_annotations(accept_image_path, engine="fake_multi_ring")
     assert proposed["staged"] is True and proposed["candidate_count"] == 1
 
-    accepted = accept_proposals(accept_image_path, [{"candidate_id": 1, "subject": "leaf"}])
+    accepted = stage_accepted_proposals(accept_image_path, [{"candidate_id": 1, "subject": "leaf"}])
     assert "error" not in accepted
 
     read_back = read_annotations(accept_image_path)
