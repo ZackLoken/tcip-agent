@@ -2,8 +2,8 @@
 
 ``prioritize_review_queue`` builds a method→scorer mapping and enforces a composed-detector
 precondition; factoring both here keeps a future second logit-reading entry point from drifting.
-(Its ``confidence_triage`` strategy deliberately does not use these: it partitions by prediction
-confidence via ``predict_batch``, which is kind-agnostic and reads no logits.)
+(The sibling tool ``triage_predictions`` deliberately does not use these: it partitions by
+prediction confidence via ``predict_batch``, which is kind-agnostic and reads no logits.)
 """
 
 from __future__ import annotations

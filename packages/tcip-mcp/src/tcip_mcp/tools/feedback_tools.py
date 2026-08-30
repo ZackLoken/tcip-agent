@@ -2,10 +2,12 @@
 
 ``materialize_review_dataset`` turns human review verdicts into a curated detection training set
 (with experiment lineage); ``prioritize_review_queue`` ranks un-reviewed images by
-active-learning informativeness for the next review batch.
+active-learning informativeness for the next review batch; ``triage_predictions`` partitions a
+checkpoint's own predictions by confidence, optionally auto-accepting the most confident ones as
+ground truth.
 
-Both are scoped by the dataset root the review was recorded against, which is what derives the
-verdict store they read. A review whose verdicts live outside that dataset states its store
+All three are scoped by the dataset root the review was recorded against, which is what derives
+the verdict store they read. A review whose verdicts live outside that dataset states its store
 instead, and the store it read is reported rather than folded into the derived one.
 """
 
@@ -52,7 +54,7 @@ def _verdict_store_of(dataset_root: str, review_state_dir: str) -> Path:
 
 
 def _load_or_refuse(checkpoint_path: str, project_path: str):
-    """The verified checkpoint a review-queue strategy builds its predictor from, or the door's
+    """The verified checkpoint either review-queue door builds its predictor from, or the door's
     own refusal dict when the registry names no entry for it. Returns ``(checkpoint, refusal)``."""
     from tcip_mcp.model_registry import UnregisteredCheckpoint, load_registered_checkpoint
 
@@ -281,94 +283,34 @@ def materialize_review_dataset(
     return result
 
 
-@mcp.tool()
-@audited
-def prioritize_review_queue(
+def _prepare_queue_sources(
     checkpoint_path: str,
     images_dir: str,
-    dataset_root: str = "",
-    strategy: str = "informativeness",
-    method: str = "combined",
-    task: str = "detection",
-    budget: int = 50,
-    skip_reviewed: bool = True,
-    low: float = 0.3,
-    high: float = 0.8,
-    auto_threshold: float | None = None,
-    bucket: str | None = None,
-    review_state_dir: str = "",
-    project_path: str = "",
-) -> dict:
-    """Order un-reviewed images for the next review batch.
+    dataset_root: str,
+    review_state_dir: str,
+    skip_reviewed: bool,
+    bucket: str | None,
+):
+    """The checkpoint-file, images-dir and reviewed-skip plumbing both review-queue doors share,
+    in the order each refusal would otherwise be found: checkpoint existence, images directory,
+    logical image enumeration, then which of them the dataset's own review state already covers.
 
-    Two strategies:
-    - ``informativeness`` (default): rank by active-learning score (``method``), the most
-      uncertain/diverse frames first.
-    - ``confidence_triage``: partition by prediction confidence into auto-accept
-      (>= ``auto_threshold``) vs needs-review (in ``[low, high]``) queues.
-
-    When ``checkpoint_path`` names a registry entry produced by a run bound to a split manifest
-    (``manifest_binding`` on that run's ``split.json``), each ``informativeness`` ``queue`` entry
-    carries ``calibration_member: bool``, matched against the bound date's own
-    ``splits.calibration`` members only, never the whole manifest (which may span other dates the
-    run was never bound against): reviewing that image edits a label inside the bound run's own
-    calibration universe, which a later validation of that run would then read as moved.
-    Membership is decided by matching ``images_dir`` against the bound date's own recorded
-    ``images_root``, by filesystem identity, never by guessing a date from ``images_dir``'s path
-    shape: when they identify, a candidate is a member iff its stem is one of that date's
-    calibration members; when they do not, no candidate under ``images_dir`` can be a member of a
-    different root's date, and the response says so under ``marks_unresolved`` rather than mark
-    confident Falses. An unbound run (no registry producer, or a producer whose run was never
-    bound to a manifest) carries no mark on any entry and no reason: there is nothing to mark. A
-    bound run whose own split record, or whose named manifest, can no longer be read carries no
-    mark either, but the response states why under ``marks_unresolved``, never a guess.
-
-    Args:
-        checkpoint_path: Trained model checkpoint (drives scoring / predictions).
-        images_dir: Directory of candidate images.
-        dataset_root: Root of the dataset whose review is in progress. It scopes the verdict store
-            (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
-            ``review_state_dir`` stated, no store is read and every candidate image is ranked.
-        strategy: ``informativeness`` | ``confidence_triage``.
-        method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
-            built-in reference implementations, not the allowed set: register your own with
-            ``register_scorer``, or pass a dotted ``module:factory`` you wrote. An
-            unresolvable name is refused rather than silently scored as ``combined``.
-        task: Task type for the uncertainty scorer.
-        budget: Number of images to return (``informativeness`` only).
-        skip_reviewed: Exclude already-completed images from the queue.
-        low: Lower confidence bound for the review band (``confidence_triage`` only).
-        high: Upper confidence bound for the review band (``confidence_triage`` only).
-        auto_threshold: Confidence at/above which a prediction is auto-accepted as ground truth
-            (``confidence_triage`` only). ``None`` (default) refuses to auto-accept: turning
-            predictions into GT at a pinned 0.8 fabricates labels the model was never confirmed to
-            get right. Derive this threshold from the model's validated confidence
-            distribution and confirm with a breeder spot-check that high-conf actually equals truth,
-            then pass it explicitly: the result is stamped as requiring that confirmation.
-        bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
-            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
-            and refuses, naming them, when it holds several.
-        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
-            default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
-            are never merged and neither stands in for the other.
-        project_path: Project root the checkpoint's registry entry is looked up under. Empty
-            (default) resolves to the process's own root.
+    Returns ``(sources, reviewed_skipped, build_predictor, error)``; ``error`` is a ready
+    ``{"error": ...}`` dict and the other three are ``None``/``0``/``None`` when it is set.
+    ``build_predictor`` is handed back rather than imported again by the caller, since it is
+    also the point at which a torch-less environment is refused.
     """
     if not Path(checkpoint_path).is_file():
-        return {"error": f"Checkpoint not found: {checkpoint_path}"}
-    if strategy not in ("informativeness", "confidence_triage"):
-        return {"error": f"Unknown strategy {strategy!r}; use 'informativeness' or 'confidence_triage'"}
+        return None, 0, None, {"error": f"Checkpoint not found: {checkpoint_path}"}
     images_path = Path(images_dir)
     if not images_path.is_dir():
-        return {"error": f"Images dir not found: {images_dir}"}
+        return None, 0, None, {"error": f"Images dir not found: {images_dir}"}
     from tcip_mcp.pipelines.image_utils import BandGroupRef, list_logical_images
 
     logical = list_logical_images(images_path)
     if not logical:
-        return {"error": "No images found in images_dir"}
-    # Real sources (a plain path or a BandGroupRef), one per logical image: a band-grouped
-    # capture's sibling band files are folded into its one entry instead of each enumerating
-    # as its own (spurious) candidate.
+        return None, 0, None, {"error": "No images found in images_dir"}
+    # Real sources, one per logical image: a band-grouped capture's sibling bands fold into one entry.
     sources = [logical[stem] for stem in sorted(logical)]
 
     reviewed_skipped = 0
@@ -379,12 +321,10 @@ def prioritize_review_queue(
             engine = ReviewEngine(str(store_dir))
             resolved_bucket, refusal = _resolve_review_bucket(engine, bucket)
             if refusal is not None:
-                return {"error": refusal}
+                return None, 0, None, {"error": refusal}
             reviewed = reviewed_image_names({"image": engine.image_states(resolved_bucket)})
             before = len(sources)
-            # select_unreviewed compares basenames against review-state img_name, which for a
-            # band-grouped capture is the manifest's own filename (the identity every review-state
-            # reader/writer in this platform uses), not any one sibling band file's name.
+            # A band-grouped capture's review-state identity is its manifest filename, not a sibling band's.
             display = [str(s.manifest_path) if isinstance(s, BandGroupRef) else str(s) for s in sources]
             kept = set(select_unreviewed(display, reviewed))
             sources = [s for s, d in zip(sources, display) if d in kept]
@@ -393,63 +333,77 @@ def prioritize_review_queue(
     try:
         from tcip_mcp.pipelines.inference.predictor import build_predictor
     except (ImportError, OSError) as e:
-        return {"error": f"torch/torchvision unavailable: {e}"}
+        return None, 0, None, {"error": f"torch/torchvision unavailable: {e}"}
 
-    if strategy == "confidence_triage":
-        from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue, unscoreable
+    return sources, reviewed_skipped, build_predictor, None
 
-        if not sources:
-            return {"strategy": strategy, "total_images": 0, "reviewed_skipped": reviewed_skipped,
-                    "auto_accepted": 0, "needs_review": 0, "review_images": [],
-                    "unscoreable_images": [], "auto_accepted_images": []}
-        checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
-        if refusal is not None:
-            return refusal
-        predictor = build_predictor(checkpoint)
-        predictions = predictor.predict_batch(sources)
-        needs_review = review_queue(predictions, low=low, high=high)
-        # A prediction with no confidence-bearing signal at all (e.g. a regression head's point
-        # estimate) can't be partitioned by auto_accept/review_queue on confidence; route it into
-        # review explicitly rather than let it silently vanish from every output, and tag it
-        # distinctly from a genuinely medium-confidence review item so a caller can tell why it's
-        # here.
-        unscoreable_preds = unscoreable(predictions)
-        all_review = needs_review + unscoreable_preds
-        # Auto-accept turns predictions into GT. Refuse to do so at a pinned threshold: the
-        # threshold must be derived from the model's validated conf distribution and breeder
-        # spot-checked. With no explicit (confirmed) threshold, accept nothing and say why.
-        if auto_threshold is None:
-            return {
-                "strategy": strategy,
-                "total_images": len(predictions),
-                "reviewed_skipped": reviewed_skipped,
-                "auto_accepted": 0,
-                "auto_accept_refused": (
-                    "auto_threshold=None: auto-accepting predictions as GT requires a threshold "
-                    "derived from the model's validated confidence distribution and confirmed by a "
-                    "breeder spot-check; pass auto_threshold explicitly once confirmed."),
-                "needs_review": len(all_review),
-                "review_images": [r.get("image", "") for r in all_review],
-                "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
-                "auto_accepted_images": [],
-            }
-        accepted = auto_accept(predictions, threshold=auto_threshold)
-        return {
-            "strategy": strategy,
-            "total_images": len(predictions),
-            "reviewed_skipped": reviewed_skipped,
-            "auto_accepted": len(accepted),
-            "auto_accept_requires_breeder_confirmation": (
-                "auto-accepted labels are GT only if this threshold was breeder-confirmed on a "
-                "high-conf sample"),
-            "needs_review": len(all_review),
-            "review_images": [r.get("image", "") for r in all_review],
-            "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
-            "auto_accepted_images": [a.get("image", "") for a in accepted],
-        }
+
+@mcp.tool()
+@audited
+def prioritize_review_queue(
+    checkpoint_path: str,
+    images_dir: str,
+    dataset_root: str = "",
+    method: str = "combined",
+    task: str = "detection",
+    budget: int = 50,
+    skip_reviewed: bool = True,
+    bucket: str | None = None,
+    review_state_dir: str = "",
+    project_path: str = "",
+) -> dict:
+    """Rank un-reviewed images by active-learning informativeness for the next review batch.
+
+    Scores every candidate with ``method`` and returns the most uncertain/diverse frames first.
+    The sibling tool ``triage_predictions`` partitions predictions by confidence instead, and can
+    auto-accept the most confident ones as ground truth; that is a different, more consequential
+    capability kept as its own door.
+
+    When ``checkpoint_path`` names a registry entry produced by a run bound to a split manifest
+    (``manifest_binding`` on that run's ``split.json``), each ``queue`` entry carries
+    ``calibration_member: bool``, matched against the bound date's own ``splits.calibration``
+    members only, never the whole manifest (which may span other dates the run was never bound
+    against): reviewing that image edits a label inside the bound run's own calibration universe,
+    which a later validation of that run would then read as moved. Membership is decided by
+    matching ``images_dir`` against the bound date's own recorded ``images_root``, by filesystem
+    identity, never by guessing a date from ``images_dir``'s path shape: when they identify, a
+    candidate is a member iff its stem is one of that date's calibration members; when they do
+    not, no candidate under ``images_dir`` can be a member of a different root's date, and the
+    response says so under ``marks_unresolved`` rather than mark confident Falses. An unbound run
+    (no registry producer, or a producer whose run was never bound to a manifest) carries no mark
+    on any entry and no reason: there is nothing to mark. A bound run whose own split record, or
+    whose named manifest, can no longer be read carries no mark either, but the response states
+    why under ``marks_unresolved``, never a guess.
+
+    Args:
+        checkpoint_path: Trained model checkpoint (drives scoring).
+        images_dir: Directory of candidate images.
+        dataset_root: Root of the dataset whose review is in progress. It scopes the verdict store
+            (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
+            ``review_state_dir`` stated, no store is read and every candidate image is ranked.
+        method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
+            built-in reference implementations, not the allowed set: register your own with
+            ``register_scorer``, or pass a dotted ``module:factory`` you wrote. An
+            unresolvable name is refused rather than silently scored as ``combined``.
+        task: Task type for the uncertainty scorer.
+        budget: Number of images to return.
+        skip_reviewed: Exclude already-completed images from the queue.
+        bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
+            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
+            and refuses, naming them, when it holds several.
+        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
+            default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
+            are never merged and neither stands in for the other.
+        project_path: Project root the checkpoint's registry entry is looked up under. Empty
+            (default) resolves to the process's own root.
+    """
+    sources, reviewed_skipped, build_predictor, error = _prepare_queue_sources(
+        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
+    if error is not None:
+        return error
 
     if not sources:
-        return {"strategy": strategy, "method": method, "task": task, "total_candidates": 0,
+        return {"method": method, "task": task, "total_candidates": 0,
                 "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
 
     try:
@@ -469,9 +423,11 @@ def prioritize_review_queue(
     except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
         return {"error": str(e)}
 
+    from tcip_mcp.pipelines.image_utils import BandGroupRef
+
     scored = scorer.score(sources, predictor.model, predictor.device)[:budget]
     calibration_stems, marks_unresolved = _resolve_calibration_ids(
-        checkpoint, images_path, project_path=project_path or None)
+        checkpoint, Path(images_dir), project_path=project_path or None)
     marks: list[bool | None] = [None] * len(scored)
     if calibration_stems is not None:
         marks = _calibration_marks([p for p, _ in scored], calibration_stems)
@@ -483,7 +439,6 @@ def prioritize_review_queue(
             entry["calibration_member"] = mark
         queue.append(entry)
     result = {
-        "strategy": strategy,
         "method": method,
         "task": task,
         "total_candidates": len(sources),
@@ -494,3 +449,101 @@ def prioritize_review_queue(
     if marks_unresolved is not None:
         result["marks_unresolved"] = marks_unresolved
     return result
+
+
+@mcp.tool()
+@audited
+def triage_predictions(
+    checkpoint_path: str,
+    images_dir: str,
+    dataset_root: str = "",
+    skip_reviewed: bool = True,
+    low: float = 0.3,
+    high: float = 0.8,
+    auto_threshold: float | None = None,
+    bucket: str | None = None,
+    review_state_dir: str = "",
+    project_path: str = "",
+) -> dict:
+    """Partition a checkpoint's own predictions by confidence into auto-accept, needs-review and unscoreable queues.
+
+    Auto-accepts predictions at or above ``auto_threshold`` as ground truth, routes those between
+    ``low`` and ``high`` into the needs-review queue, and separates out predictions with no
+    confidence-bearing signal at all (e.g. a regression head's point estimate) into their own
+    ``unscoreable_images`` list rather than let them silently vanish from every output. The
+    sibling tool ``prioritize_review_queue`` ranks images by active-learning informativeness
+    instead, without ever turning a prediction into ground truth; this tool is the more
+    consequential capability and stays agent-only.
+
+    Args:
+        checkpoint_path: Trained model checkpoint (drives predictions).
+        images_dir: Directory of candidate images.
+        dataset_root: Root of the dataset whose review is in progress. It scopes the verdict store
+            (``<dataset_root>/.tcip/state``) that ``skip_reviewed`` reads. With neither this nor
+            ``review_state_dir`` stated, no store is read and every candidate image is triaged.
+        skip_reviewed: Exclude already-completed images before triaging.
+        low: Lower confidence bound for the needs-review band.
+        high: Upper confidence bound for the needs-review band.
+        auto_threshold: Confidence at/above which a prediction is auto-accepted as ground truth.
+            ``None`` (default) refuses to auto-accept: turning predictions into GT at a pinned 0.8
+            fabricates labels the model was never confirmed to get right. Derive this threshold
+            from the model's validated confidence distribution and confirm with a breeder
+            spot-check that high-conf actually equals truth, then pass it explicitly: the result
+            is stamped as requiring that confirmation.
+        bucket: Which prediction bucket's completed reviews ``skip_reviewed`` skips, as
+            ``prediction_buckets.bucket_key_of`` spells it. Omitted reads the store's sole bucket
+            and refuses, naming them, when it holds several.
+        review_state_dir: A verdict store to read instead of the dataset's own. Not stated (the
+            default) derives the store from ``dataset_root``; stated, it is read verbatim. The two
+            are never merged and neither stands in for the other.
+        project_path: Project root the checkpoint's registry entry is looked up under. Empty
+            (default) resolves to the process's own root.
+    """
+    sources, reviewed_skipped, build_predictor, error = _prepare_queue_sources(
+        checkpoint_path, images_dir, dataset_root, review_state_dir, skip_reviewed, bucket)
+    if error is not None:
+        return error
+
+    from tcip_mcp.pipelines.active_learning.selector import auto_accept, review_queue, unscoreable
+
+    if not sources:
+        return {"total_images": 0, "reviewed_skipped": reviewed_skipped,
+                "auto_accepted": 0, "needs_review": 0, "review_images": [],
+                "unscoreable_images": [], "auto_accepted_images": []}
+    checkpoint, refusal = _load_or_refuse(checkpoint_path, project_path)
+    if refusal is not None:
+        return refusal
+    predictor = build_predictor(checkpoint)
+    predictions = predictor.predict_batch(sources)
+    needs_review = review_queue(predictions, low=low, high=high)
+    # A prediction with no confidence signal at all (a regression head's point estimate) is tagged unscoreable, not dropped.
+    unscoreable_preds = unscoreable(predictions)
+    all_review = needs_review + unscoreable_preds
+    # Refuse to auto-accept at a pinned threshold: it must be derived from the validated conf distribution and breeder-confirmed.
+    if auto_threshold is None:
+        return {
+            "total_images": len(predictions),
+            "reviewed_skipped": reviewed_skipped,
+            "auto_accepted": 0,
+            "auto_accept_refused": (
+                "auto_threshold=None: auto-accepting predictions as GT requires a threshold "
+                "derived from the model's validated confidence distribution and confirmed by a "
+                "breeder spot-check; pass auto_threshold explicitly once confirmed."),
+            "needs_review": len(all_review),
+            "review_images": [r.get("image", "") for r in all_review],
+            "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
+            "auto_accepted_images": [],
+        }
+    accepted = auto_accept(predictions, threshold=auto_threshold)
+    return {
+        "total_images": len(predictions),
+        "reviewed_skipped": reviewed_skipped,
+        "auto_accepted": len(accepted),
+        "auto_accept_requires_breeder_confirmation": (
+            "auto-accepted labels are GT only if this threshold was breeder-confirmed on a "
+            "high-conf sample"),
+        "needs_review": len(all_review),
+        "review_images": [r.get("image", "") for r in all_review],
+        "unscoreable_images": [p.get("image", "") for p in unscoreable_preds],
+        "auto_accepted_images": [a.get("image", "") for a in accepted],
+    }
