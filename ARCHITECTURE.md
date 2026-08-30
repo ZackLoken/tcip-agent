@@ -375,9 +375,10 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | Module path | Ownership (one line) | In-repo imports | Imported by |
 |---|---|---|---|
 | scripts/_paths.py | Shared path resolution for the one-off analysis scripts: no machine-specific hardcoding. | 0 | 5 |
+| scripts/_script_root.py | Resolve-or-refuse `$TCIP_PROJECT_ROOT` pinning shared by the demoted-tool scripts. | 1 | 5 |
 | scripts/_store_bootstrap.py | Re-exports the store catalogue from tcip_mcp.store_catalogue, and which roots a project's records live in. | 3 | 2 |
 | scripts/adopt_store.py | Move a root's existing record and log files into a store database. | 1 | 0 |
-| scripts/archive_project.py | Export an annotation project as a portable ZIP archive, through the demoted `archive_project` function. | 1 | 0 |
+| scripts/archive_project.py | Export an annotation project as a portable ZIP archive, through the demoted `archive_project` function. | 2 | 0 |
 | scripts/calibrate_operating_point.py | Calibrate + held-out validate a detection operating point over a labeled split. | 7 | 0 |
 | scripts/check_architecture_citations.py | Verify ARCHITECTURE.md's file:line citations against the code they quote, for CI. | 0 | 0 |
 | scripts/check_architecture_doc.py | Verify ARCHITECTURE.md's module-ownership tables against the tree, for CI. | 0 | 0 |
@@ -444,7 +445,7 @@ Non-zero cross-package edge counts at HEAD:
 
 `packages/tcip-web/frontend/src` (`tcip-web-frontend`) has zero in-repo import edges to any Python module in any of the four Python roots: `build_module_inventory.py` resolves a TypeScript specifier only against a relative path or the `@/` alias into `packages/tcip-web/frontend/src` itself (`docs/audit/phase0/module-inventory/build_module_inventory.py:301-321`), so no specifier in the frontend source tree can resolve to a file outside that tree.
 
-## Modules with zero importers (121)
+## Modules with zero importers (128)
 
 A module counts as zero-importer when no other module in its own scanned tree resolves an in-repo import to it (`imported_by_count == 0` in the regenerated inventory). This includes package entry points (`__init__.py`, `__main__.py`), CLI scripts under `scripts/` invoked as processes rather than imported, and every TypeScript `*.test.ts`/`*.test.tsx` file, none of which are expected to have an in-repo importer.
 
@@ -536,6 +537,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | tcip-web-frontend | packages/tcip-web/frontend/src/tabs/trainingMetrics.test.ts |
 | tcip-web-frontend | packages/tcip-web/frontend/src/test/setup.ts |
 | scripts | scripts/adopt_store.py |
+| scripts | scripts/archive_project.py |
 | scripts | scripts/calibrate_operating_point.py |
 | scripts | scripts/check_architecture_citations.py |
 | scripts | scripts/check_architecture_doc.py |
@@ -557,12 +559,16 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/generate_frontend_routes.py |
 | scripts | scripts/generate_frontend_types.py |
 | scripts | scripts/generate_frozen_manifest.py |
+| scripts | scripts/import_project.py |
 | scripts | scripts/inspect_baseline_weights.py |
+| scripts | scripts/inspect_compute_resources.py |
 | scripts | scripts/inspect_gps_exif.py |
 | scripts | scripts/list_tools.py |
 | scripts | scripts/plant_aware_group_splits.py |
 | scripts | scripts/prove_test_fails_before.py |
 | scripts | scripts/render_candidates_tile.py |
+| scripts | scripts/render_failure_cases.py |
+| scripts | scripts/scan_dataset.py |
 | scripts | scripts/shp_to_plant_csv.py |
 | scripts | scripts/smoke_fence_e2e.py |
 | scripts | scripts/smoke_phenology_e2e.py |
@@ -577,8 +583,8 @@ A module counts as zero-importer when no other module in its own scanned tree re
 
 ## Public surface
 
-Every tool, route, symbol and line in this section is the one standing at HEAD
-f943c12d4693409bcf2a0c1a4229d26b61d34cc1.
+This section is maintained incrementally rather than regenerated wholesale, and held to the
+tree by `scripts/check_architecture_doc.py` and `scripts/check_architecture_citations.py`.
 
 ## 1. MCP tools
 
@@ -737,8 +743,6 @@ anything.
 | `accept_proposals` | `vision_tools.py:953` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
 | `capture_live_canvas` | `vision_tools.py:1083` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1213` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
-
-8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 5 + 1 + 7 + 1 + 5 = 54 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -953,7 +957,10 @@ above against HEAD.
 | GET | `/` | loaded by the browser's own navigation, not via fetch/XHR from app code |
 | POST | `/api/events/{panel}` | posted by MCP tools (`tcip_mcp.web_client`), not by the browser |
 | GET | `/api/state` | no caller found |
-| POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function; kept as the backend for the comparison view, which wires it |  <!-- queued: P5-111 keep-as-tool -->
+| POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function |  <!-- queued: P5-111 keep-as-tool -->
+
+`/api/training/compare` is kept regardless: it is the backend for the comparison view, which
+wires it directly rather than through `trainingApi`.
 
 ## 3. tcip-annotation importable public symbols
 
