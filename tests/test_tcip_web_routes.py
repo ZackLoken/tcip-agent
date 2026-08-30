@@ -226,16 +226,6 @@ def test_dataset_select_carries_a_label_problem_with_no_subject_named(
     assert str(ann / "IMG_0000.json") in body["label_problem"]
 
 
-def test_dataset_list_images(client: TestClient, dataset_root: Path) -> None:
-    resp = client.get(
-        "/api/dataset/images",
-        params={"dataset_root": str(dataset_root), "date": "2-11-26"},
-    )
-    body = resp.json()
-    assert body["count"] == 3
-    assert body["images"][0].startswith("IMG_")
-
-
 def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
@@ -254,6 +244,7 @@ def test_dataset_select_populates_state(client: TestClient, dataset_root: Path, 
     assert sel["subject"] == "catkin"
     assert sel["date"] == "2-11-26"
     assert len(sel["image_list"]) == 3
+    assert sel["image_list"][0].startswith("IMG_")
     # One label dir per date now (no subject/task segment).
     assert sel["annotations_dir"].replace("\\", "/").endswith("annotations/2-11-26")
 

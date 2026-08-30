@@ -13,7 +13,6 @@ export const ROUTES = {
   getCoverage: "/api/coverage",
   getCoverageCompleteness: "/api/coverage/completeness",
   getCoverageGrid: "/api/coverage/grid",
-  getDatasetImages: "/api/dataset/images",
   getDatasetTree: "/api/dataset/tree",
   getFsList: "/api/fs/list",
   getHealth: "/health",

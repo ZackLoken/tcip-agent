@@ -14,7 +14,6 @@ vi.mock("@/api/client", () => {
       dataset: {
         select: vi.fn(),
         tree: vi.fn(),
-        listImages: vi.fn(),
       },
     },
   };
