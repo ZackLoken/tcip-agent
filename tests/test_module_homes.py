@@ -380,7 +380,8 @@ def test_calibration_sweep_functions_have_one_home():
 
 def test_force_redraw_cal_holdout_split_has_one_home():
     """``force_redraw_cal_holdout_split`` moved out of ``tools/inference_tools.py`` into
-    ``tools/calibration_tools.py``, decorators intact, name unchanged."""
+    ``tools/calibration_tools.py``, name unchanged. Decorators are not this test's concern:
+    ``_assert_one_home`` reads def names only, never a decorator list."""
     _assert_one_home(
         {"force_redraw_cal_holdout_split"},
         _module_path("tools/inference_tools.py"),
@@ -390,8 +391,9 @@ def test_force_redraw_cal_holdout_split_has_one_home():
 
 def test_ordinal_regression_calibration_functions_have_one_home():
     """``calibrate_ordinal_regression_operating_point`` moved out of
-    ``tools/phenology_tools.py`` into ``tools/calibration_tools.py``, decorator intact, name
-    unchanged; ``_scalar_predictions`` (its sole helper, no other consumer) travels with it."""
+    ``tools/phenology_tools.py`` into ``tools/calibration_tools.py``, name unchanged;
+    ``_scalar_predictions`` (its sole helper, no other consumer) travels with it. Decorators
+    are not this test's concern (see ``_assert_one_home``)."""
     _assert_one_home(
         {"calibrate_ordinal_regression_operating_point", "_scalar_predictions"},
         _module_path("tools/phenology_tools.py"),
@@ -413,7 +415,8 @@ def test_ordinal_regression_tasks_constant_has_one_home():
 
 def test_update_trait_spec_fields_has_one_home():
     """``update_trait_spec_fields`` moved out of ``tools/phenology_tools.py`` into
-    ``tools/trait_spec_authoring_tools.py``, beside ``author_trait_spec``, decorator intact."""
+    ``tools/trait_spec_authoring_tools.py``, beside ``author_trait_spec``. Decorators are not
+    this test's concern (see ``_assert_one_home``)."""
     _assert_one_home(
         {"update_trait_spec_fields"},
         _module_path("tools/phenology_tools.py"),

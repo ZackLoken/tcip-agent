@@ -515,7 +515,7 @@ def test_empty_constituting_field_refuses_before_class_id(tmp_path: Path):
     assert not out_csv.exists()
 
 
-def test_all_three_web_doors_refuse_identically(client: TestClient, tmp_path: Path):
+def test_both_web_doors_refuse_identically(client: TestClient, tmp_path: Path):
     """One precondition, one refusal body: a curve the breeder sees is never one Download refuses."""
     body = _delivery(tmp_path, validated=True)
     _withdraw(tmp_path, "catkin")

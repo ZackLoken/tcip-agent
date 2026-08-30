@@ -73,7 +73,9 @@ this module's own ``_workers`` guard) already reach into it directly."""
 
 _lock = _registry.lock
 _workers: dict[str, threading.Thread] = {}
-"""Every sweep worker this process has spawned and not yet seen finish, by sweep id."""
+"""Every sweep worker this process has spawned and not yet seen finish, by sweep id. Guarded
+by ``_lock``, the same lock ``_registry`` takes for its own dict; the two are unrelated state
+sharing one mutex, predating the registry adoption, not a stated invariant between them."""
 
 
 def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:

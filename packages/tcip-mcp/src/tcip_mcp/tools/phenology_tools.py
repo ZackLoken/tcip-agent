@@ -364,6 +364,11 @@ def _stated_root_disagreement(dataset_root: str, candidates: dict[str, str]) -> 
 
     Only a positive disagreement refuses: a directory the dataset layout cannot place answers
     nothing, and a bespoke calibration over loose directories with a stated root is legitimate work.
+
+    Two other modules (``scale_tools.py``, ``calibration_tools.py``) import this beside its own
+    caller here, the same cross-module-consumer shape that moved ``calibrate_operating_point``/
+    ``sweep_summary`` out of their donor module; it stays here deliberately, since it is this
+    module's own refusal wording, not a shared primitive those callers each restate.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 

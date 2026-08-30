@@ -116,7 +116,7 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   `write_phenology_curve_csv` (`phenology.py`), the one writer both doors share: it runs the gate
   itself, composes every provenance cell and records the delivery event, so a CSV from either door
   carries the same schema and the same composition. The MCP door alone can carry a caller-stated
-  `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py:745`, `:882-886`),
+  `operating_point_conf` and a caller-asserted validity floor (`phenology_tools.py:543`, `:545`),
   fields the web door has none for. The producer tail (`producer_model_sha256`,
   `producing_experiment_id`, `validation_record`) is filled from the verified bindings, so a
   bucket whose claim no record answers for delivers those cells blank rather than repeating the

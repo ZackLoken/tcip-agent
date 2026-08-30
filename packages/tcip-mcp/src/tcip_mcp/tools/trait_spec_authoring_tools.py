@@ -6,7 +6,9 @@ account of why, in the breeder's terms; the breeder confirms it from the web GUI
 no MCP tool can reach. A single tool doing both authoring and confirmation would put the
 confirmation inside the agent's own tool surface and make honest attribution depend on the agent
 choosing not to fill a field. ``update_trait_spec_fields`` is the other door: it edits fields on a
-spec already on record, never creates one, so the two doors never overlap.
+spec already on record, never creates one. Authoring creates, field-editing merges, and the one
+documented restatement path (a spec on record whose statement never landed) is where the two
+doors overlap: both then write onto an already-registered spec.
 """
 
 from __future__ import annotations

@@ -18,6 +18,7 @@ packages/tcip-web/
       annotate.py       # label CRUD, Annotate-tab commands
       canvas.py         # live canvas capture for the agent's own image-capable read tool
       classes.py        # subject/class CRUD
+      coverage.py       # view-coverage: reference grid + served/swept per-cell record
       dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers
       images.py         # EXIF-oriented JPEG serving (+ downsample)
@@ -25,11 +26,12 @@ packages/tcip-web/
       meta.py           # crop/project metadata
       projects.py       # project open/create/list
       results.py        # plant mapping + per-plant curves + onset dates + CSV
-      review.py         # compute_matches, action, backup, validate_reference
+      review.py         # compute_matches, action, backup, priority queue
       sessions.py       # GUI session state
       terminal.py       # in-app agent terminal endpoints
       training.py       # validate / launch / list / metrics / WS stream
       tuning.py         # HPO launch + sweep listing
+      validation.py     # validate_reference: a review's verdicts into COCO evaluation records
   frontend/             # Vite + React + TS + Tailwind + Zustand + Konva
   static/               # vite build output (served at /)
 ```
