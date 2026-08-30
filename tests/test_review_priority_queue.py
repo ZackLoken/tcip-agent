@@ -73,7 +73,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     def fake_prioritize_review_queue(**kwargs):
         calls.append(kwargs)
         return {
-            "strategy": "informativeness", "method": "combined", "task": "detection",
+            "method": "combined", "task": "detection",
             "total_candidates": 3, "reviewed_skipped": 1, "selected_count": 2,
             "queue": [{"image": "b.jpg", "score": 0.9}, {"image": "a.jpg", "score": 0.4}],
         }
