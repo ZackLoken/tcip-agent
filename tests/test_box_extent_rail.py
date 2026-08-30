@@ -378,7 +378,7 @@ def test_write_predictions_json_still_writes_an_ordinary_stem(tmp_path):
 
 
 def test_stage_proposals_drops_a_degenerate_box_and_reports_the_count(tmp_path):
-    from tcip_mcp.tools.annotation_tools import stage_proposals
+    from tcip_mcp.tools.proposal_tools import stage_proposals
 
     images_dir = tmp_path / "images" / "2026-01-01"
     _write_image(images_dir / "img_001.jpg")

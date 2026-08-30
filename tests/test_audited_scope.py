@@ -89,7 +89,7 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     """A proposal run is scoped like its sibling ``accept_proposals``: to the dataset the image
     belongs to, not the platform log, driven through a dotted ``module:factory`` engine so the
     test needs no torch."""
-    from tcip_mcp.tools.vision_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import propose_annotations
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
     result = propose_annotations(image_path=str(image), engine="tests.proposal_stub:factory")
@@ -106,7 +106,7 @@ def test_propose_annotations_against_a_file_under_no_images_directory_stays_plat
 ) -> None:
     """A location that resolves to no dataset is never guessed into one, for propose_annotations
     just as for its sibling: the call still succeeds and stays a platform event."""
-    from tcip_mcp.tools.vision_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import propose_annotations
 
     loose = tmp_path / "loose"
     loose.mkdir()

@@ -133,7 +133,7 @@ def test_region_crop_carries_no_exif_orientation_tag(
     orientation tag of its own: it is taken from the already-oriented frame, and a second
     (wrong) rotation inside ``auto_mask`` would silently displace every coordinate."""
     from tcip_mcp.pipelines.raster_source import PhotographicSource
-    from tcip_mcp.tools.vision_tools import _region_rect_from_cells, _write_region_crop
+    from tcip_mcp.tools.proposal_tools import _region_rect_from_cells, _write_region_crop
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     with PhotographicSource(str(exif_rotated_source), 3) as src:
@@ -161,7 +161,7 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
     or a wrongly-re-rotated one.
     """
     _install_fake_sam(monkeypatch, tmp_path)
-    from tcip_mcp.tools.vision_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import propose_annotations
 
     result = propose_annotations(
         image_path=str(exif_rotated_source),
@@ -190,7 +190,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
 ) -> None:
     """The temp crop must be deleted even when the engine raises, not only on the success path."""
     from tcip_mcp.pipelines import proposal
-    from tcip_mcp.tools.vision_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import propose_annotations
 
     class BoomProposer:
         def propose(self, image_path, **params):
@@ -222,13 +222,13 @@ class TestRegionCellNamesResolveThroughTheOneLookup:
     naming a region and naming a prompt cannot disagree about which cell a name is."""
 
     def test_named_cells_bound_their_combined_rect(self) -> None:
-        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+        from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
 
         rect = _region_rect_from_cells(_region_cells(), ["B1", "C1"])
         assert (rect.x0, rect.y0, rect.x1, rect.y1) == (60, 0, 180, 60)
 
     def test_names_are_case_insensitive_and_whitespace_stripped(self) -> None:
-        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+        from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
 
         cells = _region_cells()
         assert _region_rect_from_cells(cells, [" b1 ", "c1"]) == \
@@ -236,7 +236,7 @@ class TestRegionCellNamesResolveThroughTheOneLookup:
 
     def test_cell_dicts_are_accepted(self) -> None:
         """The plain dicts a JSON route serves are a cell list too, not only cell objects."""
-        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+        from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
 
         cells = [{"name": c.name, "x0": c.x0, "y0": c.y0, "x1": c.x1, "y1": c.y1}
                  for c in _region_cells()]
@@ -244,13 +244,13 @@ class TestRegionCellNamesResolveThroughTheOneLookup:
         assert (rect.x0, rect.y0, rect.x1, rect.y1) == (60, 0, 180, 60)
 
     def test_a_reference_that_is_not_a_cell_name_is_refused(self) -> None:
-        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+        from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
 
         with pytest.raises(ValueError, match="Invalid cell reference"):
             _region_rect_from_cells(_region_cells(), ["3B"])
 
     def test_a_name_outside_the_grid_names_the_valid_range(self) -> None:
-        from tcip_mcp.tools.vision_tools import _region_rect_from_cells
+        from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
 
         with pytest.raises(ValueError, match="Use A1 through D2"):
             _region_rect_from_cells(_region_cells(), ["Z9"])
@@ -282,7 +282,7 @@ class TestRegionFrameIsTheResolvedImageSources:
         region's cells and its crop both come from the stacked frame, never from the manifest file
         read as if it were a photograph."""
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.vision_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import propose_annotations
 
         images_dir = tmp_path / "images"
         images_dir.mkdir()
@@ -321,7 +321,7 @@ class TestRegionFrameIsTheResolvedImageSources:
 
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-        from tcip_mcp.tools.vision_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import propose_annotations
 
         images_dir = tmp_path / "images"
         images_dir.mkdir()
@@ -351,7 +351,7 @@ class TestWholeFrameDefaultIsUnaffected:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools import vision_tools
+        from tcip_mcp.tools import proposal_tools
 
         called = []
 
@@ -359,7 +359,7 @@ class TestWholeFrameDefaultIsUnaffected:
             called.append((candidates, origin))
             return candidates
 
-        monkeypatch.setattr(vision_tools, "_offset_candidates", recording_offset_candidates)
+        monkeypatch.setattr(proposal_tools, "_offset_candidates", recording_offset_candidates)
 
         class OneBoxProposer:
             def propose(self, image_path, **params):
@@ -374,7 +374,7 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = tmp_path / "whole_frame.jpg"
         Image.new("RGB", (64, 64), color=(50, 50, 50)).save(img_path)
 
-        result = vision_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(image_path=str(img_path))
         assert "error" not in result, result
         assert called == []
         assert result["candidates"][0]["bbox"] == [10.0, 10.0, 30.0, 30.0]
@@ -384,7 +384,7 @@ class TestWholeFrameDefaultIsUnaffected:
     ) -> None:
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools import vision_tools
+        from tcip_mcp.tools import proposal_tools
 
         class OneBoxProposer:
             def propose(self, image_path, **params):
@@ -400,10 +400,10 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "no_region.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = vision_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(image_path=str(img_path))
         assert "error" not in result, result
 
-        envelope = ts.read(vision_tools._staging_key_for(str(img_path)).key)
+        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
         assert set(envelope) == {"engine", "candidates", "image_identity", "image_path"}
 
     def test_a_candidate_the_store_cannot_hold_is_reported_rather_than_staged(
@@ -418,7 +418,7 @@ class TestWholeFrameDefaultIsUnaffected:
         import numpy as np
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools import vision_tools
+        from tcip_mcp.tools import proposal_tools
 
         class ArrayBoxProposer:
             def propose(self, image_path, **params):
@@ -434,10 +434,10 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "unstorable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = vision_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(image_path=str(img_path))
 
         assert "candidates[0].bbox" in result["error"]
-        assert ts.read(vision_tools._staging_key_for(str(img_path)).key, default=None) is None
+        assert ts.read(proposal_tools._staging_key_for(str(img_path)).key, default=None) is None
 
     def test_an_ordinary_candidate_is_still_staged(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -445,7 +445,7 @@ class TestWholeFrameDefaultIsUnaffected:
         """The refusal above must not cost a working engine its staged proposals."""
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools import vision_tools
+        from tcip_mcp.tools import proposal_tools
 
         class OneBoxProposer:
             def propose(self, image_path, **params):
@@ -462,8 +462,8 @@ class TestWholeFrameDefaultIsUnaffected:
         img_path = images_dir / "storable.jpg"
         Image.new("RGB", (32, 32), color=(10, 10, 10)).save(img_path)
 
-        result = vision_tools.propose_annotations(image_path=str(img_path))
+        result = proposal_tools.propose_annotations(image_path=str(img_path))
 
         assert "error" not in result, result
-        envelope = ts.read(vision_tools._staging_key_for(str(img_path)).key)
+        envelope = ts.read(proposal_tools._staging_key_for(str(img_path)).key)
         assert envelope["candidates"][0]["bbox"] == [1.0, 1.0, 2.0, 2.0]

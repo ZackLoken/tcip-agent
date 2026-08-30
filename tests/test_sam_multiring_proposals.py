@@ -196,7 +196,7 @@ def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: 
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Polygon, bbox_of
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     img = str(sam_project / "images" / "occluded.jpg")
     proposed = propose_annotations(image_path=img, engine_params={"model_type": "hiera_t"})
@@ -223,7 +223,7 @@ def test_split_sam_proposal_is_accepted_as_a_multi_ring_annotation(sam_project: 
 
 def test_segment_prompt_returns_every_ring_of_a_split_mask(sam_project: Path) -> None:
     """The prompted path (a breeder clicking the object) reports both regions too."""
-    from tcip_mcp.tools.annotation_tools import segment_prompt
+    from tcip_mcp.tools.proposal_tools import segment_prompt
 
     result = segment_prompt(
         image_path=str(sam_project / "images" / "occluded.jpg"),

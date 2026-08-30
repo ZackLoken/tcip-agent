@@ -71,7 +71,7 @@ def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _propose_over_the_region(image: Path) -> dict:
-    from tcip_mcp.tools.vision_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import propose_annotations
 
     result = propose_annotations(image_path=str(image), engine="patch",
                                  grid_cells=REGION_CELLS, tile_size=TILE_SIZE)
@@ -82,7 +82,7 @@ def _propose_over_the_region(image: Path) -> dict:
 
 def test_accept_refuses_an_image_no_run_staged_proposals_for(patched_frame: Path) -> None:
     """Nothing staged is a refusal naming the tool to run, never an empty acceptance."""
-    from tcip_mcp.tools.vision_tools import accept_proposals
+    from tcip_mcp.tools.proposal_tools import accept_proposals
 
     accepted = accept_proposals(image_path=str(patched_frame),
                                 assignments=[{"candidate_id": 0, "subject": "leaf"}])
@@ -96,7 +96,7 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     saw. The region rect starts well inside the frame on both axes, so an untranslated ring
     lands somewhere else entirely."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.vision_tools import accept_proposals
+    from tcip_mcp.tools.proposal_tools import accept_proposals
 
     _propose_over_the_region(patched_frame)
     accepted = accept_proposals(image_path=str(patched_frame),
@@ -119,7 +119,7 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     """The bbox the tool reports and the rings it caches are two views of one candidate: both
     are read as full-frame, so they must not be translated by different origins."""
     import tcip_store as ts
-    from tcip_mcp.tools.vision_tools import _staging_key_for
+    from tcip_mcp.tools.proposal_tools import _staging_key_for
 
     result = _propose_over_the_region(patched_frame)
     reported = result["candidates"][0]["bbox"]

@@ -54,7 +54,7 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     """Two images sharing a stem in different capture-date buckets have their own record: the
     second run's candidates must never answer for the first."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     first = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
     second = tmp_path / "images" / "2026-02-01" / "leaf.jpg"
@@ -87,7 +87,7 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
 ) -> None:
     """A rewrite under the same name after propose_annotations ran means the staged candidates no
     longer describe what accept_proposals would be confirming."""
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "changed.jpg"
     _make_image(img_path, fill=(50, 50, 50))
@@ -110,7 +110,7 @@ def test_the_envelope_carries_image_identity_and_path_at_the_dataset_rooted_loca
     """The record sits at a key naming the dataset root, capture date and stem, and its envelope
     names the pixels it was staged from."""
     import tcip_store as ts
-    from tcip_mcp.tools.vision_tools import PROPOSAL_STAGING_STORE, propose_annotations
+    from tcip_mcp.tools.proposal_tools import PROPOSAL_STAGING_STORE, propose_annotations
 
     img_path = tmp_path / "images" / "2026-04-01" / "sample.jpg"
     _make_image(img_path)
@@ -133,7 +133,7 @@ def test_propose_outside_a_dataset_tree_runs_the_engine_and_stages_nothing(
 ) -> None:
     """A path with no dataset address to stage under still gets a real proposal run and a real
     render; it just can never be accepted, which was already true before it could be staged."""
-    from tcip_mcp.tools.vision_tools import propose_annotations
+    from tcip_mcp.tools.proposal_tools import propose_annotations
 
     img_path = tmp_path / "loose.jpg"
     _make_image(img_path)
@@ -153,7 +153,7 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
 ) -> None:
     """The flat and the date-nested layout both propose, stage, and accept the same way."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     images_dir = tmp_path / "images" / "2026-06-01" if dated else tmp_path / "images"
     img_path = images_dir / "sample.jpg"
@@ -183,7 +183,7 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     import tifffile
     from tcip_annotation import json_io
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -216,7 +216,7 @@ def test_propose_on_a_band_groups_member_path_stages_nothing_and_names_the_manif
     import tifffile
     import tcip_store as ts
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
-    from tcip_mcp.tools.vision_tools import _staging_key_for, propose_annotations
+    from tcip_mcp.tools.proposal_tools import _staging_key_for, propose_annotations
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()
@@ -244,7 +244,7 @@ def test_a_second_accept_of_the_same_staged_run_succeeds(
 ) -> None:
     """Accepting a second subset of one run's proposals is a legitimate second call, since the
     record stays in place after accept."""
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "twice.jpg"
     _make_image(img_path)
@@ -267,7 +267,7 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
 ) -> None:
     """last_writer_wins: a re-run overwrites the previous record rather than merging into it."""
     from tcip_annotation import json_io
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "rerun.jpg"
     _make_image(img_path)
@@ -294,7 +294,7 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
 ) -> None:
     """A run that proposes zero candidates must not leave a prior run's record readable: a later
     accept would otherwise stage that stale run's candidates as if this run had proposed them."""
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "goes_empty.jpg"
     _make_image(img_path)
@@ -322,7 +322,7 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     reach the caller the same way a mismatched or missing record does: a returned ``error``, not
     an uncaught exception out of the tool."""
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     img_path = tmp_path / "images" / "unsampleable.jpg"
     _make_image(img_path)
@@ -347,7 +347,7 @@ def test_accept_proposals_refuses_a_reserved_stem_with_an_error_dict(
 ) -> None:
     """Accepting proposals for an image whose stem is a bucket stamp name answers the staging
     writer's refusal as an error dict, never a raise through the audited door."""
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
     image = tmp_path / "images" / "2026-01-01" / "operating_point.jpg"
     _make_image(image)

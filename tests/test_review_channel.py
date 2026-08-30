@@ -16,7 +16,8 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import image_dir, prediction_dir
-from tcip_mcp.tools.annotation_tools import focus, stage_proposals
+from tcip_mcp.tools.annotation_tools import focus
+from tcip_mcp.tools.proposal_tools import stage_proposals
 
 
 @pytest.fixture(autouse=True)
@@ -351,8 +352,8 @@ def test_stage_proposals_admits_segment_prompts_own_mapping_vertex_rings(
 ) -> None:
     """The admit case is the platform's own segmenter's actual return, not a hand-built shape."""
     from tcip_mcp.pipelines import proposal
-    from tcip_mcp.tools.annotation_tools import read_annotations, segment_prompt
-    from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+    from tcip_mcp.tools.annotation_tools import read_annotations
+    from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations, segment_prompt
 
     monkeypatch.setitem(proposal._ENGINES, "fake_multi_ring", _FakeMultiRingEngine())
 

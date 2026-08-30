@@ -843,13 +843,13 @@ class TestProposeAnnotationsTool:
     """Test propose_annotations tool (mocked engine)."""
 
     def test_missing_image(self):
-        from tcip_mcp.tools.vision_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import propose_annotations
 
         result = propose_annotations(image_path="/nonexistent.jpg")
         assert "error" in result
 
     def test_unknown_engine(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import propose_annotations
 
         result = propose_annotations(
             image_path=str(viz_dataset / "images" / "img_001.jpg"),
@@ -861,7 +861,7 @@ class TestProposeAnnotationsTool:
 
 class TestAcceptProposalsTool:
     def test_no_prior_proposals(self, viz_dataset: Path):
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         result = accept_proposals(
             image_path=str(viz_dataset / "images" / "img_003.jpg"),
@@ -872,7 +872,7 @@ class TestAcceptProposalsTool:
 
     def test_with_cached_proposals(self, viz_dataset: Path, monkeypatch: pytest.MonkeyPatch):
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+        from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
         # The candidates propose_annotations stages, in the neutral engine schema.
         candidates = [
@@ -1044,7 +1044,7 @@ class TestSamPredictFromGrid:
         return tmp_path
 
     def test_grid_cell_produces_polygon(self, real_dataset: Path):
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(real_dataset / "images" / "grid_test.jpg")
         result = segment_prompt(
@@ -1075,7 +1075,7 @@ class TestFullSamPipeline:
         return tmp_path
 
     def test_auto_label_then_accept(self, sam_dataset: Path):
-        from tcip_mcp.tools.vision_tools import accept_proposals, propose_annotations
+        from tcip_mcp.tools.proposal_tools import accept_proposals, propose_annotations
 
         img_path = str(sam_dataset / "images" / "e2e.jpg")
 
@@ -1198,7 +1198,7 @@ class TestFullPipelineIntegration:
         """Stage ``candidates`` through the real writer: a stub engine that hands them back
         verbatim, driven by an actual ``propose_annotations`` call."""
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.vision_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import propose_annotations
 
         class StubProposer:
             def propose(self, image_path: str, **params: object) -> list[dict]:
@@ -1213,7 +1213,7 @@ class TestFullPipelineIntegration:
     ):
         """SAM proposals are staged as predictions: pixel geometry, subject names, and score preserved."""
         from tcip_annotation import bbox_of, json_io
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
@@ -1247,7 +1247,7 @@ class TestFullPipelineIntegration:
     ):
         """SAM proposals are staged as prediction polygons: pixel vertices, subject, score."""
         from tcip_annotation import json_io
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
@@ -1278,7 +1278,7 @@ class TestFullPipelineIntegration:
     ):
         """Box and mask views of the staged predictions cover the same objects (one unified file)."""
         from tcip_annotation import bbox_of, json_io
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
@@ -1304,7 +1304,7 @@ class TestFullPipelineIntegration:
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         """Only accepted candidates appear in output; rejected are omitted."""
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
@@ -1320,7 +1320,7 @@ class TestFullPipelineIntegration:
         self, pipeline_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         """Assignments with non-existent candidate_id are ignored."""
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         self._propose(monkeypatch, img_path, MOCK_CANDIDATES)
@@ -1339,7 +1339,7 @@ class TestFullPipelineIntegration:
     ):
         """Full render â†’ accept â†’ verify pipeline (sans SAM)."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(pipeline_dataset / "images" / "sample.jpg")
         pixels, native = _display(img_path)
@@ -1377,7 +1377,7 @@ class TestGridCellToSamPrompt:
 
     def test_grid_cells_converted_to_points(self, viz_dataset: Path):
         """Grid cells should convert to points before hitting SAM."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
 
@@ -1409,7 +1409,7 @@ class TestGridCellToSamPrompt:
 
     def test_single_grid_cell_uses_single_point(self, viz_dataset: Path):
         """Single grid cell should use predict_from_point (not predict_from_points)."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
 
@@ -1438,7 +1438,7 @@ class TestGridCellToSamPrompt:
 
     def test_invalid_grid_cell_returns_error(self, viz_dataset: Path):
         """Invalid grid cell like 'Z9' should return error, not crash."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
         result = segment_prompt(image_path=img_path, grid_cells=["Z9"], tile_size=80)
@@ -1449,7 +1449,7 @@ class TestGridCellToSamPrompt:
         """A cell name means nothing without its grid: resolving 'B3' against an assumed
         grid when the overlay rendered another picks the wrong pixel silently, so the
         call is refused."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
         result = segment_prompt(image_path=img_path, grid_cells=["B3"])
@@ -1459,7 +1459,7 @@ class TestGridCellToSamPrompt:
     def test_grid_cells_resolve_against_the_callers_own_grid(self, viz_dataset: Path):
         """The cells are resolved with the caller's tile_size, the grid
         overlay_reference_grid actually rendered, never a derived default."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
         with patch("tcip_annotation.sam_wrapper.predict_from_point") as mock_predict:
@@ -1477,7 +1477,7 @@ class TestGridCellToSamPrompt:
     def test_echoed_geometry_round_trips_from_the_overlay(self, viz_dataset: Path):
         """A legitimate call with the overlay's own echoed geometry succeeds end to end,
         and the resolved center is the rendered grid's own cell center."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
@@ -1498,7 +1498,7 @@ class TestGridCellToSamPrompt:
 
     def test_no_prompts_returns_error(self, viz_dataset: Path):
         """Calling with no prompts at all should error."""
-        from tcip_mcp.tools.annotation_tools import segment_prompt
+        from tcip_mcp.tools.proposal_tools import segment_prompt
 
         img_path = str(viz_dataset / "images" / "img_001.jpg")
         result = segment_prompt(image_path=img_path)
@@ -1520,7 +1520,7 @@ class TestSamPredictionStaging:
         """Stage MOCK_CANDIDATES through the real writer: a stub engine that hands them back
         verbatim, driven by an actual ``propose_annotations`` call."""
         from tcip_mcp.pipelines import proposal
-        from tcip_mcp.tools.vision_tools import propose_annotations
+        from tcip_mcp.tools.proposal_tools import propose_annotations
 
         class StubProposer:
             def propose(self, image_path: str, **params: object) -> list[dict]:
@@ -1534,7 +1534,7 @@ class TestSamPredictionStaging:
         self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         from tcip_annotation import bbox_of, json_io
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(format_dataset / "images" / "fmt_test.jpg")
         self._propose(monkeypatch, img_path)
@@ -1558,7 +1558,7 @@ class TestSamPredictionStaging:
         self, format_dataset: Path, monkeypatch: pytest.MonkeyPatch,
     ):
         """Staged SAM output is a prediction: each object has created_by="sam" and a ``score``."""
-        from tcip_mcp.tools.vision_tools import accept_proposals
+        from tcip_mcp.tools.proposal_tools import accept_proposals
 
         img_path = str(format_dataset / "images" / "fmt_test.jpg")
         self._propose(monkeypatch, img_path)

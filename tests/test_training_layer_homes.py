@@ -173,6 +173,26 @@ def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
     ]
 
 
+def test_vision_side_proposal_tools_have_one_home():
+    """``propose_annotations`` and ``accept_proposals`` moved out of ``vision_tools.py`` into
+    ``tools/proposal_tools.py``, beside the annotation-side pair below."""
+    _assert_one_home(
+        {"propose_annotations", "accept_proposals"},
+        _module_path("tools/vision_tools.py"),
+        _module_path("tools/proposal_tools.py"),
+    )
+
+
+def test_annotation_side_proposal_tools_have_one_home():
+    """``segment_prompt`` and ``stage_proposals`` moved out of ``annotation_tools.py`` into
+    ``tools/proposal_tools.py``, the same one-home reshape as the vision-side pair above."""
+    _assert_one_home(
+        {"segment_prompt", "stage_proposals"},
+        _module_path("tools/annotation_tools.py"),
+        _module_path("tools/proposal_tools.py"),
+    )
+
+
 def test_checkpoint_marker_keys_have_one_home():
     """Structural (AST-only, no import of the modules under test): every reader of the two
     checkpoint payload marker keys, the importable model reference and the weights, spells them
