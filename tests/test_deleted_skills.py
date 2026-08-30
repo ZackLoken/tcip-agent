@@ -18,15 +18,29 @@ import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+THIS_FILE = Path(__file__).resolve()
 DELETED_SKILL = ".github/skills/visual-analysis"
 LIVE_SKILL_REFERENCE = ".github/skills/annotation"
 
+# Skipped even in the no-git fallback below, so it never inflates the walk.
+_EXCLUDE_DIR_NAMES = {".git", "node_modules", "__pycache__", ".pytest_cache"}
+
 
 def _tracked_files() -> list[Path]:
-    out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
-    )
-    return [REPO / line for line in out.stdout.splitlines() if line]
+    # Skips this test file itself, since it necessarily names DELETED_SKILL to search for it.
+    try:
+        out = subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        )
+        paths = [REPO / line for line in out.stdout.splitlines() if line]
+    except (subprocess.CalledProcessError, OSError):
+        # No .git here (a fail-before proof's git-archive baseline): a plain walk only widens
+        # the search, never narrows what the git path would have found.
+        paths = [
+            p for p in REPO.rglob("*")
+            if p.is_file() and not _EXCLUDE_DIR_NAMES & set(p.relative_to(REPO).parts[:-1])
+        ]
+    return [p for p in paths if p != THIS_FILE]
 
 
 def _files_containing(needle: str) -> list[Path]:
