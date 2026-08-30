@@ -1,14 +1,25 @@
-"""Model registry, track trained models and their performance."""
+"""Model registry, track trained models and their performance.
+
+The index document is version 2, ``{schema_version: 2, entries: [...]}``: a stored
+``checkpoint_path`` is relative POSIX exactly when the checkpoint lives under the registry's own
+scope root, absolute exactly when it does not, so a pre-family absolute-under-root spelling can
+never read as a designed-external claim. Every response surface (``list_models``, ``get_model``,
+``best_model``, both ``register_model`` returns) answers the resolved absolute path on a copy,
+never this internal storage spelling. ``scripts/conform_model_registry_paths.py`` wraps a
+version-1 (bare array) index and respells every entry; a document neither shape refuses through
+:class:`RegistryVersionRefused` naming that script.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import tcip_store
 from tcip_store import (
@@ -23,6 +34,14 @@ from tcip_store import (
 )
 from tcip_store.file_backend import RootedFileLocator
 
+from tcip_mcp.registry_paths import (
+    RegistryPathEmpty,
+    RegistryPathTraversal,
+    checkpoint_registry_path_for,
+    is_external_form,
+    resolved_registry_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── the registry store ───────────────────────────────────────────────────────
@@ -32,19 +51,66 @@ _INDEX_DOC = RootedFileLocator(prefix=(".tcip", "models"), suffix=".json")
 
 MODEL_REGISTRY_STORE = "model_registry"
 _INDEX_PARTS = ("registry",)
+REGISTRY_SCHEMA_VERSION = 2
 register_store(
     StoreDescriptor(
         name=MODEL_REGISTRY_STORE,
         kind="record",
         key_fields=("document",),
         frozen=True,
-        cannot_carry_field="a top-level JSON array of entries, with no object to hold the field; "
-                            "a future bump wraps this into {schema_version, entries}",
+        schema_version=REGISTRY_SCHEMA_VERSION,
         codec=RECORD_JSON,
         concurrency="cas",
         locator=_INDEX_DOC,
     )
 )
+
+
+class RegistryVersionRefused(ValueError):
+    """The registry index document is not a version this reader accepts: a bare top-level array
+    (the frozen version 1 shape, known but not yet conformed to version 2), or a mapping whose
+    ``schema_version``/``entries`` shape this reader does not recognize.
+
+    Deliberately not a :class:`~tcip_store.StoreError`: a blanket ``StoreError`` catch (bundle's,
+    for one) would otherwise swallow this into an empty answer, and an archive of an unconformed
+    project would silently pack zero weights. Every caller states its own behavior on this
+    exception rather than treating it like any other read failure.
+    """
+
+
+def _read_registry_document(raw: object) -> dict:
+    """The registry's version-2 document, decoded from whatever the store handed back.
+
+    ``raw`` absent (``None``, first use) answers the empty version 2 document: absence stays
+    legitimate first use, never a refusal. A present bare list is the frozen version 1 shape,
+    known but not conformed, refused by name with the remedy rather than accepted or treated as
+    unknown. A mapping with a missing, non-2, or malformed shape (``schema_version`` wrong,
+    ``entries`` missing or not a list) refuses naming what it found.
+    """
+    if raw is None:
+        return {"schema_version": REGISTRY_SCHEMA_VERSION, "entries": []}
+    if isinstance(raw, list):
+        raise RegistryVersionRefused(
+            "the model registry index is a top-level JSON array (schema_version 1, the shape "
+            "this store carried before the family that wrapped it): conform it with "
+            "scripts/conform_model_registry_paths.py before this registry can be read"
+        )
+    if (
+        not isinstance(raw, dict)
+        or raw.get("schema_version") != REGISTRY_SCHEMA_VERSION
+        or not isinstance(raw.get("entries"), list)
+    ):
+        raise RegistryVersionRefused(
+            f"the model registry index is not a recognized schema_version {REGISTRY_SCHEMA_VERSION} "
+            f"document: {raw!r}"
+        )
+    return raw
+
+
+def _write_registry_document(entries: list[dict]) -> dict:
+    """The version-2 document a write puts on disk for ``entries``. Every write is version 2;
+    there is no code path that writes version 1 any more."""
+    return {"schema_version": REGISTRY_SCHEMA_VERSION, "entries": entries}
 
 
 def registry_index_key(project_path: str | Path) -> Key:
@@ -70,8 +136,11 @@ def read_registry_index(project_path: str | Path) -> list[dict]:
     key the writer stops emitting shows up as a reader going quiet. A project that has
     registered nothing reads as an empty list; an index that exists but does not decode
     raises ``DecodeError``, because a corrupt registry is not a project with no models.
+    Raises :class:`RegistryVersionRefused` for a document this reader does not recognize (a
+    bare version-1 array included): conform it with ``scripts/conform_model_registry_paths.py``.
     """
-    return tcip_store.read(registry_index_key(project_path), default=[])
+    raw = tcip_store.read(registry_index_key(project_path), default=None)
+    return _read_registry_document(raw)["entries"]
 
 
 def _sha256_of_bytes(data: bytes) -> str:
@@ -320,16 +389,18 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key, entry: dict) -> dict | 
 
     Returns the superseded entry (``None`` for a first registration under this name), for the
     caller to audit once the transaction has closed. Refuses (:class:`EntryOwnedByRun`) a replace
-    whose superseded entry names a run other than this write's own.
+    whose superseded entry names a run other than this write's own. Reads and writes through the
+    version-2 document pair: an unconformed version-1 document raises :class:`RegistryVersionRefused`
+    naming the conform script before anything is written.
     """
-    index = txn.read(key, default=[])
+    index = _read_registry_document(txn.read(key, default=None))["entries"]
     superseded = next((e for e in index if e["name"] == entry["name"]), None)
     if superseded is not None:
         _refuse_if_owned_by_another_run(
             superseded, name=entry["name"], new_experiment_id=entry.get("experiment_id"))
     index = [e for e in index if e["name"] != entry["name"]]
     index.append(entry)
-    txn.write(key, index)
+    txn.write(key, _write_registry_document(index))
     return superseded
 
 
@@ -377,6 +448,13 @@ def _register_entry(
     explicit-mode registration takes. ``experiment_id`` is the entry's own producer-binding field:
     the run that bound it in experiment mode, ``None`` in explicit mode.
 
+    The stored ``checkpoint_path`` is spelled through
+    :func:`~tcip_mcp.registry_paths.checkpoint_registry_path_for` against this project's own root
+    (the registry's scope by definition): relative POSIX when the checkpoint resolves under it,
+    absolute when it does not, version 2's own carrier of internal versus external. A checkpoint
+    outside the project (``sha256`` given but the file gone by the time this runs) keeps the
+    caller's own string verbatim, since there is nothing to resolve or spell against.
+
     Raises ``FileNotFoundError`` for a missing ``checkpoint_path`` (explicit mode only; experiment
     mode's caller has already confirmed the file), ``ValueError``/``TypeError`` for a
     ``config``/``metrics`` JSON cannot hold or a ``metrics_source`` pairing that disagrees with
@@ -409,9 +487,13 @@ def _register_entry(
     else:
         file_size = ckpt.stat().st_size if ckpt.is_file() else None
 
+    stored_checkpoint_path = (
+        checkpoint_registry_path_for(ckpt, project_path) if ckpt.is_file() else checkpoint_path
+    )
+
     entry = {
         "name": name,
-        "checkpoint_path": checkpoint_path,
+        "checkpoint_path": stored_checkpoint_path,
         "kind": kind,
         "sha256": sha256,
         "file_size_bytes": file_size,
@@ -433,6 +515,220 @@ def _register_entry(
         raise
     _audit_entry_replace(name, superseded, entry)
     return entry
+
+
+def _is_at_or_under(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _document_entries_for_conform(raw: object) -> tuple[list[dict], bool]:
+    """(entries, was_already_v2) for the conform script's own read.
+
+    Unlike :func:`_read_registry_document`, a bare top-level array is accepted here rather than
+    refused: it is exactly the version-1 shape this conform exists to wrap.
+    """
+    if raw is None:
+        return [], True
+    if isinstance(raw, list):
+        return raw, False
+    if (
+        isinstance(raw, dict)
+        and raw.get("schema_version") == REGISTRY_SCHEMA_VERSION
+        and isinstance(raw.get("entries"), list)
+    ):
+        return raw["entries"], True
+    raise RegistryVersionRefused(
+        f"the model registry index is not a recognized document to conform: {raw!r}"
+    )
+
+
+def _candidate_checkpoint_paths(root: Path, raw: str) -> set[Path]:
+    """Every file under ``root`` worth hashing while relocating one entry's checkpoint.
+
+    A purpose-built enumeration, never bundle's ``_blob_files`` (whose sweep hashes a project's
+    imagery and whose models glob is non-recursive): the ``.tcip/models`` tree recursively, the
+    ``.tcip/experiments`` tree's checkpoint files, and any file under ``root`` the entry's own
+    version-1 relative suffix (everything from its last ``.tcip`` segment onward) or basename
+    names.
+    """
+    found: set[Path] = set()
+    models_dir = root / ".tcip" / "models"
+    if models_dir.is_dir():
+        found.update(p for p in models_dir.rglob("*") if p.is_file())
+    experiments_dir = root / ".tcip" / "experiments"
+    if experiments_dir.is_dir():
+        found.update(experiments_dir.rglob("*.pt"))
+    raw_parts = PurePosixPath(Path(raw).as_posix()).parts
+    if ".tcip" in raw_parts:
+        suffix = Path(root, *raw_parts[raw_parts.index(".tcip") :])
+        if suffix.is_file():
+            found.add(suffix)
+    basename = Path(raw).name
+    if basename:
+        found.update(p for p in root.rglob(basename) if p.is_file())
+    return {p.resolve() for p in found}
+
+
+def _pick_duplicate(candidates: list[Path], *, root: Path, original_basename: str) -> Path:
+    """The deterministic choice among more than one byte-identical relocation candidate: a
+    basename match to the entry's own original spelling first, then the sorted
+    project-relative path."""
+    basename_matches = [c for c in candidates if c.name == original_basename]
+    pool = basename_matches or candidates
+    return sorted(pool, key=lambda c: c.relative_to(root).as_posix())[0]
+
+
+def _conform_entries(
+    entries: list[dict], root: Path, *, plan: bool, hash_cache: dict[Path, str],
+) -> tuple[list[dict], list[str]]:
+    """Respell every entry's ``checkpoint_path`` relative to ``root``, per
+    :func:`conform_registry_paths`'s own rule. Returns the conformed entries and one outcome
+    line per entry actually changed (or, under ``plan``, that would change)."""
+    verb = "would respell" if plan else "respelled"
+    conformed: list[dict] = []
+    lines: list[str] = []
+    for entry in entries:
+        raw = entry.get("checkpoint_path")
+        if not raw:
+            conformed.append(entry)
+            continue
+        expected_sha = entry.get("sha256")
+        direct = Path(raw) if is_external_form(str(raw)) else root.joinpath(*PurePosixPath(raw).parts)
+        direct_resolved = direct.resolve()
+        if (
+            _is_at_or_under(direct_resolved, root)
+            and direct_resolved.is_file()
+            and expected_sha is not None
+            and hash_cache.setdefault(direct_resolved, _compute_sha256(direct_resolved)) == expected_sha
+        ):
+            respelled = checkpoint_registry_path_for(direct_resolved, root)
+            if respelled != raw:
+                lines.append(f"{entry.get('name')}: {verb} {raw!r} to {respelled!r}")
+                conformed.append({**entry, "checkpoint_path": respelled})
+            else:
+                conformed.append(entry)
+            continue
+
+        candidates = sorted(_candidate_checkpoint_paths(root, str(raw)))
+        matches = []
+        if expected_sha is not None:
+            for candidate in candidates:
+                size = entry.get("file_size_bytes")
+                if size is not None and candidate.stat().st_size != size:
+                    continue
+                if hash_cache.setdefault(candidate, _compute_sha256(candidate)) == expected_sha:
+                    matches.append(candidate)
+
+        if len(matches) == 1:
+            respelled = checkpoint_registry_path_for(matches[0], root)
+            lines.append(f"{entry.get('name')}: {verb} {raw!r} to {respelled!r} (relocated)")
+            conformed.append({**entry, "checkpoint_path": respelled})
+        elif len(matches) > 1:
+            chosen = _pick_duplicate(matches, root=root, original_basename=Path(str(raw)).name)
+            respelled = checkpoint_registry_path_for(chosen, root)
+            named = sorted(m.relative_to(root).as_posix() for m in matches)
+            lines.append(f"{entry.get('name')}: {verb} {raw!r} to {respelled!r}, ambiguous "
+                         f"among {len(matches)} byte-identical candidates {named}, picked by "
+                         "basename match then sorted path")
+            conformed.append({**entry, "checkpoint_path": respelled})
+        else:
+            fallback = str(direct_resolved)
+            if fallback != raw:
+                lines.append(f"{entry.get('name')}: {verb} {raw!r} to {fallback!r} "
+                             f"(external-or-missing, exists={direct_resolved.is_file()})")
+                conformed.append({**entry, "checkpoint_path": fallback})
+            else:
+                conformed.append(entry)
+    return conformed, lines
+
+
+def conform_registry_paths(root: str | Path, *, plan: bool = False) -> list[str]:
+    """Wrap ``root``'s registry index to version 2 and respell every entry's checkpoint_path
+    relative to ``root``, in one transaction (the same discipline as
+    ``scripts/conform_registry_experiment_id.py``).
+
+    Per entry: a stored path that resolves under ``root`` with a matching ``sha256`` is
+    respelled through the checkpoint speller (existence alone never blesses a replaced file). A
+    path that does not (outside ``root``, missing, or a hash mismatch) is relocated: every file
+    under ``.tcip/models``, every checkpoint-shaped file under ``.tcip/experiments``, and any
+    file the entry's own stored suffix or basename names (:func:`_candidate_checkpoint_paths`),
+    prefiltered by the entry's recorded ``file_size_bytes``, is hashed once (each hash cached
+    across every entry this run examines) and matched against the entry's own ``sha256``.
+    Exactly one match respells to it; more than one (byte-identical files) picks
+    deterministically (:func:`_pick_duplicate`) and is disclosed as ambiguous; none leaves the
+    entry absolute, classified external-or-missing by existence in the outcome line.
+
+    ``plan=True`` computes every outcome without writing. Idempotent: a second run changes
+    nothing, since an already-correctly-spelled entry's respelled form always equals its stored
+    one. Raises :class:`RegistryVersionRefused` for a document neither a bare array nor a
+    recognized version-2 mapping.
+    """
+    root_path = Path(root).resolve()
+    key = registry_index_key(root_path)
+    hash_cache: dict[Path, str] = {}
+
+    if plan:
+        entries, already_v2 = _document_entries_for_conform(tcip_store.read(key, default=None))
+        _conformed, lines = _conform_entries(entries, root_path, plan=True, hash_cache=hash_cache)
+        wrap_line = [] if already_v2 else ["wrapping the registry index to schema_version 2"]
+        return wrap_line + lines
+
+    with tcip_store.transaction(key) as txn:
+        entries, already_v2 = _document_entries_for_conform(txn.read(key, default=None))
+        conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache=hash_cache)
+        txn.write(key, _write_registry_document(conformed))
+    wrap_line = [] if already_v2 else ["wrapped the registry index to schema_version 2"]
+    return wrap_line + lines
+
+
+def conform_registry_paths_on_disk(root: str | Path) -> list[str]:
+    """The same conform as :func:`conform_registry_paths`, reading and writing the registry
+    index file directly rather than through the storage seam.
+
+    For a tree the caller already holds exclusive access to but that is not yet a database
+    (``import_project``'s own staging tree, always loose files until adoption runs): a seam
+    transaction there either refuses outright (the database backend refuses a write to an
+    unconformed root) or, once adopted, leaves a cached connection open on a directory the door
+    is about to rename, which Windows refuses. Never used against a live, already-adopted
+    project; :func:`conform_registry_paths` is that door.
+    """
+    root_path = Path(root).resolve()
+    path = registry_index_path(root_path)
+    if not path.is_file():
+        return []
+    try:
+        raw = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise RegistryVersionRefused(f"{path} will not decode as JSON: {exc}") from exc
+    entries, already_v2 = _document_entries_for_conform(raw)
+    conformed, lines = _conform_entries(entries, root_path, plan=False, hash_cache={})
+    path.write_bytes(RECORD_JSON.encode(_write_registry_document(conformed)))
+    wrap_line = [] if already_v2 else ["wrapped the registry index to schema_version 2"]
+    return wrap_line + lines
+
+
+def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
+    """A shallow copy of ``entry`` with ``checkpoint_path`` resolved to an absolute path.
+
+    Every response surface hands the caller something they can open, or feed back into a
+    path-taking door, directly, never the registry's own internal-vs-external storage
+    spelling: a resolve can correct case, separators, or a caller's cwd-relative process root.
+    A stored value this reader cannot resolve (empty, or a relative form carrying ``..``) is
+    never raised through a listing: the row keeps its stored spelling and carries the reason in
+    ``checkpoint_path_error`` instead, so one malformed entry never hides the rest of the
+    registry from a caller listing every model.
+    """
+    copy = dict(entry)
+    stored = entry.get("checkpoint_path") or ""
+    try:
+        copy["checkpoint_path"] = str(resolved_registry_path(project_path, stored))
+    except (RegistryPathEmpty, RegistryPathTraversal) as exc:
+        copy["checkpoint_path_error"] = str(exc)
+    return copy
 
 
 class ModelRegistry:
@@ -499,7 +795,7 @@ class ModelRegistry:
             experiment_id=None,
         )
         self._index = self._load_index()
-        return entry
+        return _resolve_entry_checkpoint(self._project_path, entry)
 
     def verify_model(self, name: str) -> dict:
         """Verify a model checkpoint's integrity against stored checksum.
@@ -528,16 +824,21 @@ class ModelRegistry:
         }
 
     def list_models(self, tag: str | None = None) -> list[dict]:
-        """List registered models, optionally filtered by tag."""
-        if tag is None:
-            return self._index
-        return [m for m in self._index if tag in m.get("tags", [])]
+        """List registered models, optionally filtered by tag.
+
+        Every returned entry is a copy carrying the resolved absolute ``checkpoint_path``
+        (:func:`_resolve_entry_checkpoint`), never the internal registry's own stored spelling,
+        and never the live ``self._index`` list itself (a caller mutating one row must not
+        corrupt the registry's own in-memory state).
+        """
+        entries = self._index if tag is None else [m for m in self._index if tag in m.get("tags", [])]
+        return [_resolve_entry_checkpoint(self._project_path, m) for m in entries]
 
     def get_model(self, name: str) -> dict | None:
-        """Get a model entry by name."""
+        """Get a model entry by name, with its checkpoint_path resolved absolute."""
         for m in self._index:
             if m["name"] == name:
-                return m
+                return _resolve_entry_checkpoint(self._project_path, m)
         return None
 
     def best_model(
@@ -584,4 +885,4 @@ class ModelRegistry:
             if best_val is None or (val > best_val if higher_is_better else val < best_val):
                 best_val = float(val)
                 best = m
-        return best
+        return _resolve_entry_checkpoint(self._project_path, best) if best is not None else None

@@ -232,8 +232,8 @@
     "model_registry": {
       "kind": "record",
       "frozen": true,
-      "schema_version": 1,
-      "cannot_carry_field": "a top-level JSON array of entries, with no object to hold the field; a future bump wraps this into {schema_version, entries}"
+      "schema_version": 2,
+      "cannot_carry_field": null
     },
     "model_snapshot_file": {
       "kind": "blob",
