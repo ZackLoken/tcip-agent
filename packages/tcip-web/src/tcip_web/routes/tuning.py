@@ -96,12 +96,6 @@ def wait_for_workers(*, timeout_s: float) -> tuple[str, ...]:
     return tuple(sweep_id for sweep_id, thread in pending if thread.is_alive())
 
 
-def _summary(job: HPOJob) -> dict:
-    return {"sweep_id": job.sweep_id, "status": job.status,
-            "error": job.error, "has_result": bool(job.result),
-            "platform_root": job.platform_root}
-
-
 def _manifest_summary(manifest: dict) -> dict:
     """A sweep read off disk, in the same shape as an in-memory job's summary."""
     return {"sweep_id": manifest.get("study_name", ""),
