@@ -406,6 +406,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/plant_aware_group_splits.py | Plant-aware group-key derivation for ``make_splits``, over per-stem georeferenced rasters. | 3 | 0 |
 | scripts/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | scripts/render_candidates_tile.py | Render a tile showing GT (green) and only the FN candidates (numbered red). | 1 | 0 |
+| scripts/render_failure_cases.py | Find and render the worst predictions for failure analysis, through the demoted `render_failure_cases` function. | 1 | 0 |
 | scripts/restamp_dataset_fingerprint.py | Restamp a bare legacy dataset fingerprint onto the formula-version-prefixed form, through register_dataset's own path. | 4 | 0 |
 | scripts/scan_dataset.py | Scan a folder for images, labels, and predictions, through the demoted `scan_dataset` function. | 1 | 0 |
 | scripts/shp_to_plant_csv.py | Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema. | 1 | 0 |
@@ -727,18 +728,17 @@ anything.
 | `run_hpo` | `training_tools.py:1319` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
 | `evaluate_model` | `training_tools.py:2586` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
-### vision_tools.py (6 tools)
+### vision_tools.py (5 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `visualize` | `vision_tools.py:295` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `render_failure_cases` | `vision_tools.py:517` | yes | Find and render the worst predictions for failure analysis. |  <!-- queued: P5-45 demote-to-script -->
 | `propose_annotations` | `vision_tools.py:750` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
 | `accept_proposals` | `vision_tools.py:951` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
 | `capture_live_canvas` | `vision_tools.py:1081` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1211` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
-8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 7 + 1 + 6 = 57 tools across 16 modules.
+8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 7 + 1 + 5 = 56 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 

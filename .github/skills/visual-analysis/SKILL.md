@@ -21,7 +21,7 @@ The agent can visually inspect images with its own image-capable read tool after
 | `visualize(source="predictions", path=<image>)` | Render model predictions on a single image |
 | `visualize(source="dataset", path=<folder>, n=16)` | Random grid of annotated dataset samples |
 | `visualize(source="comparison", path=<image>)` | Overlay GT (green) vs predictions (red) with match stats |
-| `render_failure_cases` | Grid of top-K failure cases |
+| `python scripts/render_failure_cases.py` | Grid of top-K failure cases |
 | `propose_annotations` | Engine-proposed candidate masks rendered with numbered overlay (`engine='sam'` default); `grid_cells=[...]` scopes the pass to a region instead of the whole frame |
 | `accept_proposals` | Stage classified candidates as predictions (created_by=<engine>) for human review |
 | `overlay_reference_grid` | Labeled reference-grid overlay (square native-pixel cells); echoes its grid geometry (`tile_size`, `overlap`, `cols`, `rows`, `width`, `height`) for `segment_prompt(grid_cells=...)` |
@@ -54,7 +54,7 @@ Goal: Verify annotation quality before training.
 Goal: Assess model quality after inference.
 
 1. `run_inference` or verify predictions exist
-2. `render_failure_cases(predictions_dir, labels_dir, top_k=10)`
+2. `python scripts/render_failure_cases.py <predictions_dir> <labels_dir> --top-k 10`
 3. Read the grid with the client's image-capable read tool → categorize failure types
 4. For specific failures: `visualize(source="comparison", path=image_path)` → read the render
 5. Categorize: false positives, false negatives, localization errors, class confusion
@@ -65,7 +65,7 @@ Goal: Assess model quality after inference.
 Goal: Diagnose training issues from worst-case analysis.
 
 1. `check_training_status` → verify training completed, review loss curves
-2. `render_failure_cases` → surface + render failure cases → read the render with the client's image-capable read tool
+2. `python scripts/render_failure_cases.py` → surface + render failure cases → read the render with the client's image-capable read tool
 3. Cross-reference visual findings with `score_predictions`' per-image TP/FP/FN breakdown
    (no per-class breakdown for detection today, see the `evaluation` skill)
 4. Recommend: more data, augmentation changes, architecture changes, longer training

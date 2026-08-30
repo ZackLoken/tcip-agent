@@ -512,7 +512,6 @@ def _viz_comparison(
     }
 
 
-@mcp.tool()
 @audited
 def render_failure_cases(
     predictions_dir: str,
@@ -523,6 +522,9 @@ def render_failure_cases(
     class_names: str = "",
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
+
+    Not an MCP tool: run through ``scripts/render_failure_cases.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests.
 
     Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`); no IoU
     matching, so an image with the right box count but every box mislocated scores as good. Not a

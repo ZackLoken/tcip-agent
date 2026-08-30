@@ -40,7 +40,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 |------|---------|
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named split manifest's `calibration` side (`split_manifest_dir`); writes `test_results.json` |
 | `score_predictions` | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
-| `render_failure_cases` | Surface + render the N images with highest triage error |
+| `python scripts/render_failure_cases.py` | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a calibration experiment, a pre-created one never launched) |
@@ -122,7 +122,8 @@ manifest, seals all four keys `null`.
 When metrics are poor, investigate systematically:
 
 1. Data issues: `validate_data_quality`, check for missing labels, format errors, class imbalance
-2. Worst cases: `render_failure_cases`, surface and visually inspect the worst N images
+2. Worst cases: `python scripts/render_failure_cases.py`, surface and visually inspect the worst
+   N images
 3. Per-image breakdown: `score_predictions` on a dataset dir; find images with the
    highest FP/FN counts (no built-in per-class breakdown for detection; use
    `score_predictions(<image>, detail=True)` per image and aggregate by `class_id` if
