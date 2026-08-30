@@ -65,8 +65,12 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `materialize_review_dataset` | Turn human review verdicts into a curated training set for re-delivery after correction; see `annotation` skill |
 
 `tabulate_counts` produces a different, per-image `image, detection_count,
-avg_confidence` CSV, not the per-plant schema above. Don't reach for it when the
-per-plant schema is what's wanted.
+avg_confidence` CSV, not the per-plant schema above (the `image` cell is the stem, never a
+basename with an extension, this platform's image identity everywhere else). Don't reach for it
+when the per-plant schema is what's wanted. Two source regimes: live (`checkpoint_path` +
+`images_dir`, routing through `run_inference`, optionally persisting the counted predictions into
+`predictions_dir` under `export_predictions`'s own publish contract) or bucket (`predictions_dir`
+alone, no GPU, reading an existing reviewed bucket's own stamp), exactly one stated.
 
 ## The meaning door (what the number is)
 
@@ -78,10 +82,12 @@ one nobody confirmed, or one whose spec fields moved since, and the door refuses
 primitive that fixes it. `acknowledge_unvalidated` does not reach this: it says a number's error is
 uncharacterized, which is a claim about a quantity that has been defined.
 
-- `export_detection_csv` and `tabulate_counts` take a required `trait` and rest on its
-  `per_image_count` record. That record names no delivered phenotype, because the per-image CSV
-  carries no phenotype column; what it names is the counted subject, checked against the recorded
-  `id_map` of every bucket that recorded one.
+- `export_detection_csv` and `tabulate_counts` take a required, keyword-only `trait` and rest on
+  its `per_image_count` record, in either of `tabulate_counts`'s two source regimes. That record
+  names no delivered phenotype, because the per-image CSV carries no phenotype column; what it
+  names is the counted subject, checked against the recorded `id_map` of every bucket that
+  recorded one. A bucket-regime call also refuses a bucket whose own stamp names a different,
+  non-`None` trait, validated or not.
 - `export_aggregated_csv` and `deliver_orthomosaic_plant_counts` take `trait_name`, which stays a
   crop-vocabulary delivered-phenotype name (the CSV column and the unit cross-check read it), and
   resolve it to the registered trait whose spec `delivers` it: none or more than one refuses. Which
@@ -122,9 +128,18 @@ only when every dimension it was handed clears, and otherwise refuses (or, with
   bucket whose claim no record answers for delivers those cells blank rather than repeating the
   names its stamp asserted; `produced_at` is always the write's own timestamp, never blank and
   never read from the bindings.
-- `tabulate_counts` gates the count operating point on the run's resolved bundle and hands
-  `export_detection_csv` the already-reconciled state, plus the bucket it persisted when it was
-  given a `predictions_dir` to persist one into.
+- `tabulate_counts`'s live regime, given a `predictions_dir`, publishes into it through the same
+  bracket `export_predictions` publishes with (tile gate, count-claim gate, frozen-lineage-pointer
+  refusal, write, lineage link), then hands `export_detection_csv` that bucket; the CSV's own
+  delivery gate then runs exactly once, inside the writer, never a second time at the door. Without
+  a `predictions_dir`, the door calls the writer with no bucket at all, and the writer's own
+  no-`pred_dirs` floor is what refuses (or ships provisionally under `acknowledge_unvalidated`);
+  the door's own response then reports the live run's narrowed references honestly
+  (`operating_point_validated`/`tile_size_validated`, accepted-or-false by construction), since
+  there is no bucket for a second gate call to reconcile against. With a bucket (either regime),
+  those same response fields instead quote the writer's own returned gate-and-reconciliation
+  summary, never a second gate call. The bucket regime (`predictions_dir` alone) reads an existing
+  bucket's own stamp and hands the writer that same bucket, with no run at all standing behind it.
   `export_detection_csv` and `export_aggregated_csv` both gate at the writer the same way: pass
   `pred_dirs` so the validity is reconciled from each bucket's own sidecar rather than trusting a
   bare caller string. Without `pred_dirs`, either writer floors `measurement_validated` to
