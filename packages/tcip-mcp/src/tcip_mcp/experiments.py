@@ -1386,6 +1386,7 @@ def register_model_from_experiment(
         metrics_source = "training_source" if config.get(TRAINING_SOURCE_KEY) else "trainer"
 
     from tcip_mcp.model_registry import EntryOwnedByRun, _register_entry
+    from tcip_mcp.registry_paths import resolved_registry_path
 
     try:
         entry = _register_entry(
@@ -1398,7 +1399,7 @@ def register_model_from_experiment(
     return {
         "experiment_id": experiment_id,
         "registered": entry["name"],
-        "checkpoint": checkpoint_path,
+        "checkpoint": str(resolved_registry_path(registry_root, entry["checkpoint_path"])),
         "sha256": digest,
         "metrics": final_metrics,
         "metrics_source": metrics_source,
