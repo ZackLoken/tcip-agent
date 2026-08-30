@@ -140,7 +140,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "make_splits", "focus", "get_experiment",
         "register_model", "load_project_memory",
         # Renamed tools: the new names must register.
-        "archive_project", "inspect_project", "scan_dataset", "read_annotations",
+        "archive_project", "inspect_project", "read_annotations",
         "render_failure_cases", "overlay_reference_grid", "capture_live_canvas",
         # Renamed tools: the new names must register.
         "preflight_config", "select_best_model", "score_predictions",
@@ -150,6 +150,9 @@ def test_consolidated_tools_present_and_removed_absent():
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
+        # Demoted to scripts under the admission standard (packages/tcip-mcp/CLAUDE.md): each
+        # function stays importable, only the tool registration is gone.
+        "scan_dataset",
         "evaluate_detections", "evaluate_dataset", "split_dataset",
         "log_metrics", "record_artifact", "get_training_metrics_path",
         # collapse to model_source-only: the menu/composer/spec tools are gone.

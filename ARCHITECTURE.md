@@ -406,6 +406,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/prove_test_fails_before.py | Prove a test actually fails against the code it was written to catch. | 0 | 0 |
 | scripts/render_candidates_tile.py | Render a tile showing GT (green) and only the FN candidates (numbered red). | 1 | 0 |
 | scripts/restamp_dataset_fingerprint.py | Restamp a bare legacy dataset fingerprint onto the formula-version-prefixed form, through register_dataset's own path. | 4 | 0 |
+| scripts/scan_dataset.py | Scan a folder for images, labels, and predictions, through the demoted `scan_dataset` function. | 1 | 0 |
 | scripts/shp_to_plant_csv.py | Convert a plant-locations shapefile into ``read_plant_csvs``' CSV schema. | 1 | 0 |
 | scripts/smoke_fence_e2e.py | Live smoke: does the real fenced `claude` refuse to edit platform internals? | 3 | 0 |
 | scripts/smoke_phenology_e2e.py | Live e2e smoke: the agent's phenology pipeline on real geolocated images. | 4 | 0 |
@@ -600,11 +601,10 @@ Docstring is the function's docstring first line, verbatim.
 | `stage_proposals` | `annotation_tools.py:851` | yes | Stage model-/agent-proposed shapes to ``predictions/<model>/<date>/<stem>.json`` for canvas |
 | `write_class_map` | `annotation_tools.py:1043` | yes | Author the dataset's nested class registry, a thin wrapper over ``class_registry``. |
 
-### data_tools.py (3 tools)
+### data_tools.py (2 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `scan_dataset` | `data_tools.py:229` | yes | Scan a folder for images, labels, and predictions. |  <!-- queued: P5-17 demote-to-script -->
 | `validate_data_quality` | `data_tools.py:299` | yes | Run quality checks on a dataset (any supported annotation format). |  <!-- queued: P5-18 unify -->
 | `make_splits` | `data_tools.py:449` | yes | Compute a leakage-free, annotation-stratified train/val/calibration split. |
 
@@ -738,7 +738,7 @@ anything.
 | `capture_live_canvas` | `vision_tools.py:1081` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1211` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
-8 + 3 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 8 + 1 + 6 = 59 tools across 16 modules.
+8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 8 + 1 + 6 = 58 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 

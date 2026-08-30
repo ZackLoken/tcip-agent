@@ -224,10 +224,12 @@ def _scan_dataset(root: str) -> dict:
     }
 
 
-@mcp.tool()
 @audited
 def scan_dataset(folder_path: str) -> dict:
     """Scan a folder for images, labels, and predictions.
+
+    Not an MCP tool: run through ``scripts/scan_dataset.py``, per the admission standard
+    (packages/tcip-mcp/CLAUDE.md), while staying importable for its in-package callers.
 
     Reads the name-based per-image JSON labels (one file per image, all subjects), or an assembled
     dataset-level COCO.
