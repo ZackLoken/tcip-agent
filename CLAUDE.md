@@ -133,9 +133,8 @@ composer or registry (`toolkit-inventory` maps the pieces, the derivations and t
 per-band `image_mean`/`image_std` from `derivations.band_normalization_stats` through
 `builder_kwargs`; `build_detector` refuses without them. You can see images: `visualize` and the
 renderers write to `.tcip/artifacts/viz/`; read the path with your image-capable tool, describe,
-then recommend (`visual-analysis` skill). External phenotyping resources (PlantCV and the like)
-are read for general techniques only, never for a per-trait pipeline; the endpoint is a trained
-model.
+then recommend. External phenotyping resources (PlantCV and the like) are read for general
+techniques only, never for a per-trait pipeline; the endpoint is a trained model.
 
 ## Working a change
 

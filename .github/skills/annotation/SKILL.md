@@ -127,6 +127,12 @@ Full workflow:
    verdict-guarded staging helper so a re-run never orphans recorded verdicts
 4. Agent reads the staged result with its own image-capable read tool → visual QA pass
 
+Visual QA is not optional after either write: after `accept_proposals` or `segment_prompt` stages
+a result, read it before moving to the next image. Catching a wrong class or a sloppy mask before
+it reaches human review is cheaper than catching it after. `capture_live_canvas` renders the
+human's live GUI canvas the same way (their own image, viewport, and unsaved or in-progress
+shapes), so the agent can comment on work in progress before they save.
+
 Corrective loop (for missed objects):
 1. `overlay_reference_grid(image_path)` → labeled reference grid ('A1' top-left) for spatial reference
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell

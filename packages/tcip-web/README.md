@@ -16,7 +16,7 @@ packages/tcip-web/
     terminal.py         # in-app agent terminal (spawns a hardened `claude` process)
     routes/
       annotate.py       # label CRUD, Annotate-tab commands
-      canvas.py         # live canvas capture for the agent's visual-analysis loop
+      canvas.py         # live canvas capture for the agent's own image-capable read tool
       classes.py        # subject/class CRUD
       dataset.py        # tree + select + nav position
       fs.py             # filesystem browsing for path pickers
