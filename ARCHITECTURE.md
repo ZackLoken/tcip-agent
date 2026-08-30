@@ -1088,7 +1088,7 @@ Names not re-exported in `__all__` but importable directly from their defining s
 ## 4. Entry points
 
 `python -m tcip_mcp`: `packages/tcip-mcp/src/tcip_mcp/__main__.py:1-5` imports `main`
-from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:67`
+from `tcip_mcp.server` and calls it: `packages/tcip-mcp/src/tcip_mcp/server.py:68`
 (`def main()`). `server.py:9` defines `mcp = MCPServer("tcip-pipeline")`, the object every
 `@mcp.tool()` decorator in `packages/tcip-mcp/src/tcip_mcp/tools/*.py` registers against
 (`python scripts/list_tools.py` lists them; the count is never written down, since it drifts).
@@ -2062,7 +2062,7 @@ Phase 3 verdict: single.
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:445` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:91` (`return registry, class_registry.assign_class_ids(registry, subject, attribute)`)).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:125` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:128` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store
@@ -2155,7 +2155,7 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2518` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1839` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:323` and `pipelines/postprocessing/aggregation.py:533` (`delivered_tail(provenance, measurement_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself), `tools/inference_tools.py:2295` (`gate.column_stamp("operating_point")`, `tabulate_counts`'s own read of the gate it also hands to `export_detection_csv`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:608` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1839` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:323` and `pipelines/postprocessing/aggregation.py:533` (`delivered_tail(provenance, measurement_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself), `tools/inference_tools.py:1782` (`gate.column_stamp("operating_point")`, `tabulate_counts`'s own read of the gate it also hands to `export_detection_csv`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:608` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
@@ -2365,7 +2365,7 @@ Phase 3 verdict: duplicated.
 ## S64. MCP tool registry against documented tool names  <!-- queued: P5-303 unify -->
 
 Must agree: any document naming a tool names one the server actually registers.
-Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:39` (`def list_registered_tools() -> list[str]:`).
+Side A: `packages/tcip-mcp/src/tcip_mcp/server.py:40` (`def list_registered_tools() -> list[str]:`).
 Side B: `scripts/list_tools.py:15` (`from tcip_mcp.server import list_registered_tools`).
 Phase 3 verdict: duplicated.
 
