@@ -739,10 +739,10 @@ anything.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `visualize` | `vision_tools.py:295` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `propose_annotations` | `vision_tools.py:752` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `accept_proposals` | `vision_tools.py:953` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1083` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1213` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `propose_annotations` | `vision_tools.py:759` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
+| `accept_proposals` | `vision_tools.py:965` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
+| `capture_live_canvas` | `vision_tools.py:1095` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:1226` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
@@ -1917,7 +1917,7 @@ Phase 3 verdict: single.
 
 Must agree: browser payload, backend file writer, and MCP reader agree on the two-file split and the (image_path, tab) identity check.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:142` (`def canvas_meta_key(`, the meta document's one address, with `canvas_geometry_key`, line 144, addressing the geometry document; the two stores are declared as `CANVAS_META_STORE` and `CANVAS_GEOMETRY_STORE`, lines 111 and 112; `packages/tcip-web/src/tcip_web/routes/canvas.py:85` writes meta through the key, geometry first at line 78).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1109` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/vision_tools.py:1122` (`meta_doc = canvas_meta_key(root)`, the MCP read through the same keys, geometry at line 1088).
 Phase 3 verdict: single.
 
 ## S12. Friction reports and retrospectives under .tcip/
