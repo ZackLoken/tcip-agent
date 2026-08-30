@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
