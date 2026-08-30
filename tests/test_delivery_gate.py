@@ -223,6 +223,20 @@ def test_export_detection_csv_and_the_persisted_document_agree_on_a_degenerate_b
     assert float(rows[0]["avg_confidence"]) == pytest.approx(0.9)
 
 
+def test_export_detection_csv_quantizes_a_non_finite_score_before_averaging(tmp_path):
+    """avg_confidence averages safe_score-quantized scores, never a re-spelled round(x, 4): a
+    non-finite score collapses to 0.0 before averaging, so a mix of one non-finite and one real
+    score reads as their quantized mean, not the NaN a naive round(mean(scores), 4) would carry."""
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    out = tmp_path / "o.csv"
+    export_detection_csv(
+        [{"image": "a.jpg", "count": 2, "scores": [float("nan"), 0.5]}], str(out),
+        trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    rows = list(csv.DictReader(out.open()))
+    assert rows[0]["avg_confidence"] == "0.25"  # (0.0 + 0.5) / 2, never a NaN-propagated mean
+
+
 # ── export_detection_csv reconciles pred_dirs against on-disk sidecars ─────
 
 def _detection_bucket(tmp_path, name, *, validated, ref=VALIDATED_HELD_OUT, conf=0.6,
@@ -303,6 +317,27 @@ def test_export_detection_csv_pred_dirs_gates_fabricated_tile_size(tmp_path):
         export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
                              trait=fx.COUNT_TRAIT,
                              measurement_validated=VALIDATED_HELD_OUT, pred_dirs=[bucket])
+
+
+def test_export_detection_csv_refusal_merges_the_tile_reconciler_binding_notes(tmp_path, monkeypatch):
+    """The typed refusal carries both reconcilers' binding notes, merging what the success
+    summary already merges: a refusal must not drop a tile-dimension binding note the same call's
+    own tile reconciler recorded, whichever dimension is what actually refuses."""
+    from tcip_mcp.pipelines import resolution as res
+    from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
+
+    bucket = _detection_bucket(tmp_path, "preds", validated=False)
+
+    def _fake_tile_recon(pred_dirs, **kw):
+        return {"operative": False, "validated": None, "per_bucket": {},
+               "unvalidated_buckets": [], "binding_notes": {bucket: "a tile-specific binding note"}}
+
+    monkeypatch.setattr(res, "reconcile_tile_size_validity", _fake_tile_recon)
+
+    with pytest.raises(ValueError) as exc_info:
+        export_detection_csv([{"image": "a.jpg", "count": 3}], str(tmp_path / "o.csv"),
+                             trait=fx.COUNT_TRAIT, pred_dirs=[bucket])
+    assert "a tile-specific binding note" in str(exc_info.value)
 
 
 def test_a_wrong_kind_assertion_floors_a_valid_bucket(tmp_path):
@@ -545,18 +580,21 @@ def test_tabulate_counts_refuses_fabricated_tile_size_even_with_validated_conf(t
     """A fabricated tile_size must gate the same way an unvalidated conf does: a checkpoint with
     no persisted training geometry must not ship a real count here while run_full_frame_evaluation
     refuses to even measure that regime. A cleanly-validated conf must not paper over an
-    ungrounded tile scale."""
+    ungrounded tile scale: the shared publish bracket's own tile-only gate refuses before the
+    bucket lands, so no predictions_dir read-back can retroactively deliver a real count from it."""
     import tcip_mcp.tools.inference_tools as itools
 
     monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_with(
         conf_ref=VALIDATED_HELD_OUT,
         tile_size_prov={"value": 640, "requires_validation": True,
                         "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
     r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path))
+                               trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
+                               predictions_dir=str(bucket))
     assert "error" in r
-    assert r["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself is fine...
-    assert r["tile_size_validated"] == VALIDATED_FALSE           # ...tile_size is what refuses
+    assert r["tile_size_validated"] == VALIDATED_FALSE  # tile_size is what refuses
+    assert not bucket.exists()                          # the bracket left it unpublished
     assert not (tmp_path / "o.csv").exists()
 
 
@@ -625,24 +663,38 @@ def test_tabulate_counts_without_a_persisted_bucket_cannot_deliver_a_validated_c
 
 
 def test_tabulate_counts_acknowledge_unvalidated_tile_size_floors_csv_stamp_despite_valid_conf(
-    tmp_path, monkeypatch,
+    tmp_path,
 ):
-    """A CSV whose conf is genuinely validated but whose tile_size only shipped via
-    acknowledge_unvalidated must not stamp measurement_validated as if the whole delivery were
-    trustworthy: the single CSV column must reflect the floor across every gated dimension, not
-    just conf's own (possibly-real) reference."""
+    """A CSV whose conf is genuinely validated but whose tile_size has no real basis must not
+    stamp measurement_validated as if the whole delivery were trustworthy: the single CSV column
+    must reflect the floor across every gated dimension, not just conf's own (possibly-real)
+    reference. Exercised through a real bucket, so the flooring is read off the writer's own
+    reconciled gate (column_stamp) rather than the no-pred_dirs floor a caller-asserted string
+    would hit with no bucket at all."""
     import tcip_mcp.tools.inference_tools as itools
+    from tcip_mcp.pipelines.postprocessing.export import write_predictions_json
 
-    monkeypatch.setattr(itools, "_run_inference_verified", _fake_run_inference_with(
-        conf_ref=VALIDATED_HELD_OUT,
-        tile_size_prov={"value": 640, "requires_validation": True,
-                        "validation_kind": "geometry", "validated_against": VALIDATED_FALSE}))
-    r = itools.tabulate_counts(_dummy_checkpoint(tmp_path), str(tmp_path), str(tmp_path / "o.csv"),
-                               trait=fx.COUNT_TRAIT, calibration_labels_dir=str(tmp_path),
-                               acknowledge_unvalidated=True)
-    assert "error" not in r
-    # No pred_dirs at all here (no bucket): the writer floors regardless of conf's own reference.
-    assert r["measurement_validated"] == VALIDATED_FALSE
+    bucket = tmp_path / "ds" / "predictions" / "baseline" / "2026-01-01"
+    write_predictions_json(
+        bucket / "a.json", {"image": "a.png", "width": 100, "height": 100,
+                           "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1],
+                           "count": 1},
+        created_by="test-producer", id_map={fx.COUNT_SUBJECT: 0})
+    stamp = {"trait": fx.COUNT_TRAIT, "images_dir": str(tmp_path), "raster_path": None,
+             "validated": True,
+             "operating_point": {
+                 "conf": {"value": 0.6, "validated_against": VALIDATED_HELD_OUT},
+                 "tile_size": {"value": 640, "requires_validation": True,
+                              "validation_kind": "geometry", "validated_against": VALIDATED_FALSE},
+             }}
+    write_bound_sidecar(bucket, stamp, dataset_root=tmp_path / "ds", experiment_id="exp-tile-floor")
+
+    r = itools.tabulate_counts(predictions_dir=str(bucket), output_path=str(tmp_path / "o.csv"),
+                               trait=fx.COUNT_TRAIT, acknowledge_unvalidated=True)
+    assert "error" not in r, r
+    assert r["operating_point_validated"] == VALIDATED_HELD_OUT  # conf itself is fine...
+    assert r["tile_size_validated"] == VALIDATED_FALSE           # ...tile_size is what floors
+    assert r["measurement_validated"] == VALIDATED_FALSE         # the column floors across the gate
 
 
 # ── export_predictions gates tile_size too: it is the door that actually persists a bucket ──
