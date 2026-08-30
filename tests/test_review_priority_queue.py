@@ -97,7 +97,7 @@ def test_job_completes_and_carries_the_tool_s_own_queue(client, tmp_path: Path, 
     assert len(calls) == 1
     assert calls[0]["dataset_root"] == str(tmp_path)
     assert "review_state_dir" not in calls[0]
-    # The route calls the ranking tool only; triage_predictions's auto-accept-as-GT path is not reachable through it.
+    # The route never sends a strategy kwarg: prioritize_review_queue accepts none since the split.
     assert "strategy" not in calls[0]
 
 
