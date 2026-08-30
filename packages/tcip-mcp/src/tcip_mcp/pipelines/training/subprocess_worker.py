@@ -174,8 +174,9 @@ def run(run_id: str, experiment_id: str, output_dir: str, resume_from: str) -> N
     executing in this dedicated process instead."""
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
     from tcip_mcp.pipelines.training.generic_trainer import (
-        attach_run, seeded_loader_kwargs, stamp_effective_data_geometry, task_collate,
+        seeded_loader_kwargs, stamp_effective_data_geometry, task_collate,
     )
+    from tcip_mcp.pipelines.training.run_registry import attach_run
     from tcip_mcp.pipelines.data.split_construction import (
         auto_train_val, dataset_identity, persist_split_manifest,
     )

@@ -27,11 +27,8 @@ pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader
 
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
-    create_run,
-    task_collate,
-    train,
-)
+from tcip_mcp.pipelines.training.generic_trainer import task_collate, train  # noqa: E402
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 

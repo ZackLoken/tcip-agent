@@ -125,7 +125,8 @@ def test_one_epoch_logs_one_row_when_the_run_writes_where_its_record_lives(tmp_p
     from tcip_store import read_log
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tests.tiny_trainer_fixtures import ConstantImageDataset
 
     experiment_id = "exp-016-currant-berry-reg"
@@ -197,7 +198,7 @@ def test_a_run_with_no_experiment_record_still_logs_beside_its_own_artifacts(tmp
     from tcip_store import read_log
 
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import trial_metrics_key
 
     trial_dir = tmp_path / "sweep" / "trial_7"

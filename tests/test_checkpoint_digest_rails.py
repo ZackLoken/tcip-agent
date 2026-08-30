@@ -531,7 +531,7 @@ def test_registration_failure_after_completion_is_recorded_in_the_audit_log(tmp_
     import tcip_mcp.experiments as experiments_mod
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.pipelines.training.envelope import TrainContext, _finalize_run
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     exp_id = "exp-rail11"
@@ -624,7 +624,7 @@ def test_ctx_save_checkpoint_refuses_a_state_naming_the_reserved_schema_version_
 ):
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run({"data": {}}, str(tmp_path / "out"))
     ctx = TrainContext(run=run, train_loader=None)
@@ -637,7 +637,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path, mon
     """The admitting half: an ordinary bespoke state, through a real ctx.save_checkpoint call."""
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path))
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     run = create_run({"data": {}}, str(tmp_path / "out"))
     ctx = TrainContext(run=run, train_loader=None)

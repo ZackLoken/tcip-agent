@@ -65,7 +65,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tcip_mcp.pipelines.model_contract import overfit_check
     from tcip_mcp.pipelines.operating_point import records_over_loader, resolve_operating_point
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     # 1. Synthetic detection data: elongated (tall) boxes so GT-derived anchors differ from defaults.
     images_dir = tmp_path / "images"

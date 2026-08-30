@@ -6,7 +6,7 @@ torch = pytest.importorskip("torch")
 
 
 def test_cancel_run_helper_and_tool():
-    from tcip_mcp.pipelines.training.generic_trainer import cancel_run, create_run
+    from tcip_mcp.pipelines.training.run_registry import cancel_run, create_run
     from tcip_mcp.tools.training_tools import cancel_training
 
     run = create_run({"model_source": {"builder": "x:y"}}, "out")
@@ -25,7 +25,8 @@ def test_cancel_before_training_yields_cancelled(tmp_path):
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.run_registry import create_run
 
     images_dir = tmp_path / "images"
     images_dir.mkdir()

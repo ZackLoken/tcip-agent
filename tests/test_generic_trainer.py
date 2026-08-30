@@ -8,10 +8,9 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.training import generic_trainer as gt
-from tcip_mcp.pipelines.training.generic_trainer import (
-    create_run,
-    train,
-)
+from tcip_mcp.pipelines.training import run_registry as rr
+from tcip_mcp.pipelines.training.generic_trainer import train
+from tcip_mcp.pipelines.training.run_registry import create_run
 
 
 # ====================================================================
@@ -44,8 +43,8 @@ def test_create_run_ids_unique_across_threads():
     assert len(set(results)) == n
     # Every run must be retrievable under its own id (no silent overwrite).
     for run_id in results:
-        assert gt.get_run(run_id) is not None
-        assert gt.get_run(run_id).run_id == run_id
+        assert rr.get_run(run_id) is not None
+        assert rr.get_run(run_id).run_id == run_id
 
 
 # ====================================================================

@@ -191,7 +191,7 @@ def _capture_run_test_evaluation(monkeypatch):
 
 def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 

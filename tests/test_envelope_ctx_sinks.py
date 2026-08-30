@@ -17,7 +17,7 @@ import tcip_store as ts
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_mcp.tools.training_tools import trial_metrics_key_for_dir  # noqa: E402
 
 CONFIG = {"model_source": {"builder": "x:y", "task": "detection", "in_chans": 5}, "device": "cpu"}

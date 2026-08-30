@@ -44,7 +44,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     """With no caller-supplied subject, the evaluation dataset reads the subject the run trained
     on, so the ground truth it scores against holds that subject's objects and no others."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -78,7 +78,7 @@ def test_a_caller_supplied_subject_still_wins_over_the_runs_own(
     """Reuse never overrides an explicit scope: evaluating the same run against another subject
     stays possible, and reads that subject's ground truth."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.pipelines.training.generic_trainer import create_run
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 

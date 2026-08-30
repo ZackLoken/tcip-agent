@@ -21,7 +21,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.audit import audit_log_key  # noqa: E402
 from tcip_mcp.experiments import env_key, status_key  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import create_run  # noqa: E402
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
 
 def _audit_statuses(root, tool="training_run"):

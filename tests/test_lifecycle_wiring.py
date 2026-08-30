@@ -68,7 +68,8 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tests.tiny_trainer_fixtures import ConstantImageDataset
 
     train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
@@ -117,7 +118,8 @@ def test_a_diverged_stock_run_registers_with_trainer_source_and_a_null_loss(tmp_
     from tcip_mcp.experiments import create_experiment, update_status
     from tcip_mcp.model_registry import ModelRegistry
     from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tests.tiny_trainer_fixtures import ConstantImageDataset
 
     train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])

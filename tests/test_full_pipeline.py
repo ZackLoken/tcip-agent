@@ -89,7 +89,8 @@ class TestFullClassificationPipeline:
         assert "labels" in batch_targets
 
         # --- Step 4: Create run and train 2 epochs ---
-        from tcip_mcp.pipelines.training.generic_trainer import create_run, train
+        from tcip_mcp.pipelines.training.generic_trainer import train
+        from tcip_mcp.pipelines.training.run_registry import create_run
 
         config = {
             "model_source": model_source,
@@ -221,9 +222,8 @@ class TestDetectionPipelineRealData:
 
     def test_build_train_infer_export(self, detection_output_dir, tmp_path):
         from tcip_mcp.pipelines.data.datasets import build_dataset
-        from tcip_mcp.pipelines.training.generic_trainer import (
-            create_run, train, task_collate,
-        )
+        from tcip_mcp.pipelines.training.generic_trainer import train, task_collate
+        from tcip_mcp.pipelines.training.run_registry import create_run
         from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
         from tcip_mcp.pipelines.postprocessing.export import export_detection_csv
 

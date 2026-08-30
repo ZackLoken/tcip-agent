@@ -465,7 +465,7 @@ class TestTrainingToolOutputSchema:
         from tcip_annotation import json_io
         from tcip_annotation.state import Annotation, BBox
         from tcip_mcp.pipelines.training import tensorboard_manager
-        from tcip_mcp.pipelines.training.generic_trainer import get_run
+        from tcip_mcp.pipelines.training.run_registry import get_run
         from tcip_mcp.tools import training_tools
 
         images_dir, labels_dir = tmp_path / "images", tmp_path / "labels"
@@ -520,7 +520,7 @@ class TestTrainingToolOutputSchema:
         progress, so a caller tracking several runs at once can tell the answers apart. An
         identifier that names no run is refused rather than answered for some other run.
         """
-        from tcip_mcp.pipelines.training.generic_trainer import create_run
+        from tcip_mcp.pipelines.training.run_registry import create_run
         from tcip_mcp.tools import training_tools
 
         early = create_run({"seed": 11}, str(tmp_path / "early"))

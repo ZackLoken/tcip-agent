@@ -21,9 +21,8 @@ from torch import nn  # noqa: E402
 from torch.utils.data import DataLoader  # noqa: E402
 
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
-    create_run, task_collate, train,
-)
+from tcip_mcp.pipelines.training.generic_trainer import task_collate, train  # noqa: E402
+from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale, snapshot_optimizer_state, restore_optimizer_state,
 )

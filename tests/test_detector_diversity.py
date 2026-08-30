@@ -82,7 +82,8 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     from torchvision.utils import save_image
     from torch.utils.data import DataLoader
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import create_run, task_collate, train
+    from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+    from tcip_mcp.pipelines.training.run_registry import create_run
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
