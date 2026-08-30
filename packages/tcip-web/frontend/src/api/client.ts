@@ -453,9 +453,8 @@ export const api = {
       }>(`${ROUTES.getReviewImageStatuses}?${qs.toString()}`);
     },
 
-    // Launch the active-learning priority queue (informativeness ranking only, never the
-    // confidence_triage/auto-accept-as-GT strategy, which stays agent-only) as a background job;
-    // poll launchPriorityQueue's job_id via priorityQueueJob until status is a terminal value.
+    // Launch the active-learning priority queue (ranking only; triage_predictions's
+    // auto-accept-as-GT path stays agent-only) as a background job; poll its job_id via priorityQueueJob until terminal.
     launchPriorityQueue: (body: {
       dataset_root: string;
       checkpoint_path: string;
