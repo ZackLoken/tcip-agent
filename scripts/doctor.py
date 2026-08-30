@@ -221,18 +221,19 @@ def check_registry(root: Path, findings: list) -> None:
     from tcip_store import StoreError
 
     from tcip_mcp.dataset_layout import list_models, prediction_root
-    from tcip_mcp.model_registry import read_registry_index
+    from tcip_mcp.model_registry import RegistryVersionRefused, read_registry_index
     from tcip_mcp.pipelines.resolution import read_operating_point_sidecar
+    from tcip_mcp.registry_paths import RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path
 
     try:
         entries = read_registry_index(root)
-    except StoreError as exc:
+    except (StoreError, RegistryVersionRefused) as exc:
         findings.append(("error", "the model registry index will not decode or read, so this "
                         f"project's registered models could not be checked at all: {exc}"))
         return
     entry_list = entries if isinstance(entries, list) else []
     for m in entry_list:
-        ckpt = m.get("checkpoint_path", "")
+        ckpt_raw = m.get("checkpoint_path", "")
         if "metrics_source" not in m:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
                             "metrics_source (predates the field, and experiment_id with it); "
@@ -242,10 +243,19 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(("warn", f"{m.get('name')!r} in the model registry carries no "
                             "experiment_id (predates the producer-binding field); conform it "
                             "with scripts/conform_registry_experiment_id.py"))
+        if not ckpt_raw:
+            continue
+        # Existence resolves first; the temp-tree marker scan runs over the resolved string.
+        try:
+            ckpt = str(resolved_registry_path(root, ckpt_raw))
+        except (RegistryPathEmpty, RegistryPathTraversal) as exc:
+            findings.append(("error", f"registry entry {m.get('name')!r} checkpoint_path "
+                            f"could not be resolved: {exc}"))
+            continue
         if any(marker in ckpt for marker in TEMP_TREE_MARKERS):
             findings.append(("error", f"registry entry {m.get('name')!r} points at a test/temp "
                             f"checkpoint: {ckpt}"))
-        elif ckpt and not Path(ckpt).is_file():
+        elif not Path(ckpt).is_file():
             findings.append(("error", f"registry entry {m.get('name')!r} checkpoint missing: {ckpt}"))
 
     # A bucket predating the checkpoint-digest rail may name a digest no entry carries; visible
