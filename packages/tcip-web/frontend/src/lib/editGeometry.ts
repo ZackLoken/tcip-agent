@@ -5,6 +5,7 @@
  */
 
 import { pointInPolygon, polygonBbox } from "@/lib/polygonGeometry";
+import type { ReviewGeom } from "@/lib/reviewGeometry";
 
 /** The smallest side, in image pixels, a box may be drawn, resized or moved to and still be
  *  kept: below it, a commit is refused with a toast rather than writing a sliver. */
@@ -132,4 +133,15 @@ export function applyEditDrag(
     };
   }
   return { shape, drag };
+}
+
+/** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN,
+ *  what a save replaces, or the prediction for an FP, which a save adds). Deep-copied so dragging
+ *  never mutates matches. Single-ring by construction: hand-editing adjusts one contour, and
+ *  ``/review/action``'s ``edited_points`` carries exactly one (startEdit turns a multi-part shape
+ *  away rather than seeding one part and saving it as the whole object). A point never gets here:
+ *  the editor authors an outline, and there is no outline a location could stand in for. */
+export function seedEditShape(geom: Exclude<ReviewGeom, { kind: "point" }>): EditShape {
+  if (geom.kind === "box") return { kind: "box", box: geom.box };
+  return { kind: "polygon", points: geom.rings[0].map((p): [number, number] => [p[0], p[1]]) };
 }

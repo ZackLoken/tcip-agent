@@ -33,6 +33,7 @@ import {
   clampShapeToImage,
   hitTestEdit,
   MIN_BOX_SIDE,
+  seedEditShape,
   type EditDrag,
   type EditShape,
 } from "@/lib/editGeometry";
@@ -69,17 +70,6 @@ const COLOR_LABELS: { key: keyof ReviewColors; label: string; tag: string; dashe
   { key: "active", label: "Under review", tag: "active", dashed: true },
 ];
 const HANDLE_HIT_PX = 10; // screen-px hit radius for edit handles
-
-/** The shape Edit picks up, from the geometry the detection draws as (the matched GT for a TP/FN,
- *  what a save replaces, or the prediction for an FP, which a save adds). Deep-copied so dragging
- *  never mutates matches. Single-ring by construction: hand-editing adjusts one contour, and
- *  ``/review/action``'s ``edited_points`` carries exactly one (startEdit turns a multi-part shape
- *  away rather than seeding one part and saving it as the whole object). A point never gets here:
- *  the editor authors an outline, and there is no outline a location could stand in for. */
-function seedEditShape(geom: Exclude<ReviewGeom, { kind: "point" }>): EditShape {
-  if (geom.kind === "box") return { kind: "box", box: geom.box };
-  return { kind: "polygon", points: geom.rings[0].map((p): [number, number] => [p[0], p[1]]) };
-}
 
 const TYPE_ORDER: ("tp" | "fp" | "fn")[] = ["tp", "fp", "fn"];
 

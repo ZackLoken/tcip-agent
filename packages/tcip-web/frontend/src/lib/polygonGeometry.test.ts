@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   computePolygonBboxes,
+  derivedBoxFromPolygon,
   findHitPoint,
   findHoveredPolygon,
   pointInPolygon,
   pointInRings,
+  pointToSegmentDist,
   polygonBbox,
   ringsBbox,
+  withRing,
 } from "@/lib/polygonGeometry";
+import type { PolygonShape } from "@/store/types";
 
 const SQUARE: [number, number][] = [
   [0, 0],
@@ -161,5 +165,73 @@ describe("findHoveredPolygon (bbox-prefiltered hover scan)", () => {
     expect(findHoveredPolygon([5, 5], multi, bb)).toBe(0);
     expect(findHoveredPolygon([105, 105], multi, bb)).toBe(0);
     expect(findHoveredPolygon([50, 50], multi, bb)).toBeNull(); // between the parts, inside the bbox
+  });
+});
+
+describe("derivedBoxFromPolygon", () => {
+  it("carries the polygon's subject onto its footprint box", () => {
+    const p: PolygonShape = { rings: [SQUARE], subject: "trunk", attributes: {} };
+    expect(derivedBoxFromPolygon(p)).toEqual({
+      x1: 0,
+      y1: 0,
+      x2: 10,
+      y2: 10,
+      subject: "trunk",
+      attributes: {},
+    });
+  });
+
+  it("spans every ring, not just the first (an occlusion-split shape's whole footprint)", () => {
+    const p: PolygonShape = { rings: [SQUARE, FAR_SQUARE], subject: "trunk", attributes: {} };
+    expect(derivedBoxFromPolygon(p)).toEqual({
+      x1: 0,
+      y1: 0,
+      x2: 110,
+      y2: 110,
+      subject: "trunk",
+      attributes: {},
+    });
+  });
+});
+
+describe("withRing", () => {
+  it("replaces one ring, leaving the rest of the annotation untouched", () => {
+    const p: PolygonShape = {
+      rings: [SQUARE, FAR_SQUARE],
+      subject: "trunk",
+      attributes: { health: "good" },
+    };
+    const replaced: [number, number][] = [
+      [0, 0],
+      [5, 0],
+      [5, 5],
+    ];
+    const next = withRing(p, 0, replaced);
+    expect(next.rings).toEqual([replaced, FAR_SQUARE]);
+    expect(next.subject).toBe("trunk");
+    expect(next.attributes).toEqual({ health: "good" });
+    expect(p.rings[0]).toEqual(SQUARE); // the input is not mutated
+  });
+});
+
+describe("pointToSegmentDist", () => {
+  it("projects onto the segment interior and reports its fraction", () => {
+    const r = pointToSegmentDist(5, 5, 0, 0, 10, 0);
+    expect(r.dist).toBe(5);
+    expect(r.t).toBe(0.5);
+    expect(r.proj).toEqual([5, 0]);
+  });
+
+  it("clamps the projection to an endpoint past the segment", () => {
+    const r = pointToSegmentDist(-5, 5, 0, 0, 10, 0);
+    expect(r.t).toBe(0);
+    expect(r.proj).toEqual([0, 0]);
+    expect(r.dist).toBeCloseTo(Math.hypot(5, 5));
+  });
+
+  it("degenerates to point distance when the segment has zero length", () => {
+    const r = pointToSegmentDist(3, 4, 0, 0, 0, 0);
+    expect(r.dist).toBe(5);
+    expect(r.proj).toEqual([0, 0]);
   });
 });
