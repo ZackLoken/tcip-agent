@@ -37,10 +37,12 @@ carries which trait; verify there, never assert from memory.
 Reproductive and vegetative events run in a genotype- and site-specific sequence:
 dormancy → budbreak → bloom → fruit/nut set → ripening → harvest → senescence. Timing is
 commonly framed with Growing Degree Days (GDD): thermal accumulation above a base
-temperature predicts transitions such as bloom onset. GDD is a *scheduling* aid: it tells
-you roughly when to fly or walk a row, and it transfers poorly across sites and cultivars
-(a Northern-Hemisphere synthesis found GDD explained on average only ~67% of
-growing-season-onset variance). It does not read a phenophase from an image.
+temperature predicts phenophase transitions. GDD is a *scheduling* aid: it tells
+you roughly when to fly or walk a row, and it transfers poorly across sites and cultivars.
+An uncited literature recollection holds that GDD explains only around two-thirds of
+growing-season-onset variance on average; no source is retained for that figure, so treat it
+as an unconfirmed recollection, not a settled number, until a citation is found. It does not
+read a phenophase from an image.
 
 The consequence for capture: a milestone trait is a crossing between two visit dates,
 not a single-image reading. Date traits (`catkin_05per_date`, `catkin_50per_date`,

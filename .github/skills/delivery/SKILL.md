@@ -164,7 +164,8 @@ door; the measurement gate lives at the final phenotype door.
 
 Before delivery, verify:
 1. Completeness: Every plant has values for all expected traits
-2. Range: Values within biological plausibility (e.g., fruit diameter 1-15cm)
+2. Range: Values within biological plausibility. The plausible range is the breeder's own
+   account or a `crops.yml` fact, checked at review; the platform states no number of its own
 3. Outliers: Flag statistical outliers for manual review
 4. Confidence: Reject predictions below a confidence operating point derived from the data in hand (per the "derive, don't pin" rule), not a frozen constant; the right cutoff varies by dataset, model, and trait
 5. No duplicates: One value per plant per trait per date
