@@ -1,7 +1,5 @@
 import type { AttributeDef } from "@/api/classes";
 
-// The reset option's glyph, by code point rather than the literal character (an em dash).
-
 /** One `<select>` per declared attribute of the subject; empty resets the value. */
 export function AttributeEditors({
   subject,
