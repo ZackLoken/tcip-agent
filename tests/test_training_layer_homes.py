@@ -176,6 +176,48 @@ def test_label_query_functions_have_one_home():
     )
 
 
+def _assign_name_counts(path: Path) -> Counter:
+    """Every module-level (``tree.body``) ``ast.Assign``/``ast.AnnAssign`` simple-name target in
+    ``path``, for a constant's one-home check: unlike a def, a constant's home is meaningfully
+    only its module-level binding, not one nested inside a function or class body."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    counts: Counter = Counter()
+    for node in tree.body:
+        targets: list[ast.AST] = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for t in targets:
+            if isinstance(t, ast.Name):
+                counts[t.id] += 1
+    return counts
+
+
+def test_dataset_fingerprint_functions_have_one_home():
+    """The fingerprint block (``dataset_fingerprint``, its four term helpers and
+    ``fingerprint_formula_version``) moved out of ``resolution.py`` into
+    ``pipelines/data/dataset_fingerprint.py``, the formula untouched."""
+    _assert_one_home(
+        {"dataset_fingerprint", "_labels_term", "_images_term", "_registry_term",
+         "_confirmations_term", "fingerprint_formula_version"},
+        _module_path("pipelines/resolution.py"),
+        _module_path("pipelines/data/dataset_fingerprint.py"),
+    )
+
+
+def test_fingerprint_formula_version_constant_has_one_home():
+    old_path = _module_path("pipelines/resolution.py")
+    new_path = _module_path("pipelines/data/dataset_fingerprint.py")
+    assert "FINGERPRINT_FORMULA_VERSION" not in _assign_name_counts(old_path)
+    assert _assign_name_counts(new_path)["FINGERPRINT_FORMULA_VERSION"] == 1
+    for root in _package_roots():
+        for py_file in root.rglob("*.py"):
+            if py_file in (old_path, new_path):
+                continue
+            assert "FINGERPRINT_FORMULA_VERSION" not in _assign_name_counts(py_file), py_file
+
+
 def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
     return [
         node for node in ast.walk(tree)

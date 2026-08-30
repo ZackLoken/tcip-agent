@@ -167,7 +167,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     is required, never inferred from a path or slug. ``id`` is minted once and preserved across
     re-runs and path moves; ``fingerprint`` is the whole-dataset content digest (labels + image pixels
     + registry + confirmed negatives), recomputed here, but the stored value is a cache, and
-    recompute-on-read (``resolution.dataset_fingerprint``) is the authority.
+    recompute-on-read (``dataset_fingerprint.dataset_fingerprint``) is the authority.
 
     The identity write is compare-and-set against the version this call read, so two first-time
     registrations cannot each mint an id and leave the loser's id cited by records the winner's
@@ -189,7 +189,7 @@ def register_dataset(dataset_root: str, crop: str, project_root: str = "") -> di
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.dataset_layout import decode_dataset_identity, dataset_identity_key
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
     root = Path(dataset_root)
     if not root.is_dir():

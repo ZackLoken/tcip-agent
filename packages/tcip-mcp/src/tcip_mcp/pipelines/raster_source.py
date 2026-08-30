@@ -1004,8 +1004,8 @@ class RasterIdentity:
     """One raster file's own content identity: header facts plus a deterministic, seeded pixel
     checksum.
 
-    A sibling primitive to ``resolution.dataset_hash``/``resolution.dataset_fingerprint``, never
-    an extension of either: those identify a whole *dataset's* ground truth (or ground truth +
+    A sibling primitive to ``resolution.dataset_hash``/``dataset_fingerprint.dataset_fingerprint``,
+    never an extension of either: those identify a whole *dataset's* ground truth (or ground truth +
     pixels + registry + confirmations) across many images, a coarser granularity that answers a
     different question ("is this the same dataset") than the one this class answers ("is this the
     same raster file"). ``pixel_checksum`` is the discriminating term (two different rasters of

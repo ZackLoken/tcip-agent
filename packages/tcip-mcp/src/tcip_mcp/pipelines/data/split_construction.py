@@ -32,7 +32,7 @@ def dataset_identity(data_cfg: dict) -> tuple[str | None, str | None]:
     from tcip_store import SchemaVersionRefused
 
     from tcip_mcp.dataset_layout import dataset_root_of, require_dataset_identity
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
     root = dataset_root_of(images_dir)
     if root is None:

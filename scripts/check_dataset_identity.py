@@ -20,7 +20,7 @@ from pathlib import Path
 from tcip_store import SchemaVersionRefused
 
 from tcip_mcp.dataset_layout import require_dataset_identity
-from tcip_mcp.pipelines.resolution import (
+from tcip_mcp.pipelines.data.dataset_fingerprint import (
     FINGERPRINT_FORMULA_VERSION,
     dataset_fingerprint,
     fingerprint_formula_version,

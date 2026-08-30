@@ -562,7 +562,7 @@ def make_splits(
         refuse_insufficient_foreground_groups,
         resolve_group_key_fn,
     )
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
     kept_splits = SPLIT_NAMES
     out_dir = Path(output_path) if output_path else (Path(folder_path) / "splits" if materialize else None)

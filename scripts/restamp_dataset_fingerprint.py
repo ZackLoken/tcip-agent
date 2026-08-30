@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from tcip_store.binding import bind_default  # noqa: E402
 
 from tcip_mcp.dataset_layout import require_dataset_identity  # noqa: E402
-from tcip_mcp.pipelines.resolution import (  # noqa: E402
+from tcip_mcp.pipelines.data.dataset_fingerprint import (  # noqa: E402
     FINGERPRINT_FORMULA_VERSION,
     dataset_fingerprint,
     fingerprint_formula_version,

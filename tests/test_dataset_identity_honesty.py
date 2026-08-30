@@ -14,7 +14,7 @@ from PIL import Image
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.pipelines.resolution import dataset_fingerprint
+from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
 _DATE = "2026-02-11"
 

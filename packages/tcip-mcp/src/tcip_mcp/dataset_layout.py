@@ -341,7 +341,8 @@ def dataset_identity_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/dataset.json``: the dataset's identity ({crop, id, fingerprint}).
 
     Sibling of ``classes.json``: identity is part of the data, so it travels with the image set. The
-    stored fingerprint is a cache; recompute-on-read (``resolution.dataset_fingerprint``) is authority.
+    stored fingerprint is a cache; recompute-on-read (``dataset_fingerprint.dataset_fingerprint``)
+    is authority.
     """
     return _entry_path(_DATASET_DOC, dataset_root, _DATASET_IDENTITY_PARTS)
 

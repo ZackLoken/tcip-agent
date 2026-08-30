@@ -58,7 +58,7 @@ def _dataset(tmp_path: Path, *, negative: bool = False, subjects=(Subject(name="
 
 # (a) fail-before: the fingerprint was blind to confirmed-negative membership.
 def test_dataset_fingerprint_changes_with_confirmed_negatives(tmp_path):
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
     root = _dataset(tmp_path, negative=False)
     before = dataset_fingerprint(root)
@@ -76,7 +76,7 @@ def test_dataset_fingerprint_changes_with_confirmed_negatives(tmp_path):
 def test_dataset_fingerprint_stable_with_no_confirmations_store(tmp_path):
     """The confirmations term must not null the whole fingerprint (matches the registry term's
     optional/additive convention); a dataset with zero confirmed negatives is still valid content."""
-    from tcip_mcp.pipelines.resolution import dataset_fingerprint
+    from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
 
     root = _dataset(tmp_path, negative=False)
     assert dataset_fingerprint(root) is not None
