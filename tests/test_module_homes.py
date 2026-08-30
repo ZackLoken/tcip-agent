@@ -25,6 +25,14 @@ def _module_path(rel: str) -> Path:
     return _src_root() / rel
 
 
+def _web_src_root() -> Path:
+    return Path(tcip_web.__file__).resolve().parent
+
+
+def _web_module_path(rel: str) -> Path:
+    return _web_src_root() / rel
+
+
 def _package_roots() -> tuple[Path, Path]:
     """The two packages a moved training-layer/tools name could still be hiding in as a real
     duplicate: the platform package the reshape happened in, and the one engine package it
@@ -370,3 +378,28 @@ def test_accept_proposals_is_absent_from_package_source():
         for py_file in root.rglob("*.py"):
             text = py_file.read_text(encoding="utf-8")
             assert "accept_proposals" not in text, f"{py_file} still names accept_proposals"
+
+
+def test_review_priority_queue_no_longer_defines_its_own_dict_and_lock():
+    """The priority-queue registry's dict-plus-lock state moved onto jobstore.JobRegistry
+    (checked below); review.py keeps only its routes and its own job dataclass and worker."""
+    path = _web_module_path("routes/review.py")
+    assert path.is_file()
+    stray = {"_pq_jobs", "_pq_lock"} & set(_assign_name_counts(path))
+    assert not stray, f"review.py still defines {sorted(stray)}"
+
+
+def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shape():
+    """jobstore.JobRegistry is the one home for the register/get/persist/rehydrate shape
+    review.py's priority queue and images.py's overview builds used to restate around their own
+    dict-plus-lock registry (inference.py and tuning.py adopt the same class, keeping their own
+    dict/lock bound under their historical names for callers that already reach into them)."""
+    jobstore_path = _web_module_path("jobstore.py")
+    assert jobstore_path.is_file()
+    counts = _def_name_counts(jobstore_path, node_types=(ast.ClassDef,))
+    assert counts["JobRegistry"] == 1, "jobstore.py does not define JobRegistry exactly once"
+    for py_file in _web_src_root().rglob("*.py"):
+        if py_file == jobstore_path:
+            continue
+        other = _def_name_counts(py_file, node_types=(ast.ClassDef,))
+        assert "JobRegistry" not in other, f"{py_file} also defines JobRegistry"

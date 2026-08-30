@@ -254,11 +254,11 @@ def test_review_priority_queue_persists_lists_and_rehydrates_per_root_across_a_r
         assert [d["job_id"] for d in docs_a] == ["pq-a1"]
         assert [d["job_id"] for d in docs_b] == ["pq-b1"]
 
-        review._pq_jobs.clear()
+        review._pq_registry.jobs.clear()
         review.rehydrate_for_current_root()
-        assert set(review._pq_jobs) == {"pq-b1"}
+        assert set(review._pq_registry.jobs) == {"pq-b1"}
     finally:
-        review._pq_jobs.clear()
+        review._pq_registry.jobs.clear()
 
 
 def test_review_priority_queue_rehydrate_restores_the_persisted_queue(tmp_path, monkeypatch):
@@ -271,13 +271,13 @@ def test_review_priority_queue_rehydrate_restores_the_persisted_queue(tmp_path, 
         status="completed", queue=[{"image": "a.jpg", "score": 0.9}],
     )
     review._pq_register(job)
-    review._pq_jobs.clear()
+    review._pq_registry.jobs.clear()
 
     try:
         review.rehydrate_for_current_root()
-        assert review._pq_jobs["pq-done"].queue == [{"image": "a.jpg", "score": 0.9}]
+        assert review._pq_registry.jobs["pq-done"].queue == [{"image": "a.jpg", "score": 0.9}]
     finally:
-        review._pq_jobs.clear()
+        review._pq_registry.jobs.clear()
 
 
 def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_path, monkeypatch):
@@ -294,15 +294,15 @@ def test_review_priority_queue_rehydrate_restores_calibration_marks_fields(tmp_p
         marks_unresolved="this run is bound to split manifest 'nope', but it could not be read",
     )
     review._pq_register(job)
-    review._pq_jobs.clear()
+    review._pq_registry.jobs.clear()
 
     try:
         review.rehydrate_for_current_root()
-        restored = review._pq_jobs["pq-unresolved"]
+        restored = review._pq_registry.jobs["pq-unresolved"]
         assert restored.marks_unresolved == (
             "this run is bound to split manifest 'nope', but it could not be read")
     finally:
-        review._pq_jobs.clear()
+        review._pq_registry.jobs.clear()
 
 
 def test_tuning_sweeps_persist_list_and_rehydrate_per_root_across_a_repin(tmp_path, monkeypatch):
@@ -462,7 +462,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_under_a_previous_root(tmp_p
 
     from tcip_mcp import workspace
     from tcip_web.routes.review import (
-        PriorityQueueJob, _pq_get, _pq_jobs, _pq_register, get_priority_queue_job,
+        PriorityQueueJob, _pq_get, _pq_register, _pq_registry, get_priority_queue_job,
     )
 
     job = PriorityQueueJob(
@@ -483,7 +483,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_under_a_previous_root(tmp_p
             get_priority_queue_job("pq-never-launched")
         assert miss.value.status_code == 404
     finally:
-        _pq_jobs.clear()
+        _pq_registry.jobs.clear()
 
 
 def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, monkeypatch):
@@ -522,3 +522,91 @@ def test_rehydrate_never_displaces_a_job_still_live_from_another_root(tmp_path, 
         assert job_a.done == 2 and job_a.total == 5
     finally:
         inference._jobs.clear()
+
+
+def test_job_registry_register_get_persist_rehydrate_match_the_module_shape(tmp_path, monkeypatch):
+    """jobstore.JobRegistry is the one home for the dict-plus-lock register/get/persist/rehydrate
+    shape review.py's priority queue, inference.py and tuning.py each adopt: a bare registry
+    constructed directly (no route, no module-specific dataclass) exercises the same four
+    operations the adopting modules now call through."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import JobRegistry, TERMINAL_STATUSES
+
+    root = str(tmp_path.resolve())  # rehydrate/load are keyed by the current root; a fake root
+                                     # string would persist under a key rehydrate never reads back.
+
+    class J:
+        def __init__(self, job_id, status="pending", platform_root=root):
+            self.job_id = job_id
+            self.status = status
+            self.platform_root = platform_root
+
+    def to_summary(j):
+        return {"job_id": j.job_id, "status": j.status, "platform_root": j.platform_root}
+
+    registry = JobRegistry("inference_jobs")
+    job = J("j1", status="completed")
+    registry.register(job.job_id, job, root=job.platform_root, to_summary=to_summary)
+
+    assert registry.get("j1") is job
+    assert registry.list(root) == [job]
+    assert registry.list("root-b") == []
+
+    registry.jobs.clear()
+
+    def factory(s, root):
+        return J(s["job_id"], status=s["status"], platform_root=s.get("platform_root") or root)
+
+    registry.rehydrate(factory)
+    assert registry.get("j1").status == "completed"
+    assert registry.get("j1").status in TERMINAL_STATUSES
+
+
+def test_job_registry_persist_is_a_no_op_for_an_unpersisted_registry(tmp_path, monkeypatch):
+    """images.py's overview-build registry carries no root concept and persists nothing:
+    JobRegistry(None) must not write or read anything through jobstore's own store."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import JobRegistry
+
+    registry = JobRegistry(None)
+    registry.register("ovr1", object(), root=None, to_summary=lambda j: {"job_id": "ovr1"})
+    registry.persist(lambda j: {"job_id": "ovr1"})  # no-op: no store binding required
+    registry.rehydrate(lambda s, root: s)  # no-op
+    assert list(registry.jobs) == ["ovr1"]
+
+
+def test_registered_job_summaries_persist_byte_stable_through_job_registry(tmp_path, monkeypatch):
+    """The persisted job_registry record must not change shape when a registry adopts
+    jobstore.JobRegistry. persist_grouped/load are unchanged by the reshape, so a summary
+    written directly through persist_grouped (the pre-adoption path every route's own ``_persist``
+    called) and the identical summary written through JobRegistry.persist (the post-adoption call
+    the adopting routes now make) must decode back to the identical record: value/structural
+    equality of the decoded JSON document, the idiom test_persist_grouped_writes_state_that_reads_back
+    above already uses for this store. A byte-for-byte comparison of the underlying storage would
+    additionally depend on which backend (sqlite/file) is bound, which the persisted shape itself
+    does not.
+    """
+    monkeypatch.chdir(tmp_path)
+    from tcip_web.jobstore import JobRegistry, load, persist_grouped
+
+    root = str(tmp_path.resolve())
+    summary = {"job_id": "a", "status": "completed", "done": 3, "total": 3,
+               "images_dir": "i", "output_dir": "o", "error": None,
+               "warning": None, "dropped_nonpositive_boxes": 0, "platform_root": root}
+
+    persist_grouped("inference_jobs", [summary])
+    before = load("inference_jobs")
+
+    class J:
+        pass
+
+    job = J()
+    for k, v in summary.items():
+        setattr(job, k, v)
+
+    registry = JobRegistry("inference_jobs")
+    registry.jobs["a"] = job
+    registry.persist(lambda j: {k: getattr(j, k) for k in summary})
+
+    after = load("inference_jobs")
+    assert after == before

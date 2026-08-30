@@ -50,8 +50,14 @@ class HPOJob:
     platform_root: str = field(default_factory=_current_root)
 
 
-_sweeps: dict[str, HPOJob] = {}
-_lock = threading.Lock()
+_registry = jobstore.JobRegistry(HPO_REGISTRY)
+"""The dict-plus-lock live registry for this route's own sweeps (see ``jobstore.JobRegistry``),
+the shared home review.py's priority queue and inference.py's jobs adopt too. ``_sweeps``/
+``_lock`` below are this registry's own dict and lock, bound under their historical names since
+callers (tests among them) already reach into them directly."""
+
+_sweeps: dict[str, HPOJob] = _registry.jobs
+_lock = _registry.lock
 _workers: dict[str, threading.Thread] = {}
 """Every sweep worker this process has spawned and not yet seen finish, by sweep id."""
 
@@ -191,9 +197,7 @@ def _sweep_launch_root(sweep_id: str) -> Optional[str]:
     The one lookup shared by everywhere a sweep's own files (its trial directory, its
     TensorBoard link farm) must be addressed under the root the sweep actually belongs to.
     """
-    from tcip_web import jobstore
-    with _lock:
-        job = jobstore.find_job(_sweeps, sweep_id)
+    job = _registry.get(sweep_id)
     return job.platform_root if job is not None else None
 
 
@@ -240,10 +244,7 @@ def _persist() -> None:
     reaches the right root's file even from a background worker after this process has since
     adopted another project.
     """
-    from tcip_web import jobstore
-    with _lock:
-        summaries = [_summary(j) for j in _sweeps.values()]
-    jobstore.persist_grouped(HPO_REGISTRY, summaries)
+    _registry.persist(_summary)
 
 
 def rehydrate_for_current_root() -> None:
@@ -259,20 +260,13 @@ def rehydrate_for_current_root() -> None:
     """
     from tcip_web import jobstore
 
-    root = jobstore.current_root()
-    with _lock:
-        for s in jobstore.load(HPO_REGISTRY):
-            sid = s.get("sweep_id")
-            if not sid or sid in _sweeps:
-                continue
-            status = s.get("status", "interrupted")
-            if status not in jobstore.TERMINAL_STATUSES:
-                status = "interrupted"
-            _sweeps[sid] = HPOJob(
-                sweep_id=sid, status=status, error=s.get("error"),
-                platform_root=s.get("platform_root") or root,
-            )
-        jobstore.evict_terminal(_sweeps, root)
+    def _from_summary(s: dict, root: str) -> HPOJob:
+        return HPOJob(
+            sweep_id=s["sweep_id"], status=jobstore.rehydrated_status(s), error=s.get("error"),
+            platform_root=s.get("platform_root") or root,
+        )
+
+    _registry.rehydrate(_from_summary, id_field="sweep_id")
 
 
 class LaunchHPOPayload(BaseModel):
@@ -320,7 +314,6 @@ def _worker(job: HPOJob, payload: LaunchHPOPayload, output_dir: str) -> None:
 def launch_hpo(payload: LaunchHPOPayload) -> dict:
     from tcip_mcp.tools.training_tools import hpo_root
 
-    from tcip_web import jobstore
     from tcip_web.paths import assert_path_allowed
 
     # Confine the client-supplied output dir when the server is locked down (no-op otherwise).
@@ -334,10 +327,7 @@ def launch_hpo(payload: LaunchHPOPayload) -> dict:
     output_dir = payload.output_dir or str(hpo_root())
 
     job = HPOJob(sweep_id=f"hpo-{uuid.uuid4().hex[:8]}")
-    with _lock:
-        _sweeps[job.sweep_id] = job
-        jobstore.evict_terminal(_sweeps, job.platform_root)  # bound this root's own share
-    _persist()
+    _registry.register(job.sweep_id, job, root=job.platform_root, to_summary=_summary)
     t = threading.Thread(target=_worker, args=(job, payload, output_dir), daemon=True)
     with _lock:
         for sweep_id in [sid for sid, done in _workers.items() if not done.is_alive()]:
@@ -358,9 +348,7 @@ def list_sweeps() -> dict:
     """
     from tcip_web import jobstore
 
-    root = jobstore.current_root()
-    with _lock:
-        live = [_summary(j) for j in _sweeps.values() if j.platform_root == root]
+    live = [_summary(j) for j in _registry.list(jobstore.current_root())]
     live_ids = {s["sweep_id"] for s in live}
     return {"sweeps": live + [d for d in _disk_sweeps() if d["sweep_id"] not in live_ids]}
 
@@ -370,8 +358,7 @@ def get_sweep(sweep_id: str) -> dict:
     """One sweep by id: a live entry (whichever root it launched under) wins, else its
     manifest under the current root."""
     from tcip_web import jobstore
-    with _lock:
-        j = jobstore.find_job(_sweeps, sweep_id)
+    j = _registry.get(sweep_id)
     if j is not None:
         response = (
             _terminal_response(j) if j.status in jobstore.TERMINAL_STATUSES

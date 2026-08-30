@@ -97,8 +97,14 @@ class InferenceJob:
     platform_root: str = field(default_factory=_current_root)
 
 
-_jobs: dict[str, InferenceJob] = {}
-_job_lock = threading.Lock()
+_registry = jobstore.JobRegistry(INFERENCE_REGISTRY)
+"""The dict-plus-lock live registry for this route's own jobs (see ``jobstore.JobRegistry``),
+the shared home review.py's priority queue and tuning.py's sweeps adopt too. ``_jobs``/
+``_job_lock`` below are this registry's own dict and lock, bound under their historical names
+since callers (tests among them) already reach into them directly."""
+
+_jobs: dict[str, InferenceJob] = _registry.jobs
+_job_lock = _registry.lock
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
@@ -125,33 +131,22 @@ def _summary(job: InferenceJob) -> dict:
 
 
 def _persist() -> None:
-    from tcip_web import jobstore
-    with _job_lock:
-        summaries = [_summary(j) for j in _jobs.values()]
-    jobstore.persist_grouped(INFERENCE_REGISTRY, summaries)
+    _registry.persist(_summary)
 
 
 def _register(job: InferenceJob) -> None:
-    from tcip_web import jobstore
-    with _job_lock:
-        _jobs[job.job_id] = job
-        jobstore.evict_terminal(_jobs, job.platform_root)  # bound this root's own share
-    _persist()
+    _registry.register(job.job_id, job, root=job.platform_root, to_summary=_summary)
 
 
 def _get(job_id: str) -> Optional[InferenceJob]:
     """A job by id, from any root this process holds: a repin to another project must not
     make an in-flight job unreachable for cancelling or streaming it."""
-    from tcip_web import jobstore
-    with _job_lock:
-        return jobstore.find_job(_jobs, job_id)
+    return _registry.get(job_id)
 
 
 def _list_jobs() -> list[InferenceJob]:
     from tcip_web import jobstore
-    root = jobstore.current_root()
-    with _job_lock:
-        return [j for j in _jobs.values() if j.platform_root == root]
+    return _registry.list(jobstore.current_root())
 
 
 def rehydrate_for_current_root() -> None:
@@ -170,34 +165,27 @@ def rehydrate_for_current_root() -> None:
     """
     from tcip_web import jobstore
 
-    root = jobstore.current_root()
-    with _job_lock:
-        for s in jobstore.load(INFERENCE_REGISTRY):
-            jid = s.get("job_id")
-            if not jid or jid in _jobs:
-                continue
-            status = s.get("status", "interrupted")
-            if status not in jobstore.TERMINAL_STATUSES:
-                status = "interrupted"
-            _jobs[jid] = InferenceJob(
-                job_id=jid,
-                checkpoint_path="",
-                images_dir=s.get("images_dir", ""),
-                output_dir=s.get("output_dir", ""),
-                tile=None,  # a dead job's own tile choice is never read again; honest, not fabricated
-                conf=0.0,
-                iou=0.0,
-                slice_hw=(0, 0),
-                overlap=0.0,
-                total=s.get("total", 0),
-                done=s.get("done", 0),
-                platform_root=s.get("platform_root") or root,
-                status=status,
-                error=s.get("error"),
-                warning=s.get("warning"),
-                dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
-            )
-        jobstore.evict_terminal(_jobs, root)
+    def _from_summary(s: dict, root: str) -> InferenceJob:
+        return InferenceJob(
+            job_id=s["job_id"],
+            checkpoint_path="",
+            images_dir=s.get("images_dir", ""),
+            output_dir=s.get("output_dir", ""),
+            tile=None,  # a dead job's own tile choice is never read again; honest, not fabricated
+            conf=0.0,
+            iou=0.0,
+            slice_hw=(0, 0),
+            overlap=0.0,
+            total=s.get("total", 0),
+            done=s.get("done", 0),
+            platform_root=s.get("platform_root") or root,
+            status=jobstore.rehydrated_status(s),
+            error=s.get("error"),
+            warning=s.get("warning"),
+            dropped_boxes=s.get("dropped_nonpositive_boxes", 0),
+        )
+
+    _registry.rehydrate(_from_summary)
 
 
 # ── Worker ─────────────────────────────────────────────────────────────

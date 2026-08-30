@@ -23,7 +23,7 @@ def client():
     import tcip_web.routes.review as review_mod
     from tcip_web.app import app
 
-    review_mod._pq_jobs.clear()  # a stale job from another test must not leak into this one
+    review_mod._pq_registry.jobs.clear()  # a stale job from another test must not leak into this one
     return TestClient(app, base_url="http://127.0.0.1")
 
 

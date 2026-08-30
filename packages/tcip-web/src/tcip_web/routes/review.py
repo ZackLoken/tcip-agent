@@ -1289,8 +1289,9 @@ class PriorityQueueJob:
     platform_root: str = field(default_factory=_pq_current_root)
 
 
-_pq_jobs: dict[str, PriorityQueueJob] = {}
-_pq_lock = threading.Lock()
+_pq_registry = jobstore.JobRegistry(REVIEW_PRIORITY_REGISTRY)
+"""The dict-plus-lock live registry for this queue's own jobs (see ``jobstore.JobRegistry``),
+the shared home inference.py's and tuning.py's own registries adopt too."""
 
 
 def _pq_summary(job: PriorityQueueJob) -> dict:
@@ -1303,27 +1304,18 @@ def _pq_summary(job: PriorityQueueJob) -> dict:
 
 
 def _pq_persist() -> None:
-    from tcip_web import jobstore
-    with _pq_lock:
-        summaries = [_pq_summary(j) for j in _pq_jobs.values()]
-    jobstore.persist_grouped(REVIEW_PRIORITY_REGISTRY, summaries)
+    _pq_registry.persist(_pq_summary)
 
 
 def _pq_register(job: PriorityQueueJob) -> None:
-    from tcip_web import jobstore
-    with _pq_lock:
-        _pq_jobs[job.job_id] = job
-        jobstore.evict_terminal(_pq_jobs, job.platform_root)  # bound this root's own share
-    _pq_persist()
+    _pq_registry.register(job.job_id, job, root=job.platform_root, to_summary=_pq_summary)
 
 
 def _pq_get(job_id: str) -> Optional[PriorityQueueJob]:
     """A job by id, from any root this process holds: a repin to another project must not
     make an in-flight priority-queue job unreachable, the same contract inference and tuning
     hold for their own by-id lookups."""
-    from tcip_web import jobstore
-    with _pq_lock:
-        return jobstore.find_job(_pq_jobs, job_id)
+    return _pq_registry.get(job_id)
 
 
 def rehydrate_for_current_root() -> None:
@@ -1340,29 +1332,22 @@ def rehydrate_for_current_root() -> None:
     """
     from tcip_web import jobstore
 
-    root = jobstore.current_root()
-    with _pq_lock:
-        for s in jobstore.load(REVIEW_PRIORITY_REGISTRY):
-            jid = s.get("job_id")
-            if not jid or jid in _pq_jobs:
-                continue
-            status = s.get("status", "interrupted")
-            if status not in jobstore.TERMINAL_STATUSES:
-                status = "interrupted"
-            _pq_jobs[jid] = PriorityQueueJob(
-                job_id=jid,
-                checkpoint_path="",
-                images_dir="",
-                dataset_root="",
-                status=status,
-                error=s.get("error"),
-                queue=s.get("queue") or [],
-                total_candidates=s.get("total_candidates", 0),
-                reviewed_skipped=s.get("reviewed_skipped", 0),
-                marks_unresolved=s.get("marks_unresolved"),
-                platform_root=s.get("platform_root") or root,
-            )
-        jobstore.evict_terminal(_pq_jobs, root)
+    def _from_summary(s: dict, root: str) -> PriorityQueueJob:
+        return PriorityQueueJob(
+            job_id=s["job_id"],
+            checkpoint_path="",
+            images_dir="",
+            dataset_root="",
+            status=jobstore.rehydrated_status(s),
+            error=s.get("error"),
+            queue=s.get("queue") or [],
+            total_candidates=s.get("total_candidates", 0),
+            reviewed_skipped=s.get("reviewed_skipped", 0),
+            marks_unresolved=s.get("marks_unresolved"),
+            platform_root=s.get("platform_root") or root,
+        )
+
+    _pq_registry.rehydrate(_from_summary)
 
 
 def _pq_worker(job: PriorityQueueJob) -> None:
