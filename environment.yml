@@ -39,7 +39,7 @@ dependencies:
       - opencv-python>=4.5
       - scikit-image>=0.22
       - pycocotools>=2.0.7
-      - psutil>=5.9  # read-only host CPU/RAM visibility for inspect_compute_resources
+      - psutil>=5.9  # read-only host CPU/RAM visibility for scripts/inspect_compute_resources.py
       # --- web backend ---
       - fastapi>=0.115.0
       - uvicorn[standard]>=0.30.0

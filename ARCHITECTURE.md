@@ -400,6 +400,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
 | scripts/generate_frozen_manifest.py | Render the store registry's freeze classifications into the shipped frozen-formats.json; --check holds CI to the committed edition. | 2 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
+| scripts/inspect_compute_resources.py | Report the host's current compute headroom, through the demoted `inspect_compute_resources` function. | 1 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
 | scripts/plant_aware_group_splits.py | Plant-aware group-key derivation for ``make_splits``, over per-stem georeferenced rasters. | 3 | 0 |
@@ -714,7 +715,7 @@ anything.
 |---|---|---|---|
 | `calibrate_physical_scale` | `scale_tools.py:84` | yes | Derive and validate a physical per-pixel scale, and stamp it into ``pred_dir``'s |
 
-### training_tools.py (8 tools)
+### training_tools.py (7 tools)
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
@@ -723,7 +724,6 @@ anything.
 | `check_training_status` | `training_tools.py:749` | yes | Check the status of a training run. |
 | `list_training_runs` | `training_tools.py:885` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:899` | yes | Request graceful cancellation of a running training run. |
-| `inspect_compute_resources` | `training_tools.py:928` | yes | Report the host's current compute headroom, a fact to reason with before launching |  <!-- queued: P5-31 demote-to-script -->
 | `run_hpo` | `training_tools.py:1319` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
 | `evaluate_model` | `training_tools.py:2586` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
@@ -738,7 +738,7 @@ anything.
 | `capture_live_canvas` | `vision_tools.py:1081` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1211` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
-8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 8 + 1 + 6 = 58 tools across 16 modules.
+8 + 2 + 4 + 2 + 4 + 1 + 4 + 3 + 1 + 1 + 5 + 7 + 1 + 7 + 1 + 6 = 57 tools across 16 modules.
 
 ## 2. HTTP routes and WebSocket endpoints
 

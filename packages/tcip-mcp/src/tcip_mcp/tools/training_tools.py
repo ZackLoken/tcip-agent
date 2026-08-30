@@ -923,14 +923,17 @@ def cancel_training(run_id: str) -> dict:
     return {"run_id": run_id, "status": status, "cancel_requested": True}
 
 
-@mcp.tool()
 @audited
 def inspect_compute_resources() -> dict:
     """Report the host's current compute headroom, a fact to reason with before launching
-    another concurrent training/HPO run, not an enforced cap. This platform doesn't cap memory/CPU
-    per run (no portable, non-pinned way to do that across POSIX/Windows without guessing a number
-    that's wrong on the next host); it gives you the real numbers and trusts you to judge whether
-    another candidate run fits, the same way you'd judge any other CV-scientist tradeoff.
+    another concurrent training/HPO run, not an enforced cap.
+
+    Not an MCP tool: run through ``scripts/inspect_compute_resources.py``, per the admission
+    standard (packages/tcip-mcp/CLAUDE.md), while staying importable for its own tests. This
+    platform doesn't cap memory/CPU per run (no portable, non-pinned way to do that across
+    POSIX/Windows without guessing a number that's wrong on the next host); it gives you the
+    real numbers and trusts you to judge whether another candidate run fits, the same way you'd
+    judge any other CV-scientist tradeoff.
 
     Returns:
         ``cpu``: ``{logical_count, percent_used}``, ``percent_used`` is ``None`` without
