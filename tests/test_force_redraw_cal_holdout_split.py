@@ -18,7 +18,7 @@ def _audit_events(root: Path, tool: str) -> list[dict]:
 
 
 def test_force_redraw_requires_nonempty_reason(tmp_path: Path):
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     assert "error" in force_redraw_cal_holdout_split(
         dataset_root=str(tmp_path), identity_hash="abc123", reason="")
@@ -27,7 +27,7 @@ def test_force_redraw_requires_nonempty_reason(tmp_path: Path):
 
 
 def test_force_redraw_requires_labels_dir_or_identity_hash(tmp_path: Path):
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     r = force_redraw_cal_holdout_split(dataset_root=str(tmp_path), reason="need to redraw")
     assert "error" in r
@@ -35,7 +35,7 @@ def test_force_redraw_requires_labels_dir_or_identity_hash(tmp_path: Path):
 
 def test_force_redraw_records_old_to_new_membership_diff(tmp_path: Path):
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     stems = [f"src{g}_{r}_0" for g in range(6) for r in range(3)]
     first = resolve_locked_cal_holdout_split(
@@ -75,7 +75,7 @@ def test_force_redraw_records_old_to_new_membership_diff(tmp_path: Path):
 def test_force_redraw_with_labels_dir_rescans_stems(tmp_path: Path):
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
@@ -97,7 +97,7 @@ def test_force_redraw_answers_an_error_dict_over_an_unreadable_label(tmp_path: P
     raise through this audited door."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     labels_dir = tmp_path / "labels"
     labels_dir.mkdir()
@@ -120,7 +120,7 @@ def test_force_redraw_refuses_a_root_the_labels_own_lock_does_not_live_under(tmp
     The calibration door scopes the lock to the labeled dir's own root, so a redraw stating a
     different root would leave the split that door keeps reading untouched while reporting success.
     """
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     labels_dir = tmp_path / "dataset" / "labels"
     labels_dir.mkdir(parents=True)
@@ -137,7 +137,7 @@ def test_force_redraw_replaces_the_lock_the_calibration_door_drew(tmp_path: Path
         cal_holdout_scope_root,
         resolve_locked_cal_holdout_split,
     )
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     labels_dir = tmp_path / "dataset" / "labels"
     labels_dir.mkdir(parents=True)
@@ -162,7 +162,7 @@ def test_a_redraw_records_in_the_log_of_the_dataset_whose_split_it_replaced(tmp_
     """
     import tcip_mcp.audit as audit_module
     from tcip_mcp.pipelines.data.splits import resolve_locked_cal_holdout_split
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     platform_root = tmp_path / "platform"
     platform_root.mkdir()

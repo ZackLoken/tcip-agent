@@ -227,7 +227,7 @@ def test_calibrate_ordinal_regression_operating_point_refuses_an_unregistered_ch
 
     from tcip_mcp.pipelines.data.splits import cal_holdout_lock_key, cal_holdout_scope_root
     from tcip_mcp.pipelines.resolution import csv_dataset_hash
-    from tcip_mcp.tools.phenology_tools import calibrate_ordinal_regression_operating_point
+    from tcip_mcp.tools.calibration_tools import calibrate_ordinal_regression_operating_point
 
     r = calibrate_ordinal_regression_operating_point(
         trait_name="catkin", task="ordinal", checkpoint_path=ckpt,

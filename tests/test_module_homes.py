@@ -378,6 +378,39 @@ def test_calibration_sweep_functions_have_one_home():
     )
 
 
+def test_force_redraw_cal_holdout_split_has_one_home():
+    """``force_redraw_cal_holdout_split`` moved out of ``tools/inference_tools.py`` into
+    ``tools/calibration_tools.py``, decorators intact, name unchanged."""
+    _assert_one_home(
+        {"force_redraw_cal_holdout_split"},
+        _module_path("tools/inference_tools.py"),
+        _module_path("tools/calibration_tools.py"),
+    )
+
+
+def test_ordinal_regression_calibration_functions_have_one_home():
+    """``calibrate_ordinal_regression_operating_point`` moved out of
+    ``tools/phenology_tools.py`` into ``tools/calibration_tools.py``, decorator intact, name
+    unchanged; ``_scalar_predictions`` (its sole helper, no other consumer) travels with it."""
+    _assert_one_home(
+        {"calibrate_ordinal_regression_operating_point", "_scalar_predictions"},
+        _module_path("tools/phenology_tools.py"),
+        _module_path("tools/calibration_tools.py"),
+    )
+
+
+def test_ordinal_regression_tasks_constant_has_one_home():
+    old_path = _module_path("tools/phenology_tools.py")
+    new_path = _module_path("tools/calibration_tools.py")
+    assert "_ORDINAL_REGRESSION_TASKS" not in _assign_name_counts(old_path)
+    assert _assign_name_counts(new_path)["_ORDINAL_REGRESSION_TASKS"] == 1
+    for root in _package_roots():
+        for py_file in root.rglob("*.py"):
+            if py_file in (old_path, new_path):
+                continue
+            assert "_ORDINAL_REGRESSION_TASKS" not in _assign_name_counts(py_file), py_file
+
+
 def test_accept_proposals_is_absent_from_package_source():
     """The rename's structural half: the retired name ``accept_proposals`` is gone from every
     package's shipped source, not just from the live MCP registry the manifest test checks (a

@@ -419,7 +419,7 @@ def test_run_inference_refuses_split_manifest_dir_without_calibration_labels_dir
 
 
 def test_force_redraw_binds_to_the_manifest_and_records_its_dir(tmp_path: Path):
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -441,7 +441,7 @@ def test_force_redraw_binds_to_the_manifest_and_records_its_dir(tmp_path: Path):
 
 
 def test_force_redraw_manifest_requires_subject(tmp_path: Path):
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -459,7 +459,7 @@ def test_force_redraw_manifest_requires_subject(tmp_path: Path):
 def test_force_redraw_manifest_requires_images_dir(tmp_path: Path):
     """A labels-only universe can include a stem whose image is gone, a lock the redraw would
     address that no manifest-restricted calibration ever draws; refuse rather than address it."""
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -474,7 +474,7 @@ def test_force_redraw_manifest_requires_images_dir(tmp_path: Path):
 
 
 def test_force_redraw_refuses_a_moved_images_root_by_name(tmp_path: Path):
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
@@ -497,7 +497,7 @@ def test_force_redraw_manifest_addresses_the_same_lock_when_an_image_is_missing(
     addresses that same lock rather than a second, unreachable one."""
     from tcip_mcp.pipelines.data.splits import calibration_universe_from_manifest, label_image_stems
     from tcip_mcp.pipelines.resolution import dataset_hash
-    from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
+    from tcip_mcp.tools.calibration_tools import force_redraw_cal_holdout_split
 
     root = _two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
