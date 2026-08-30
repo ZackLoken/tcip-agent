@@ -739,10 +739,10 @@ anything.
 | tool | line | audited | docstring first line |
 |---|---|---|---|
 | `visualize` | `vision_tools.py:295` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
-| `propose_annotations` | `vision_tools.py:759` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `accept_proposals` | `vision_tools.py:965` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
-| `capture_live_canvas` | `vision_tools.py:1095` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
-| `overlay_reference_grid` | `vision_tools.py:1226` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
+| `propose_annotations` | `vision_tools.py:763` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
+| `accept_proposals` | `vision_tools.py:969` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
+| `capture_live_canvas` | `vision_tools.py:1099` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
+| `overlay_reference_grid` | `vision_tools.py:1234` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
 ## 2. HTTP routes and WebSocket endpoints
 
