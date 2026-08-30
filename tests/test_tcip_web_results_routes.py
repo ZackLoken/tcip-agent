@@ -802,6 +802,26 @@ def test_registered_models_admits_a_project_path_with_no_extra_roots_set(
     assert resp.json()["models"] == []
 
 
+def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """A relative stored checkpoint_path (the registry's own internal spelling) still answers
+    absolute over this route, the surface the Inference tab feeds straight back into a launch."""
+    from tcip_mcp.model_registry import ModelRegistry
+
+    ckpt_dir = tmp_path / ".tcip" / "models"
+    ckpt_dir.mkdir(parents=True)
+    ckpt = ckpt_dir / "m.pt"
+    ckpt.write_bytes(b"route fixture weights")
+    ModelRegistry(str(tmp_path)).register_model("m", str(ckpt), {}, metrics_source=None)
+
+    resp = client.get("/api/results/models/registered", params={"project_path": str(tmp_path)})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert Path(body["models"][0]["checkpoint_path"]) == ckpt.resolve()
+
+
 def test_inference_launch_missing_checkpoint(client: TestClient, tmp_path: Path) -> None:
     resp = client.post(
         "/api/inference/launch",
