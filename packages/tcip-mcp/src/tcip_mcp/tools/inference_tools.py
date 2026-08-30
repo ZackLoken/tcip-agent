@@ -21,6 +21,7 @@ from tcip_mcp.pipelines.resolution import (
     DEFAULT_CONF,
     DEFAULT_MAX_DETS,
     DEFAULT_NMS_IOU,
+    DeliveryRefused,
 )
 from tcip_mcp.project_paths import resolve_output_path
 
@@ -937,6 +938,75 @@ def _publish_image_predictions(out: Path, result: dict, *, checkpoint_path: str,
     return written, dropped, _seal_and_stamp(out, op_stamp, draft)
 
 
+def _publish_bucket_bracket(result: dict, *, out: Path, checkpoint_path: str, trait: str | None,
+                           images_dir: str | None, dataset_root: Path | None,
+                           acknowledge_unvalidated: bool) -> dict:
+    """Publish a live run's predictions into ``out``, gated and linked exactly as
+    ``export_predictions`` does: the authoritative post-inference tile gate, the count claim's own
+    gate, the frozen-lineage-pointer refusal, the write, and the post-write lineage link. Shared so
+    ``tabulate_counts``' live-with-``predictions_dir`` path publishes under the identical contract
+    rather than a second implementation.
+
+    Returns a dict: ``refusal`` (the door's own error dict, or ``None``), ``written``,
+    ``dropped_boxes``, ``op_stamp``, ``tile_size_validated`` and ``lineage_linked`` (``True``/
+    ``False`` for an attempted link, ``None`` when the run named no experiment to link). A non-
+    ``None`` ``refusal`` leaves the bucket untouched and the other values empty/``None``.
+    """
+    from tcip_mcp.pipelines.resolution import check_delivery_gate, tile_size_gate_flag
+
+    # Re-checked against the real predictor's own resolution: an earlier sniff (if any) is only an
+    # early opt-out, this stays the authoritative gate.
+    tile_ref = tile_size_gate_flag(result.get("operating_point"))
+    tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
+    gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
+    if not gate.ok:
+        return {"refusal": {"error": gate.reason, "tile_size_validated": tile_ref},
+                "written": [], "dropped_boxes": 0, "op_stamp": {},
+                "tile_size_validated": tile_ref, "lineage_linked": None}
+    tile_size_validated = gate.stamp.get("tile_size")
+
+    # The count claim's own gate, run before a single file is written.
+    draft, refusal = _draft_count_claim(
+        result, trait=trait, bucket=out, dataset_root=dataset_root,
+        tile_size_validated=tile_size_validated)
+    if refusal is not None:
+        return {"refusal": refusal, "written": [], "dropped_boxes": 0, "op_stamp": {},
+                "tile_size_validated": tile_size_validated, "lineage_linked": None}
+
+    exp_id = result.get("experiment_id")
+    if exp_id:
+        # Checked before the publisher writes the bucket, ahead of this door's own @audited entry
+        # (appended only after the caller's body returns), so nothing on disk needs unwinding.
+        from tcip_mcp.experiments import pointer_frozen
+
+        frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
+        if frozen is not None:
+            return {"refusal": {"error": frozen}, "written": [], "dropped_boxes": 0,
+                    "op_stamp": {}, "tile_size_validated": tile_size_validated,
+                    "lineage_linked": None}
+
+    written, dropped_boxes, op_stamp = _publish_image_predictions(
+        out, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
+        tile_size_validated=tile_size_validated, draft=draft)
+
+    # Close the data->model->predictions chain: link this bucket into the producing run's lineage.
+    # Additive first-write, the terminal-state lock permits it into a still-empty predictions field.
+    lineage_linked = None
+    if exp_id:
+        try:
+            from tcip_mcp.experiments import update_lineage
+
+            update_lineage(exp_id, predictions=str(out))
+            lineage_linked = True
+        except Exception:
+            logger.warning("could not link predictions into experiment lineage", exc_info=True)
+            lineage_linked = False
+
+    return {"refusal": None, "written": written, "dropped_boxes": dropped_boxes,
+            "op_stamp": op_stamp, "tile_size_validated": tile_size_validated,
+            "lineage_linked": lineage_linked}
+
+
 def _export_predictions_raster(
     *, checkpoint, raster_path: str, out: Path, resolution, device: str | None,
     conf_threshold: float | None, tile_size: int | None, overlap: float | None, tile_batch_size: int,
@@ -1491,46 +1561,15 @@ def export_predictions(
     if "error" in result:
         return result
 
-    # Re-checked against the real predictor's own resolution: the sniff above is an early
-    # opt-out, this stays the authoritative gate.
-    tile_ref = tile_size_gate_flag(result.get("operating_point"))
-    tile_flags = {"tile_size": tile_ref} if tile_ref is not None else {}
-    gate = check_delivery_gate(tile_flags, acknowledge_unvalidated=acknowledge_unvalidated)
-    if not gate.ok:
-        return {"error": gate.reason, "tile_size_validated": tile_ref}
-    tile_size_validated = gate.stamp.get("tile_size")
-
-    # The count claim's own gate, run before a single file is written.
     sha = result.get("checkpoint_sha256")
-    draft, refusal = _draft_count_claim(
-        result, trait=trait, bucket=out, dataset_root=bucket_root,
-        tile_size_validated=tile_size_validated)
-    if refusal is not None:
-        return refusal
-
     exp_id = result.get("experiment_id")
-    if exp_id:
-        # Checked before the publisher writes the bucket, ahead of this door's own @audited
-        # entry (appended only after this body returns), so nothing on disk needs unwinding.
-        from tcip_mcp.experiments import pointer_frozen
-
-        frozen = pointer_frozen(exp_id, "lineage", "predictions", str(out))
-        if frozen is not None:
-            return {"error": frozen}
-
-    written, dropped_boxes, op_stamp = _publish_image_predictions(
-        out, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
-        tile_size_validated=tile_size_validated, draft=draft)
-
-    # Close the data→model→predictions chain: link this bucket into the producing run's lineage.
-    # Additive first-write, the terminal-state lock permits it into a still-empty predictions field.
-    if exp_id:
-        try:
-            from tcip_mcp.experiments import update_lineage
-
-            update_lineage(exp_id, predictions=str(out))
-        except Exception:
-            logger.warning("could not link predictions into experiment lineage", exc_info=True)
+    pub = _publish_bucket_bracket(
+        result, out=out, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
+        dataset_root=bucket_root, acknowledge_unvalidated=acknowledge_unvalidated)
+    if pub["refusal"] is not None:
+        return pub["refusal"]
+    written, dropped_boxes = pub["written"], pub["dropped_boxes"]
+    op_stamp, tile_size_validated = pub["op_stamp"], pub["tile_size_validated"]
 
     response = {"image_count": len(written), "output_dir": str(out), "files": written,
                 "bucket_redirected": resolution.redirected,
@@ -1552,12 +1591,27 @@ def export_predictions(
     return response
 
 
+_TABULATE_COUNTS_LIVE_ONLY_DEFAULTS = {
+    "conf_threshold": None, "device": None, "tile": None, "tile_size": None, "overlap": None,
+    "global_nms_iou": None, "max_dets": None, "calibration_labels_dir": None,
+    "calibration_images_dir": None, "split_manifest_dir": None, "experiment_id": None,
+    "postprocess": "nms", "tile_batch_size": 96,
+}
+"""``tabulate_counts`` parameters meaningful only for its live regime, mapped to the documented
+default a bucket-regime call is judged against. A non-``None`` default (``postprocess``,
+``tile_batch_size``) makes stated-at-default indistinguishable from stating nothing, so a call
+naming one at its own default is honestly admitted rather than refused; every other parameter
+here is ``None``-defaulted, so any non-``None`` value it carries is unambiguously a live-only
+statement and refuses."""
+
+
 @mcp.tool()
 @audited
 def tabulate_counts(
-    checkpoint_path: str,
-    images_dir: str,
-    output_path: str,
+    checkpoint_path: str | None = None,
+    images_dir: str | None = None,
+    output_path: str = "",
+    *,
     trait: str,
     conf_threshold: float | None = None,
     device: str | None = None,
@@ -1575,86 +1629,110 @@ def tabulate_counts(
     acknowledge_unvalidated: bool = False,
     predictions_dir: str | None = None,
 ) -> dict:
-    """Run inference and export a CSV summary of detection counts per image.
+    """Export a CSV summary of detection counts per image, from a live run or a persisted bucket.
 
-    Routes through ``run_inference`` so the per-image counts resolve the same firewalled
-    operating point (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions``,
-    the CSV is a count-bearing deliverable (the count is the phenotype for count traits), so it
-    must not be produced at a different, untiled, truncating operating point.
+    Two source regimes, exactly one stated:
 
-    Delivery gate: the count is a phenotype, so the CSV is not written unless every gating dimension
-    of the run's own resolved bundle is validated (not a caller string), or
+    - Live (``checkpoint_path`` and ``images_dir``, both required together): routes through
+      ``run_inference`` so the per-image counts resolve the same firewalled operating point
+      (conf/NMS/tiling/max_dets) as ``run_inference``/``export_predictions``; the CSV is a
+      count-bearing deliverable, so it must not be produced at a different, untiled, truncating
+      operating point. Passing ``predictions_dir`` too persists the run's own predictions into
+      that bucket, gated and linked exactly as ``export_predictions`` publishes one (the same
+      tile-scale gate, frozen-lineage-pointer refusal, and lineage link), then reads the CSV's own
+      validity back off the bucket it just wrote. Without ``predictions_dir`` the counts rest on
+      one in-memory pass with nothing a reviewer can re-open, so the CSV can only be delivered
+      provisionally (``acknowledge_unvalidated=True``); a bucket published this way (or by
+      ``export_predictions``) can also be promoted to validated later, with no re-run, through the
+      review validation route (``validate_reference``), then re-delivered through this door's
+      bucket regime below.
+    - Bucket (``predictions_dir`` alone, ``checkpoint_path``/``images_dir`` both absent): no GPU,
+      no predictor import, no checkpoint argument at all. Reads an existing, reviewed per-image
+      prediction bucket's own ``operating_point.json`` stamp as its identity and validity source,
+      counting real detections (a ``Point`` excluded) off each of its documents, sorted by stem.
+      Every parameter meaningful only to a live run (conf/device/tiling/NMS/max_dets/calibration/
+      split-manifest/experiment_id) refuses here by name, since a bucket regime call cannot honor
+      a stated live parameter with nothing behind it; ``postprocess``/``tile_batch_size`` refuse
+      only away from their own documented default, since stated-at-default is indistinguishable
+      from unstated for a non-``None`` default. A bucket recording ``raster_path`` (a whole-mosaic
+      bucket) refuses naming
+      ``deliver_orthomosaic_plant_counts``: one mosaic total is not a per-image count. A stamp
+      recording a different, non-``None`` trait refuses as a positive contradiction, validated or
+      not.
+
+    Delivery gate, both regimes: one composition, inside ``export_detection_csv``, over the count
+    operating point and (if tiled) the tile geometry, reconciled from the bucket's own sidecar
+    rather than trusted from a caller string; ships unless every dimension clears, or
     ``acknowledge_unvalidated=True`` writes a clearly-flagged provisional CSV stamped
-    ``measurement_validated=false``. Calibrate per dataset (``trait`` + ``calibration_labels_dir``)
-    to reach a validated conf. A tiled run's ``tile_size`` gates the same way, a run with no
-    persisted training geometry, no recoverable native-frame edge, and no explicit caller override
-    refuses here too (closing the asymmetry with ``run_full_frame_evaluation``, which already
-    refuses outright for that same case); pass an explicit ``tile_size``, retrain with tile geometry
-    persisted, or rely on a checkpoint's own uniform untiled training frame to reach a validated
-    tile scale. An untiled run is never gated on tile_size at all.
-
-    A validated CSV also needs the predictions its counts were read off to exist somewhere a
-    reviewer can check them, so ``predictions_dir`` is the third gating dimension: without it the
-    counts rest on one in-memory pass and nothing else, and the CSV can only be delivered
-    provisionally. With it, this persists the predictions it counted into that bucket, stamps the
-    bucket exactly as ``export_predictions`` does (the same bucket resolution, earning order and
-    stamp), and reads the CSV's own validity back off that stamp.
+    ``measurement_validated=false``. A refused delivery still names what happened to a
+    ``predictions_dir`` the live regime published before the CSV's own gate ran
+    (``bucket_published``, ``bucket_redirected``, ``lineage_linked``, beside ``csv_delivered:
+    false``): the bucket is the caller's own stated ``predictions_dir`` intent, published under
+    ``export_predictions``' contract, and it survives a refused CSV so the review-promotion
+    workflow above can proceed from it.
 
     Meaning door: ``trait``'s per-image-count operationalization must be recorded and
-    breeder-confirmed, and that is checked before the inference runs, not after. This function
-    returns ``image_count`` and ``total_detections`` on its refusal paths as well as its success
-    one, so a check placed after the pass would hand back the very numbers it refused to write.
+    breeder-confirmed, checked before the pass runs (live) or the bucket is read (bucket regime),
+    not after. This function returns ``image_count`` and ``total_detections`` on a gate refusal as
+    well as on success, so a check placed after the gate would hand back the very numbers it
+    refused to write; an operationalization refusal (withdrawn or never recorded) carries neither.
 
-    The response's own ``checkpoint_sha256``/``experiment_id`` are the run's own asserted identity
-    (read off the resolved checkpoint and the caller's/best-effort-resolved ``experiment_id``),
-    never corroborated; the CSV's own ``producer_model_sha256``/``producing_experiment_id``
-    columns, and this response's ``measurement_validated``, are ``export_detection_csv``'s
-    returned tail, corroborated against what a record outside the stamp actually answers for, so
-    the two can legitimately differ (or the tail can read unknown where the asserted identity
-    does not) rather than that being read as drift between them.
+    The live regime's own ``checkpoint_sha256``/``experiment_id`` are the run's asserted identity,
+    never corroborated; the bucket regime's are the stamp's own asserted identity, labelled so, no
+    ``conf_source`` (not a stamp key, never fabricated from one). Either way the CSV's own
+    ``producer_model_sha256``/``producing_experiment_id`` columns, and this response's
+    ``measurement_validated``, are ``export_detection_csv``'s returned tail, corroborated against
+    what a record outside the stamp actually answers for, so the two can legitimately differ (or
+    the tail can read unknown where the asserted identity does not).
 
     Args:
-        checkpoint_path: Path to model .pt checkpoint. Must be registered under this process's
-            project root (``register_model``, explicit mode for a foreign or bespoke checkpoint)
-            or this door refuses before loading it.
-        images_dir: Directory containing input images.
-        output_path: Path for the output CSV file. A relative path resolves against the
+        checkpoint_path: Path to model .pt checkpoint (live regime; required with ``images_dir``,
+            absent for the bucket regime). Must be registered under this process's project root
+            (``register_model``, explicit mode for a foreign or bespoke checkpoint) or this door
+            refuses before loading it.
+        images_dir: Directory containing input images (live regime; required with
+            ``checkpoint_path``, absent for the bucket regime).
+        output_path: Path for the output CSV file. Required; a relative path resolves against the
             project root, never the server process's cwd.
         trait: The registered trait whose confirmed per-image-count operationalization this
-            delivery rests on, and whose operating point is calibrated per dataset (with
-            ``calibration_labels_dir``). Required.
-        conf_threshold: Minimum confidence score. ``None`` (default) states nothing and forwards
-            that on, leaving the value to run at the platform default; a stated value is an
-            explicit override even when it equals the platform default.
-        device: Device to use.
-        tile: Tiled (SAHI-style) inference for small dense objects. ``None`` (default) forwards to
-            ``run_inference`` unresolved, see its own ``tile`` doc: a documented default distinct
-            from an explicit choice, not silently ``False``.
-        tile_size: Sliding-window tile edge (px).
-        overlap: Fractional tile overlap.
-        tile_batch_size: Tiles per forward batch.
-        global_nms_iou: Cross-tile NMS IoU. ``None`` (default) states nothing and forwards that on,
-            leaving the value to be derived; a stated value is an explicit override even when it
-            equals the platform default. See ``run_inference``'s own doc.
-        max_dets: Full-frame detection cap. ``None`` (default) states nothing and forwards that on,
-            leaving the value to be derived; a stated value is an explicit override even when it
-            equals the platform default. See ``run_inference``'s own doc.
-        postprocess: Cross-tile merge, "nms" or "nmm".
-        calibration_labels_dir: Labeled dir for calibrating + held-out validating the operating point.
-        calibration_images_dir: Images for the calibration labels (defaults to ``images_dir``).
-        split_manifest_dir: Restrict calibration to one capture date's ``calibration`` side of a
-            split manifest (forwarded to ``run_inference``; see its own doc), so a
-            manifest-restricted calibration's evidence can earn a validation record through this
-            door.
-        experiment_id: The run that produced the checkpoint, for provenance (forwarded to
-            ``run_inference``; see its own doc for the best-effort resolution when omitted).
-        acknowledge_unvalidated: Write the count CSV even when the operating point is unvalidated,
-            stamping it ``measurement_validated=false`` so the un-trustworthiness travels downstream.
-        predictions_dir: Directory to persist the counted predictions into, resolved and stamped
-            the way ``export_predictions`` resolves and stamps a bucket (a relative path resolves
-            against the project root; a bucket carrying review verdicts redirects to a fresh
-            variant). Omitted, the CSV can only be delivered provisionally, since its counts would
-            rest on no artifact anyone can re-read.
+            delivery rests on. Required, in both regimes; a bucket regime call also refuses when
+            the bucket's own stamp recorded a different, non-``None`` trait.
+        conf_threshold: Live regime only. Minimum confidence score. ``None`` (default) states
+            nothing and forwards that on, leaving the value to run at the platform default; a
+            stated value is an explicit override even when it equals the platform default.
+        device: Live regime only. Device to use.
+        tile: Live regime only. Tiled (SAHI-style) inference for small dense objects. ``None``
+            (default) forwards to ``run_inference`` unresolved, see its own ``tile`` doc.
+        tile_size: Live regime only. Sliding-window tile edge (px).
+        overlap: Live regime only. Fractional tile overlap.
+        tile_batch_size: Live regime only. Tiles per forward batch.
+        global_nms_iou: Live regime only. Cross-tile NMS IoU. ``None`` (default) states nothing
+            and forwards that on, leaving the value to be derived; a stated value is an explicit
+            override even when it equals the platform default. See ``run_inference``'s own doc.
+        max_dets: Live regime only. Full-frame detection cap. ``None`` (default) states nothing
+            and forwards that on, leaving the value to be derived; a stated value is an explicit
+            override even when it equals the platform default. See ``run_inference``'s own doc.
+        postprocess: Live regime only. Cross-tile merge, "nms" or "nmm".
+        calibration_labels_dir: Live regime only. Labeled dir for calibrating + held-out
+            validating the operating point.
+        calibration_images_dir: Live regime only. Images for the calibration labels (defaults to
+            ``images_dir``).
+        split_manifest_dir: Live regime only. Restrict calibration to one capture date's
+            ``calibration`` side of a split manifest (forwarded to ``run_inference``; see its own
+            doc), so a manifest-restricted calibration's evidence can earn a validation record
+            through this door.
+        experiment_id: Live regime only. The run that produced the checkpoint, for provenance
+            (forwarded to ``run_inference``; see its own doc for the best-effort resolution when
+            omitted).
+        acknowledge_unvalidated: Both regimes. Write the count CSV even when a gated dimension is
+            unvalidated, stamping it ``measurement_validated=false`` so the un-trustworthiness
+            travels downstream.
+        predictions_dir: Live regime: directory to persist the counted predictions into, resolved
+            and stamped the way ``export_predictions`` resolves and stamps a bucket (a relative
+            path resolves against the project root; a bucket carrying review verdicts redirects to
+            a fresh variant); omitted, the CSV can only be delivered provisionally. Bucket regime:
+            the existing bucket to read (required, resolved the same way; no writable-bucket
+            resolution or redirect, since nothing is written).
     """
     from tcip_mcp.operationalization import (
         PER_IMAGE_COUNT,
@@ -1664,10 +1742,42 @@ def tabulate_counts(
     from tcip_mcp.project_paths import resolve_output_path
     from tcip_mcp.traits import TraitUnknownError
 
-    if not Path(checkpoint_path).is_file():
-        return {"error": f"Checkpoint not found: {checkpoint_path}"}
+    live = checkpoint_path is not None or images_dir is not None
+    if live and (checkpoint_path is None or images_dir is None):
+        return {"error": "the live regime requires both checkpoint_path and images_dir."}
+    if not live and predictions_dir is None:
+        return {"error": (
+            "Provide either checkpoint_path and images_dir (a live run) or predictions_dir naming "
+            "an existing, reviewed prediction bucket (a bucket regime call)."
+        )}
+    if live:
+        if not Path(checkpoint_path).is_file():
+            return {"error": f"Checkpoint not found: {checkpoint_path}"}
+    else:
+        stated_live_only = sorted(
+            name for name, value in (
+                ("conf_threshold", conf_threshold), ("device", device), ("tile", tile),
+                ("tile_size", tile_size), ("overlap", overlap),
+                ("global_nms_iou", global_nms_iou), ("max_dets", max_dets),
+                ("calibration_labels_dir", calibration_labels_dir),
+                ("calibration_images_dir", calibration_images_dir),
+                ("split_manifest_dir", split_manifest_dir), ("experiment_id", experiment_id),
+                ("postprocess", postprocess), ("tile_batch_size", tile_batch_size),
+            ) if value != _TABULATE_COUNTS_LIVE_ONLY_DEFAULTS[name])
+        if stated_live_only:
+            return {"error": (
+                f"{stated_live_only} only apply to the live regime (checkpoint_path + "
+                "images_dir); a bucket regime call (predictions_dir alone) reads an existing "
+                "bucket's own stamp and cannot honor a stated live parameter, including one "
+                "stated at its own documented default, since that is indistinguishable from "
+                "stating nothing."
+            )}
+    if not output_path:
+        return {"error": "output_path is required"}
     output_path = str(resolve_output_path(output_path))
-    # Ahead of the pass, so a refused delivery has no counts of its own to hand back.
+
+    # Ahead of the pass (live) or the bucket read (bucket regime), so a refused delivery has no
+    # counts of its own to hand back.
     try:
         spec, record, _specs_dir = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
     except TraitUnknownError as e:
@@ -1677,6 +1787,11 @@ def tabulate_counts(
     stated = check_operationalization(spec, record, PER_IMAGE_COUNT, registry=None)
     if not stated.ok:
         return {"error": stated.message}
+
+    if not live:
+        return _tabulate_counts_from_bucket(
+            predictions_dir, output_path, trait=trait, acknowledge_unvalidated=acknowledge_unvalidated,
+            stated_basis=stated.basis)
 
     bucket = bucket_root = None
     resolution = None
@@ -1714,78 +1829,77 @@ def tabulate_counts(
     if "error" in result:
         return result
 
-    from tcip_mcp.pipelines.resolution import (
-        VALIDATED_FALSE,
-        accepted_references,
-        check_delivery_gate,
-        tile_size_gate_flag,
-    )
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, accepted_references, tile_size_gate_flag
 
     op = result.get("operating_point") or {}
     conf_prov = op.get("conf") or {}
-    # The count operating point's validity is the reference the run's own conf param recorded, judged
-    # against the references accepted for conf's own validation kind (annotations), never the bare
-    # `validated` bool promoted to a reference the run never earned. That upgrade laundered a
-    # missing/unrecognized/wrong-kind value into a shippable one (the same hole
-    # resolution._sidecar_reference closed).
+    # Judged against the references accepted for conf's own kind, never the bare validated bool
+    # (that would launder a missing/unrecognized/wrong-kind value into a shippable one).
     op_ref = conf_prov.get("validated_against")
     if op_ref not in accepted_references("annotations"):
         op_ref = VALIDATED_FALSE
-    flags = {"operating_point": op_ref}
-
     # tile_size gates the same way (closing the asymmetry with run_full_frame_evaluation): a
     # no-basis tile scale is as untrustworthy for a count as an uncalibrated conf; None if untiled.
     tile_ref = tile_size_gate_flag(op)
-    if tile_ref is not None:
-        flags["tile_size"] = tile_ref
-
-    # With no bucket persisted there is nothing behind the count, so this dimension floors.
-    if bucket is None:
-        flags["persisted_predictions"] = VALIDATED_FALSE
-
-    gate = check_delivery_gate(flags, acknowledge_unvalidated=acknowledge_unvalidated)
-    if not gate.ok:
-        reason = gate.reason
-        if bucket is None:
-            reason += (
-                " These counts were read off an in-memory pass with no prediction bucket behind "
-                "them: pass predictions_dir to persist and stamp the predictions they came from, "
-                "which is what a validated count CSV rests on."
-            )
-        return {
-            "error": reason,
-            "operating_point_validated": op_ref,
-            "tile_size_validated": tile_ref,
-            "operating_point": result.get("operating_point"),
-            "validated": False,
-            "image_count": result["image_count"],
-            "total_detections": result["total_detections"],
-        }
 
     dropped_boxes = 0
+    bucket_published = False
+    lineage_linked = None
     if bucket is not None:
-        draft, refusal = _draft_count_claim(
-            result, trait=trait, bucket=bucket, dataset_root=bucket_root,
-            tile_size_validated=gate.stamp.get("tile_size"))
-        if refusal is not None:
-            return refusal
-        _, dropped_boxes, _ = _publish_image_predictions(
-            bucket, result, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
-            tile_size_validated=gate.stamp.get("tile_size"), draft=draft)
+        pub = _publish_bucket_bracket(
+            result, out=bucket, checkpoint_path=checkpoint_path, trait=trait, images_dir=images_dir,
+            dataset_root=bucket_root, acknowledge_unvalidated=acknowledge_unvalidated)
+        if pub["refusal"] is not None:
+            return pub["refusal"]
+        dropped_boxes = pub["dropped_boxes"]
+        lineage_linked = pub["lineage_linked"]
+        bucket_published = True
 
     provenance = {
         "producer_model_sha256": result.get("checkpoint_sha256"),
         "producing_experiment_id": result.get("experiment_id"),
         "operating_point_conf": op.get("conf"),
     }
-    # Read back off the bucket's own stamp, the same reconciliation the other bucket doors perform.
-    csv_measurement_validated = gate.column_stamp("operating_point")
-    csv_path, tail = export_detection_csv(
-        result["results"], output_path, provenance=provenance, trait=trait,
-        measurement_validated=csv_measurement_validated,
-        pred_dirs=[str(bucket)] if bucket is not None else None,
-        acknowledge_unvalidated=acknowledge_unvalidated,
-    )
+    try:
+        csv_path, tail, summary = export_detection_csv(
+            result["results"], output_path, provenance=provenance, trait=trait,
+            measurement_validated=op_ref,
+            pred_dirs=[str(bucket)] if bucket is not None else None,
+            acknowledge_unvalidated=acknowledge_unvalidated,
+        )
+    except DeliveryRefused as exc:
+        reason = str(exc)
+        if bucket is None:
+            reason += (
+                " These counts were read off an in-memory pass with no prediction bucket behind "
+                "them: pass predictions_dir to persist and stamp the predictions they came from, "
+                "which is what a validated count CSV rests on; an unvalidated bucket can also be "
+                "promoted to validated later through the review validation route, with no re-run."
+            )
+            op_validated, tile_validated = op_ref, tile_ref
+        else:
+            op_validated = exc.gate.stamp.get("measurement", VALIDATED_FALSE)
+            tile_validated = exc.gate.stamp.get("tile_size", tile_ref)
+        refusal = {
+            "error": reason,
+            "operating_point_validated": op_validated,
+            "tile_size_validated": tile_validated,
+            "operating_point": result.get("operating_point"),
+            "validated": False,
+            "image_count": result["image_count"],
+            "total_detections": result["total_detections"],
+        }
+        if bucket is not None:
+            refusal["bucket_published"] = bucket_published
+            refusal["predictions_dir"] = str(bucket)
+            refusal["bucket_redirected"] = resolution.redirected
+            refusal["lineage_linked"] = lineage_linked
+            refusal["csv_delivered"] = False
+            refusal["dropped_nonpositive_boxes"] = dropped_boxes
+            if bucket_root is None:
+                refusal["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
+        return refusal
+
     # This response carries the counts too, so it needs the proof at the end that the write did.
     spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
     still_stated = check_operationalization(
@@ -1800,11 +1914,14 @@ def tabulate_counts(
         # count-bearing deliverable; the numbers are only as trustworthy as what stands behind them.
         "operating_point": result.get("operating_point"),
         "validated": bool(result.get("validated", False)),
-        # The cell export_detection_csv actually wrote, which its own gate can floor below the
-        # pre-write csv_measurement_validated reconciliation.
         "measurement_validated": tail["measurement_validated"],
-        "operating_point_validated": gate.stamp["operating_point"],
-        "tile_size_validated": gate.stamp.get("tile_size"),
+        # With a bucket, the writer's own reconciliation (the single authoritative gate); without
+        # one, the run's own narrowed references, accepted-or-false by construction, no gate call.
+        "operating_point_validated": (
+            summary["stamp"].get("measurement", VALIDATED_FALSE) if bucket is not None else op_ref),
+        "tile_size_validated": (
+            (summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None)
+            if bucket is not None else tile_ref),
         "conf_source": result.get("conf_source"),
         "checkpoint_sha256": result.get("checkpoint_sha256"),
         "experiment_id": result.get("experiment_id"),
@@ -1814,6 +1931,7 @@ def tabulate_counts(
         out["bucket_redirected"] = resolution.redirected
         out["verdict_guard_operative"] = bucket_root is not None
         out["dropped_nonpositive_boxes"] = dropped_boxes
+        out["lineage_linked"] = lineage_linked
         if bucket_root is None:
             out["note"] = _NO_DATASET_ROOT_NOTE.format(bucket=bucket)
     # run_inference's own warnings (a CPU-bound workload) are surfaced here too, so a count CSV
@@ -1821,3 +1939,102 @@ def tabulate_counts(
     if result.get("warning"):
         out["warning"] = result["warning"]
     return out
+
+
+def _tabulate_counts_from_bucket(predictions_dir: str, output_path: str, *, trait: str,
+                                 acknowledge_unvalidated: bool, stated_basis) -> dict:
+    """``tabulate_counts``'s bucket regime: an existing, reviewed prediction bucket in, no GPU.
+
+    No writable-bucket resolution and no verdict redirect: nothing is written, and reading a
+    reviewed bucket is the point. Refuses on the bucket's own mandatory stamp shape before
+    counting anything, so a mosaic bucket or a directory with no stamp at all is never counted.
+    """
+    from tcip_annotation.json_io import detection_annotations, prediction_documents, safe_score
+    from tcip_mcp.operationalization import (
+        PER_IMAGE_COUNT,
+        check_operationalization,
+        resolve_trait_and_record,
+    )
+    from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, read_operating_point_sidecar
+
+    bucket_path = resolve_output_path(predictions_dir)
+    sidecar = read_operating_point_sidecar(bucket_path)
+    if sidecar is None:
+        return {"error": (
+            f"{bucket_path} carries no readable operating_point.json: a bucket regime call reads "
+            "a stamp a platform producer wrote (export_predictions, tabulate_counts's own "
+            "live-with-predictions_dir path, or the web inference worker), never a directory of "
+            "label JSON with no stamp."
+        )}
+    if sidecar.get("raster_path") is not None:
+        return {"error": (
+            f"{bucket_path} is a whole-raster bucket (its stamp records raster_path): one mosaic "
+            "total is not a per-image count, and the per_image_count operationalization was never "
+            "confirmed for it. Deliver a per-plant count from it through "
+            "deliver_orthomosaic_plant_counts instead."
+        )}
+    if sidecar.get("images_dir") is None:
+        return {"error": (
+            f"{bucket_path}'s stamp records neither images_dir nor raster_path: it is not a "
+            "per-image prediction bucket this door can read."
+        )}
+    stamp_trait = sidecar.get("trait")
+    if stamp_trait is not None and stamp_trait != trait:
+        return {"error": (
+            f"{bucket_path}'s stamp was recorded for trait {stamp_trait!r}, not {trait!r}: a "
+            "bucket produced for one trait cannot deliver acknowledged under another."
+        )}
+
+    documents = prediction_documents(bucket_path)
+    image_results = []
+    for doc in documents:
+        annotations = detection_annotations(doc)
+        scores = [safe_score(a.score) for a in annotations if a.score is not None]
+        image_results.append({"image": str(doc), "count": len(annotations), "scores": scores})
+    image_count = len(image_results)
+    total_detections = sum(r["count"] for r in image_results)
+
+    op = sidecar.get("operating_point") or {}
+    provenance = {
+        "producer_model_sha256": sidecar.get("checkpoint_sha256"),
+        "producing_experiment_id": sidecar.get("experiment_id"),
+        "operating_point_conf": op.get("conf"),
+    }
+    try:
+        csv_path, tail, summary = export_detection_csv(
+            image_results, output_path, provenance=provenance, trait=trait,
+            measurement_validated=None, pred_dirs=[str(bucket_path)],
+            acknowledge_unvalidated=acknowledge_unvalidated,
+        )
+    except DeliveryRefused as exc:
+        return {
+            "error": str(exc),
+            "operating_point_validated": exc.gate.stamp.get("measurement", VALIDATED_FALSE),
+            "tile_size_validated": exc.gate.stamp.get("tile_size"),
+            "operating_point": sidecar.get("operating_point"),
+            "validated": False,
+            "image_count": image_count,
+            "total_detections": total_detections,
+            "predictions_dir": str(bucket_path),
+        }
+
+    spec_now, record_now, _ = resolve_trait_and_record(trait, PER_IMAGE_COUNT)
+    still_stated = check_operationalization(
+        spec_now, record_now, PER_IMAGE_COUNT, registry=None, basis=stated_basis)
+    if not still_stated.ok:
+        return {"error": still_stated.message}
+
+    return {
+        "csv_path": csv_path,
+        "image_count": image_count,
+        "total_detections": total_detections,
+        "operating_point": sidecar.get("operating_point"),
+        "operating_point_validated": summary["stamp"].get("measurement", VALIDATED_FALSE),
+        "tile_size_validated": (
+            summary["stamp"].get("tile_size") if summary["tile_size_operative"] else None),
+        "measurement_validated": tail["measurement_validated"],
+        "validated": len(summary["unvalidated"]) == 0,
+        "checkpoint_sha256": sidecar.get("checkpoint_sha256"),
+        "experiment_id": sidecar.get("experiment_id"),
+        "predictions_dir": str(bucket_path),
+    }
