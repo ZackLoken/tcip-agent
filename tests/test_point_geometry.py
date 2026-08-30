@@ -406,12 +406,13 @@ def test_annotate_route_round_trips_a_point(client: TestClient, tmp_path: Path) 
     assert ann["point"] == [12.0, 34.0]  # read back as itself, not as a geometry-less label
 
 
-def test_review_save_gt_round_trips_a_point(client: TestClient, tmp_path: Path) -> None:
+def test_annotate_route_round_trips_mixed_point_and_box_geometry(
+    client: TestClient, tmp_path: Path
+) -> None:
     img = _img(tmp_path)
     label = tmp_path / "labels" / "IMG_0001.json"
-    resp = client.post("/api/review/save_gt", json={
-        "dataset_root": str(tmp_path / "proj"),
-        "image_name": "IMG_0001.JPG", "image_path": str(img), "label_path": str(label),
+    resp = client.post("/api/annotate/labels", json={
+        "image_path": str(img), "label_path": str(label),
         "annotations": [{"subject": "catkin", "point": [12.0, 34.0]},
                         {"subject": "catkin", "bbox": [10.0, 10.0, 30.0, 30.0]}],
     })

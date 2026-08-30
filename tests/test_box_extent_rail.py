@@ -310,42 +310,6 @@ def test_review_action_admits_accepting_an_ordered_prediction(
     assert json.loads(gt_path.read_text())["annotations"][0]["bbox"] == [10, 10, 10, 10]
 
 
-# ── the reviewer's edited-GT save ───────────────────────────────────────────
-
-
-def test_save_gt_refuses_an_inverted_box(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / "img_001.jpg"
-    _write_image(img)
-    label_path = tmp_path / "annotations" / "img_001.json"
-
-    resp = client.post(
-        "/api/review/save_gt",
-        json={
-            "dataset_root": str(tmp_path), "image_name": "img_001.jpg", "image_path": str(img),
-            "label_path": str(label_path),
-            "annotations": [{"subject": "leaf", "bbox": [10, 10, 5, 5]}],
-        },
-    )
-
-    assert resp.status_code == 400
-    assert not label_path.exists()
-
-
-def test_save_gt_refuses_an_empty_label_path(client: TestClient, tmp_path: Path) -> None:
-    img = tmp_path / "images" / "img_001.jpg"
-    _write_image(img)
-
-    resp = client.post(
-        "/api/review/save_gt",
-        json={
-            "dataset_root": str(tmp_path), "image_name": "img_001.jpg", "image_path": str(img),
-            "label_path": "", "annotations": [],
-        },
-    )
-
-    assert resp.status_code == 422
-
-
 # ── prediction writers drop a degenerate box and report it, rather than fail ─
 
 

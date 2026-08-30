@@ -1077,8 +1077,13 @@ def test_review_gt_write_without_path_is_rejected(client, dataset_root, tmp_path
 def test_review_action_auto_completes_and_audits(
     client: TestClient, dataset_root: Path, tmp_path: Path
 ) -> None:
-    # A single detection on the image: reviewing it flips the image to 'completed'
-    # (the only GUI path to that status) and leaves an audit-trail entry.
+    """A single detection on the image: reviewing it flips the image to 'completed' (the only
+    GUI path to that status) and leaves an audit-trail entry. That entry belongs beside the
+    labels rather than in the project the breeder is working out of; the project root here is a
+    genuinely different directory, so a log written there is a log in the wrong place rather
+    than the same file under another name."""
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     gt = tmp_path / "gt.json"
     _write_gt(gt, [(40, 32, 60, 48)])
@@ -1102,6 +1107,7 @@ def test_review_action_auto_completes_and_audits(
     assert resp.status_code == 200
     assert resp.json()["image_status"] == "completed"
     assert any(e.get("tool") == "gui_review_action" for e in _audit_entries(dataset_root))
+    assert _audit_entries(project_root) == []
 
 
 def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> None:
@@ -1185,29 +1191,6 @@ def test_review_mark_complete_refuses_an_unreadable_prediction(
         },
     )
     assert resp.status_code == 400
-
-
-def test_review_gt_edit_audits_into_the_log_of_the_dataset_it_wrote(
-    client: TestClient, dataset_root: Path, tmp_path: Path
-) -> None:
-    """A review that edits ground truth changes a record that travels with the dataset, so the
-    entry belongs beside the labels rather than in the project the breeder is working out of. The
-    project root is a genuinely different directory here, so a log written there is a log in the
-    wrong place rather than the same file under another name."""
-    project_root = tmp_path / "proj"
-    project_root.mkdir()
-    img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
-    label_path = dataset_root / "annotations" / "2-11-26" / "IMG_0000.json"
-
-    resp = client.post("/api/review/save_gt", json={
-        "dataset_root": str(dataset_root),
-        "image_name": "IMG_0000.JPG", "image_path": str(img_path), "label_path": str(label_path),
-        "annotations": [{"subject": "catkin", "bbox": [10.0, 10.0, 30.0, 30.0]}],
-    })
-    assert resp.status_code == 200
-
-    assert any(e.get("tool") == "gui_review_save_gt" for e in _audit_entries(dataset_root))
-    assert _audit_entries(project_root) == []
 
 
 def test_review_action_records_subject_name_and_reviewer(

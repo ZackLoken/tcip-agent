@@ -25,7 +25,7 @@ packages/tcip-web/
       meta.py           # crop/project metadata
       projects.py       # project open/create/list
       results.py        # plant mapping + per-plant curves + onset dates + CSV
-      review.py         # compute_matches, action, backup, save_gt
+      review.py         # compute_matches, action, backup, validate_reference
       sessions.py       # GUI session state
       terminal.py       # in-app agent terminal endpoints
       training.py       # validate / launch / list / metrics / WS stream
