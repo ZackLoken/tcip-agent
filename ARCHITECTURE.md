@@ -123,6 +123,7 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/project_paths.py | Stable resolution of the platform state root, independent of a process's cwd. | 0 | 24 |
 | packages/tcip-mcp/src/tcip_mcp/project_record.py | The project record: the one document every project carries, holding its authored site. | 0 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/project_status.py | Per-project status pointer: a small, persisted summary of recent activity. | 0 | 3 |
+| packages/tcip-mcp/src/tcip_mcp/registry_paths.py | The containment core and grammar-aware external test the checkpoint and dataset registries share, plus the resolver every stored registry path becomes an absolute one through. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/server.py | MCP server entry point: register all domain tools and run on stdio. | 19 | 19 |
 | packages/tcip-mcp/src/tcip_mcp/statements.py | Comparable-value and content-hash primitives shared by every statement kind. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/store_catalogue.py | The whole store catalogue in one import: every module that registers a store, package-only so account_for reaches it with no repo root on sys.path. | 35 | 2 |
@@ -432,6 +433,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/conform_cal_holdout_locks.py | Conform every pre-existing `cal_holdout_split_lock` record under a root to carry `split_manifest_dir`. | 3 | 0 |
 | scripts/conform_dataset_registry_paths.py | Conform a project's dataset registry onto the relative-path row: rewrite each entry's stored path through the same identity-based rule `register_dataset` now uses. | 3 | 0 |
 | scripts/conform_metrics_marker.py | Stamp the ``metrics_logged`` marker onto every experiment a root's status record predates. | 1 | 0 |
+| scripts/conform_model_registry_paths.py | Wrap a project's model registry index to schema_version 2 and respell every entry's checkpoint_path relative to its scope root, relocating a moved or replaced checkpoint by content digest. | 3 | 0 |
 | scripts/conform_project_site.py | Write or correct one project's authored site: the record ``init_project``/``ingest_images`` themselves cannot reach for a project whose name does not fit the workspace scheme, and the one deliberate overwrite for a site typed wrong once or a record damaged by hand. | 1 | 0 |
 | scripts/conform_registry_experiment_id.py | Conform a project's registry entries to carry ``experiment_id``, for an entry registered before the producer-binding field existed. | 2 | 0 |
 | scripts/conform_view_coverage_viewing.py | Conform a dataset's stored `view_coverage` records to the current `CoverageViewing` shape. | 2 | 0 |
@@ -752,11 +754,11 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `register_dataset` | `project_tools.py:162` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
-| `init_project` | `project_tools.py:272` | yes | Initialise a TCIP project directory. |
-| `set_active_project` | `project_tools.py:306` | yes | Set the workspace's active project so the GUI opens it. |
-| `view_gui_state` | `project_tools.py:395` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
-| `inspect_project` | `project_tools.py:442` | yes | Get an overview of a TCIP project. |
+| `register_dataset` | `project_tools.py:165` | yes | Record a dataset's identity so a delivered number can be traced to the exact data behind it. |
+| `init_project` | `project_tools.py:275` | yes | Initialise a TCIP project directory. |
+| `set_active_project` | `project_tools.py:309` | yes | Set the workspace's active project so the GUI opens it. |
+| `view_gui_state` | `project_tools.py:398` | yes | The live GUI session the human is looking at: active project, dataset, date, trait, tab, and the |
+| `inspect_project` | `project_tools.py:445` | yes | Get an overview of a TCIP project. |
 
 `tools/bundle.py` (not a tool module: no `@mcp.tool()` sites) is the one membership accounting
 `archive_project` and `import_project` both compose from, `account_for(tree)`. It derives every
@@ -1233,7 +1235,7 @@ read.
 Path: `<dataset_root>/dataset.json`.
 
 Writer: `tcip_mcp.tools.project_tools.register_dataset`,
-`packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:162`.
+`packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:165`.
 
 Reader: `tcip_mcp.pipelines.data.dataset_fingerprint.dataset_fingerprint` (recompute-on-read is
 the stated authority; the stored value is a cache),
@@ -1425,8 +1427,8 @@ are listed here with the rest rather than taking numbers of their own.
   `packages/tcip-mcp/src/tcip_mcp/pipelines/training/subprocess_worker.py:72`
   (`def _patch_experiment_config_tiling(`), `_patch_experiment_config_id_map`, same file line 90
   (`def _patch_experiment_config_id_map(`), and `_patch_experiment_config_split`, same file line
-  113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1416`
-  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1531`.
+  113 (`def _patch_experiment_config_split(`). Read by `get_experiment`, `experiments.py:1417`
+  (`def get_experiment(`), and `compare_experiments`, `experiments.py:1532`.
 - `status.json` (`status_key`, line 140): written by `create_experiment` (397), `update_status`,
   `experiments.py:533` (`def update_status(`), `stamp_run_identity` (`experiments.py:666`),
   `_touch_heartbeat`, `experiments.py:862` (`def _touch_heartbeat(`). Read by `get_experiment`
@@ -1547,6 +1549,20 @@ An entry that predates the `metrics_source` key also predates `experiment_id`: c
 `scripts/conform_registry_experiment_id.py` first (the eviction rail refuses a pre-`experiment_id`
 entry's replace by name), then re-register it through `register_model` to add `metrics_source`.
 
+The index document is `{schema_version: 2, entries: [...]}`, read and written through one pair,
+`_read_registry_document`/`_write_registry_document`, that is the only code touching the raw
+value: an absent key answers the empty version-2 document, a present bare array is the frozen
+version-1 shape and refuses by name (`RegistryVersionRefused`, deliberately not a `StoreError`)
+naming `scripts/conform_model_registry_paths.py` as the remedy, and a malformed mapping refuses
+naming what it found. `_register_entry` spells `checkpoint_path` through
+`registry_paths.checkpoint_registry_path_for` against the registry's own scope root: relative
+POSIX when the checkpoint resolves under it, absolute when it does not (the dataset registry's
+own `entry_is_external`/`registry_path_for` share the same containment core and grammar-aware
+`is_external_form` test, `registry_paths.py`). `scripts/conform_model_registry_paths.py` wraps an
+unconformed index and respells every entry in one transaction, relocating a moved or replaced
+checkpoint by content digest when its stored path no longer resolves; `import_project` runs the
+same conform on the staging tree before accounting for it and before the rename.
+
 Readers: `read_registry_index`, `model_registry.py:53`, the read path for anything outside the
 module (`scripts/doctor.py:125`, `"metrics_source"`), and the entry-by-entry accessors built on
 it: `ModelRegistry.list_models`, line 319; `get_model`, line 325; `best_model`, line 332;
@@ -1557,6 +1573,14 @@ keywords, no default and no name heuristic, and by default ranks only entries wh
 `evaluation.HIGHER_IS_BETTER_BY_METRIC` (`pipelines/training/evaluation.py:62` (`HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {`)) when the caller
 states none, the single declared-direction mapping `resolve_selection_metric`
 (`pipelines/training/generic_trainer.py`) also reads for the trainer's own checkpoint selection.
+Every one of these accessors, plus `register_model`'s own return and
+`register_model_from_experiment`'s `checkpoint` field, answers `checkpoint_path` (or `checkpoint`)
+resolved to an absolute path (`registry_paths.resolved_registry_path`) on a copy, never the
+registry's own internal relative-or-absolute storage spelling; bundle's checkpoint resolution and
+`doctor.py`'s registry check resolve through the same function. `unresolved_registered_checkpoints`
+and `import_project`'s own disclosure split on `is_external_form`: a designed-external entry is
+`external_checkpoints` (its own existence stated per entry), never counted toward
+`checkpoint_paths_unresolved` (an entry expected to resolve under the tree that does not).
 
 Seam S27 ("Trained-model registry .tcip/models/registry.json"), verdict `one-side-only`,
 `phase0_implementation: once, shared`: `tests/test_lifecycle_wiring.py:7`,
@@ -1719,7 +1743,7 @@ check counts, and the promotion reads that same store.
 
 Path: `<project_root>/.tcip/datasets.json`.
 
-Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:145`.
+Writer: `upsert_dataset`, `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:148`.
 
 Reader: `read_datasets`, `project_tools.py:71`.
 
@@ -1980,7 +2004,7 @@ Phase 3 verdict: duplicated.
 
 Must agree: the MCP agent reading GUI context parses the snapshot the web backend wrote.
 Side A: `packages/tcip-mcp/src/tcip_mcp/web_client.py:106` (`def gui_snapshot_key(`, the one address, declared beside `GUI_SNAPSHOT_STORE`, line 82; `packages/tcip-web/src/tcip_web/state.py:197` writes through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:411` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/project_tools.py:414` (`gui = tcip_store.read(gui_snapshot_key(project_root), default=None)`, the MCP read through the same key).
 Phase 3 verdict: single.
 
 ## S11. Live canvas state files canvas_live.json / canvas_shapes.json
@@ -2105,7 +2129,7 @@ Phase 3 verdict: single.
 ## S27. Trained-model registry .tcip/models/registry.json
 
 Must agree: the MCP registrar and the GUI model pickers read one registry entry shape.
-Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:65` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
+Side A: `packages/tcip-mcp/src/tcip_mcp/model_registry.py:131` (`def read_registry_index(`, the read path for everything outside the module; `register_model`, line 200, replaces one entry by name inside one `tcip_store.transaction` on the key `registry_index_key`, line 36, mints).
 Side B: `packages/tcip-web/src/tcip_web/routes/results.py:1070` (`@router.get("/models/registered")`, serving `model_tools.list_registered_models`) and the browser's one entry declaration, `packages/tcip-web/frontend/src/api/inference.ts:16` (`export interface RegisteredModel {`), held field by field against an entry the real registrar wrote by `tests/test_registry_entry_shape_agreement.py`.
 Phase 3 verdict: single.
 
@@ -2127,7 +2151,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1673` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1674` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
