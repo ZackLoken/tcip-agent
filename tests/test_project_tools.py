@@ -571,7 +571,9 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
     create_experiment(exp_id, {"model_source": {"builder": "x:y"}})
     update_status(exp_id, "running")
     ckpt_dir = experiment_dir(exp_id)
-    ckpt_dir.mkdir(parents=True)
+    # The file backend materializes the experiment directory with the record; the database
+    # backend does not, so tolerate either.
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
     weights = ckpt_dir / "model_final.pt"
     weights.write_bytes(b"the real weights this run produced")
     completed = complete_run(exp_id, str(weights))
