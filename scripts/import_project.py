@@ -7,6 +7,9 @@ then moves the staged tree onto ``destination``. Wraps
 ``tcip_mcp.tools.project_tools.import_project`` with no MCP tool registration.
 
     python scripts/import_project.py <zip_path> <destination>
+
+This run's audit line is recorded under ``<destination>/.tcip``, the project being restored,
+not the process cwd.
 """
 
 from __future__ import annotations
@@ -14,14 +17,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from _script_root import pin_project_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("zip_path", help="Path to the .tcip.zip archive.")
     parser.add_argument("destination", help="Directory to extract into; must not already exist, "
-                                             "or must be an empty directory.")
+                                             "or must be an empty directory. Also where this "
+                                             "run's audit line is recorded.")
     args = parser.parse_args(argv)
+
+    pin_project_root(args.destination)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default

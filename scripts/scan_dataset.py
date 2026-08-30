@@ -7,7 +7,10 @@ collides with a prediction bucket's provenance stamp. Wraps
 ``tcip_mcp.tools.data_tools.scan_dataset`` with no MCP tool registration; a domain module still
 composes on the underlying function directly.
 
-    python scripts/scan_dataset.py <folder_path>
+    python scripts/scan_dataset.py <folder_path> --project <project_root>
+
+``folder_path`` is what gets scanned; ``--project`` (or an already-set ``$TCIP_PROJECT_ROOT``)
+names the project this run's audit line is recorded under.
 """
 
 from __future__ import annotations
@@ -15,12 +18,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from _script_root import pin_project_root  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("folder_path", help="Dataset root directory to scan.")
+    parser.add_argument("--project", default="",
+                         help="Project root this run's audit line is recorded under; falls "
+                              "back to $TCIP_PROJECT_ROOT.")
     args = parser.parse_args(argv)
+
+    pin_project_root(args.project or None)
 
     # Its own process entry point, so it binds the storage backend the seam has no default for.
     from tcip_store.binding import bind_default
