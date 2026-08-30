@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp import operationalization as op
-from tcip_mcp.tools.phenology_tools import update_trait_spec_fields
+from tcip_mcp.tools.trait_spec_authoring_tools import update_trait_spec_fields
 from tests import _operationalization_fixtures as fx
 
 
