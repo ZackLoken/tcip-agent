@@ -687,9 +687,9 @@ Docstring is the function's docstring first line, verbatim.
 
 | tool | line | audited | docstring first line |
 |---|---|---|---|
-| `run_inference` | `inference_tools.py:192` | yes | Run a trained model on images. |
-| `export_predictions` | `inference_tools.py:1251` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
-| `tabulate_counts` | `inference_tools.py:1557` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
+| `run_inference` | `inference_tools.py:193` | yes | Run a trained model on images. |
+| `export_predictions` | `inference_tools.py:1321` | yes | Run inference and save predictions as COCO/JSON prediction file(s). |  <!-- queued: P5-36 unify -->
+| `tabulate_counts` | `inference_tools.py:1610` | yes | Run inference and export a CSV summary of detection counts per image. |  <!-- queued: P5-37 merge-or-split -->
 
 ### calibration_tools.py (2 tools)
 
@@ -1153,7 +1153,7 @@ Path: `<dataset_root>/annotations/[<date>/]<stem>.json` (ground truth);
 `<dataset_root>/predictions/<model>/[<date>/]<stem>.json` (predictions, identical schema).
 
 Writers: `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:703`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:722`;
 `tcip_annotation.format_io.save_annotations` (`fmt="json"`),
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:283`;
 `tcip_annotation.review_engine.ReviewEngine.save_gt`,
@@ -1162,7 +1162,7 @@ Writers: `tcip_annotation.json_io.write_annotations`,
 `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`.
 
 Readers: `tcip_annotation.json_io.read_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:517`;
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:523`;
 `tcip_annotation.format_io.load_annotations`,
 `packages/tcip-annotation/src/tcip_annotation/format_io.py:353`;
 `tcip_mcp.dataset_layout.subjects_on_date`,
@@ -1573,7 +1573,7 @@ Path: `<dataset_root>/predictions/<model_name>/[<date>/]`, via
 
 Writer: `stage_prediction_shapes`, `packages/tcip-mcp/src/tcip_mcp/prediction_buckets.py:254`, the
 underlying per-image files written via `tcip_annotation.json_io.write_annotations`,
-`packages/tcip-annotation/src/tcip_annotation/json_io.py:703` (format 1's writer).
+`packages/tcip-annotation/src/tcip_annotation/json_io.py:722` (format 1's writer).
 `resolve_prediction_bucket`, `prediction_buckets.py:223`, resolves a `(dataset_root, model_name,
 date)` triple to a writable directory; `resolve_writable_bucket`, `prediction_buckets.py:191`,
 redirects to the next free `<model_name>@r2`/`@r3` variant once any image in a bucket has a
@@ -2034,7 +2034,7 @@ Phase 3 verdict: single.
 ## S17. Canonical per-image annotation JSON schema
 
 Must agree: every writer produces, and every reader accepts, the same name-based record shape.
-Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:409` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
+Side A: `packages/tcip-annotation/src/tcip_annotation/json_io.py:415` (`def annotation_from_payload(`, the one conversion from a client payload to a record, with `_annotations_of` at line 227 the one parse back and `write_annotations` at line 336 the one writer).
 Side B: `packages/tcip-web/src/tcip_web/routes/annotate.py:191`, `packages/tcip-web/src/tcip_web/routes/review.py:667` and `packages/tcip-mcp/src/tcip_mcp/tools/annotation_tools.py:179` (every save door converts through it rather than assembling records of its own).
 Phase 3 verdict: single.
 
@@ -2042,7 +2042,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:40` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:622` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:641` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
@@ -2063,7 +2063,7 @@ Phase 3 verdict: single.
 
 Must agree: a prediction's integer label decodes to the class name the run trained it as.
 Side A: `packages/tcip-mcp/src/tcip_mcp/class_registry.py:445` (`def assign_class_ids(`, the one assignment, reached by the loader through `pipelines/data/label_queries.py:91` (`return registry, class_registry.assign_class_ids(registry, subject, attribute)`)).
-Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:128` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
+Side B: `packages/tcip-mcp/src/tcip_mcp/tools/inference_tools.py:129` (`def resolve_decode_id_map(`, the one resolution every door that decodes predictions or reads GT by id calls: `run_inference` at line 822, the raster export at line 1011, the GUI worker at `packages/tcip-web/src/tcip_web/routes/inference.py:281`, and block calibration at `pipelines/block_calibration.py:274`, which hands over the run's own scope rather than restating the prefer-recorded-else-derive rule).
 Phase 3 verdict: single.
 
 ## S22. image_status.json confirmed-negative store
@@ -2155,8 +2155,8 @@ Phase 3 verdict: single. One value is still spelled as a literal rather than bou
 ## S34. check_delivery_gate behind every delivery path
 
 Must agree: no delivered result ships an unvalidated parameter without an explicit acknowledgement.
-Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2518` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1839` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:323` and `pipelines/postprocessing/aggregation.py:533` (`delivered_tail(provenance, measurement_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself), `tools/inference_tools.py:1782` (`gate.column_stamp("operating_point")`, `tabulate_counts`'s own read of the gate it also hands to `export_detection_csv`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:608` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
+Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:2537` (`def check_delivery_gate(`, judging each dimension against `_DIMENSION_REFERENCES`, line 2165, so a reference clears only the dimension whose kind earned it, with `DeliveryGateResult.column_stamp`, line 2146, as the one derivation of what a deliverable's validity column carries).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/resolution.py:1839` (`def delivered_tail(`, the one composition every delivered tail's validity columns route through, deriving `own_column` from which of `_DIMENSION_TO_COLUMN`'s columns a door's own column list carries, never a second list stating so). `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/export.py:323` and `pipelines/postprocessing/aggregation.py:533` (`delivered_tail(provenance, measurement_recon["bindings"], gate,`, each delivery door composing its tail through it rather than stamping the column itself), `tools/inference_tools.py:1782` (`gate.column_stamp("operating_point")`, `tabulate_counts`'s own read of the gate it also hands to `export_detection_csv`), and `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:604` (`delivered_tail(`, inside `_write_phenology_delivery`, the one writer both phenology delivery doors call through, `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv`, rather than stamping the column themselves). The aggregated per-plant door also floors a claim-scope dimension read from each bucket's sidecar (`resolution.reconcile_claim_scope_validity`, whose accepted values, `CLAIM_SCOPE_REFERENCES`, are narrower than `VALIDATED_SHIPPABLE`, so an annotation reference cannot clear a raster-scope claim): a bucket that records no claim scope never acquires the dimension.
 Phase 3 verdict: single.
 
 ## S35. ResolvedParam validation firewall
@@ -2191,7 +2191,7 @@ Phase 3 verdict: single.
 
 Must agree: the delivered CSV's column names derive from the trait spec on every path that writes them.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:81` (`def majority_provisional_column(spec) -> str | None:`, the one owner; `phenology_csv_columns` builds the schema through it).
-Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:618` (`majority_provisional_column(spec)`, called from `_write_phenology_delivery`, the one writer both `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling the name themselves).
+Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/postprocessing/phenology.py:614` (`majority_provisional_column(spec)`, called from `_write_phenology_delivery`, the one writer both `tools/phenology_tools.py`'s `compute_phenology` and `packages/tcip-web/src/tcip_web/routes/results.py`'s `export_csv` call through instead of assembling the name themselves).
 Phase 3 verdict: single.
 
 ## S40. Per-band normalization stats for a non-3-channel detector
