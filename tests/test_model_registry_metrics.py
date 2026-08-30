@@ -138,9 +138,9 @@ def test_best_model_refuses_an_entry_with_no_metrics_source_key(tmp_path):
 
     key = registry_index_key(str(tmp_path))
     with ts.transaction(key) as txn:
-        index = txn.read(key, default=[])
-        del index[0]["metrics_source"]
-        txn.write(key, index)
+        document = txn.read(key)
+        del document["entries"][0]["metrics_source"]
+        txn.write(key, document)
 
     with _pytest.raises(ValueError, match="re-register"):
         ModelRegistry(str(tmp_path)).best_model("val_loss", higher_is_better=False)
