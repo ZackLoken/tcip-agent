@@ -109,3 +109,25 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
     with pytest.raises(HTTPException) as ei:
         load_labels(str(outside))                         # a sibling workspace -> 403
     assert ei.value.status_code == 403
+
+
+def test_images_route_blocks_outside_allowed_root(
+    tmp_path, tmp_path_factory: pytest.TempPathFactory
+):
+    """images.py's own ``_checked`` guard, exercised on a route that still calls it (the annotate
+    route above guards a different module's copy)."""
+    pytest.importorskip("fastapi")
+    from fastapi import HTTPException
+    from PIL import Image
+
+    from tcip_web.routes.images import get_bands
+
+    img = tmp_path / "ok.jpg"
+    Image.new("RGB", (8, 8)).save(img)
+    outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
+    Image.new("RGB", (8, 8)).save(outside)
+
+    assert get_bands(path=str(img))["band_count"] == 3    # inside the workspace -> served
+    with pytest.raises(HTTPException) as ei:
+        get_bands(path=str(outside))                       # a sibling workspace -> 403
+    assert ei.value.status_code == 403
