@@ -1458,6 +1458,11 @@ REGISTERED = {
     "backend_port": Registered(
         "8765", lambda root: web_client.backend_port_key(), ".tcip/state/web_port.txt",
         pin=_pin_workspace),
+    "canvas_open_binding": Registered(
+        {"generation": 1, "root": "C:/orchards/catkin", "project_name": "hazelnut_catkin_valley",
+         "issued_at": "2026-03-04T12:00:00+00:00"},
+        lambda root: web_client.canvas_open_binding_key(),
+        ".tcip/state/canvas_open_binding.json", pin=_pin_workspace),
     "experiment_config": Registered(
         {"model_source": {"builder": "my_module:build"}, "training": {"epochs": 3}},
         lambda root: experiments.config_key(EXPERIMENT),

@@ -275,6 +275,9 @@ PLATFORM_CLAIMS: Mapping[str, Claim] = {
     ),
     "ray_dashboard": Claim(ROOT, (_named(".tcip", "state", name="ray_dashboard", suffix=".json"),)),
     "backend_port": Claim(WORKSPACE, (_named(".tcip", "state", name="web_port", suffix=".txt"),)),
+    "canvas_open_binding": Claim(
+        WORKSPACE, (_named(".tcip", "state", name="canvas_open_binding", suffix=".json"),)
+    ),
     "job_registry": Claim(
         ROOT,
         (

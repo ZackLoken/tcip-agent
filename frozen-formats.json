@@ -49,6 +49,12 @@
       "schema_version": 1,
       "cannot_carry_field": null
     },
+    "canvas_open_binding": {
+      "kind": "record",
+      "frozen": true,
+      "schema_version": 1,
+      "cannot_carry_field": null
+    },
     "class_registry": {
       "kind": "blob",
       "frozen": true,
