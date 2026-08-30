@@ -158,13 +158,21 @@ def derive_roots(tree: str | Path) -> tuple[DerivedRoot, ...]:
 
 def _resolve_checkpoint_entry(tree: Path, raw: str) -> Path | None:
     """The absolute, existing-under-``tree`` path a registry's ``checkpoint_path`` entry
-    (``raw``, exactly as stored) resolves to, or ``None`` when it does not: an absolute path
+    (``raw``, exactly as stored) resolves to, or ``None`` when it does not: an external entry
     naming a different tree entirely (the exporting root, read back from a staged or destination
-    copy of its registry), or a relative one with nothing at it any more."""
-    candidate = Path(raw)
-    if not candidate.is_absolute():
-        candidate = tree / candidate
-    resolved = candidate.resolve()
+    copy of its registry), a relative one with nothing at it any more, or a value this reader
+    cannot resolve at all (empty, or carrying a ``..`` segment).
+
+    One resolver, :func:`~tcip_mcp.registry_paths.resolved_registry_path`, everywhere a
+    registry's stored string becomes a path; this keeps the at-or-under and existence checks
+    that are this function's own.
+    """
+    from tcip_mcp.registry_paths import RegistryPathEmpty, RegistryPathTraversal, resolved_registry_path
+
+    try:
+        resolved = resolved_registry_path(tree, raw).resolve()
+    except (RegistryPathEmpty, RegistryPathTraversal):
+        return None
     return resolved if resolved.is_file() and _is_at_or_under(resolved, tree) else None
 
 
@@ -200,17 +208,21 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
 
 
 def unresolved_registered_checkpoints(tree: Path) -> tuple[str, ...]:
-    """Every registry ``checkpoint_path`` entry under ``tree`` that does not resolve to an
-    existing file under it, named exactly as the registry itself carries it: the entries
+    """Every registry ``checkpoint_path`` entry under ``tree`` that is expected to resolve under
+    it (not a designed-external claim, :func:`~tcip_mcp.registry_paths.is_external_form`) but
+    does not, named exactly as the registry itself carries it: the entries
     :func:`_registered_checkpoint_paths` (the same reader, the same per-entry resolution) leaves
-    out. A moved tree (``import_project``, past its own rename) still carries the exporting
-    root's own registry verbatim, so an absolute checkpoint_path it wrote stays unreachable
-    through ``load_registered_checkpoint`` at the new location; this names that fact for
-    disclosure rather than the registry rewriting itself, which stays no door's job here.
+    out. Version 2's own external entries are never counted here, however they resolve; see
+    :func:`external_registered_checkpoints` for those. A relative entry a moved tree carries
+    (``import_project``, past its own rename) that no longer names a real file is exactly the
+    case this discloses, rather than the registry rewriting itself, which stays no door's job
+    here. Propagates :class:`~tcip_mcp.model_registry.RegistryVersionRefused`: an unconformed
+    registry is a refusal for the caller to act on, never an empty answer.
     """
     from tcip_store import StoreError
 
     from tcip_mcp.model_registry import read_registry_index
+    from tcip_mcp.registry_paths import is_external_form
 
     try:
         entries = read_registry_index(tree)
@@ -219,11 +231,38 @@ def unresolved_registered_checkpoints(tree: Path) -> tuple[str, ...]:
     unresolved: list[str] = []
     for entry in entries if isinstance(entries, list) else []:
         raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
-        if not raw:
+        if not raw or is_external_form(str(raw)):
             continue
         if _resolve_checkpoint_entry(tree, raw) is None:
             unresolved.append(str(raw))
     return tuple(sorted(unresolved))
+
+
+def external_registered_checkpoints(tree: Path) -> tuple[dict, ...]:
+    """Every registry ``checkpoint_path`` entry under ``tree`` that is a designed-external claim
+    (:func:`~tcip_mcp.registry_paths.is_external_form`), each as ``{"checkpoint_path", "exists"}``.
+
+    An external entry is never expected to resolve under ``tree``, so its existence is reported
+    per entry rather than folded into :func:`unresolved_registered_checkpoints`'s "should
+    resolve under the tree and does not" claim. Propagates
+    :class:`~tcip_mcp.model_registry.RegistryVersionRefused`, the same as
+    :func:`unresolved_registered_checkpoints`.
+    """
+    from tcip_store import StoreError
+
+    from tcip_mcp.model_registry import read_registry_index
+    from tcip_mcp.registry_paths import is_external_form
+
+    try:
+        entries = read_registry_index(tree)
+    except StoreError:
+        return ()
+    found: list[dict] = []
+    for entry in entries if isinstance(entries, list) else []:
+        raw = entry.get("checkpoint_path") if isinstance(entry, dict) else None
+        if raw and is_external_form(str(raw)):
+            found.append({"checkpoint_path": str(raw), "exists": Path(raw).is_file()})
+    return tuple(sorted(found, key=lambda d: d["checkpoint_path"]))
 
 
 def _blob_files(
@@ -312,8 +351,10 @@ def blob_home(
     :func:`account_for` while ``tree`` still holds its own registry index) names every checkpoint
     a registry entry points at outside ``.tcip/models``; pass it back in for a caller classifying
     blobs after the tree has moved (``import_project``, past its own rename), when a fresh
-    registry read would find nothing there any more, since the moved tree's own registry still
-    names the exporting root's absolute paths. A ``.pt`` file under ``.tcip/experiments/`` is
+    registry read would otherwise find nothing there any more for a registry the move's own
+    conform step (:func:`~tcip_mcp.model_registry.conform_registry_paths`) has not yet respelled,
+    or for an entry whose designed-external path genuinely sits outside the tree either way. A
+    ``.pt`` file under ``.tcip/experiments/`` is
     recognized as a checkpoint by shape alone, whether or not any registry names it, so the same
     file classifies the same way on both sides of that move. Omitted, this still recognizes every
     checkpoint physically under ``.tcip/models`` or shaped as one under ``.tcip/experiments/``.
@@ -425,5 +466,6 @@ __all__ = [
     "account_for",
     "blob_home",
     "derive_roots",
+    "external_registered_checkpoints",
     "unresolved_registered_checkpoints",
 ]
