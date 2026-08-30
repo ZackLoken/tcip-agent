@@ -633,6 +633,34 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     assert (dest / ".tcip" / "experiments" / exp_id / "model_final.pt").is_file()
 
 
+def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(tmp_path: Path):
+    """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
+    _blob_files' two homes (the models glob and the registered-checkpoint reader); it must land
+    in the bundle once, not as a duplicate zip member neither door's own accounting predicts."""
+    from tcip_mcp.model_registry import ModelRegistry
+    from tcip_mcp.tools.bundle import account_for
+
+    src = tmp_path / "src_project"
+    init_project(str(src), site="north orchard")
+    ckpt = src / ".tcip" / "models" / "m.pt"
+    ckpt.write_bytes(b"weights")
+    ModelRegistry(str(src)).register_model("m", str(ckpt), {}, metrics_source=None)
+
+    accounting = account_for(src)
+    blob_names = [os.path.normcase(str(p)) for p in accounting.blobs]
+    assert blob_names.count(os.path.normcase(str(ckpt))) == 1
+
+    result = archive_project(str(src), str(tmp_path / "export.zip"), include_models=True)
+    assert "error" not in result, result
+
+    import zipfile
+
+    with zipfile.ZipFile(str(tmp_path / "export.zip")) as zf:
+        names = zf.namelist()
+    matching = [n for n in names if n.endswith("m.pt")]
+    assert len(matching) == 1, f"m.pt bundled more than once: {names}"
+
+
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
     """A project reached through a symlink must archive rather than raising ValueError out of
     the door: archive_project resolves project_path once and uses that resolved root for both

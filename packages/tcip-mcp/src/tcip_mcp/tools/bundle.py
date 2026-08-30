@@ -193,7 +193,10 @@ def _registered_checkpoint_paths(tree: Path) -> frozenset[Path]:
 def _blob_files(
     tree: Path, claimed: frozenset[str], registered_checkpoints: frozenset[Path],
 ) -> tuple[Path, ...]:
-    """Every file under a recognized blob home that no record or log plan already adopts.
+    """Every file under a recognized blob home that no record or log plan already adopts, each
+    named once even when more than one recognized home would otherwise find the same file (a
+    checkpoint sitting under ``.tcip/models`` and also registered, or an experiment-dir ``.pt``
+    that is also part of a ``model_src`` snapshot walk).
 
     A ``.pt`` file anywhere under ``.tcip/experiments/`` is found by shape alone, in addition to
     a registry-named path and the ``.tcip/models`` convenience location: a run's own checkpoint
@@ -206,10 +209,13 @@ def _blob_files(
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
 
     found: list[Path] = []
+    seen: set[str] = set()
 
     def _add(candidate: Path) -> None:
+        marker = os.path.normcase(str(candidate))
         if candidate.is_file() and not _is_bookkeeping(candidate.name) \
-                and os.path.normcase(str(candidate)) not in claimed:
+                and marker not in claimed and marker not in seen:
+            seen.add(marker)
             found.append(candidate)
 
     image_dir = _image_root(tree)
