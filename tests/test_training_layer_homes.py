@@ -38,12 +38,14 @@ def _assert_one_home(names: set[str], old_path: Path, new_path: Path) -> None:
 
 
 def test_split_construction_functions_have_one_home():
-    """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity`` and
-    ``persist_split_manifest`` moved out of ``training_tools.py`` into
+    """``auto_train_val``, ``spatial_single_source_split``, ``dataset_identity``,
+    ``persist_split_manifest``, ``checked_label_format``, ``build_full_admitted_dataset`` and
+    ``spatial_split_raster_identity`` moved out of ``training_tools.py`` into
     ``pipelines/data/split_construction.py`` (beside ``splits.py``), public and unaliased."""
     _assert_one_home(
         {"auto_train_val", "spatial_single_source_split", "dataset_identity",
-         "persist_split_manifest"},
+         "persist_split_manifest", "checked_label_format", "build_full_admitted_dataset",
+         "spatial_split_raster_identity"},
         _module_path("tools/training_tools.py"),
         _module_path("pipelines/data/split_construction.py"),
     )
