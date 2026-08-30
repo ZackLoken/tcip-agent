@@ -752,12 +752,12 @@ the response shape `training.py` and `tuning.py` both answer in, and `_body_comm
 `EmptyBodyPayload`, the empty body model six path-parameter-only routes now declare so the
 browser must send a preflighted request rather than reaching the handler as a simple one.
 
-Total HTTP routes at HEAD: 88 (5 on `app.py` plus 83 across the 16 route modules, both counts
+Total HTTP routes at HEAD: 87 (5 on `app.py` plus 82 across the 16 route modules, both counts
 obtained this session by grepping `@app.get/post(` and `@router.get/post(` and summing);
 websocket routes are counted separately, below, and excluded from this total. Each per-router
-heading's own route count (and their sum, 86) includes any websocket route it lists, since
+heading's own route count (and their sum, 85) includes any websocket route it lists, since
 `routes/inference.py`, `routes/terminal.py` and `routes/training.py` each carry one; net of
-those three, the 16 modules hold the 83 HTTP routes counted here.
+those three, the 16 modules hold the 82 HTTP routes counted here.
 
 Total WebSocket routes at HEAD: 5 (`/ws/state`, `/ws/panel/{panel}` on `app.py`;
 `/api/terminal/ws/{session_id}` on `routes/terminal.py`; `/api/inference/jobs/{job_id}/stream`  <!-- queued: P5-124 unify -->
@@ -909,15 +909,14 @@ registered at HEAD.
 | POST | `/end` | `end_session` | `routes/sessions.py:207` |
 | GET | `/load` | `load_sessions` | `routes/sessions.py:223` |
 
-### routes/terminal.py, prefix `/api/terminal` (4 HTTP + 1 WS)
+### routes/terminal.py, prefix `/api/terminal` (3 HTTP + 1 WS)
 
 | method | path | handler | line |
 |---|---|---|---|
 | GET | `/status` | `get_status` | `routes/terminal.py:253` |
 | POST | `/sessions` | `create_session` | `routes/terminal.py:282` |
-| GET | `/sessions` | `list_terminal_sessions` | `routes/terminal.py:305` |
-| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:314` |
-| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:342` |
+| POST | `/sessions/{session_id}/restart` | `restart_session` | `routes/terminal.py:305` |
+| WS | `/ws/{session_id}` (full path `/api/terminal/ws/{session_id}`) | `terminal_ws` | `routes/terminal.py:333` |
 
 ### routes/training.py, prefix `/api/training` (8 HTTP + 1 WS)
 
@@ -947,9 +946,9 @@ registered at HEAD.
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard` | `launch_trial_tensorboard` | `routes/tuning.py:565` |
 | POST | `/sweeps/{sweep_id}/trials/{trial_id}/tensorboard/stop` | `stop_trial_tensorboard` | `routes/tuning.py:579` |
 
-### 10 routes with no located frontend caller
+### 9 routes with no located frontend caller
 
-Per phase0's `web-surface.md`, these 10 registered backend routes had no caller found
+Per phase0's `web-surface.md`, these 9 registered backend routes had no caller found
 under `packages/tcip-web/frontend/src/` by literal-path grep. Not re-derived this
 session; restated from phase0 as the brief instructs, with each route's line verified
 above against HEAD.
@@ -964,7 +963,6 @@ above against HEAD.
 | GET | `/api/inference/jobs/{job_id}/preview` | no caller found; `inferenceApi` has no `preview` function |  <!-- queued: P5-125 delete -->
 | GET | `/api/review/image_status` | singular form; no caller found (plural `/api/review/image_statuses` is called) |  <!-- queued: P5-141 delete -->
 | POST | `/api/review/save_gt` | no caller found; `api.review` has no `saveGt` function |  <!-- queued: P5-139 delete -->
-| GET | `/api/terminal/sessions` | no caller found; `terminalApi` has no list function |  <!-- queued: P5-99 delete -->
 | POST | `/api/training/compare` | no caller found; `trainingApi` has no `compare` function |  <!-- queued: P5-111 delete -->
 
 ## 3. tcip-annotation importable public symbols
