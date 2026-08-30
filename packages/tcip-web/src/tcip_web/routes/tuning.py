@@ -67,11 +67,10 @@ _registry = jobstore.JobRegistry(
     HPO_REGISTRY, to_summary=_summary, from_summary=_from_summary, id_field="sweep_id",
 )
 """The dict-plus-lock live registry for this route's own sweeps (see ``jobstore.JobRegistry``),
-the shared home review.py's priority queue and inference.py's jobs adopt too. ``_sweeps``/
-``_lock`` below are this registry's own dict and lock, bound under their historical names since
-callers (tests among them) already reach into them directly."""
+the shared home review.py's priority queue and inference.py's jobs adopt too. ``_lock`` below is
+this registry's own lock, bound under its historical name since callers (tests among them, and
+this module's own ``_workers`` guard) already reach into it directly."""
 
-_sweeps: dict[str, HPOJob] = _registry.jobs
 _lock = _registry.lock
 _workers: dict[str, threading.Thread] = {}
 """Every sweep worker this process has spawned and not yet seen finish, by sweep id."""

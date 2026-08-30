@@ -460,8 +460,7 @@ def test_images_overview_builds_no_longer_defines_its_own_dict_and_lock():
 def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shape():
     """jobstore.JobRegistry is the one home for the register/get/persist/rehydrate shape
     review.py's priority queue and images.py's overview builds used to restate around their own
-    dict-plus-lock registry (inference.py and tuning.py adopt the same class, keeping their own
-    dict/lock bound under their historical names for callers that already reach into them)."""
+    dict-plus-lock registry (inference.py and tuning.py adopt the same class too)."""
     jobstore_path = _web_module_path("jobstore.py")
     assert jobstore_path.is_file()
     counts = _def_name_counts(jobstore_path, node_types=(ast.ClassDef,))
@@ -471,6 +470,24 @@ def test_job_registry_class_is_the_one_home_for_the_dict_plus_lock_registry_shap
             continue
         other = _def_name_counts(py_file, node_types=(ast.ClassDef,))
         assert "JobRegistry" not in other, f"{py_file} also defines JobRegistry"
+
+
+def test_inference_and_tuning_no_longer_bind_historical_dict_aliases():
+    """inference.py's ``_jobs``/``_job_lock`` and tuning.py's ``_sweeps`` restated
+    ``_registry.jobs``/``_registry.lock`` under their pre-adoption names for no shipped
+    reader (tuning.py's ``_sweeps``) or none at all (inference.py's pair); every reaching test
+    now goes through ``_registry`` directly, the same access review.py's and images.py's own
+    registries never offered another name for. tuning.py's ``_lock`` stays: its own
+    ``_workers`` dict, unrelated to the registry, still guards through it."""
+    inference_path = _web_module_path("routes/inference.py")
+    tuning_path = _web_module_path("routes/tuning.py")
+    assert inference_path.is_file() and tuning_path.is_file()
+    stray_inference = {"_jobs", "_job_lock"} & set(_assign_name_counts(inference_path))
+    assert not stray_inference, f"inference.py still defines {sorted(stray_inference)}"
+    stray_tuning = {"_sweeps"} & set(_assign_name_counts(tuning_path))
+    assert not stray_tuning, f"tuning.py still defines {sorted(stray_tuning)}"
+    assert "_lock" in _assign_name_counts(tuning_path), (
+        "tuning.py's _workers guard still needs its own _lock alias")
 
 
 def test_validate_reference_and_its_exclusive_helpers_moved_to_validation_module():

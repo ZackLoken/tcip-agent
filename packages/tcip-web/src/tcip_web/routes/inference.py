@@ -136,12 +136,7 @@ _registry = jobstore.JobRegistry(
     INFERENCE_REGISTRY, to_summary=_summary, from_summary=_from_summary,
 )
 """The dict-plus-lock live registry for this route's own jobs (see ``jobstore.JobRegistry``),
-the shared home review.py's priority queue and tuning.py's sweeps adopt too. ``_jobs``/
-``_job_lock`` below are this registry's own dict and lock, bound under their historical names
-since callers (tests among them) already reach into them directly."""
-
-_jobs: dict[str, InferenceJob] = _registry.jobs
-_job_lock = _registry.lock
+the shared home review.py's priority queue and tuning.py's sweeps adopt too."""
 
 
 def _audit_dataset_write(dataset_root: str, tool: str, arguments: dict) -> None:
