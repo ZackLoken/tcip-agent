@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Circle, Line, Rect, Text } from "react-konva";
+import { Circle, Line, Rect } from "react-konva";
 import Konva from "konva";
 
 import { api } from "@/api/client";
@@ -9,6 +9,7 @@ import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { CoverageMinimap } from "@/components/Canvas/CoverageMinimap";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
+import { HaloLabel } from "@/components/HaloLabel";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useCoverageTracking } from "@/hooks/useCoverageTracking";
@@ -2140,37 +2141,5 @@ function SnapIndicator({
       strokeWidth={1.5 / scale}
       dash={[2.5 / scale, 2.5 / scale]}
     />
-  );
-}
-
-function HaloLabel({
-  x,
-  y,
-  text,
-  fill,
-  size,
-}: {
-  x: number;
-  y: number;
-  text: string;
-  fill: string;
-  size: number;
-}) {
-  return (
-    <>
-      <Text
-        x={x + 2}
-        y={y - size - 2}
-        text={text}
-        fill="#000000"
-        fontSize={size}
-        fontStyle="bold"
-        shadowColor="#000000"
-        shadowBlur={size * 0.2}
-        shadowOffset={{ x: 0, y: 0 }}
-        shadowOpacity={0.9}
-      />
-      <Text x={x + 2} y={y - size - 2} text={text} fill={fill} fontSize={size} fontStyle="bold" />
-    </>
   );
 }

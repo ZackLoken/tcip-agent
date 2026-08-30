@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Circle, Line, Rect, Text } from "react-konva";
+import { Circle, Line, Rect } from "react-konva";
 import type Konva from "konva";
 
 import { api } from "@/api/client";
@@ -19,6 +19,7 @@ import { BandPicker } from "@/components/BandPicker";
 import { CanvasStage } from "@/components/Canvas/CanvasStage";
 import { DisclosureChevron } from "@/components/CollapsibleSection";
 import { ColorPickerModal } from "@/components/ColorPickerModal";
+import { HaloLabel } from "@/components/HaloLabel";
 import { useBandSelection } from "@/hooks/useBandSelection";
 import { useCoverageGrid } from "@/hooks/useCoverageGrid";
 import { useDisclosure } from "@/hooks/useDisclosure";
@@ -2191,36 +2192,5 @@ function ReviewLine({
       dash={dashed ? [8 * lw, 4 * lw] : undefined}
       fill={fill}
     />
-  );
-}
-
-function HaloLabel({
-  x,
-  y,
-  text,
-  fill,
-  size,
-}: {
-  x: number;
-  y: number;
-  text: string;
-  fill: string;
-  size: number;
-}) {
-  return (
-    <>
-      <Text
-        x={x + 2}
-        y={y - size - 2}
-        text={text}
-        fill="#000000"
-        fontSize={size}
-        fontStyle="bold"
-        shadowColor="#000000"
-        shadowBlur={size * 0.2}
-        shadowOpacity={0.9}
-      />
-      <Text x={x + 2} y={y - size - 2} text={text} fill={fill} fontSize={size} fontStyle="bold" />
-    </>
   );
 }
