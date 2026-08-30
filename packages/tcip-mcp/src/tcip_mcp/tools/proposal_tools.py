@@ -3,7 +3,7 @@ canvas review.
 
 propose_annotations and segment_prompt each ask an engine (the built-in SAM reference, or a
 bespoke 'module:factory' the agent brings) to look at pixels and offer candidates or a prompted
-mask. accept_proposals and stage_proposals each land shapes in the predictions tree through the
+mask. stage_accepted_proposals and stage_proposals each land shapes in the predictions tree through the
 same verdict-guarded staging door, for a human to accept, reject or edit on the Review canvas.
 Neither ever writes ground truth.
 """
@@ -51,7 +51,7 @@ ts.register_store(
 
 
 def proposal_staging_key(dataset_root: str | Path, date: str | None, stem: str) -> ts.Key:
-    """The proposals one run staged for one dataset image, for ``accept_proposals`` to read back.
+    """The proposals one run staged for one dataset image, for ``stage_accepted_proposals`` to read back.
 
     ``last_writer_wins``: a run writes the whole envelope from the candidates it just
     produced, so a re-run replaces the previous one rather than merging into it. Scoped to the
@@ -73,7 +73,7 @@ class StagingAddress(NamedTuple):
     """The :func:`proposal_staging_key` for a dataset image, plus the dataset root and date
     :func:`~tcip_mcp.dataset_layout.parse_image_path` derived to reach it.
 
-    ``accept_proposals`` needs the root and date too, to stage the accepted predictions at the
+    ``stage_accepted_proposals`` needs the root and date too, to stage the accepted predictions at the
     same address; carrying them here means that address is derived once, not twice.
     """
 
@@ -86,7 +86,7 @@ def _staging_key_for(image_path: str) -> StagingAddress:
     """The :class:`StagingAddress` for the dataset image at ``image_path``.
 
     Runs :func:`~tcip_mcp.dataset_layout.parse_image_path` once, so ``propose_annotations`` and
-    ``accept_proposals`` never derive two different addresses for the same image. Raises
+    ``stage_accepted_proposals`` never derive two different addresses for the same image. Raises
     ``ValueError``, the resolver's own message, for a path outside any dataset's ``images/`` tree.
     """
     from tcip_mcp.dataset_layout import parse_image_path
@@ -98,7 +98,7 @@ def _staging_key_for(image_path: str) -> StagingAddress:
 def _unresolvable_staging_source(img: Path, exc: Exception) -> str:
     """A reason for ``propose_annotations`` to decline staging ``img``, when
     :func:`~tcip_mcp.pipelines.image_utils.resolve_image_source` raised ``exc`` for it (the same
-    call ``accept_proposals`` will make on this path).
+    call ``stage_accepted_proposals`` will make on this path).
 
     A band-group member's own path (``capture_Red.tif`` when ``capture.bandgroup`` claims it)
     resolves to nothing: the resolver's own ``FileNotFoundError`` for it reads the same as one for
@@ -159,7 +159,7 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
     """Candidates proposed against a region crop's own pixels, translated into the source image's
     full-frame native coordinates by the crop's own origin.
 
-    Both consumers downstream (``render_candidates``, and ``accept_proposals`` reading the cached
+    Both consumers downstream (``render_candidates``, and ``stage_accepted_proposals`` reading the cached
     envelope back later) expect ``bbox``/``rings`` in the source image's native frame, never
     crop-local pixels, so this runs before either sees the candidates.
     """
@@ -188,21 +188,22 @@ def propose_annotations(
 
     Runs the engine's whole-image proposal pass, renders the numbered candidates, and returns the
     render path and neutral candidate data. Read the render with your own image-capable read
-    tool, then call accept_proposals to assign classes and stage the accepted ones as predictions.
+    tool, then call stage_accepted_proposals to assign subjects and stage the accepted ones as
+    predictions.
 
     Each candidate renders as a colored, semi-transparent filled polygon (every ring of an
     occlusion-split candidate drawn, not just the largest) with a large numbered label at its
     centroid, colors cycling through the shared class palette; the candidate id in that number is
-    the same id ``accept_proposals``' ``assignments`` parameter names.
+    the same id ``stage_accepted_proposals``' ``assignments`` parameter names.
 
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the
     dataset, capture date and stem, alongside the content identity of the pixels the engine ran
-    on: ``accept_proposals`` reads the record back by that same address and refuses if the
+    on: ``stage_accepted_proposals`` reads the record back by that same address and refuses if the
     image's content no longer matches it. On a path outside any dataset's ``images/`` tree, or a
-    dataset path ``accept_proposals`` would itself fail to resolve (a band-group member's own
+    dataset path ``stage_accepted_proposals`` would itself fail to resolve (a band-group member's own
     path when its manifest claims it), the engine still runs and the render and candidates are
     returned the same way, but nothing is staged (the response's ``staged`` is ``false``, naming
-    why): there is no address ``accept_proposals`` could ever read the record back by, so such a
+    why): there is no address ``stage_accepted_proposals`` could ever read the record back by, so such a
     call cannot later be accepted.
 
     The engine is a capability, not a fixed method: 'sam' is the built-in SAM2 reference; the agent
@@ -330,7 +331,7 @@ def propose_annotations(
     read = _display_for_path(image_path)
     out = render_candidates(read.pixels, candidates, native_size=read.native_size)
 
-    # The envelope records the engine so accept_proposals stamps the right producer.
+    # The envelope records the engine so stage_accepted_proposals stamps the right producer.
     envelope: dict = {"engine": engine, "candidates": candidates}
     if region_info is not None:
         envelope["region"] = region_info
@@ -344,7 +345,7 @@ def propose_annotations(
         from tcip_mcp.pipelines import image_utils
 
         try:
-            # The same resolution accept_proposals will make on this path: staging over a
+            # The same resolution stage_accepted_proposals will make on this path: staging over a
             # source accept could never reread would leave a record it can never confirm.
             source = image_utils.resolve_image_source(img.parent, img.stem)
         except (FileNotFoundError, image_utils.BandGroupIncomplete) as exc:
@@ -367,7 +368,7 @@ def propose_annotations(
         "image_path": out,
         "engine": engine,
         "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}."
-                   f"{stage_note} Review the numbered overlay, then call accept_proposals "
+                   f"{stage_note} Review the numbered overlay, then call stage_accepted_proposals "
                    f"with class assignments.",
         "candidate_count": len(candidates),
         "staged": staged,
@@ -385,19 +386,19 @@ def propose_annotations(
 
 @mcp.tool()
 @audited(scope_arg="image_path")
-def accept_proposals(
+def stage_accepted_proposals(
     image_path: str,
     assignments: list[dict],
 ) -> dict:
-    """Assign classes to reviewed proposals and stage them as predictions for canvas review.
+    """Stage reviewed proposals, each assigned a subject, as predictions for canvas review.
 
     After reviewing propose_annotations output, the agent calls this tool with a mapping from
-    candidate IDs to class IDs. Rejected candidates are simply omitted from the assignments list.
-    The masks are written to the predictions tree (``predictions/<engine>/<date>/<task>``) as
-    per-image COCO/JSON with ``created_by=<engine>`` and ``score`` = the engine's proposal score;
-    they are model output, so a human accepts them on the Review canvas before they become ground
-    truth. Staging goes through the prediction-bucket verdict guard, so a re-run never overwrites
-    reviewed predictions or orphans their verdicts. This never writes GT.
+    candidate IDs to subjects; rejected candidates are simply omitted from the assignments list.
+    The masks land in the predictions tree (``predictions/<engine>/<date>/<task>``) as per-image
+    COCO/JSON with ``created_by=<engine>`` and ``score`` = the engine's proposal score: model
+    output for a human to accept, reject or edit on the Review canvas, staged through the
+    prediction-bucket verdict guard so a re-run never overwrites reviewed predictions or orphans
+    their verdicts. It never writes ground truth.
 
     Reads back the record propose_annotations staged for this exact image (dataset, capture date
     and stem) and refuses if the image's content no longer matches the content identity that run

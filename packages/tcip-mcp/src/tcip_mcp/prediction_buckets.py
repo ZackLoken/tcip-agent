@@ -264,7 +264,7 @@ def stage_prediction_shapes(
 ) -> dict:
     """Write already-built prediction :class:`Annotation` records into a verdict-guarded bucket.
 
-    The one staging path shared by ``stage_proposals`` and ``accept_proposals`` so both honor
+    The one staging path shared by ``stage_proposals`` and ``stage_accepted_proposals`` so both honor
     prediction-bucket immutability: a bucket that carries review verdicts is never overwritten (the
     default redirects to the next free ``<name>@r2`` variant; ``overwrite=True`` raises
     :class:`BucketHasVerdicts`). ``annotations`` are name-based prediction records (subject + geometry

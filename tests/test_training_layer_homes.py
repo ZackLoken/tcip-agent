@@ -174,10 +174,11 @@ def _literal_loads(tree: ast.AST, literal: str) -> list[ast.AST]:
 
 
 def test_vision_side_proposal_tools_have_one_home():
-    """``propose_annotations`` and ``accept_proposals`` moved out of ``vision_tools.py`` into
-    ``tools/proposal_tools.py``, beside the annotation-side pair below."""
+    """``propose_annotations`` and ``stage_accepted_proposals`` (renamed from
+    ``accept_proposals``) moved out of ``vision_tools.py`` into ``tools/proposal_tools.py``,
+    beside the annotation-side pair below."""
     _assert_one_home(
-        {"propose_annotations", "accept_proposals"},
+        {"propose_annotations", "stage_accepted_proposals"},
         _module_path("tools/vision_tools.py"),
         _module_path("tools/proposal_tools.py"),
     )

@@ -778,7 +778,7 @@ anything.
 |---|---|---|---|
 | `visualize` | `vision_tools.py:300` | yes | Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid. |
 | `propose_annotations` | `vision_tools.py:840` | yes | Propose candidate annotations on an image for review, using a chosen auto-labeling engine. |
-| `accept_proposals` | `vision_tools.py:1046` | yes | Assign classes to reviewed proposals and stage them as predictions for canvas review. |
+| `stage_accepted_proposals` | `vision_tools.py:1046` | yes | Stage reviewed proposals, each assigned a subject, as predictions for canvas review. |
 | `capture_live_canvas` | `vision_tools.py:1176` | yes | Render exactly what the human's GUI canvas shows right now: image, shapes, viewport. |
 | `overlay_reference_grid` | `vision_tools.py:1311` | yes | Render image with a labeled reference-grid overlay for spatial referencing. |
 
@@ -1559,8 +1559,9 @@ Seam S29 ("Prediction-bucket immutability"), verdict `both-sides-one-implementat
 `phase0_implementation: once, shared`: `tests/test_prediction_bucket_resolution.py:39,48`,
 `tests/test_review_channel.py:287,312,325`, `tests/test_export_predictions_bucket_handling.py:60`,
 `tests/test_orthomosaic_tools.py:241-248`, `tests/test_tcip_web_routes.py:898`. Gap: the seam's
-fourth named caller, `vision_tools.py:1033` inside `accept_proposals`'s `except BucketHasVerdicts`
-block, has no test coverage; every `accept_proposals` test writes into a fresh, verdict-free
+fourth named caller, `vision_tools.py:1033` inside `stage_accepted_proposals`'s `except
+BucketHasVerdicts` block, has no test coverage; every `stage_accepted_proposals` test writes
+into a fresh, verdict-free
 bucket.
 
 ## 18. `operating_point.json`, prediction-bucket provenance sidecar

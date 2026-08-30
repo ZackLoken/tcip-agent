@@ -146,7 +146,7 @@ def test_consolidated_tools_present_and_removed_absent():
         "preflight_config", "select_best_model", "score_predictions",
         "tabulate_counts", "view_gui_state",
         # Method-neutral auto-labeling seam: no longer SAM-specific names.
-        "propose_annotations", "accept_proposals", "segment_prompt",
+        "propose_annotations", "stage_accepted_proposals", "segment_prompt",
     ):
         assert present in registered, f"{present} should be registered"
     removed = {
@@ -177,6 +177,8 @@ def test_consolidated_tools_present_and_removed_absent():
         # Old names: must no longer register.
         "validate_config", "get_best_model", "evaluate_predictions",
         "export_results_csv", "get_active_context",
+        # Renamed: the docstring stopped denying its own verb under the old name.
+        "accept_proposals",
     }
     assert not (removed & registered), f"removed tools still registered: {removed & registered}"
 
