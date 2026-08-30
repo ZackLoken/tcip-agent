@@ -299,12 +299,11 @@ def test_each_launch_leaves_one_platform_audit_line_naming_the_session_and_progr
     assert rows[0]["arguments"]["version"] is None
 
 
-def test_the_session_list_and_the_restart_answer_the_launched_program(client):
-    sid = client.post("/api/terminal/sessions", json={}).json()["session_id"]
-
-    (listed,) = client.get("/api/terminal/sessions").json()["sessions"]
-    assert listed["id"] == sid
-    assert Path(listed["launched"]["executable"]).name == Path(sys.executable).name
+def test_the_create_and_restart_responses_answer_the_launched_program(client):
+    created = client.post("/api/terminal/sessions", json={}).json()
+    sid = created["session_id"]
+    assert Path(created["launched"]["executable"]).name == Path(sys.executable).name
 
     restarted = client.post(f"/api/terminal/sessions/{sid}/restart", json={}).json()
+    assert restarted["alive"] is True
     assert Path(restarted["launched"]["executable"]).name == Path(sys.executable).name

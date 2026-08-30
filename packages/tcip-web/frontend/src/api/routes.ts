@@ -42,7 +42,6 @@ export const ROUTES = {
   getRoot: "/",
   getSessionsLoad: "/api/sessions/load",
   getState: "/api/state",
-  getTerminalSessions: "/api/terminal/sessions",
   getTerminalStatus: "/api/terminal/status",
   getTrainingRuns: "/api/training/runs",
   getTrainingRunsByRunId: (runId: string) => `/api/training/runs/${encodeURIComponent(runId)}`,

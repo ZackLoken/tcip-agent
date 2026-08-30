@@ -301,15 +301,6 @@ def _require(session_id: str) -> TerminalSession:
     return session
 
 
-@router.get("/sessions")
-def list_terminal_sessions() -> dict:
-    return {
-        "sessions": [
-            {"id": s.id, "alive": s.alive(), "launched": s.launched} for s in _SESSIONS.values()
-        ]
-    }
-
-
 @router.post("/sessions/{session_id}/restart")
 def restart_session(session_id: str, req: CreateSessionRequest) -> dict:
     session = _require(session_id)
