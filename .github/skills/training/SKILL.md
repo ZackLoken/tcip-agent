@@ -122,7 +122,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 | `list_training_runs` | List all runs in session |
 | `cancel_training` | Request graceful cancellation of a running run; stops at the next batch/epoch boundary, still saves `model_final.pt` |
 | `run_hpo` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
-| `python scripts/render_failure_cases.py` | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
+| `scripts/render_failure_cases.py` (logged script, run with python) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 | `create_experiment` | Track training run with full lineage |
 
 ## TensorBoard

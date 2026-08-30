@@ -40,7 +40,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 |------|---------|
 | `evaluate_model` | Evaluate a checkpoint on a held-out dataset, or a named split manifest's `calibration` side (`split_manifest_dir`); writes `test_results.json` |
 | `score_predictions` | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN |
-| `python scripts/render_failure_cases.py` | Surface + render the N images with highest triage error |
+| `scripts/render_failure_cases.py` (logged script, run with python) | Surface + render the N images with highest triage error |
 | `compare_experiments` | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | Enumerate every experiment on record, including one no other tool can rediscover (a calibration experiment, a pre-created one never launched) |
