@@ -1115,10 +1115,10 @@ def test_review_mark_complete_and_audits(client: TestClient, tmp_path: Path) -> 
     assert resp.json()["image_status"] == "completed"
 
     status = client.get(
-        "/api/review/image_status",
-        params={"dataset_root": str(dataset_root), "image_name": "IMG_9.JPG"},
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root)},
     )
-    assert status.json()["status"] == "completed"
+    assert status.json()["statuses"]["IMG_9.JPG"] == "completed"
     assert any(e.get("tool") == "gui_review_mark_complete" for e in _audit_entries(dataset_root))
 
 
@@ -1148,10 +1148,10 @@ def test_review_mark_complete_refusal_persists_nothing(
     gt.write_text("not json {][", encoding="utf-8")
 
     before = client.get(
-        "/api/review/image_status",
-        params={"dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG"},
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root)},
     ).json()
-    assert before["status"] == "not_started"
+    assert before["statuses"].get("IMG_0000.JPG", "not_started") == "not_started"
 
     resp = client.post(
         "/api/review/mark_complete",
@@ -1163,10 +1163,10 @@ def test_review_mark_complete_refusal_persists_nothing(
     assert resp.status_code == 400
 
     after = client.get(
-        "/api/review/image_status",
-        params={"dataset_root": str(dataset_root), "image_name": "IMG_0000.JPG"},
+        "/api/review/image_statuses",
+        params={"dataset_root": str(dataset_root)},
     ).json()
-    assert after["status"] == "not_started"
+    assert after["statuses"].get("IMG_0000.JPG", "not_started") == "not_started"
     assert _audit_entries(dataset_root) == []
 
 

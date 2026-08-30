@@ -266,9 +266,9 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One fixture, a project root and a dataset root that are different directories, and every
-    review surface driven across it: matches, a verdict, mark-complete, both image-status queries,
-    the priority-queue launch, the promotion and the inference-side bucket guard. One route standing
-    in for the rest is what let the two roots look interchangeable."""
+    review surface driven across it: matches, a verdict, mark-complete, the batch image-status
+    query, the priority-queue launch, the promotion and the inference-side bucket guard. One route
+    standing in for the rest is what let the two roots look interchangeable."""
     import time
 
     pytest.importorskip("torch")  # the promotion's gate resolves through the evaluation stack
@@ -294,9 +294,6 @@ def test_every_review_surface_reads_the_dataset_root_the_request_states(
     assert done.status_code == 200
     assert done.json()["image_status"] == "completed"
 
-    one = client.get("/api/review/image_status", params={
-        "dataset_root": str(dataset_root), "image_name": f"{STEM}.jpg"})
-    assert one.json()["status"] == "completed"
     batch = client.get("/api/review/image_statuses", params={
         "dataset_root": str(dataset_root), "pred_dir": str(bucket)})
     assert batch.json()["statuses"][f"{STEM}.jpg"] == "completed"

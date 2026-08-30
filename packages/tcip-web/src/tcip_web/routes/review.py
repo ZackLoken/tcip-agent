@@ -1192,14 +1192,6 @@ def validate_reference(req: ValidateReferenceRequest) -> ValidateReferenceRespon
     )
 
 
-@router.get("/image_status")
-def get_image_status(dataset_root: str, image_name: str) -> dict:
-    engine = _get_engine(dataset_root)
-    # This route names no prediction bucket, so it answers across every bucket the image was
-    # reviewed under rather than picking one.
-    return {"status": engine.image_status_across_buckets(image_name)}
-
-
 class ImageStatusesResponse(BaseModel):
     # image_name -> "not_started" | "started" | "completed"; images the engine has never
     # touched are absent (the client defaults them to "not_started").
