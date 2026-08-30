@@ -7,7 +7,7 @@ Single home for:
     truth, the canonical COCO mAP definition;
   * in-house scalar metrics for classification / ordinal / regression (the seam
     where pycocotools ``iou_type='segm'`` can later cover true instance seg);
-  * the ported composite selection objective (lower = better);
+  * the composite selection objective (lower = better);
   * a task-agnostic two-pass ``evaluate()``, the metrics pass ``eval_runners.py``'s
     checkpoint-evaluation orchestration calls into.
 

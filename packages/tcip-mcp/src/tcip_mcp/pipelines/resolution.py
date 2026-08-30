@@ -618,7 +618,7 @@ def dataset_hash_and_label_digests(
 def manifest_digest(manifest: dict) -> str:
     """The one digest a split-manifest record earns: sha256 over ``RECORD_JSON.encode(manifest)``.
 
-    Called at bind time (``training_tools._persist_split_manifest``, stamping ``split.json``'s
+    Called at bind time (``split_construction.persist_split_manifest``, stamping ``split.json``'s
     ``label_digests.manifest_sha256``) and at calibration time (``inference_tools``'s
     ``split_manifest_sha256``, and the operator script that passes the same fact) so the two
     sides that must agree on a manifest's identity can never spell the digest differently.

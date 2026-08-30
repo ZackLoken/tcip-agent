@@ -1,5 +1,5 @@
 """Block-aware calibration/holdout: validate a detection operating point directly against a
-mosaic's own reserved calibration/test bands (see ``training_tools._spatial_single_source_split``'s
+mosaic's own reserved calibration/test bands (see ``split_construction.spatial_single_source_split``'s
 four-way split, ``reserve_calibration_fraction``), for a raster training source too large or too
 singular to hold whole images out from.
 

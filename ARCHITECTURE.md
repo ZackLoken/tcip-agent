@@ -109,8 +109,8 @@ differs from phase0 record: the Phase 0 inventory (`docs/audit/phase0/module-inv
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/collation.py | Collate functions for a task's ``DataLoader``: batches per-sample pairs into the shape ``train()`` and ``evaluate()`` both expect. | 0 | 5 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/envelope.py | The audited training envelope + ``TrainContext``. | 16 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/eval_runners.py | Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and writes its scored result; ``evaluation.py`` keeps the metrics computation itself. | 10 | 2 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py | Task-aware evaluation metrics + composite selection objective, alone in this module. | 7 | 11 |
-| packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model, alone in this module. | 11 | 8 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py | Task-aware evaluation metrics + composite selection objective. | 7 | 11 |
+| packages/tcip-mcp/src/tcip_mcp/pipelines/training/generic_trainer.py | Task-agnostic training loop for a bespoke ``model_source`` model. | 11 | 8 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/hpo.py | HPO, hyperparameter optimization on Ray Tune. | 1 | 3 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/optimizer_factory.py | Optimizer factory with differential learning rate support. | 0 | 2 |
 | packages/tcip-mcp/src/tcip_mcp/pipelines/training/run_registry.py | In-process registry of live training runs: ``TrainRun``, its cancel-sentinel protocol, and the create/attach/get/list/cancel operations over the process-global ``_RUNS`` map. | 1 | 3 |
@@ -769,8 +769,8 @@ anything.
 | `check_training_status` | `training_tools.py:749` | yes | Check the status of a training run. |
 | `list_training_runs` | `training_tools.py:885` | yes | List every training run this platform can currently account for. |
 | `cancel_training` | `training_tools.py:899` | yes | Request graceful cancellation of a running training run. |
-| `run_hpo` | `training_tools.py:1325` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
-| `evaluate_model` | `training_tools.py:1931` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
+| `run_hpo` | `training_tools.py:1326` | yes | Run hyperparameter optimization on Ray Tune, training each trial for real. |
+| `evaluate_model` | `training_tools.py:1838` | yes | Evaluate a trained checkpoint on a (held-out) dataset and write test_results.json. |
 
 ### vision_tools.py (5 tools)
 
@@ -1484,7 +1484,7 @@ rows directly. The route reads the log through the seam and shapes the answer wi
 Seam S30 ("split.json train/val manifest"), verdict `both-sides-one-implementation`,
 `phase0_implementation: written twice`: `tests/test_calibration_holdout_disjointness.py:124,305,357`,
 `tests/test_block_calibration.py:75`. These tests call the real writer
-`_persist_split_manifest` and the real readers (`operating_point.py`'s disjointness check,
+`persist_split_manifest` and the real readers (`operating_point.py`'s disjointness check,
 `block_calibration.py`'s `resolve_block_calibration_records`) against the same file. Gap: nothing
 exercises a mismatch between `dataset_hash`/`dataset_id`/`dataset_fingerprint` values recorded by
 the writer and any downstream consumer keying off them. `manifest_binding`, the block a run bound
@@ -1522,7 +1522,7 @@ it: `ModelRegistry.list_models`, line 319; `get_model`, line 325; `best_model`, 
 keywords, no default and no name heuristic, and by default ranks only entries whose
 `metrics_source` is `"trainer"` (`include_unverified=True` also ranks the rest). The
 `select_best_model` tool (`tools/model_tools.py:123`) resolves `higher_is_better` from
-`evaluation.HIGHER_IS_BETTER_BY_METRIC` (`pipelines/training/evaluation.py:109`) when the caller
+`evaluation.HIGHER_IS_BETTER_BY_METRIC` (`pipelines/training/evaluation.py:62` (`HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {`)) when the caller
 states none, the single declared-direction mapping `resolve_selection_metric`
 (`pipelines/training/generic_trainer.py`) also reads for the trainer's own checkpoint selection.
 
@@ -1811,7 +1811,7 @@ longer admits, an empty side) are unchanged in shape.
 
 No seam id in `seam-coverage.json`'s inventory names this record: it is new, and
 `tests/test_split_manifest_binding.py` calls the real writer and the real consumer
-(`_auto_train_val`'s manifest branch) against the same files.
+(`auto_train_val`'s manifest branch) against the same files.
 
 ## 27. `cal_holdout_split_lock`, `.tcip/artifacts/cal_holdout_split_<hash>.json`
 
@@ -2010,7 +2010,7 @@ Phase 3 verdict: single.
 
 Must agree: the browser and the route use corner coordinates while the file uses xywh, with the conversion happening once.
 Side A: `packages/tcip-web/src/tcip_web/routes/annotate.py:40` (`bbox: Optional[list[float]] = None          # [x1, y1, x2, y2], pixel`, the wire form).
-Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:622` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:42`, to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
+Side B: `packages/tcip-annotation/src/tcip_annotation/json_io.py:622` (`def xywh(`, the one corner-to-xywh conversion and the 2-decimal grid the stored document lives on, applied on write and, via the import at `packages/tcip-mcp/src/tcip_mcp/pipelines/training/evaluation.py:33` (`from tcip_annotation.json_io import xywh`), to every box scored against a stored label so both sides of a match sit on one grid; a wire box becomes a `BBox` in `annotation_from_payload`, line 175, and `_annotations_of`, line 227, is the inverse read).
 Phase 3 verdict: single.
 
 ## S19. Annotation format detection scope (json, coco)
@@ -2095,7 +2095,7 @@ Phase 3 verdict: single.
 
 Must agree: the calibration holdout is disjoint from the split the run actually trained on, and,
 when a split manifest is in play, from the checkpoint's own selection (val) side too.
-Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1669` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
+Side A: `packages/tcip-mcp/src/tcip_mcp/experiments.py:1671` (`def read_split_manifest(`, the one path and parse beside the member's key constructor; the writer persists through the same key).
 Side B: `packages/tcip-mcp/src/tcip_mcp/pipelines/block_calibration.py` (precheck and resolver share one spatial-strip predicate over that reader) and `pipelines/operating_point.py` (`_train_disjointness` and `_selection_disjointness` both read through it and share `_resolve_group_stem_disjointness`, the one group/stem-overlap implementation).
 Phase 3 verdict: single.
 
@@ -2103,7 +2103,7 @@ Phase 3 verdict: single.
 
 Must agree: a checkpoint written by the training envelope is kind-routable and rebuildable by the predictor that later loads it.
 Side A: `packages/tcip-mcp/src/tcip_mcp/pipelines/model_build.py:30` (`MODEL_SOURCE_KEY` and `STATE_DICT_KEY`, the one key vocabulary).
-Side B: the three checkpoint writers in `pipelines/training/generic_trainer.py` and the readers (`generic_predictor.py`, `inference/predictor.py`, `training/evaluation.py`) all bind through the constants.
+Side B: the three checkpoint writers in `pipelines/training/generic_trainer.py` and the readers (`generic_predictor.py`, `inference/predictor.py`, `training/eval_runners.py`) all bind through the constants.
 Phase 3 verdict: single.
 
 ## S32. Single operating-point resolution for all consumers

@@ -35,7 +35,7 @@ from tcip_mcp.pipelines import model_build, resolution  # noqa: F401
 from tcip_mcp.pipelines.data import band_groups, splits  # noqa: F401
 from tcip_mcp.pipelines.feedback import materialize  # noqa: F401
 from tcip_mcp.pipelines.postprocessing import plant_mapping  # noqa: F401
-from tcip_mcp.pipelines.training import eval_runners, evaluation, generic_trainer, hpo  # noqa: F401
+from tcip_mcp.pipelines.training import eval_runners, generic_trainer, hpo  # noqa: F401
 from tcip_mcp.tools import (  # noqa: F401
     data_tools,
     inference_tools,
