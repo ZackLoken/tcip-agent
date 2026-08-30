@@ -305,6 +305,7 @@ class JobRegistry:
         construction; a no-op for an unpersisted registry (``name`` is ``None``)."""
         if self.name is None:
             return
+        assert self._to_summary is not None, "a named registry always has one, refused otherwise"
         with self.lock:
             summaries = [self._to_summary(j) for j in self.jobs.values()]
         persist_grouped(self.name, summaries)
@@ -316,6 +317,7 @@ class JobRegistry:
         rehydrate from."""
         if self.name is None:
             return
+        assert self._from_summary is not None, "a named registry always has one, refused otherwise"
         root = current_root()
         with self.lock:
             for s in load(self.name):
