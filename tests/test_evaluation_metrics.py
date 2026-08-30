@@ -557,7 +557,7 @@ def test_resolve_selection_metric_rejects_a_metric_with_no_declared_direction():
 # HIGHER_IS_BETTER_BY_METRIC held against what evaluate()/governing_counts really return.
 
 def _detection_batch(num_images: int = 2, img_size: int = 64):
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.collation import task_collate
 
     items = []
     boxes = [[10.0, 10.0, 40.0, 40.0], [5.0, 5.0, 25.0, 30.0]]
@@ -885,7 +885,8 @@ torchvision = pytest.importorskip("torchvision")
 from torch.utils.data import DataLoader  # noqa: E402
 
 from tcip_mcp.pipelines.data.datasets import build_dataset  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import task_collate, train
+from tcip_mcp.pipelines.training.generic_trainer import train
+from tcip_mcp.pipelines.training.collation import task_collate
 from tcip_mcp.pipelines.training.run_registry import create_run  # noqa: E402
 
 IMG = 64

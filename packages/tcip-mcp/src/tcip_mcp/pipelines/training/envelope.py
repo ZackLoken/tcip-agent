@@ -122,7 +122,7 @@ class TrainContext:
         return TiledDetectionDataset(base, **kwargs)
 
     def task_collate(self, task: str | None = None) -> Any:
-        from tcip_mcp.pipelines.training.generic_trainer import task_collate
+        from tcip_mcp.pipelines.training.collation import task_collate
 
         return task_collate(task or self.task)
 

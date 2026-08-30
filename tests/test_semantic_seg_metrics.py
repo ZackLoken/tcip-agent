@@ -98,7 +98,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.data.datasets import build_dataset
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.collation import task_collate
     from tests import bespoke_models
 
     IMG = 64

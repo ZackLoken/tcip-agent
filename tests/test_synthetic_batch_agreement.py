@@ -17,7 +17,7 @@ import torch  # noqa: E402
 
 from tcip_mcp.pipelines.components.heads import OrdinalHead  # noqa: E402
 from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import task_collate  # noqa: E402
+from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 
 
 class _DetectionTargetRecorder(torch.nn.Module):

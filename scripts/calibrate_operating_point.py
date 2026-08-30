@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         resolve_operating_point, set_detector_operating_point,
     )
     from tcip_mcp.pipelines.resolution import DEFAULT_MAX_DETS, dataset_hash
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.collation import task_collate
 
     # --labels-dir is this script's measurement reference, so it clears the one admissibility rail.
     require_reference_ground_truth(args.labels_dir)

@@ -57,7 +57,7 @@ def _synth_batch(task: str, *, in_chans: int, num_classes: int, img_size: int, d
     """
     import torch
 
-    from tcip_mcp.pipelines.training.generic_trainer import task_collate
+    from tcip_mcp.pipelines.training.collation import task_collate
 
     if task not in _SYNTHESIZABLE_TASKS:
         raise ValueError(
