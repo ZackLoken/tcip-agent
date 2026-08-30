@@ -103,24 +103,13 @@ to be findable: save under `"model_best"`/`"model_final"`, or call `ctx.set_fina
 
 ## Hyperparameter search: Ray Tune (`pipelines.training.hpo`, `run_hpo`)
 
-HPO is a capability, not a fixed algorithm. `run_hpo` trains each trial for real (minimizing the
-composite objective) and lets you choose the search *algorithm* and trial *scheduler* per task,
-space, and budget; no method is welded in. Match them to the problem; the defaults
-(`random` + `asha`) are a floor, not a rule.
-
-| Piece | Role |
-|-------|------|
-| `search_alg` | `random` / `grid` (native), plus `optuna`, `bayesopt`, `hyperopt`, `nevergrad`, `ax`, all installed by default. An uninstalled pick (an install that skipped the `hpo` extra) errors clearly, never silently swapped. |
-| `scheduler` | `asha`, `hyperband`, `pbt`, `median`, or `none`. `grace_period` / `reduction_factor` tune the halving schedulers. |
-| `available_search_algs()` / `available_schedulers()` | the live menu on *this* machine (probes which backends import); call it rather than assuming. |
-| `tune_search(objective_fn, param_space, …)` | the seam under `run_hpo`: bring your own `objective_fn(config, report)` (call `report(value)` each step) with any `metric`/`mode`, and it drives the same searcher/scheduler machinery for a search that isn't a training sweep. `storage_path` is required (trial results land where you say, never Ray's home-directory default); `run_hpo` resolves it to the project's own `.tcip/hpo`. |
-
-Trials run under the base config's regime (same augmentation / imbalance handling) so the winning
-hyperparameters transfer to `launch_training`. `warm_start` seeds a known-good point;
-`max_concurrent` bounds parallel trials (default 1, safe for single-GPU training); each trial
-already runs in its own Ray-managed process, and `resources_per_trial` (omit to derive a fractional
-GPU share from the host's real device count and `max_concurrent`) tells Ray how much of the host
-each one may actually use. Ray persists trials under `output_dir` (also the TensorBoard logdir).
+HPO is a capability, not a fixed algorithm; see the `run_hpo` tool's own docstring for the
+search-algorithm/scheduler menu (call `available_search_algs()` / `available_schedulers()` for
+what this machine actually has installed), the sweep's on-disk layout, and its refusal shape.
+One seam the docstring doesn't carry: `tune_search(objective_fn, param_space, …)` is the
+bring-your-own-objective seam under `run_hpo`. Bring your own `objective_fn(config, report)`
+(call `report(value)` each step) for a search that isn't a training sweep; `storage_path` is
+required, trial results land where you say, never Ray's home-directory default.
 
 ## Concurrent runs: `scripts/inspect_compute_resources.py`
 
@@ -135,16 +124,13 @@ and how many runs this process's own registry currently reports running.
 ## Auto-labeling: the proposal-engine registry (`pipelines.proposal`)
 
 An auto-label engine turns an image into candidate shapes for a human to review. The seam is as
-open as `model_source`: name a built-in or bring your own by dotted `module:factory`, so you can
-wire, trial, and compare techniques and deduce which serves a task best by how well each engine's
-high-conf proposals survive breeder review.
-
-| Piece | Role |
-|-------|------|
-| `Proposer` protocol | `propose(image)` → whole-image candidates; `segment(image, points/box)` → one prompted mask. Implement either. |
-| `register_proposal_engine(name, engine)` | register your engine so `engine=<name>` resolves to it. |
-| `resolve_proposer(engine)` / `available_engines()` | resolve a built-in name or a dotted `module:factory`; list the built-ins. |
-| `SamProposer` (`"sam"`) | the built-in SAM2 reference engine; its stability / predicted-IoU signals ride under `engine_meta`. SAM ships as the runnable example; no engine is privileged. |
+open as `model_source`: implement the `Proposer` protocol (`propose(image)` for whole-image
+candidates, `segment(image, points/box)` for one prompted mask) and register it with
+`register_proposal_engine(name, engine)` so `engine=<name>` resolves to it, or bring one by dotted
+`module:factory` with no registration at all, so you can wire, trial, and compare techniques and
+deduce which serves a task best by how well each engine's high-conf proposals survive breeder
+review. `available_engines()` is the discovery call, listing the resolvable built-ins on this
+machine rather than a table this doc would have to keep in step with the registry.
 
 Candidates use a neutral schema (`candidate_id` / `bbox` / `area` / `rings` / `score` / `engine`
 / `engine_meta`) so the shared review/staging path stays method-agnostic. `rings` is `Polygon.rings`
@@ -155,13 +141,10 @@ occlusion-split object identically.
 ## Active learning: the scorer registry (`pipelines.active_learning.scorer`)
 
 An acquisition function is a capability, not a fixed menu; scorers resolve through a dict registry
-you can extend rather than a welded `if/elif`.
-
-| Piece | Role |
-|-------|------|
-| `BaseScorer` | `score(image_paths, model, device)` → `(path, score)` pairs, descending. |
-| `SCORER_REGISTRY` / `register_scorer(name, factory)` | built-ins: `uncertainty`, `diversity`, `combined`; register your own (margin, least-confidence, …) under a name. |
-| `resolve_scorer(method, task)` | resolve a built-in name, a registered one, or a dotted `module:factory` you wrote. An unresolvable name raises `ValueError` listing the built-ins (never silently substituted). |
+you can extend rather than a welded `if/elif`. `resolve_scorer(method, task)` resolves a built-in
+name, a registered one, or a dotted `module:factory` you wrote; an unresolvable name raises
+`ValueError` naming the built-ins itself, rather than silently substituting one. Register your own
+(margin, least-confidence, …) with `register_scorer(name, factory)`.
 
 `require_composed_detector` (`active_learning.helpers`) is the honest guard the logit-reading
 scorers use: it returns an error rather than reading logits off a non-`nn.Module` model, and
