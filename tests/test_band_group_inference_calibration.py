@@ -1,4 +1,4 @@
-"""``inference_tools._calibrate_operating_point`` must handle a grouped image without crashing:
+"""``pipelines.calibration.calibrate_operating_point`` must handle a grouped image without crashing:
 ``label_image_stems``' ``stem_to_image`` can hold a ``BandGroupRef`` (a band-grouped
 capture, see ``pipelines.data.band_groups``), and naively ``str()``-ing it produces its
 dataclass repr instead of a path any reader could decode. This file exercises a real
@@ -61,7 +61,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 def _grouped_dataset(root: Path) -> tuple[Path, Path]:
     """Two 2-band grouped captures, each with a GT label, a labeled dir every stem of which is a
-    ``BandGroupRef``, the shape ``_calibrate_operating_point`` hands to ``predict_batch``."""
+    ``BandGroupRef``, the shape ``calibrate_operating_point`` hands to ``predict_batch``."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
 
@@ -87,8 +87,8 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
     predictor is 2-channel, so it can only run at all if the grouped captures actually decoded
     that way (a 3-channel predictor could silently "work" on a bad path by
     broadcasting/re-normalizing, masking the bug)."""
+    from tcip_mcp.pipelines.calibration import calibrate_operating_point
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.tools.inference_tools import _calibrate_operating_point
 
     from tcip_mcp.model_registry import load_registered_checkpoint
 
@@ -107,7 +107,7 @@ def test_calibrate_operating_point_over_a_grouped_image_does_not_crash(tmp_path,
 
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
-    bundle, dataset_hash, n_excluded, _evidence = _calibrate_operating_point(
+    bundle, dataset_hash, n_excluded, _evidence = calibrate_operating_point(
         predictor, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=TILE, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.5, postprocess="nms", cross_tile_nms=None, max_dets=100,

@@ -84,9 +84,9 @@ _CAL_KWARGS = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8, gl
 
 
 def _calibrate(labels_dir, images_dir):
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
 
-    return itools._calibrate_operating_point(
+    return calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir), **_CAL_KWARGS)
 
 
@@ -303,6 +303,7 @@ class _OneDetectionStub(_CalStub):
 
 
 def _run_with_bundle(tmp_path, monkeypatch, calibration):
+    import tcip_mcp.pipelines.calibration as calibration_pipeline
     import tcip_mcp.pipelines.inference.predictor as predictor_mod
     import tcip_mcp.tools.inference_tools as itools
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -310,7 +311,7 @@ def _run_with_bundle(tmp_path, monkeypatch, calibration):
     bundle, inputs = calibration
     evidence = {"resolver": "resolve_operating_point", "inputs": inputs,
                 "reference_inputs": {"label_dirs": {"calibration": str(tmp_path)}}}
-    monkeypatch.setattr(itools, "_calibrate_operating_point",
+    monkeypatch.setattr(calibration_pipeline, "calibrate_operating_point",
                         lambda *a, **k: (bundle, "H", 0, evidence))
     monkeypatch.setattr(predictor_mod, "build_predictor",
                         lambda checkpoint, **kw: _OneDetectionStub())

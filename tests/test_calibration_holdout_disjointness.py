@@ -50,7 +50,7 @@ def _detection_dataset(root: Path, stems: list[str]) -> tuple[Path, Path]:
 
 
 class _CalStub:
-    """Predictor stub with the mutable operating-point surface run_inference/_calibrate_operating_point
+    """Predictor stub with the mutable operating-point surface run_inference/calibrate_operating_point
     set: every prediction comes back empty, which is enough to exercise the split/provenance
     machinery without a real model forward pass."""
 
@@ -487,8 +487,8 @@ def test_describe_review_validation_content_shared_with_calibration_message():
 
 
 def test_sweep_summary_surfaces_disjointness_fields():
+    from tcip_mcp.pipelines.calibration import sweep_summary
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
-    from tcip_mcp.tools.inference_tools import _sweep_summary
 
     conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
                    validated_against=VALIDATED_FALSE,
@@ -497,30 +497,29 @@ def test_sweep_summary_surfaces_disjointness_fields():
                           "train_disjointness": {"unresolvable": False, "leaked_groups": ["g1"]},
                           "passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
                           "pooled_count_bias_tolerance": 4.0})
-    out = _sweep_summary(conf)
+    out = sweep_summary(conf)
     assert out["disjoint"] is True
     assert out["content_overlap_frac"] == 0.0
     assert out["train_disjointness"]["leaked_groups"] == ["g1"]  # visible, not silently dropped
-    # The renamed/new fields must actually reach _sweep_summary's output, not just be present
-    # somewhere in the input sweep dict: asserting only the input wouldn't catch a key-name
-    # drift in _sweep_summary's own `.get(...)` calls.
+    # The renamed/new fields must actually reach sweep_summary's output, not just be present
+    # in the input sweep dict, catching a key-name drift in its own `.get(...)` calls.
     assert out["count_bias_tolerance_frac"] == 1.0
     assert out["pooled_count_bias_tolerance"] == 4.0
 
 
 def test_sweep_summary_surfaces_split_policy_divergence():
-    """attach_split_policy_provenance writes into conf.sweep; _sweep_summary must forward those
+    """attach_split_policy_provenance writes into conf.sweep; sweep_summary must forward those
     keys too, or run_inference's actual response never shows a caller their declared seed/ratio
     didn't take effect against an existing lock -- only the persisted sweep artifact would."""
+    from tcip_mcp.pipelines.calibration import sweep_summary
     from tcip_mcp.pipelines.resolution import VALIDATED_FALSE, derived
-    from tcip_mcp.tools.inference_tools import _sweep_summary
 
     conf = derived("conf", 0.4, requires_validation=True, validation_kind="annotations", derived_from="x",
                    validated_against=VALIDATED_FALSE,
                    sweep={"passed_holdout": False, "conf_censored": False, "count_bias_tolerance_frac": 1.0,
                           "split_policy_divergence": {"requested": {"seed": 7}, "locked": {"seed": 0}},
                           "split_unlocked_stems": ["new_stem_0_0"]})
-    out = _sweep_summary(conf)
+    out = sweep_summary(conf)
     assert out["split_policy_divergence"] == {"requested": {"seed": 7}, "locked": {"seed": 0}}
     assert out["split_unlocked_stems"] == ["new_stem_0_0"]
 
@@ -604,9 +603,9 @@ def test_a_first_draw_locks_a_split_an_ordinary_identity_can_read_back(tmp_path)
 
 def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
     """At the tool level: a locked stem whose image was later deleted must produce a clean
-    ValueError through _calibrate_operating_point, never a bare KeyError from a stale
+    ValueError through calibrate_operating_point, never a bare KeyError from a stale
     stem_to_image lookup."""
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
 
     stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
@@ -614,20 +613,20 @@ def test_missing_image_refuses_cleanly_not_keyerror(tmp_path):
     kwargs = dict(tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
                   global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None)
     # First call locks the split over all 4 stems.
-    itools._calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
+    calibration.calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
 
     (images_dir / "b_0_1.png").unlink()  # an image vanishes after the lock
 
     with pytest.raises(ValueError, match="no longer present"):
-        itools._calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
+        calibration.calibrate_operating_point(_CalStub(), "catkin", str(labels_dir), str(images_dir), **kwargs)
 
 
 def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(tmp_path, monkeypatch):
     """The locked cal/holdout draw balances on the checkpoint's own subject's annotation count,
     the same subject-aware scope the manifest draw itself applies: a stem carrying only another
     subject's annotation counts zero foreground here, not the file's raw record count."""
+    import tcip_mcp.pipelines.calibration as calibration
     import tcip_mcp.pipelines.data.splits as splits_mod
-    import tcip_mcp.tools.inference_tools as itools
 
     stems = ["a_0_0", "a_0_1", "b_0_0", "b_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
@@ -648,7 +647,7 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
 
     stub = _CalStub()
     stub.config = {"data": {"subject": "catkin"}}
-    itools._calibrate_operating_point(
+    calibration.calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -659,7 +658,7 @@ def test_calibrate_operating_point_lock_balances_on_the_checkpoints_own_subject(
 
 def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
     """force_redraw_cal_holdout_split(images_dir=...) must use the same labels-intersect-images
-    scan _calibrate_operating_point uses, not a second independent labels-only glob: a stem
+    scan calibrate_operating_point uses, not a second independent labels-only glob: a stem
     with no image on disk must not enter the redraw's stem universe."""
     from tcip_mcp.tools.inference_tools import force_redraw_cal_holdout_split
 
@@ -681,12 +680,12 @@ def test_force_redraw_shares_the_labels_intersect_images_scan(tmp_path):
 # ===========================================================================
 
 def test_declared_seed_and_holdout_ratio_reach_the_first_draw(tmp_path):
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
 
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
 
-    bundle, _dh, _n_excluded, _evidence = itools._calibrate_operating_point(
+    bundle, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -706,7 +705,7 @@ def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_
     """
     import shutil
 
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
 
     stems = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
@@ -717,11 +716,11 @@ def test_the_calibration_door_keeps_its_lock_across_an_active_project_repin(tmp_
         shutil.copytree(tmp_path / ".tcip", root / ".tcip")
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "before_adoption"))
-    first, _dh, _n_excluded, _evidence = itools._calibrate_operating_point(
+    first, _dh, _n_excluded, _evidence = calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=1, **kwargs)
 
     monkeypatch.setenv("TCIP_PROJECT_ROOT", str(tmp_path / "adopted_project"))
-    second, _dh2, _n_excluded2, _evidence2 = itools._calibrate_operating_point(
+    second, _dh2, _n_excluded2, _evidence2 = calibration.calibrate_operating_point(
         _CalStub(), "catkin", str(labels_dir), str(images_dir), seed=2, **kwargs)
 
     assert first.get("conf").sweep["split_policy"]["seed"] == 1
@@ -739,7 +738,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     """A stem with any instance unlabeled for `attribute` is dropped whole from the cal/holdout
     record set (the missing-label-file precedent): the count must travel back to the caller,
     not vanish, so a caller can see the reference shrank rather than assume every stem measured."""
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
     from tcip_mcp.class_registry import Attribute, ClassRegistry, Subject, write_registry
 
     root = tmp_path / "ds"
@@ -764,7 +763,7 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
     stub = _CalStub()
     stub.config = {"data": {"subject": "catkin", "attribute": "state"}}
 
-    _bundle, _dh, n_excluded, _evidence = itools._calibrate_operating_point(
+    _bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -775,12 +774,12 @@ def test_calibration_discloses_excluded_incomplete_attribute_count(tmp_path):
 
 
 def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
-    """_calibrate_operating_point's bare `except Exception` around resolve_registry_id_map must
+    """calibrate_operating_point's bare `except Exception` around resolve_registry_id_map must
     not silently degrade an attribute-classification calibration to a single-class GT read when
     the registry read fails for a real reason, sitting directly on the calibration/
     operating-point rail, worse than the delivery-grade-eval instance of the same bug. No
     classes.json exists here for an attribute-scoped config, so this must refuse."""
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
 
     stems = ["a_0_0", "a_0_1"]
     images_dir, labels_dir = _detection_dataset(tmp_path / "ds", stems)
@@ -789,7 +788,7 @@ def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
     stub.config = {"data": {"subject": "catkin", "attribute": "state"}}  # no classes.json written
 
     with pytest.raises(ValueError, match="classes.json"):
-        itools._calibrate_operating_point(
+        calibration.calibrate_operating_point(
             stub, "catkin", str(labels_dir), str(images_dir),
             tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
             global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -807,7 +806,7 @@ def test_calibration_attribute_registry_refusal_reaches_the_caller(tmp_path):
 def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_registry_read(
     tmp_path, monkeypatch,
 ):
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
 
     stems = ["a_0_0", "a_0_1"]
     images_dir, labels_dir = tmp_path / "ds" / "images", tmp_path / "ds" / "labels"
@@ -834,7 +833,7 @@ def test_calibration_gt_id_map_prefers_the_training_recorded_map_over_a_fresh_re
     # the registry when `subject` was set) would have raised the ValueError
     # test_calibration_attribute_registry_refusal_reaches_the_caller pins -- this must instead
     # succeed, using only the recorded map.
-    bundle, _dh, n_excluded, _evidence = itools._calibrate_operating_point(
+    bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=IMG, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,

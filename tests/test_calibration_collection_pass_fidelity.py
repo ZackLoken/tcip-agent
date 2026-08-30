@@ -1,6 +1,6 @@
 """The reference a conf sweep is resolved from must be the model's own unfiltered output.
 
-Two properties of ``_calibrate_operating_point``'s record-collection pass are load-bearing for the
+Two properties of ``calibrate_operating_point``'s record-collection pass are load-bearing for the
 resolved operating point, and neither shows up in the bundle's own pass/fail booleans:
 
 - the pass is staged at a conf floor far below the shipping default, so hesitant detections reach
@@ -128,13 +128,13 @@ def test_calibration_collection_pass_stages_below_the_shipping_conf(tmp_path):
     """The sweep must see the low-score tail: staged at the floor, the count-unbiased conf lands in
     the hesitant band and the resolved conf is both uncensored and consistent with the floor the
     reference was generated at."""
-    import tcip_mcp.tools.inference_tools as itools
+    import tcip_mcp.pipelines.calibration as calibration
     from tcip_mcp.pipelines.resolution import DEFAULT_CONF, VALIDATED_HELD_OUT
 
     images_dir, labels_dir = _hesitant_detector_dataset(tmp_path / "ds")
     stub = _HesitantDetectorStub()
 
-    bundle, _dh, n_excluded, _evidence = itools._calibrate_operating_point(
+    bundle, _dh, n_excluded, _evidence = calibration.calibrate_operating_point(
         stub, "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,
@@ -235,8 +235,8 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
     the detection side must stay in that same space, or every class-conditioned statistic the sweep
     computes is measured against a vocabulary the detections never occupy.
     """
+    import tcip_mcp.pipelines.calibration as calibration
     import tcip_mcp.pipelines.operating_point as operating_point
-    import tcip_mcp.tools.inference_tools as itools
 
     images_dir, labels_dir = _two_class_dataset(tmp_path / "ds")
     captured: dict = {}
@@ -249,7 +249,7 @@ def test_calibration_records_name_detections_in_the_ground_truths_class_vocabula
 
     monkeypatch.setattr(operating_point, "resolve_operating_point", _capturing_resolve)
 
-    itools._calibrate_operating_point(
+    calibration.calibrate_operating_point(
         _TwoClassStub(), "catkin", str(labels_dir), str(images_dir),
         tile=False, tile_size=None, overlap=0.2, tile_batch_size=8,
         global_nms_iou=0.3, postprocess="nms", cross_tile_nms=None, max_dets=None,

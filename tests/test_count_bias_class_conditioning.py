@@ -8,7 +8,7 @@ operating point earns a ``VALIDATED_HELD_OUT``/``VALIDATED_REVIEW_CONFIRMED`` st
 
 Every gate test here drives a real door: ``resolve_operating_point_from_review`` (what
 ``routes/review.py`` calls) or ``resolve_operating_point`` (what ``run_inference``'s
-``_calibrate_operating_point`` calls). The two at the end are about the conf sweep itself, so they
+``calibrate_operating_point`` calls). The two at the end are about the conf sweep itself, so they
 call ``sweep_operating_point`` (the thing under test) directly. None construct a sweep by hand.
 """
 
@@ -158,7 +158,7 @@ def test_review_door_still_validates_a_multi_class_reference_that_is_honest_per_
     assert conf.validated_against == VALIDATED_REVIEW_CONFIRMED
 
 
-# ── the GT door (run_inference -> _calibrate_operating_point) ─────────────────────────────────
+# ── the GT door (run_inference -> calibrate_operating_point) ─────────────────────────────────
 
 def test_gt_door_refuses_a_class_compensating_reference():
     b = resolve_operating_point(
@@ -620,19 +620,19 @@ def test_a_class_missing_entirely_gets_the_missing_class_message_not_the_single_
 
 
 def test_sweep_summary_surfaces_per_class_tolerance_and_typical_count():
-    """Per-class provenance fields were added to `_sweep_summary` (the agent-facing compact view)
+    """Per-class provenance fields were added to `sweep_summary` (the agent-facing compact view)
     but nothing asserted they actually reach its output -- deleting them left the suite green.
     Drives a real refusal through the real door end to end, then checks the compact view a caller
     (e.g. run_inference's response) actually sees, not just the full sidecar.
     """
-    from tcip_mcp.tools.inference_tools import _sweep_summary
+    from tcip_mcp.pipelines.calibration import sweep_summary
 
     b = resolve_operating_point(
         "catkin", tiled=True, dataset_hash="h", staged_conf_floor=0.05,
         calibration_records=_gt_records("cal", 4, swap_classes=True),
         holdout_records=_gt_records("hold", 4, swap_classes=True, offset=5000.0))
     sweep = b.params["conf"].sweep
-    out = _sweep_summary(b.params["conf"])
+    out = sweep_summary(b.params["conf"])
     assert out["per_class_count_bias_tolerance"] == sweep["per_class_count_bias_tolerance"]
     assert out["pooled_typical_count"] == sweep["pooled_typical_count"]
     assert out["per_class_typical_count"] == sweep["per_class_typical_count"]

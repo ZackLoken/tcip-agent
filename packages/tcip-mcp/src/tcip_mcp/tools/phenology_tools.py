@@ -624,7 +624,7 @@ def calibrate_ordinal_regression_operating_point(
     prediction JSON via ``_classification_items``), there is no such staging mechanism for a
     CSV-sourced scalar trait (``OrdinalDataset``/``RegressionDataset`` are one CSV row per image
     stem, no bbox/geometry concept applies), so this runs live inference directly, mirroring
-    ``inference_tools._calibrate_operating_point``'s pattern instead: a locked cal/holdout split
+    ``pipelines.calibration.calibrate_operating_point``'s pattern instead: a locked cal/holdout split
     (``resolve_locked_cal_holdout_split``, dataset-shape-agnostic, a plain stems list + identity
     hash) of the CSV's own stems, the predictor run live over each side, then the same-rigor
     calibration gate (``operating_point.resolve_ordinal_operating_point``/

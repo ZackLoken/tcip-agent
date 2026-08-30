@@ -6,7 +6,7 @@ singular to hold whole images out from.
 Ties together the region-completeness gate (:mod:`region_completeness`), the halo mechanism
 (:func:`~tcip_mcp.pipelines.data.tiling.region_halo`), a recursive
 :func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split` sub-banding of each reserved region,
-and per-band record building (shaped like ``inference_tools._calibrate_operating_point``'s own
+and per-band record building (shaped like ``pipelines.calibration.calibrate_operating_point``'s own
 per-image records) into :func:`~tcip_mcp.pipelines.operating_point.resolve_operating_point`, the
 same gate every other calibration path resolves through -- never a second, parallel validation
 mechanism.
@@ -472,7 +472,7 @@ def _band_records(
     postprocess: str, gt_boxes: np.ndarray, gt_labels: np.ndarray, stem: str,
 ) -> tuple[list[dict], dict[str, tuple[int, int, int, int]]]:
     """Per-band COCO-shaped records (:func:`~tcip_mcp.pipelines.training.evaluation.
-    build_coco_image_record`, the exact model ``_calibrate_operating_point._records`` builds) plus
+    build_coco_image_record`, the exact model ``calibrate_operating_point._records`` builds) plus
     the band rects keyed by a globally-unique image_id, for ``resolve_operating_point``'s
     ``cal_rects``/``hold_rects`` geometric disjointness check.
 
