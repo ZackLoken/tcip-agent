@@ -2,6 +2,7 @@
 not on disk: the stamp lands after the pass, the order both export doors already write in."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -78,8 +79,10 @@ def test_worker_leaves_no_sidecar_when_a_prediction_write_fails_partway(tmp_path
 
 def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_path, monkeypatch):
     """The ordering costs a completed run nothing: every prediction file and the stamp that
-    certifies them are all on disk, and the job still reports what it reported before."""
+    certifies them are all on disk, in the order the pass walked the images, and the job still
+    reports what it reported before."""
     pytest.importorskip("fastapi")
+    from tcip_mcp.pipelines.postprocessing import export
     from tcip_web.routes.inference import _summary, _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -89,6 +92,15 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor", _FakePredictor)
+
+    real_write = export.write_predictions_json
+    written = []
+
+    def recording_write(json_path, result, **kwargs):
+        written.append(json_path)
+        return real_write(json_path, result, **kwargs)
+
+    monkeypatch.setattr(export, "write_predictions_json", recording_write)
 
     job = _job("full-pass", images_dir, out_dir, ckpt, tmp_path)
     _worker(job)
@@ -111,4 +123,4 @@ def test_worker_writes_every_prediction_file_and_the_sidecar_on_a_full_pass(tmp_
 
     assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir", "output_dir",
                                  "error", "warning", "dropped_nonpositive_boxes", "platform_root"}
-    assert [r["image"] for r in job.results] == ["a.jpg", "b.jpg"]
+    assert [Path(p).stem for p in written] == ["a", "b"]
