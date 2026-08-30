@@ -41,8 +41,8 @@ from tcip_mcp.tools import (  # noqa: F401
     inference_tools,
     meta_tools,
     project_tools,
+    proposal_tools,
     training_tools,
-    vision_tools,
 )
 from tcip_web import agent_learning_capture, jobstore  # noqa: F401
 from tcip_web import state as web_state  # noqa: F401

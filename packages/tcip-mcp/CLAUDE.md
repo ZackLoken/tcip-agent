@@ -9,8 +9,8 @@ operating posture, and pipeline/model rules there apply here and aren't restated
 src/tcip_mcp/
   server.py, __main__.py   # MCP entry point; registers all tool modules
   tools/          # domain tools, one module per area: annotation, data, experiment, feedback,
-                  # inference, ingest, meta, model, operationalization, orthomosaic, phenology,
-                  # project, training, vision
+                  # gui, inference, ingest, meta, model, operationalization, orthomosaic,
+                  # phenology, project, proposal, training, vision
   pipelines/      # composable ML: active_learning, components, data, feedback, inference,
                   # measurement, postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,

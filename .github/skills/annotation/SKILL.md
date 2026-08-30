@@ -14,8 +14,8 @@ schema without reading any label document (`stage_accepted_proposals` reads back
 record `propose_annotations` staged in a prior run, not a label file); `export_predictions` reads it only
 when it calibrates a confidence operating point, through `run_inference`. A dataset-level
 COCO training set is assembled from these per-image files (`tcip_annotation.json_io`'s
-`to_coco_dataset`, called from `pipelines/data/datasets.py`), not authored directly. An
-unspecified format resolves to `.json`
+`to_coco_dataset`, called from `pipelines/data/label_queries.py`'s `assemble_coco`), not authored
+directly. An unspecified format resolves to `.json`
 (`dataset_layout.py`'s `label_ext()`).
 
 ## Import/export formats

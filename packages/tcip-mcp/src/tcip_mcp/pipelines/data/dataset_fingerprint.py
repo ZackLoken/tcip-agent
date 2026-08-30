@@ -37,8 +37,9 @@ def _labels_term(annotations_root: Path) -> str | None:
         if not prediction_documents(d):
             continue
         any_labels = True
-        # A real subdir name can never be empty, so the flat root keys with "" rather than its own name,
-        # otherwise a dated subdir named literally "annotations" would key identically to the flat case and collide with it.
+        # A real subdir name can never be empty, so the flat root keys with "" rather than its
+        # own name, otherwise a dated subdir named literally "annotations" would key identically
+        # to the flat case and collide with it.
         key = "" if flat else d.name
         h.update(key.encode("utf-8"))
         h.update(b"\0")
