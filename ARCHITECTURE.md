@@ -398,6 +398,7 @@ Counts in this table are import edges inside `packages/tcip-store/src`, counted 
 | scripts/gate_baseline.py | Parse ci.yml's jobs and run the steps it declares, so a local pass means CI would pass too. | 0 | 0 |
 | scripts/generate_frontend_routes.py | Generate the browser's route-path module from the backend's registered routes. | 1 | 0 |
 | scripts/generate_frontend_types.py | Generate the browser's coverage-record types from the pydantic models that declare them. | 9 | 0 |
+| scripts/generate_frozen_manifest.py | Render the store registry's freeze classifications into the shipped frozen-formats.json; --check holds CI to the committed edition. | 2 | 0 |
 | scripts/inspect_baseline_weights.py | Print framework / model metadata from the baseline weights.pt. | 1 | 0 |
 | scripts/inspect_gps_exif.py | Print GPS EXIF for a sample of images per acquisition date. | 1 | 0 |
 | scripts/list_tools.py | Print the live MCP tool registry (count + names). | 1 | 0 |
@@ -550,6 +551,7 @@ A module counts as zero-importer when no other module in its own scanned tree re
 | scripts | scripts/gate_baseline.py |
 | scripts | scripts/generate_frontend_routes.py |
 | scripts | scripts/generate_frontend_types.py |
+| scripts | scripts/generate_frozen_manifest.py |
 | scripts | scripts/inspect_baseline_weights.py |
 | scripts | scripts/inspect_gps_exif.py |
 | scripts | scripts/list_tools.py |
